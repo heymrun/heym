@@ -6,10 +6,13 @@ import {
   buildTimelineModel,
   formatSpanCost,
   isSameSpan,
+  formatToolCallArguments,
   isSpanSettled,
   LIVE_TIMELINE_REFRESH_INTERVAL_MS,
   orderSpansByStart,
+  readSpanJsonRepairs,
   readSpanTokenUsage,
+  readSpanToolCalls,
   splitSpanOutput,
   summarizeTimelineModel,
 } from "@/components/Panels/executionTimeline";
@@ -463,5 +466,114 @@ describe("splitSpanOutput", () => {
     });
     expect(splitSpanOutput({ text: 42 })).toEqual({ message: null, details: { text: 42 } });
     expect(splitSpanOutput(null)).toEqual({ message: null, details: null });
+  });
+});
+
+
+describe("span tool calls", () => {
+  const outline = [
+    {
+      name: "call_sub_workflow",
+      status: "success",
+      elapsed_ms: 848.09,
+      arguments: { inputs: { text: "https://talanoa.email" }, workflow_id: "9606db51-f5e9-4a96-84bb-9e38f58513b7" },
+    },
+    { name: "lookup", status: "error", elapsed_ms: 12, arguments: { q: "a" } },
+  ];
+
+  it("reads the outline JSON output keeps in metadata", () => {
+    expect(readSpanToolCalls({ output: { answer: "ok" }, metadata: { tool_calls: outline } })).toEqual([
+      {
+        name: "call_sub_workflow",
+        status: "success",
+        elapsedMs: 848.09,
+        arguments: outline[0].arguments,
+      },
+      { name: "lookup", status: "error", elapsedMs: 12, arguments: { q: "a" } },
+    ]);
+  });
+
+  it("falls back to the tool_calls of a plain agent output", () => {
+    const calls = readSpanToolCalls({
+      output: { text: "done", tool_calls: [...outline, { name: "_context_compression" }] },
+    });
+    expect(calls?.map((call) => call.name)).toEqual(["call_sub_workflow", "lookup"]);
+  });
+
+  it("is null when nothing was called or the data is malformed", () => {
+    expect(readSpanToolCalls({ output: { text: "no tools" } })).toBeNull();
+    expect(readSpanToolCalls({ output: {}, metadata: { tool_calls: [] } })).toBeNull();
+    expect(readSpanToolCalls({ output: {}, metadata: { tool_calls: [null, 3, {}] } })).toBeNull();
+  });
+
+  it("carries tool calls onto the span, once the node settled", () => {
+    const results = [
+      entry({
+        node_id: "agent-1",
+        node_label: "extractData",
+        node_type: "agent",
+        status: "success",
+        output: { email: "a@b.c" },
+        metadata: { started_at_ms: 1000, ended_at_ms: 2000, tool_calls: outline },
+      }),
+    ];
+    const { rows } = buildTimelineModel(results, 1000, new Map());
+    expect(rows[0].spans[0].toolCalls?.length).toBe(2);
+  });
+});
+
+describe("formatToolCallArguments", () => {
+  it("flattens nested objects into key=value pairs", () => {
+    expect(formatToolCallArguments({ inputs: { text: "https://talanoa.email" }, workflow_id: "9606db51-f5e9-4a96-84bb-9e38f58513b7" })).toBe(
+      "inputs.text=https://talanoa.email, workflow_id=9606db51…",
+    );
+  });
+
+  it("keeps numbers, booleans and null readable", () => {
+    expect(formatToolCallArguments({ n: 3, ok: true, none: null })).toBe("n=3, ok=true, none=null");
+  });
+
+  it("shortens long strings and caps the whole line", () => {
+    const long = formatToolCallArguments({ code: "x".repeat(200) });
+    expect(long.length).toBeLessThanOrEqual(90);
+    expect(long.endsWith("…")).toBe(true);
+  });
+
+  it("summarises arrays by length and tolerates empty arguments", () => {
+    expect(formatToolCallArguments({ items: [1, 2, 3] })).toBe("items=[3]");
+    expect(formatToolCallArguments(undefined)).toBe("");
+    expect(formatToolCallArguments({})).toBe("");
+    expect(formatToolCallArguments("raw text")).toBe("raw text");
+  });
+});
+
+
+describe("span json repairs", () => {
+  it("reads the rejection reasons JSON output keeps in metadata", () => {
+    expect(
+      readSpanJsonRepairs({ metadata: { json_repairs: ["'name' is a required property"] } }),
+    ).toEqual(["'name' is a required property"]);
+  });
+
+  it("is null when the reply needed no repair or the data is malformed", () => {
+    expect(readSpanJsonRepairs({ metadata: {} })).toBeNull();
+    expect(readSpanJsonRepairs({ metadata: { json_repairs: [] } })).toBeNull();
+    expect(readSpanJsonRepairs({ metadata: { json_repairs: [3, null, ""] } })).toBeNull();
+    expect(readSpanJsonRepairs({})).toBeNull();
+  });
+
+  it("carries the repairs onto the settled span", () => {
+    const results = [
+      entry({
+        node_id: "agent-1",
+        node_label: "extractData",
+        node_type: "agent",
+        status: "success",
+        output: { email: "a@b.c" },
+        metadata: { started_at_ms: 1000, ended_at_ms: 2000, json_repairs: ["not valid JSON"] },
+      }),
+    ];
+    const { rows } = buildTimelineModel(results, 1000, new Map());
+    expect(rows[0].spans[0].jsonRepairs).toEqual(["not valid JSON"]);
   });
 });

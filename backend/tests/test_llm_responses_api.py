@@ -333,3 +333,31 @@ class TestTracePayloadIsSerializable(unittest.IsolatedAsyncioTestCase):
     async def test_chat_trace_request_is_json_serializable(self) -> None:
         captured = await self._capture_trace_requests(use_responses_api=False)
         self.assertIn("messages", captured[0])
+
+
+class TestOpenCodeGatewayTransportChoice(unittest.TestCase):
+    """The gateway serves GPT and Grok over /responses only, so the node toggle is not needed."""
+
+    GATEWAY = "https://opencode.ai/inference/go/v1"
+
+    def _service(self, base_url: str | None, *, use_responses_api: bool = False) -> LLMService:
+        return LLMService(
+            CredentialType.custom, "key", base_url, use_responses_api=use_responses_api
+        )
+
+    def test_responses_only_model_switches_transport_without_the_toggle(self) -> None:
+        self.assertEqual(self._service(self.GATEWAY)._get_transport("gpt-6-luna").name, "responses")
+        self.assertEqual(self._service(self.GATEWAY)._get_transport("grok-4.7").name, "responses")
+
+    def test_chat_model_stays_on_chat_completions(self) -> None:
+        self.assertEqual(
+            self._service(self.GATEWAY)._get_transport("glm-5.3").name, "chat.completions"
+        )
+
+    def test_other_gateways_are_never_switched_by_model_name(self) -> None:
+        service = self._service("https://openrouter.ai/api/v1")
+        self.assertEqual(service._get_transport("gpt-6-luna").name, "chat.completions")
+
+    def test_explicit_toggle_still_wins_everywhere(self) -> None:
+        service = self._service(self.GATEWAY, use_responses_api=True)
+        self.assertEqual(service._get_transport("glm-5.3").name, "responses")

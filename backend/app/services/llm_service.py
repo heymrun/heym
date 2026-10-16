@@ -23,6 +23,7 @@ from app.services.agent_tool_observability import (
     sanitize_tool_payload,
     summarize_tool_calls,
 )
+from app.services.json_output import MAX_OUTPUT_REPAIRS, check_json_output, repair_instruction
 from app.services.llm_provider import is_reasoning_model
 from app.services.llm_trace import LLMTraceContext, record_llm_trace
 from app.services.llm_transport import (
@@ -31,12 +32,15 @@ from app.services.llm_transport import (
     ResponsesTransport,
     ToolResult,
 )
+from app.services.llm_transport_gemini import GeminiTransport
+from app.services.llm_transport_messages import AnthropicMessagesTransport
 from app.services.model_router import (
     ModelRouter,
     fit_tool_outputs_to_budget,
     load_option_credential,
 )
 from app.services.openai_client import create_guarded_openai_client, create_openai_client
+from app.services.opencode_catalog import is_opencode_base_url, opencode_model_protocol
 from app.services.ssrf_guard import get_guarded_http_client, guard_http_url
 
 logger = logging.getLogger(__name__)
@@ -856,10 +860,31 @@ class LLMService:
             result["_model_routing"] = routing_summary
         return result
 
-    def _get_transport(self) -> ChatCompletionsTransport | ResponsesTransport:
-        if self.use_responses_api:
+    def _get_transport(
+        self, model: str
+    ) -> (
+        ChatCompletionsTransport | ResponsesTransport | AnthropicMessagesTransport | GeminiTransport
+    ):
+        protocol = self._gateway_protocol(model)
+        if protocol == "messages":
+            return AnthropicMessagesTransport()
+        if protocol == "google":
+            return GeminiTransport()
+        if self.use_responses_api or protocol == "responses":
             return ResponsesTransport()
         return ChatCompletionsTransport()
+
+    def _defers_format_while_tools_run(self) -> bool:
+        """Open-weight gateways stop calling tools when a JSON format rides on the same request."""
+        if self.credential_type == CredentialType.custom:
+            return True
+        return self.credential_type == CredentialType.openai and bool(self.base_url)
+
+    def _gateway_protocol(self, model: str) -> str | None:
+        """The endpoint OpenCode serves ``model`` on; None for any other gateway."""
+        if self.credential_type == CredentialType.custom and is_opencode_base_url(self.base_url):
+            return opencode_model_protocol(model)
+        return None
 
     def _record_trace(
         self,
@@ -919,6 +944,7 @@ class LLMService:
         skills_included: list[str] | None = None,
         content_only: bool = False,
         extra_body: dict[str, Any] | None = None,
+        repair_json_output: bool = False,
     ) -> dict[str, Any]:
         binding = self._resolve_turn(
             model=model,
@@ -927,7 +953,7 @@ class LLMService:
             tool_names=None,
         )
         client, provider, model = binding.client, binding.provider, binding.model
-        transport = self._get_transport()
+        transport = self._get_transport(model)
 
         history = transport.start(
             system_instruction=system_instruction,
@@ -1010,23 +1036,79 @@ class LLMService:
 
         _log_response(provider, turn.raw_items[0] if turn.raw_items else None, elapsed_ms)
 
-        total_tokens = turn.total_tokens
-        tokens_per_sec = round(total_tokens / (elapsed_ms / 1000), 2) if elapsed_ms > 0 else 0
-
         # content_only keeps structured JSON out of the provider `reasoning` fallback.
         text = turn.text if content_only else transport.final_text(turn)
+        prompt_tokens = turn.prompt_tokens
+        completion_tokens = turn.completion_tokens
+        total_tokens = turn.total_tokens
+
+        repair_errors: list[str] = []
+        if repair_json_output and response_format is not None:
+            output_repairs = 0
+            while True:
+                check = check_json_output(text, response_format)
+                if check.ok:
+                    text = check.text
+                    break
+                if output_repairs >= MAX_OUTPUT_REPAIRS:
+                    break
+                output_repairs += 1
+                repair_errors.append(check.error or "the reply was not the JSON asked for")
+                logger.info(
+                    "Reply from %s was not the JSON asked for (%s); repair turn %d",
+                    model,
+                    check.error,
+                    output_repairs,
+                )
+                transport.append_turn(history, turn)
+                transport.append_user(history, repair_instruction(check.error))
+                repair_started_ms = self._offset_ms()
+                repair_start = time.time()
+                try:
+                    turn = await asyncio.to_thread(
+                        transport.create,
+                        client=client,
+                        model=model,
+                        history=history,
+                        tools=None,
+                        opts=opts,
+                    )
+                except Exception:
+                    logger.warning("JSON repair turn failed for %s", model, exc_info=True)
+                    break
+                repair_elapsed_ms = (time.time() - repair_start) * 1000
+                self._record_turn_timing(
+                    repair_started_ms,
+                    repair_elapsed_ms,
+                    model=model,
+                    provider=provider,
+                    turn_result=turn,
+                )
+                elapsed_ms += repair_elapsed_ms
+                prompt_tokens += turn.prompt_tokens
+                completion_tokens += turn.completion_tokens
+                total_tokens += turn.total_tokens
+                text = turn.text if content_only else transport.final_text(turn)
+
+        tokens_per_sec = round(total_tokens / (elapsed_ms / 1000), 2) if elapsed_ms > 0 else 0
 
         result = {
             "text": text,
             "model": model,
             "usage": {
-                "prompt_tokens": turn.prompt_tokens,
-                "completion_tokens": turn.completion_tokens,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
                 "total_tokens": total_tokens,
             },
             "tokens_per_sec": tokens_per_sec,
             "elapsed_ms": round(elapsed_ms, 2),
         }
+        if repair_errors:
+            result["json_repairs"] = repair_errors
+            # The trace shows the whole exchange: the rejected reply and the repair request.
+            trace_request = {**kwargs, **transport.trace_request(history, None)}
+            if skills_included:
+                trace_request["skills_included"] = skills_included
         self._record_trace(
             request_type=transport.name,
             provider=provider,
@@ -1315,6 +1397,7 @@ class LLMService:
         initial_completion_tokens: int = 0,
         should_abort: Callable[[], str | None] | None = None,
         extra_body: dict[str, Any] | None = None,
+        repair_json_output: bool = False,
     ) -> dict[str, Any]:
         """Execute LLM with tool calling loop."""
         # With a router there is no credential to bind yet: every turn binds its own
@@ -1326,7 +1409,7 @@ class LLMService:
         if self.router is None:
             client, provider = self._get_client()
 
-        transport = self._get_transport()
+        transport = self._get_transport(model)
         if initial_messages is not None:
             history = transport.load(initial_messages, system_instruction)
             if system_instruction or user_message:
@@ -1368,6 +1451,17 @@ class LLMService:
         total_completion_tokens = int(initial_completion_tokens)
         tool_calls_collected: list[dict[str, Any]] = copy.deepcopy(initial_tool_calls or [])
         last_assistant_turn_had_tool_calls = False
+        output_repairs = 0
+        repair_errors: list[str] = []
+        # The format goes on the repair turn only, when a node's tools could not be called otherwise.
+        format_on_repair_only = (
+            repair_json_output
+            and response_format is not None
+            and bool(tools)
+            and transport.carries_response_format
+            and self._defers_format_while_tools_run()
+        )
+        repair_turn = False
 
         from app.services.context_compressor import get_context_limit
 
@@ -1538,9 +1632,13 @@ class LLMService:
                 temperature=temperature,
                 reasoning_effort=reasoning_effort,
                 max_tokens=max_tokens,
-                response_format=response_format,
+                response_format=None
+                if format_on_repair_only and not repair_turn
+                else response_format,
+                tool_choice="none" if repair_turn else None,
                 extra_body=extra_body,
             )
+            repair_turn = False
 
             base_url = client.base_url if hasattr(client, "base_url") else self.base_url
             _log_request(
@@ -1632,6 +1730,23 @@ class LLMService:
 
             if not tool_calls:
                 text = transport.final_text(turn)
+                if repair_json_output and response_format is not None:
+                    check = check_json_output(text, response_format)
+                    if check.ok:
+                        text = check.text
+                    elif output_repairs < MAX_OUTPUT_REPAIRS:
+                        output_repairs += 1
+                        repair_errors.append(check.error or "the reply was not the JSON asked for")
+                        logger.info(
+                            "Reply from %s was not the JSON asked for (%s); repair turn %d",
+                            model,
+                            check.error,
+                            output_repairs,
+                        )
+                        transport.append_turn(history, turn)
+                        transport.append_user(history, repair_instruction(check.error))
+                        repair_turn = True
+                        continue
                 result = {
                     "text": text,
                     "model": model,
@@ -1644,6 +1759,8 @@ class LLMService:
                 }
                 if tool_calls_collected:
                     result["tool_calls"] = tool_calls_collected
+                if repair_errors:
+                    result["json_repairs"] = repair_errors
                 _attach_tool_metrics(result)
                 self._record_trace(
                     request_type=transport.name,
@@ -2620,6 +2737,7 @@ async def execute_llm(
     request_timeout: float = LLM_REQUEST_TIMEOUT,
     use_responses_api: bool = False,
     router: ModelRouter | None = None,
+    repair_json_output: bool = False,
 ) -> dict[str, Any]:
     cred_type = CredentialType(credential_type)
     service = LLMService(
@@ -2632,6 +2750,7 @@ async def execute_llm(
         router=router,
     )
     return await service.execute(
+        repair_json_output=repair_json_output,
         model=model,
         system_instruction=system_instruction,
         user_message=user_message,
@@ -2987,6 +3106,7 @@ async def execute_llm_with_tools(
     extra_body: dict[str, Any] | None = None,
     use_responses_api: bool = False,
     router: ModelRouter | None = None,
+    repair_json_output: bool = False,
 ) -> dict[str, Any]:
     cred_type = CredentialType(credential_type)
     service = LLMService(
@@ -2999,6 +3119,7 @@ async def execute_llm_with_tools(
         router=router,
     )
     return await service.execute_with_tools(
+        repair_json_output=repair_json_output,
         model=model,
         system_instruction=system_instruction,
         user_message=user_message,

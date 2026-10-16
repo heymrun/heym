@@ -98,6 +98,89 @@ export function readSpanTokenUsage(result: {
   return total === null ? null : { total, prompt, completion };
 }
 
+export interface SpanToolCall {
+  name: string;
+  status: string;
+  elapsedMs: number | null;
+  arguments: unknown;
+}
+
+function toolCallFromEntry(entry: unknown): SpanToolCall | null {
+  if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return null;
+  const record = entry as Record<string, unknown>;
+  if (typeof record.name !== "string" || record.name === "" || record.name === "_context_compression") {
+    return null;
+  }
+  return {
+    name: record.name,
+    status: typeof record.status === "string" && record.status !== "" ? record.status : "success",
+    elapsedMs: readTokenCount(record.elapsed_ms),
+    arguments: record.arguments,
+  };
+}
+
+/** Tool calls of an agent run: JSON output keeps an outline in metadata, plain output keeps the full list. */
+export function readSpanToolCalls(result: {
+  output?: unknown;
+  metadata?: Record<string, unknown>;
+}): SpanToolCall[] | null {
+  const output = result.output;
+  const raw =
+    result.metadata?.tool_calls ??
+    (typeof output === "object" && output !== null
+      ? (output as Record<string, unknown>).tool_calls
+      : undefined);
+  if (!Array.isArray(raw)) return null;
+  const calls = raw.map(toolCallFromEntry).filter((call): call is SpanToolCall => call !== null);
+  return calls.length > 0 ? calls : null;
+}
+
+/** Why each rejected JSON reply was sent back for a repair turn; null when none was. */
+export function readSpanJsonRepairs(result: { metadata?: Record<string, unknown> }): string[] | null {
+  const raw = result.metadata?.json_repairs;
+  if (!Array.isArray(raw)) return null;
+  const reasons = raw.filter((reason): reason is string => typeof reason === "string" && reason !== "");
+  return reasons.length > 0 ? reasons : null;
+}
+
+const ARGUMENT_LINE_MAX = 90;
+const ARGUMENT_VALUE_MAX = 40;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function shortenArgumentValue(value: unknown): string {
+  if (typeof value === "string") {
+    if (UUID_PATTERN.test(value)) return `${value.slice(0, 8)}…`;
+    return value.length > ARGUMENT_VALUE_MAX ? `${value.slice(0, ARGUMENT_VALUE_MAX - 1)}…` : value;
+  }
+  if (Array.isArray(value)) return `[${value.length}]`;
+  return String(value);
+}
+
+function flattenArguments(
+  value: unknown,
+  prefix: string,
+  out: Array<[string, unknown]>,
+  depth: number,
+): void {
+  if (typeof value === "object" && value !== null && !Array.isArray(value) && depth < 3) {
+    for (const [key, nested] of Object.entries(value)) {
+      flattenArguments(nested, prefix ? `${prefix}.${key}` : key, out, depth + 1);
+    }
+    return;
+  }
+  out.push([prefix, value]);
+}
+
+/** One short line of `key=value` pairs for a tool call's arguments. */
+export function formatToolCallArguments(args: unknown): string {
+  if (args === undefined || args === null) return "";
+  if (typeof args !== "object" || Array.isArray(args)) return shortenArgumentValue(args);
+  const pairs: Array<[string, unknown]> = [];
+  flattenArguments(args, "", pairs, 0);
+  const line = pairs.map(([key, value]) => `${key}=${shortenArgumentValue(value)}`).join(", ");
+  return line.length > ARGUMENT_LINE_MAX ? `${line.slice(0, ARGUMENT_LINE_MAX - 1)}…` : line;
+}
+
 export interface SpanItem {
   key: string;
   /** Index into the execution `node_results` array for this span (disambiguates multiple runs of the same node). */
@@ -109,6 +192,10 @@ export interface SpanItem {
   modelRouting: ModelRoutingSummary | null;
   /** Only set once the node finished. */
   tokenUsage: SpanTokenUsage | null;
+  /** Tool calls in the order they ran; null when the node made none. Only set once settled. */
+  toolCalls: SpanToolCall[] | null;
+  /** Reasons a JSON reply was rejected and sent back for repair; null when it needed none. */
+  jsonRepairs: string[] | null;
   status: string;
   durationMs: number;
   startOffsetMs: number;
@@ -154,6 +241,8 @@ interface RawSpanItem {
   traceId: string | null;
   modelRouting: ModelRoutingSummary | null;
   tokenUsage: SpanTokenUsage | null;
+  toolCalls: SpanToolCall[] | null;
+  jsonRepairs: string[] | null;
   status: string;
   durationMs: number;
   error: string | null;
@@ -443,6 +532,10 @@ export function buildTimelineModel(
       modelRouting: readSpanModelRouting(result),
       tokenUsage:
         !isHitlWait && isSettledStatus(result.status) ? readSpanTokenUsage(result) : null,
+      toolCalls:
+        !isHitlWait && isSettledStatus(result.status) ? readSpanToolCalls(result) : null,
+      jsonRepairs:
+        !isHitlWait && isSettledStatus(result.status) ? readSpanJsonRepairs(result) : null,
       status: isHitlWait ? "pending" : result.status,
       durationMs: Math.max(endMs - startMs, isHitlWait ? 0 : result.execution_time_ms, 0),
       error: isHitlWait ? null : result.error,
@@ -608,6 +701,8 @@ export function buildTimelineModel(
             traceId: span.traceId,
             modelRouting: span.modelRouting,
             tokenUsage: span.tokenUsage,
+            toolCalls: span.toolCalls,
+            jsonRepairs: span.jsonRepairs,
             status: span.status,
             durationMs: span.durationMs,
             startOffsetMs: Math.max(span.startMs - timeWindow.startMs, 0),

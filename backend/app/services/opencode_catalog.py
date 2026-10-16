@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from urllib.parse import urlsplit
+
+OPENCODE_HOSTNAME = "opencode.ai"
+
 # Default OpenCode Go gateway base URL. Overridable per credential (its optional ``base_url``), not
 # via an environment variable.
 OPENCODE_ZEN_BASE_URL = "https://opencode.ai/zen/go/v1"
@@ -20,6 +24,33 @@ OPENCODE_MODEL_FALLBACK: tuple[dict[str, str], ...] = (
 )
 
 OPENCODE_DEFAULT_MODEL = "opencode-go/kimi-k3"
+
+
+def is_opencode_base_url(base_url: str | None) -> bool:
+    """True when the URL's hostname is the OpenCode gateway (not a lookalike)."""
+    hostname = urlsplit(str(base_url or "")).hostname or ""
+    return hostname.rstrip(".") == OPENCODE_HOSTNAME
+
+
+# Probed against the live gateway: it translates most models onto /chat/completions (MiniMax M3
+# and Qwen answer there although its docs list /messages), so only these stay single-protocol.
+_RESPONSES_ONLY_PREFIXES = ("gpt-", "grok-", "muse-spark-")
+_MESSAGES_ONLY_PREFIXES = ("claude-", "minimax-m2.7")
+_GOOGLE_ONLY_PREFIXES = ("gemini-",)
+
+
+def opencode_model_protocol(model: str) -> str:
+    """Return "responses", "messages", "google" or "chat": the API the gateway serves ``model`` on."""
+    bare = (model or "").strip().lower()
+    for prefix in (f"{OPENCODE_PROVIDER_ID}/", f"{_LEGACY_PROVIDER_ID}/"):
+        bare = bare.removeprefix(prefix)
+    if bare.startswith(_RESPONSES_ONLY_PREFIXES):
+        return "responses"
+    if bare.startswith(_MESSAGES_ONLY_PREFIXES):
+        return "messages"
+    if bare.startswith(_GOOGLE_ONLY_PREFIXES):
+        return "google"
+    return "chat"
 
 
 def qualify_model_id(model: str) -> str:

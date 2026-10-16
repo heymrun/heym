@@ -530,6 +530,27 @@ def _result_indicates_error(result: dict[str, Any]) -> bool:
     return isinstance(outputs, dict) and outputs.get("error") is not None
 
 
+def _resolved_status(entry: dict[str, Any]) -> str:
+    """Status of one tool-call record, deriving it from the result for legacy entries."""
+    raw_status = entry.get("status")
+    status = normalize_tool_call_status(raw_status)
+    result = entry.get("result")
+    # Legacy entries may omit top-level status. Prefer structured result.status,
+    # then treat any non-null result.error / outputs.error as error — never
+    # reclassify from free-form error text (e.g. "request timeout" in a name).
+    if (raw_status is None or raw_status == "") and isinstance(result, dict):
+        result_status = result.get("status")
+        if isinstance(result_status, str) and result_status.strip():
+            normalized_result_status = normalize_tool_call_status(result_status)
+            if normalized_result_status != "unknown":
+                status = normalized_result_status
+            elif _result_indicates_error(result):
+                status = "error"
+        elif _result_indicates_error(result):
+            status = "error"
+    return "error" if status == "unknown" else status
+
+
 def summarize_tool_calls(tool_calls: Any) -> dict[str, Any]:
     """Summarize tool-call counts and durations without exposing payloads."""
     if not isinstance(tool_calls, list):
@@ -548,24 +569,7 @@ def summarize_tool_calls(tool_calls: Any) -> dict[str, Any]:
         if not isinstance(entry, dict) or entry.get("name") == "_context_compression":
             continue
         summary["count"] += 1
-        raw_status = entry.get("status")
-        status = normalize_tool_call_status(raw_status)
-        result = entry.get("result")
-        # Legacy entries may omit top-level status. Prefer structured result.status,
-        # then treat any non-null result.error / outputs.error as error — never
-        # reclassify from free-form error text (e.g. "request timeout" in a name).
-        if (raw_status is None or raw_status == "") and isinstance(result, dict):
-            result_status = result.get("status")
-            if isinstance(result_status, str) and result_status.strip():
-                normalized_result_status = normalize_tool_call_status(result_status)
-                if normalized_result_status != "unknown":
-                    status = normalized_result_status
-                elif _result_indicates_error(result):
-                    status = "error"
-            elif _result_indicates_error(result):
-                status = "error"
-        if status == "unknown":
-            status = "error"
+        status = _resolved_status(entry)
         if status in summary:
             summary[status] += 1
         duration = entry.get("elapsed_ms")
@@ -575,6 +579,37 @@ def summarize_tool_calls(tool_calls: Any) -> dict[str, Any]:
     summary["total_duration_ms"] = round(summary["total_duration_ms"], 2)
     summary["max_duration_ms"] = round(summary["max_duration_ms"], 2)
     return summary
+
+
+OUTLINE_ARGUMENT_CHARS = 300
+
+
+def outline_tool_calls(tool_calls: Any) -> list[dict[str, Any]]:
+    """Ordered, bounded record of each tool call for execution logs, never carrying results."""
+    if not isinstance(tool_calls, list):
+        return []
+    outline: list[dict[str, Any]] = []
+    for entry in tool_calls:
+        if not isinstance(entry, dict) or entry.get("name") == "_context_compression":
+            continue
+        item: dict[str, Any] = {
+            "name": str(entry.get("name") or "tool"),
+            "status": _resolved_status(entry),
+        }
+        duration = entry.get("elapsed_ms")
+        if isinstance(duration, (int, float)):
+            item["elapsed_ms"] = round(float(duration), 2)
+        if entry.get("source"):
+            item["source"] = str(entry["source"])
+        if entry.get("arguments") is not None:
+            item["arguments"] = sanitize_tool_payload(
+                entry["arguments"],
+                max_chars=120,
+                max_depth=3,
+                max_total_chars=OUTLINE_ARGUMENT_CHARS,
+            )
+        outline.append(item)
+    return outline
 
 
 def _sanitize_trace_messages(

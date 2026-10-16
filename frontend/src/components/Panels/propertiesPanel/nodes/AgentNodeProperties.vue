@@ -236,7 +236,7 @@ const fallbackBlocksResponses = computed((): boolean => {
           type="checkbox"
           class="h-4 w-4 rounded border-input bg-background"
           :checked="!!selectedNode.data.responsesApiEnabled"
-          :disabled="!responsesCapability.available.value"
+          :disabled="!responsesCapability.available.value && !selectedNode.data.responsesApiEnabled"
           @change="updateNodeData('responsesApiEnabled', ($event.target as HTMLInputElement).checked)"
         >
         <Label

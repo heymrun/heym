@@ -7447,6 +7447,8 @@ export function usePropertiesPanelController() {
     { value: "low", label: "Low" },
     { value: "medium", label: "Medium" },
     { value: "high", label: "High" },
+    { value: "xhigh", label: "Extra high" },
+    { value: "max", label: "Max" },
   ];
 
   const outputTypeOptions = [

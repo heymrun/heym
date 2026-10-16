@@ -4,6 +4,7 @@ import copy
 import time
 from importlib import import_module
 
+from app.services.agent_tool_observability import outline_tool_calls
 from app.services.node_execution.base import NodeExecutionContext
 
 
@@ -82,6 +83,7 @@ def execute(ctx: NodeExecutionContext) -> object:
         output["_generated_files"] = generated_files
     trace_id = self._pop_internal_trace_id(output)
     pending_meta = output.pop("_hitl_pending", None)
+    agent_tool_calls = output.get("tool_calls")
     if agent_json_output_enabled and not output.get("error"):
         agent_output = output
         try:
@@ -102,6 +104,8 @@ def execute(ctx: NodeExecutionContext) -> object:
             output["model"] = agent_output["model"]
         if isinstance(agent_output.get("usage"), dict):
             output["_usage"] = agent_output["usage"]
+        if agent_output.get("json_repairs"):
+            output["_json_repairs"] = agent_output["json_repairs"]
         if generated_files:
             output["_generated_files"] = generated_files
         self._restore_internal_trace_id(output, trace_id)
@@ -165,4 +169,7 @@ def execute(ctx: NodeExecutionContext) -> object:
             }
         return pending_result
     self._restore_internal_trace_id(output, trace_id)
+    tool_outline = outline_tool_calls(agent_tool_calls)
+    if tool_outline:
+        output["_tool_calls"] = tool_outline
     return output

@@ -10,7 +10,7 @@ vi.mock("@/services/api", () => ({ traceApi: { get: getTrace } }));
 function span(partial: Partial<SpanItem>): SpanItem {
   return {
     key: "row:0", resultListIndex: 0, nodeId: "agent", nodeLabel: "writer", nodeType: "agent",
-    traceId: null, modelRouting: null, tokenUsage: null, status: "success", durationMs: 1,
+    traceId: null, modelRouting: null, tokenUsage: null, toolCalls: null, jsonRepairs: null, status: "success", durationMs: 1,
     startOffsetMs: 0, endOffsetMs: 1, error: null, leftPct: 0, widthPct: 1, colorVar: "primary",
     occurrence: 1, occurrenceCount: 1, retryFailedAttempts: 0, retryFinalAttempt: null,
     retryMaxAttempts: null, retryLastError: null, gcPauseMs: 0, gcPauseCount: 0,

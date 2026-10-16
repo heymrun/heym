@@ -506,3 +506,239 @@ class TestResponsesReasoningAndCompression(unittest.IsolatedAsyncioTestCase):
             )
         self.assertIsNone(info)
         self.assertIs(compressed, history)
+
+
+from app.services.llm_transport import ModelProtocolError  # noqa: E402
+
+_PROTOCOL_BODY = (
+    'Error code: 400 - {"type":"error","error":{"type":"ModelProtocolUnsupported",'
+    '"message":"Model does not support this protocol."}}'
+)
+_TEMPERATURE_BODY = (
+    'Error code: 400 - {"model":"gpt-6-luna","error":{"message":"Unsupported parameter: '
+    '\'temperature\' is not supported with this model.","param":"temperature"}}'
+)
+
+
+def _status_error(message: str, status: int) -> Exception:
+    error = Exception(message)
+    error.status_code = status
+    return error
+
+
+class TestProviderErrorsAreNotMislabelled(unittest.TestCase):
+    """A 400 about one parameter used to be reported as "Responses API is not available"."""
+
+    def _responses_create(self, error: Exception) -> None:
+        client = MagicMock()
+        client.responses.create.side_effect = error
+        ResponsesTransport().create(
+            client=client,
+            model="gpt-6-luna",
+            history=ResponsesTransport().new_history(),
+            tools=None,
+            opts=RequestOpts(),
+        )
+
+    def test_plain_400_keeps_the_providers_own_message(self) -> None:
+        error = _status_error(_TEMPERATURE_BODY, 400)
+        with self.assertRaises(Exception) as ctx:
+            self._responses_create(error)
+        self.assertIs(ctx.exception, error)
+        self.assertNotIsInstance(ctx.exception, ResponsesTransportError)
+
+    def test_protocol_unsupported_400_is_wrapped_with_the_provider_detail(self) -> None:
+        with self.assertRaises(ResponsesTransportError) as ctx:
+            self._responses_create(_status_error(_PROTOCOL_BODY, 400))
+        self.assertIn("Use Responses API", str(ctx.exception))
+        self.assertIn("ModelProtocolUnsupported", str(ctx.exception))
+
+    def test_404_wrap_now_carries_the_provider_detail(self) -> None:
+        with self.assertRaises(ResponsesTransportError) as ctx:
+            self._responses_create(_status_error("Not Found", 404))
+        self.assertIn("Not Found", str(ctx.exception))
+
+    def test_chat_protocol_unsupported_names_the_way_out(self) -> None:
+        client = MagicMock()
+        client.chat.completions.create.side_effect = _status_error(_PROTOCOL_BODY, 400)
+        with self.assertRaises(ModelProtocolError) as ctx:
+            ChatCompletionsTransport().create(
+                client=client,
+                model="claude-haiku-5-5",
+                history=[{"role": "user", "content": "hi"}],
+                tools=None,
+                opts=RequestOpts(),
+            )
+        message = str(ctx.exception)
+        self.assertIn("claude-haiku-5-5", message)
+        self.assertIn("Chat Completions", message)
+        self.assertIn("Use Responses API", message)
+
+    def test_chat_other_errors_pass_through_untouched(self) -> None:
+        error = _status_error("Error code: 400 - bad temperature", 400)
+        client = MagicMock()
+        client.chat.completions.create.side_effect = error
+        with self.assertRaises(Exception) as ctx:
+            ChatCompletionsTransport().create(
+                client=client,
+                model="glm-5.3",
+                history=[{"role": "user", "content": "hi"}],
+                tools=None,
+                opts=RequestOpts(),
+            )
+        self.assertIs(ctx.exception, error)
+
+
+class TestReasoningModelsDropTemperature(unittest.TestCase):
+    def test_responses_request_for_gpt_6_luna_omits_temperature(self) -> None:
+        transport = ResponsesTransport()
+        kwargs = transport.build_kwargs(
+            model="gpt-6-luna",
+            history=transport.new_history(),
+            tools=None,
+            opts=RequestOpts(temperature=0.1, reasoning_effort="high"),
+        )
+        self.assertNotIn("temperature", kwargs)
+        self.assertEqual(kwargs["reasoning"], {"effort": "high"})
+
+    def test_responses_request_for_a_plain_model_still_sends_temperature(self) -> None:
+        transport = ResponsesTransport()
+        kwargs = transport.build_kwargs(
+            model="glm-5.3",
+            history=transport.new_history(),
+            tools=None,
+            opts=RequestOpts(temperature=0.1, reasoning_effort="high"),
+        )
+        self.assertEqual(kwargs["temperature"], 0.1)
+        self.assertNotIn("reasoning", kwargs)
+
+
+class TestResponsesHistoryOmitsNullFields(unittest.TestCase):
+    """xAI rejects a reasoning item that carries `content: null` as a corrupt compaction blob."""
+
+    def test_sdk_items_are_replayed_without_none_fields(self) -> None:
+        from openai.types.responses import ResponseFunctionToolCall, ResponseReasoningItem
+
+        reasoning = ResponseReasoningItem(
+            id="rs_1", summary=[], type="reasoning", encrypted_content="blob", status="completed"
+        )
+        call = ResponseFunctionToolCall(
+            arguments="{}", call_id="c1", name="search", type="function_call", id="fc_1"
+        )
+        transport = ResponsesTransport()
+        history = transport.new_history()
+        transport.append_turn(
+            history,
+            TurnResult(text="", tool_calls=[], raw_items=[reasoning, call]),
+        )
+        for item in history.items:
+            self.assertNotIn(None, item.values(), item)
+        self.assertEqual(history.items[0]["encrypted_content"], "blob")
+        self.assertEqual(history.items[0]["summary"], [])
+
+
+_FORMAT_BODY = (
+    "Error code: 400 - {'error': {'param': None, 'type': 'invalid_request_error', "
+    "'message': 'Upstream request failed: [invalid_request_error] This response_format type is "
+    "unavailable now (request_id: abc)'}}"
+)
+_SCHEMA_FORMAT = {
+    "type": "json_schema",
+    "json_schema": {"name": "output", "schema": {"type": "object"}, "strict": True},
+}
+
+
+class TestResponseFormatFallback(unittest.TestCase):
+    """DeepSeek V4 Pro answers 400 to json_schema but takes json_object and plain requests."""
+
+    def _create(
+        self, transport: ChatCompletionsTransport, client: MagicMock, response_format: dict | None
+    ) -> TurnResult:
+        return transport.create(
+            client=client,
+            model="deepseek-v4-pro",
+            history=[{"role": "user", "content": "hi"}],
+            tools=None,
+            opts=RequestOpts(response_format=response_format),
+        )
+
+    def _client(self, *outcomes: Exception | None) -> MagicMock:
+        client = MagicMock()
+        client.chat.completions.create.side_effect = [
+            outcome if outcome is not None else _chat_ok() for outcome in outcomes
+        ]
+        return client
+
+    def _formats_sent(self, client: MagicMock) -> list:
+        return [
+            c.kwargs.get("response_format") for c in client.chat.completions.create.call_args_list
+        ]
+
+    def test_json_schema_falls_back_to_json_object(self) -> None:
+        client = self._client(_status_error(_FORMAT_BODY, 400), None)
+        turn = self._create(ChatCompletionsTransport(), client, _SCHEMA_FORMAT)
+        self.assertEqual(turn.text, "ok")
+        self.assertEqual(self._formats_sent(client), [_SCHEMA_FORMAT, {"type": "json_object"}])
+
+    def test_json_object_falls_back_to_a_plain_request(self) -> None:
+        client = self._client(
+            _status_error(_FORMAT_BODY, 400), _status_error(_FORMAT_BODY, 400), None
+        )
+        self._create(ChatCompletionsTransport(), client, _SCHEMA_FORMAT)
+        self.assertEqual(
+            self._formats_sent(client), [_SCHEMA_FORMAT, {"type": "json_object"}, None]
+        )
+
+    def test_the_rejection_is_remembered_for_later_turns(self) -> None:
+        transport = ChatCompletionsTransport()
+        client = self._client(_status_error(_FORMAT_BODY, 400), None, None)
+        self._create(transport, client, _SCHEMA_FORMAT)
+        self._create(transport, client, _SCHEMA_FORMAT)
+        self.assertEqual(
+            self._formats_sent(client),
+            [_SCHEMA_FORMAT, {"type": "json_object"}, {"type": "json_object"}],
+        )
+
+    def test_a_fresh_transport_tries_the_full_format_again(self) -> None:
+        client = self._client(_status_error(_FORMAT_BODY, 400), None, None)
+        self._create(ChatCompletionsTransport(), client, _SCHEMA_FORMAT)
+        self._create(ChatCompletionsTransport(), client, _SCHEMA_FORMAT)
+        self.assertEqual(self._formats_sent(client)[2], _SCHEMA_FORMAT)
+
+    def test_an_unrelated_400_is_not_retried(self) -> None:
+        error = _status_error(_TEMPERATURE_BODY, 400)
+        client = self._client(error)
+        with self.assertRaises(Exception) as ctx:
+            self._create(ChatCompletionsTransport(), client, _SCHEMA_FORMAT)
+        self.assertIs(ctx.exception, error)
+        self.assertEqual(client.chat.completions.create.call_count, 1)
+
+    def test_nothing_to_drop_means_the_error_surfaces(self) -> None:
+        error = _status_error(_FORMAT_BODY, 400)
+        client = self._client(error)
+        with self.assertRaises(Exception) as ctx:
+            self._create(ChatCompletionsTransport(), client, None)
+        self.assertIs(ctx.exception, error)
+        self.assertEqual(client.chat.completions.create.call_count, 1)
+
+    def test_a_server_error_mentioning_the_field_is_not_retried(self) -> None:
+        error = _status_error(_FORMAT_BODY, 500)
+        client = self._client(error)
+        with self.assertRaises(Exception):
+            self._create(ChatCompletionsTransport(), client, _SCHEMA_FORMAT)
+        self.assertEqual(client.chat.completions.create.call_count, 1)
+
+
+def _chat_ok() -> MagicMock:
+    message = MagicMock()
+    message.content = "ok"
+    message.tool_calls = []
+    choice = MagicMock()
+    choice.message = message
+    choice.finish_reason = "stop"
+    response = MagicMock()
+    response.choices = [choice]
+    response.usage.prompt_tokens = 1
+    response.usage.completion_tokens = 1
+    response.usage.total_tokens = 2
+    return response

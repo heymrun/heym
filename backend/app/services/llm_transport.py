@@ -8,10 +8,13 @@ must survive every turn. The loop never inspects a history's contents.
 from __future__ import annotations
 
 import copy
-from dataclasses import dataclass, field
+import logging
+from dataclasses import dataclass, field, replace
 from typing import Any, Protocol
 
 from app.services.llm_provider import is_reasoning_model
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(eq=False)
@@ -52,6 +55,8 @@ class RequestOpts:
 
 class LLMTransport(Protocol):
     name: str
+    # False when the JSON contract travels in the prompt, not in a request field.
+    carries_response_format: bool
 
     def start(
         self,
@@ -102,10 +107,47 @@ class LLMTransport(Protocol):
     def trace_request(self, history: Any, tools: list[dict[str, Any]] | None) -> dict[str, Any]: ...
 
 
+class ModelProtocolError(RuntimeError):
+    """The gateway does not serve this model on the endpoint the node called."""
+
+
+def is_protocol_unsupported(exc: Exception) -> bool:
+    """OpenCode answers 400 `ModelProtocolUnsupported` when a model lives on another endpoint."""
+    return "ModelProtocolUnsupported" in str(exc)
+
+
+def provider_detail(exc: Exception, limit: int = 300) -> str:
+    detail = str(exc).strip()
+    return detail if len(detail) <= limit else detail[:limit] + "..."
+
+
+def rejects_response_format(exc: Exception) -> bool:
+    """A 400/422 naming `response_format`: the model cannot honour that structured-output type."""
+    return getattr(exc, "status_code", None) in (400, 422) and "response_format" in str(exc).lower()
+
+
+def _weaker_response_format(response_format: dict[str, Any]) -> dict[str, Any] | None:
+    """json_schema -> json_object -> none; the node prompt already carries the schema."""
+    return {"type": "json_object"} if response_format.get("type") == "json_schema" else None
+
+
 class ChatCompletionsTransport:
     """Today's behaviour, unchanged. History is the familiar message list."""
 
     name = "chat.completions"
+    carries_response_format = True
+
+    def __init__(self) -> None:
+        # What the provider refused earlier in this run, so later turns skip the failing try.
+        self._rejected_formats: set[str | None] = set()
+
+    def _apply_rejections(self, opts: RequestOpts) -> RequestOpts:
+        while (
+            opts.response_format is not None
+            and opts.response_format.get("type") in self._rejected_formats
+        ):
+            opts = replace(opts, response_format=_weaker_response_format(opts.response_format))
+        return opts
 
     def start(
         self,
@@ -182,8 +224,32 @@ class ChatCompletionsTransport:
         tools: list[dict[str, Any]] | None,
         opts: RequestOpts,
     ) -> TurnResult:
-        kwargs = self.build_kwargs(model=model, history=history, tools=tools, opts=opts)
-        response = client.chat.completions.create(**kwargs)
+        opts = self._apply_rejections(opts)
+        while True:
+            kwargs = self.build_kwargs(model=model, history=history, tools=tools, opts=opts)
+            try:
+                response = client.chat.completions.create(**kwargs)
+                break
+            except Exception as exc:
+                if opts.response_format is not None and rejects_response_format(exc):
+                    rejected = opts.response_format
+                    self._rejected_formats.add(rejected.get("type"))
+                    opts = replace(opts, response_format=_weaker_response_format(rejected))
+                    logger.info(
+                        "Provider rejected response_format %s for %s; retrying with %s",
+                        rejected.get("type"),
+                        model,
+                        (opts.response_format or {}).get("type", "no response_format"),
+                    )
+                    continue
+                if is_protocol_unsupported(exc):
+                    raise ModelProtocolError(
+                        f"The gateway does not serve {model} over Chat Completions. If it is a "
+                        f'GPT or Grok style model, turn on "Use Responses API" on this node. '
+                        f"Claude and Gemini models are served over their own APIs, which Heym "
+                        f"calls automatically for the OpenCode Go models it recognizes."
+                    ) from exc
+                raise
         return self.to_turn(response)
 
     def to_turn(self, response: Any) -> TurnResult:
@@ -217,20 +283,17 @@ class ChatCompletionsTransport:
         return _extract_text_from_response(turn.raw_items[0])
 
     def append_turn(self, history: list[dict[str, Any]], turn: TurnResult) -> None:
-        history.append(
-            {
-                "role": "assistant",
-                "content": turn.text or "",
-                "tool_calls": [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {"name": tc.name, "arguments": tc.arguments},
-                    }
-                    for tc in turn.tool_calls
-                ],
-            }
-        )
+        message: dict[str, Any] = {"role": "assistant", "content": turn.text or ""}
+        if turn.tool_calls:
+            message["tool_calls"] = [
+                {
+                    "id": tc.id,
+                    "type": "function",
+                    "function": {"name": tc.name, "arguments": tc.arguments},
+                }
+                for tc in turn.tool_calls
+            ]
+        history.append(message)
 
     def append_tool_results(self, history: list[dict[str, Any]], results: list[ToolResult]) -> None:
         for result in results:
@@ -268,7 +331,7 @@ class ResponsesHistory:
     items: list[dict[str, Any]] = field(default_factory=list)
 
 
-class ResponsesTransportError(RuntimeError):
+class ResponsesTransportError(ModelProtocolError):
     """Raised when the endpoint is unavailable, with actionable text for the node."""
 
 
@@ -277,6 +340,7 @@ class ResponsesTransport:
     carried back as encrypted blobs so a tool loop keeps its chain of thought."""
 
     name = "responses"
+    carries_response_format = True
 
     def new_history(self) -> ResponsesHistory:
         return ResponsesHistory()
@@ -398,11 +462,15 @@ class ResponsesTransport:
             response = client.responses.create(**kwargs)
         except Exception as exc:
             status = getattr(exc, "status_code", None)
-            if status in (400, 404) or "404" in str(exc):
+            if (
+                status == 404
+                or (status is None and "404" in str(exc))
+                or is_protocol_unsupported(exc)
+            ):
                 raise ResponsesTransportError(
                     f"Responses API is not available for this credential/model "
-                    f'(provider returned {status or 404}). Turn off "Use Responses API" '
-                    f"on this node, or switch to a credential that supports it."
+                    f'(provider returned {status or 404}: {provider_detail(exc)}). Turn off "Use '
+                    f'Responses API" on this node, or switch to a credential that supports it.'
                 ) from exc
             raise
         return self.to_turn(response)
@@ -483,7 +551,9 @@ class ResponsesTransport:
     def append_turn(self, history: ResponsesHistory, turn: TurnResult) -> None:
         """The only writer. Reasoning items go back verbatim."""
         for item in turn.raw_items:
-            history.items.append(item if isinstance(item, dict) else item.model_dump())
+            history.items.append(
+                item if isinstance(item, dict) else item.model_dump(exclude_none=True)
+            )
 
     def append_tool_results(self, history: ResponsesHistory, results: list[ToolResult]) -> None:
         for result in results:

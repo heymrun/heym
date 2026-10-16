@@ -3,11 +3,11 @@
 import uuid
 from collections.abc import Mapping
 from typing import Any
-from urllib.parse import urlsplit
 
 from openai import DEFAULT_CONNECTION_LIMITS, DEFAULT_TIMEOUT, OpenAI
 
 from app.http_identity import merge_outbound_headers
+from app.services.opencode_catalog import is_opencode_base_url
 from app.services.ssrf_guard import build_guarded_http_client, guard_http_url
 
 
@@ -19,8 +19,7 @@ def create_openai_client(
 ) -> OpenAI:
     """Send Heym's identity and an OpenCode session ID scoped to this conversation."""
     headers = dict(default_headers or {})
-    base_url = urlsplit(str(kwargs.get("base_url") or ""))
-    if (base_url.hostname or "").rstrip(".") == "opencode.ai":
+    if is_opencode_base_url(kwargs.get("base_url")):
         existing_session = None
         for name in list(headers):
             if name.lower() == "x-opencode-session":

@@ -292,7 +292,7 @@ export interface ExecuteInputMapping {
   value: string;
 }
 
-export type ReasoningEffort = "none" | "low" | "medium" | "high";
+export type ReasoningEffort = "none" | "low" | "medium" | "high" | "xhigh" | "max";
 
 export type CodexReasoningEffort = "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
 

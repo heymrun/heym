@@ -3780,6 +3780,7 @@ class WorkflowExecutor:
                             extra_body=extra_body,
                             use_responses_api=use_responses_api,
                             router=router,
+                            repair_json_output=json_output_enabled,
                         )
                     )
                 out = dict(result)
@@ -5792,6 +5793,7 @@ class WorkflowExecutor:
                             extra_body=agent_extra_body,
                             use_responses_api=agent_use_responses_api,
                             router=router,
+                            repair_json_output=json_output_enabled,
                         )
                     )
                 else:
@@ -5815,6 +5817,7 @@ class WorkflowExecutor:
                             extra_body=agent_extra_body,
                             use_responses_api=agent_use_responses_api,
                             router=router,
+                            repair_json_output=json_output_enabled,
                         )
                     )
             except Exception as e:
@@ -7544,6 +7547,12 @@ class WorkflowExecutor:
             usage = output.pop("_usage", None)
             if isinstance(usage, dict):
                 metadata["usage"] = usage
+            tool_calls = output.pop("_tool_calls", None)
+            if isinstance(tool_calls, list) and tool_calls:
+                metadata["tool_calls"] = tool_calls
+            json_repairs = output.pop("_json_repairs", None)
+            if isinstance(json_repairs, list) and json_repairs:
+                metadata["json_repairs"] = [str(item) for item in json_repairs]
 
             return NodeResult(
                 node_id=node_id,
@@ -8184,14 +8193,23 @@ def _collect_downstream_global_node_ids(
     return frozenset(downstream & all_globals)
 
 
+# Metadata that can quote model replies or tool arguments, which may carry a credential.
+_MASKED_METADATA_KEYS = ("tool_calls", "json_repairs")
+
+
 def _mask_node_result_row(
     row: dict, credentials_context: dict[str, str], *, keep_output: bool = False
 ) -> None:
-    """Mask a serialized node result's output and error in place."""
+    """Mask a serialized node result's output, error and quoting metadata in place."""
     if "output" in row and not keep_output:
         row["output"] = mask_sensitive_output(row["output"], credentials_context)
     if isinstance(row.get("error"), str):
         row["error"] = mask_sensitive_text(row["error"], credentials_context)
+    metadata = row.get("metadata")
+    if isinstance(metadata, dict):
+        quoted = {key: metadata[key] for key in _MASKED_METADATA_KEYS if key in metadata}
+        if quoted:
+            row["metadata"] = {**metadata, **mask_sensitive_output(quoted, credentials_context)}
 
 
 def mask_sub_workflow_result(

@@ -11,6 +11,7 @@ from app.models.chat_schemas import ToolCallRecord
 from app.services.agent_tool_observability import (
     classify_tool_failure_status,
     normalize_tool_call_status,
+    outline_tool_calls,
     sanitize_persisted_tool_entry,
     sanitize_tool_payload,
     sanitize_trace_tool_payloads,
@@ -991,3 +992,72 @@ class LLMTraceSafetyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OutlineToolCallsTests(unittest.TestCase):
+    def test_keeps_order_name_status_duration_and_arguments(self) -> None:
+        outline = outline_tool_calls(
+            [
+                {
+                    "name": "call_sub_workflow",
+                    "status": "success",
+                    "elapsed_ms": 848.094,
+                    "source": "sub_workflow",
+                    "arguments": {"inputs": {"text": "https://talanoa.email"}},
+                    "result": {"huge": "x" * 5000},
+                },
+                {"name": "lookup", "status": "error", "elapsed_ms": 12, "arguments": {"q": "a"}},
+            ]
+        )
+        self.assertEqual(
+            outline,
+            [
+                {
+                    "name": "call_sub_workflow",
+                    "status": "success",
+                    "elapsed_ms": 848.09,
+                    "source": "sub_workflow",
+                    "arguments": {"inputs": {"text": "https://talanoa.email"}},
+                },
+                {"name": "lookup", "status": "error", "elapsed_ms": 12.0, "arguments": {"q": "a"}},
+            ],
+        )
+
+    def test_never_carries_results(self) -> None:
+        outline = outline_tool_calls([{"name": "t", "status": "success", "result": {"a": 1}}])
+        self.assertNotIn("result", outline[0])
+
+    def test_redacts_secrets_in_arguments(self) -> None:
+        outline = outline_tool_calls(
+            [
+                {
+                    "name": "http",
+                    "status": "success",
+                    "arguments": {"url": "https://x.test", "api_key": "sk-live-123456"},
+                }
+            ]
+        )
+        self.assertNotIn("sk-live-123456", json.dumps(outline))
+        self.assertEqual(outline[0]["arguments"]["url"], "https://x.test")
+
+    def test_bounds_large_arguments(self) -> None:
+        outline = outline_tool_calls(
+            [{"name": "python", "status": "success", "arguments": {"code": "x" * 5000}}]
+        )
+        self.assertLess(len(json.dumps(outline[0]["arguments"])), 400)
+
+    def test_skips_context_compression_and_garbage_entries(self) -> None:
+        outline = outline_tool_calls(
+            [{"name": "_context_compression"}, "nope", None, {"name": "real", "status": "success"}]
+        )
+        self.assertEqual([entry["name"] for entry in outline], ["real"])
+
+    def test_status_follows_the_same_rules_as_the_summary(self) -> None:
+        legacy_error = {"name": "t", "result": {"error": "boom"}}
+        legacy_ok = {"name": "t", "result": {"status": "success"}}
+        outline = outline_tool_calls([legacy_error, legacy_ok])
+        self.assertEqual([entry["status"] for entry in outline], ["error", "success"])
+
+    def test_non_lists_give_an_empty_outline(self) -> None:
+        self.assertEqual(outline_tool_calls(None), [])
+        self.assertEqual(outline_tool_calls({"name": "t"}), [])

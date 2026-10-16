@@ -7,6 +7,7 @@ import {
   formatModelRoutingLabel,
   formatSpanCost,
   formatTimelineMs,
+  formatToolCallArguments,
   isSpanSettled,
   splitSpanOutput,
 } from "@/components/Panels/executionTimeline";
@@ -48,6 +49,12 @@ const inputValue = computed(() =>
 );
 const hasJsonColumn = computed(() => props.input !== null || outputParts.value.details !== null);
 let traceIdCopiedTimer: ReturnType<typeof setTimeout> | null = null;
+
+function toolStatusClass(status: string): string {
+  if (status === "success") return "text-success";
+  if (status === "pending" || status === "timeout" || status === "cancelled") return "text-amber-600 dark:text-amber-400";
+  return "text-destructive";
+}
 
 async function copyTraceId(): Promise<void> {
   if (!props.span.traceId) return;
@@ -95,7 +102,7 @@ onBeforeUnmount(() => {
         </button>
       </div>
     </div>
-    <div class="grid grid-cols-2 gap-x-4 gap-y-1 px-2 py-2 text-[10px] sm:grid-cols-3 lg:grid-cols-6">
+    <div class="flex flex-wrap gap-x-6 gap-y-1 px-2 py-2 text-[10px]">
       <div>
         <span class="text-muted-foreground">Status</span><div class="font-medium capitalize">
           {{ span.status }}
@@ -109,7 +116,7 @@ onBeforeUnmount(() => {
       <div><span class="text-muted-foreground">Attempts</span><div>{{ span.retryFinalAttempt ?? 1 }}<span v-if="span.retryMaxAttempts"> / {{ span.retryMaxAttempts }}</span></div></div>
       <div v-if="span.tokenUsage">
         <span class="text-muted-foreground">Tokens</span><div
-          class="font-mono"
+          class="whitespace-nowrap font-mono"
           data-testid="span-token-usage"
         >
           {{ span.tokenUsage.total.toLocaleString() }}<span
@@ -157,6 +164,22 @@ onBeforeUnmount(() => {
       </div>
     </div>
     <div
+      v-if="span.jsonRepairs"
+      class="mx-2 mb-2 rounded border border-amber-500/30 bg-amber-500/5 px-2 py-1.5 text-[10px] text-amber-700 dark:text-amber-300"
+      data-testid="span-json-repairs"
+    >
+      <span class="font-medium">JSON reply auto-fixed ({{ span.jsonRepairs.length }}×):</span>
+      the model's reply was not the JSON the node asked for, so it was sent back to be corrected.
+      <ul class="mt-0.5 list-disc pl-4">
+        <li
+          v-for="(reason, index) in span.jsonRepairs"
+          :key="index"
+        >
+          {{ reason }}
+        </li>
+      </ul>
+    </div>
+    <div
       v-if="span.error"
       class="mx-2 mb-2 rounded border border-destructive/30 bg-destructive/5 px-2 py-1.5 text-[10px] text-destructive"
     >
@@ -164,7 +187,7 @@ onBeforeUnmount(() => {
     </div>
     <div
       v-else-if="span.retryLastError"
-      class="mx-2 mb-2 rounded border border-amber-500/30 bg-amber-500/5 px-2 py-1.5 text-[10px] text-amber-700"
+      class="mx-2 mb-2 rounded border border-amber-500/30 bg-amber-500/5 px-2 py-1.5 text-[10px] text-amber-700 dark:text-amber-300"
     >
       <span class="font-medium">Previous attempt error:</span> {{ span.retryLastError }}
     </div>
@@ -181,11 +204,38 @@ onBeforeUnmount(() => {
         <Copy class="h-3 w-3" />
       </button><button
         type="button"
-        class="text-primary hover:underline"
+        class="text-primary hover:underline dark:text-violet-300"
         @click="emit('openTrace', $event)"
       >
         Open trace
       </button>
+    </div>
+    <div
+      v-if="span.toolCalls"
+      class="mx-2 mb-2 rounded border border-border/40 px-2 py-1.5 text-[10px]"
+      data-testid="span-tool-calls"
+    >
+      <div class="mb-1 text-muted-foreground">
+        Tool calls ({{ span.toolCalls.length }})
+      </div>
+      <ol class="max-h-32 space-y-0.5 overflow-y-auto">
+        <li
+          v-for="(call, index) in span.toolCalls"
+          :key="index"
+          class="flex items-baseline gap-2 font-mono"
+        >
+          <span class="text-muted-foreground">{{ index + 1 }}.</span><span class="shrink-0 font-medium">{{ call.name }}</span><span
+            class="min-w-0 flex-1 truncate text-muted-foreground"
+            :title="formatToolCallArguments(call.arguments)"
+          >{{ formatToolCallArguments(call.arguments) }}</span><span
+            class="shrink-0"
+            :class="toolStatusClass(call.status)"
+          >{{ call.status === "success" ? "ok" : call.status }}</span><span
+            v-if="call.elapsedMs !== null"
+            class="shrink-0 text-muted-foreground"
+          >{{ formatTimelineMs(call.elapsedMs) }}</span>
+        </li>
+      </ol>
     </div>
     <!-- JSON always sits in the left column; a reply text reads as the message on the right. -->
     <div

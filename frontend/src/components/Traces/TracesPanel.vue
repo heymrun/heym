@@ -947,6 +947,13 @@ onMounted(async () => {
             <div class="mt-1 text-sm font-medium">
               {{ selectedTrace.total_tokens ?? "-" }}
             </div>
+            <div
+              v-if="selectedTrace.prompt_tokens != null && selectedTrace.completion_tokens != null"
+              class="mt-0.5 whitespace-nowrap text-xs text-muted-foreground"
+              data-testid="trace-token-split"
+            >
+              {{ selectedTrace.prompt_tokens.toLocaleString() }} in / {{ selectedTrace.completion_tokens.toLocaleString() }} out
+            </div>
           </Card>
         </div>
 

@@ -41,7 +41,7 @@ Use `$input.text`, `$nodeName.field`, and other [Expression DSL](../reference/ex
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `temperature` | number | 0.0–2.0 (default: 0.7), for standard models |
-| `reasoningEffort` | `"low"` \| `"medium"` \| `"high"` | Reasoning depth for reasoning models |
+| `reasoningEffort` | `"low"` \| `"medium"` \| `"high"` \| `"xhigh"` \| `"max"` | Reasoning depth for reasoning models. `xhigh` and `max` work only on models that accept them, such as GPT 5.6 and GPT 6; other models answer with a 400 |
 
 When using a reasoning model (e.g. o1, o3), the UI shows **Reasoning Effort** instead of Temperature. For standard models, **Temperature** controls creativity.
 
@@ -54,7 +54,7 @@ When using a reasoning model (e.g. o1, o3), the UI shows **Reasoning Effort** in
 }
 ```
 
-Downstream nodes can use `$agentLabel.status`, `$agentLabel.reason`, etc. Same behavior as the [LLM node](../nodes/llm-node.md) JSON output.
+Downstream nodes can use `$agentLabel.status`, `$agentLabel.reason`, etc. Same behavior as the [LLM node](../nodes/llm-node.md) JSON output, including the repair turns for a reply that is not the JSON the schema asked for. The agent repairs only its final answer, so its tool calls are not run again. On a custom or OpenAI-compatible credential the JSON response format is not sent with the tool turns, because several open-weight models stop calling tools when it is; the schema in the prompt guides the answer, and the repair turn then asks for the format with tools switched off.
 
 ## Human Review (HITL)
 

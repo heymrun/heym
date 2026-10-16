@@ -1,5 +1,6 @@
 import type { LLMTraceDetail } from "@/types/trace";
 
+import { readRequestMessages, type RawMessage, type RawToolCall } from "@/lib/traceRequestMessages";
 import {
   formatRoutingCallLabel,
   readTraceModelRouting,
@@ -37,19 +38,6 @@ export interface TraceStep {
   tokens?: number;
   isError?: boolean;
   badges?: TraceStepBadge[];
-}
-
-interface RawToolCall {
-  id?: string;
-  type?: string;
-  function?: { name?: string; arguments?: string };
-}
-
-interface RawMessage {
-  role?: string;
-  content?: unknown;
-  tool_calls?: RawToolCall[];
-  tool_call_id?: string;
 }
 
 /** One model call of the request, with the routing decision that picked it. */
@@ -91,6 +79,9 @@ function withoutNulls(value: object): Record<string, unknown> {
     Object.entries(value).filter(([, entry]) => entry !== null && entry !== undefined),
   );
 }
+
+/** The sentence the backend opens a JSON repair request with (`repair_instruction`). */
+const REPAIR_PROMPT_PREFIX = "Your previous reply could not be used:";
 
 const SUMMARY_MAX = 140;
 const ARGS_SUMMARY_MAX = 80;
@@ -339,14 +330,16 @@ function buildConversationSteps(
       });
     } else if (msg.role === "user") {
       const text = asText(msg.content);
+      const isAutoFix = text.startsWith(REPAIR_PROMPT_PREFIX);
       steps.push({
         id: `msg-${index}`,
         kind: "user",
         icon: "user",
-        roleLabel: "User",
+        roleLabel: isAutoFix ? "User · auto fix" : "User",
         summary: summarize(text),
         detail: text,
         json: msg,
+        ...(isAutoFix ? { badges: [{ label: "Auto fix" }] } : {}),
       });
     } else if (msg.role === "assistant") {
       steps.push(...(placement.beforeMessage.get(index) ?? []));
@@ -417,6 +410,10 @@ function buildConversationSteps(
         answerBadges.push({ label: `${Math.round(metrics.total_duration_ms)}ms tools` });
       }
     }
+    const jsonRepairs = Array.isArray(response.json_repairs)
+      ? response.json_repairs.filter((reason): reason is string => typeof reason === "string")
+      : [];
+    if (jsonRepairs.length > 0) answerBadges.push({ label: `JSON auto-fixed ×${jsonRepairs.length}` });
     steps.push(...placement.beforeAnswer);
     steps.push({
       id: "answer",
@@ -436,6 +433,7 @@ function buildConversationSteps(
         usage: response.usage,
         elapsed_ms: response.elapsed_ms,
         ...(metrics ? { tool_metrics: metrics } : {}),
+        ...(jsonRepairs.length > 0 ? { json_repairs: jsonRepairs } : {}),
         ...(error ? { error } : {}),
       },
     });
@@ -603,7 +601,7 @@ export function buildTraceSteps(
 ): TraceStep[] {
   const request = (trace.request ?? {}) as Record<string, unknown>;
   const response = (trace.response ?? {}) as Record<string, unknown>;
-  const messages = request.messages;
+  const messages = readRequestMessages(trace.request_type, request);
   const workflowNames = options.workflowNames ?? {};
 
   const turnBlocks = buildTurnBlocks(
@@ -612,9 +610,9 @@ export function buildTraceSteps(
   );
   const turnSteps = turnBlocks.flatMap((block) => block.steps);
 
-  if (Array.isArray(messages) && messages.length > 0) {
+  if (messages.length > 0) {
     const steps = buildConversationSteps(
-      messages as RawMessage[],
+      messages,
       response,
       trace,
       workflowNames,

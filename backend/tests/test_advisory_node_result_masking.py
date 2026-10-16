@@ -198,6 +198,44 @@ class MaskSubWorkflowResultTests(unittest.TestCase):
         self.assertEqual(rows[0]["output"]["value"], _SECRET)
         self.assertEqual(rows[0]["error"], f"bad {_SECRET}")
 
+    def test_tool_call_arguments_kept_in_metadata_are_masked_too(self) -> None:
+        rows = [
+            {
+                "node_id": "a1",
+                "output": {},
+                "metadata": {
+                    "usage": {"total_tokens": 3},
+                    "tool_calls": [{"name": "http", "arguments": {"token": _SECRET}}],
+                },
+            }
+        ]
+
+        _, masked_rows = mask_sub_workflow_result(_sub_result({}, rows), _CREDENTIALS)
+
+        metadata = masked_rows[0]["metadata"]
+        self.assertEqual(metadata["tool_calls"][0]["arguments"], {"token": _MASKED})
+        self.assertEqual(metadata["usage"], {"total_tokens": 3})
+        self.assertEqual(rows[0]["metadata"]["tool_calls"][0]["arguments"], {"token": _SECRET})
+        self.assertNotIn(_SECRET, json.dumps(masked_rows))
+
+    def test_repair_messages_quoting_a_reply_are_masked_too(self) -> None:
+        rows = [
+            {
+                "node_id": "a1",
+                "output": {},
+                "metadata": {"json_repairs": [f"token: '{_SECRET}' is not of type 'integer'"]},
+            }
+        ]
+
+        _, masked_rows = mask_sub_workflow_result(_sub_result({}, rows), _CREDENTIALS)
+
+        self.assertEqual(
+            masked_rows[0]["metadata"]["json_repairs"],
+            [f"token: '{_MASKED}' is not of type 'integer'"],
+        )
+        self.assertNotIn(_SECRET, json.dumps(masked_rows))
+        self.assertIn(_SECRET, json.dumps(rows))
+
     def test_global_variable_rows_keep_their_output(self) -> None:
         rows = [
             {"node_id": "g1", "output": {"value": _SECRET}, "error": f"bad {_SECRET}"},

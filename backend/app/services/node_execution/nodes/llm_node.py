@@ -207,6 +207,8 @@ def execute(ctx: NodeExecutionContext) -> object:
             output["model"] = llm_output["model"]
         if isinstance(llm_output.get("usage"), dict):
             output["_usage"] = llm_output["usage"]
+        if llm_output.get("json_repairs") and not batch_mode_enabled:
+            output["_json_repairs"] = llm_output["json_repairs"]
         if model_routing is not None:
             output["_model_routing"] = model_routing
     self._restore_internal_trace_id(output, trace_id)

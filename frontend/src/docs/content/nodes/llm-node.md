@@ -57,7 +57,7 @@ If the selected provider or model does not support batch execution, the Properti
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `isReasoningModel` | boolean | Enable for reasoning models |
-| `reasoningEffort` | `"low"` \| `"medium"` \| `"high"` | Reasoning depth |
+| `reasoningEffort` | `"low"` \| `"medium"` \| `"high"` \| `"xhigh"` \| `"max"` | Reasoning depth. `xhigh` and `max` work only on models that accept them, such as GPT 5.6 and GPT 6; other models answer with a 400 |
 
 ### Batch Mode
 
@@ -188,6 +188,15 @@ also needs to support the endpoint.
 ## JSON Output
 
 When `jsonOutputEnabled` is true, the LLM returns JSON matching the schema. Access fields via `$nodeLabel.fieldName`.
+
+Heym checks the reply before the node accepts it. A reply wrapped in a code fence is unwrapped. A reply that is
+not valid JSON, or that misses a required field or has a field of the wrong type, gets up to two repair turns:
+the model sees its own reply and what was wrong, and answers again. Tools an agent already ran are not run
+again. A fixed reply is visible afterwards: the Execution Log lists why each reply was rejected, and the
+trace shows a **JSON auto-fixed** badge on the answer with the repair request as an **auto fix** step. If the
+reply is still unusable after that, the node fails with a JSON parse error. Providers that reject
+the `json_schema` response format are retried with `json_object`, then with no response format; the schema in
+the system prompt still applies.
 
 ## Extra Body
 

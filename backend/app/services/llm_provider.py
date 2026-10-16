@@ -1,10 +1,12 @@
 import asyncio
+import re
 
 import httpx
 
 from app.db.models import CredentialType
 from app.http_identity import HEYM_USER_AGENT
 from app.models.schemas import LLMModel
+from app.services.opencode_catalog import is_opencode_base_url, opencode_model_protocol
 from app.services.ssrf_guard import (
     SsrfBlockedError,
     build_guarded_async_http_client,
@@ -22,6 +24,24 @@ GOOGLE_RESPONSES_UNSUPPORTED_MESSAGE = "Google credentials do not support the Re
 CUSTOM_RESPONSES_SUPPORT_MESSAGE = (
     "Your gateway must support the Responses API. If it does not, runs on this node will fail."
 )
+
+OPENCODE_RESPONSES_AUTO_MESSAGE = (
+    "OpenCode Go serves this model over the Responses API only, so Heym uses it automatically."
+)
+OPENCODE_CHAT_ONLY_MESSAGE = (
+    "OpenCode Go serves this model over Chat Completions, not the Responses API."
+)
+OPENCODE_MESSAGES_ONLY_MESSAGE = (
+    "OpenCode Go serves this model over the Anthropic Messages API, which Heym calls automatically."
+)
+
+OPENCODE_GOOGLE_ONLY_MESSAGE = (
+    "OpenCode Go serves this model over Google's generateContent API, "
+    "which Heym calls automatically."
+)
+
+# Every GPT generation from 5 on is a reasoning model and rejects `temperature`.
+_GPT_GENERATION = re.compile(r"(?:^|[/:])gpt-(\d+)")
 
 REASONING_MODELS = {
     "o1",
@@ -43,7 +63,20 @@ def is_reasoning_model(model_id: str) -> bool:
     for reasoning in REASONING_MODELS:
         if reasoning in model_lower:
             return True
-    return False
+    generation = _GPT_GENERATION.search(model_lower)
+    return generation is not None and int(generation.group(1)) >= 5
+
+
+def opencode_responses_support(model_id: str) -> tuple[bool, str]:
+    """Whether the OpenCode gateway offers ``model_id`` on /responses, with the UI reason."""
+    protocol = opencode_model_protocol(model_id)
+    if protocol == "responses":
+        return True, OPENCODE_RESPONSES_AUTO_MESSAGE
+    if protocol == "messages":
+        return False, OPENCODE_MESSAGES_ONLY_MESSAGE
+    if protocol == "google":
+        return False, OPENCODE_GOOGLE_ONLY_MESSAGE
+    return False, OPENCODE_CHAT_ONLY_MESSAGE
 
 
 async def fetch_models(credential_type: CredentialType, config: dict) -> list[LLMModel]:
@@ -279,9 +312,14 @@ async def fetch_custom_models(base_url: str, api_key: str) -> list[LLMModel]:
             response.raise_for_status()
             data = response.json()
 
+            on_opencode = is_opencode_base_url(base)
             models = []
             for model in data.get("data", []):
                 model_id = model.get("id", "")
+                if on_opencode:
+                    supports_responses, responses_reason = opencode_responses_support(model_id)
+                else:
+                    supports_responses, responses_reason = True, CUSTOM_RESPONSES_SUPPORT_MESSAGE
                 models.append(
                     LLMModel(
                         id=model_id,
@@ -289,8 +327,8 @@ async def fetch_custom_models(base_url: str, api_key: str) -> list[LLMModel]:
                         is_reasoning=is_reasoning_model(model_id),
                         supports_batch=False,
                         batch_support_reason=NON_OPENAI_LLM_BATCH_MESSAGE,
-                        supports_responses=True,
-                        responses_support_reason=CUSTOM_RESPONSES_SUPPORT_MESSAGE,
+                        supports_responses=supports_responses,
+                        responses_support_reason=responses_reason,
                     )
                 )
 

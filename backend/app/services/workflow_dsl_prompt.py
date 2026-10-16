@@ -467,7 +467,7 @@ In workflow expressions:
   - `batchModeEnabled`: Boolean to use provider-native Batch API execution for supported text models (default: false)
   - `responsesApiEnabled`: Boolean to route the model call through the Responses API instead of Chat Completions (default: false). Works with OpenAI and custom credentials; Google credentials do not support it. Cannot be combined with `batchModeEnabled`.
   - `isReasoningModel`: Boolean for reasoning models (o1, o3)
-  - `reasoningEffort`: "low" | "medium" | "high" (for reasoning models)
+  - `reasoningEffort`: "low" | "medium" | "high" | "xhigh" | "max" (for reasoning models; "xhigh" and "max" only work on models that accept them, such as gpt-5.6 and gpt-6, and others answer 400)
   - `jsonOutputEnabled`: Boolean to enable structured JSON output (default: false) - for text mode only
   - `jsonOutputSchema`: JSON Schema string for structured output (optional, use with jsonOutputEnabled)
   - `extraBodyEnabled`: Boolean to send provider-specific extra request parameters (default: false). NEVER set this unless the user explicitly asks for custom/raw API request parameters.

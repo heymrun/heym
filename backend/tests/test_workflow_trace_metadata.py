@@ -1,3 +1,4 @@
+import copy
 import unittest
 import uuid
 from unittest.mock import patch
@@ -101,6 +102,105 @@ class WorkflowTraceMetadataTests(unittest.TestCase):
 
                 self.assertEqual(result.metadata["usage"], usage)
                 self.assertEqual(result.output, {"answer": "ok", "model": "gpt-test"})
+
+    def test_agent_tool_calls_move_to_metadata_without_leaking_into_output(self) -> None:
+        tool_calls = [
+            {"name": "call_sub_workflow", "status": "success", "elapsed_ms": 40.0},
+            {"name": "lookup", "status": "error", "elapsed_ms": 5.0, "arguments": {"q": "a"}},
+        ]
+        for json_output in (True, False):
+            with self.subTest(json_output=json_output):
+                executor = WorkflowExecutor(
+                    nodes=[
+                        {
+                            "id": "node1",
+                            "type": "agent",
+                            "data": {
+                                "label": "extractData",
+                                "credentialId": str(uuid.uuid4()),
+                                "model": "gpt-test",
+                                "userMessage": "hello",
+                                "jsonOutputEnabled": json_output,
+                            },
+                        }
+                    ],
+                    edges=[],
+                )
+                with patch.object(
+                    executor,
+                    "_execute_agent_node",
+                    return_value={
+                        "text": '{"answer":"ok"}',
+                        "model": "gpt-test",
+                        "tool_calls": copy.deepcopy(tool_calls),
+                    },
+                ):
+                    result = executor.execute_node_parallel("node1", {})
+
+                self.assertEqual(
+                    [(c["name"], c["status"]) for c in result.metadata["tool_calls"]],
+                    [("call_sub_workflow", "success"), ("lookup", "error")],
+                )
+                self.assertNotIn("_tool_calls", result.output)
+
+    def test_json_repairs_move_to_metadata_for_llm_and_agent_nodes(self) -> None:
+        repairs = ["'name' is a required property"]
+        for node_type, llm_method in (
+            ("llm", "_execute_llm_node"),
+            ("agent", "_execute_agent_node"),
+        ):
+            with self.subTest(node_type=node_type):
+                executor = WorkflowExecutor(
+                    nodes=[
+                        {
+                            "id": "node1",
+                            "type": node_type,
+                            "data": {
+                                "label": "parseReply",
+                                "credentialId": str(uuid.uuid4()),
+                                "model": "gpt-test",
+                                "userMessage": "hello",
+                                "jsonOutputEnabled": True,
+                            },
+                        }
+                    ],
+                    edges=[],
+                )
+                with patch.object(
+                    executor,
+                    llm_method,
+                    return_value={
+                        "text": '{"answer":"ok"}',
+                        "model": "gpt-test",
+                        "json_repairs": list(repairs),
+                    },
+                ):
+                    result = executor.execute_node_parallel("node1", {})
+
+                self.assertEqual(result.metadata["json_repairs"], repairs)
+                self.assertEqual(result.output, {"answer": "ok", "model": "gpt-test"})
+
+    def test_an_agent_that_called_no_tools_records_none(self) -> None:
+        executor = WorkflowExecutor(
+            nodes=[
+                {
+                    "id": "node1",
+                    "type": "agent",
+                    "data": {
+                        "label": "extractData",
+                        "credentialId": str(uuid.uuid4()),
+                        "model": "gpt-test",
+                        "userMessage": "hello",
+                    },
+                }
+            ],
+            edges=[],
+        )
+        with patch.object(
+            executor, "_execute_agent_node", return_value={"text": "hi", "model": "gpt-test"}
+        ):
+            result = executor.execute_node_parallel("node1", {})
+        self.assertNotIn("tool_calls", result.metadata)
 
     def test_plain_llm_output_keeps_token_usage_in_output(self) -> None:
         usage = {"prompt_tokens": 12, "completion_tokens": 5, "total_tokens": 17}
