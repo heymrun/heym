@@ -3,10 +3,8 @@ import { computed } from "vue";
 import { useRouter } from "vue-router";
 import { ArrowRight, MessageSquare, Split, User, Wrench } from "lucide-vue-next";
 
-import TraceTokenUsage from "@/components/Traces/TraceTokenUsage.vue";
-import TraceToolTokenCost from "@/components/Traces/TraceToolTokenCost.vue";
-import Tooltip from "@/components/ui/Tooltip.vue";
-import { formatTokenCount } from "@/lib/traceSpans";
+import TraceSpanTooltip from "@/components/Traces/TraceSpanTooltip.vue";
+import { hasTokenTooltip } from "@/lib/traceSpans";
 
 import type { TraceSpan } from "@/types/trace";
 
@@ -68,15 +66,6 @@ function formatDuration(ms: number): string {
   return `${ms.toFixed(2)}ms`;
 }
 
-/** A row with something to say about tokens swaps the native title for the tooltip. */
-function hasTokenTooltip(span: TraceSpan): boolean {
-  return Boolean(span.usage || span.toolTokens);
-}
-
-function usageLabel(span: TraceSpan): string {
-  return `Prompt ${formatTokenCount(span.usage?.promptTokens)} · Completion ${formatTokenCount(span.usage?.completionTokens)}`;
-}
-
 const iconComponent = (icon: TraceSpan["icon"]) => {
   switch (icon) {
     case "invocation":
@@ -110,12 +99,10 @@ const iconComponent = (icon: TraceSpan["icon"]) => {
       >
         <!-- No nesting indent: every row's icon starts at the same edge, which is
              what makes the column scannable top to bottom. -->
-        <!-- A model call row carries the tokens that call used; hovering it shows them. -->
-        <Tooltip
-          :label="usageLabel(span)"
-          :disabled="!hasTokenTooltip(span)"
-          side="top"
-          content-class="px-3 py-2.5 shadow-lg"
+        <!-- A row with tokens to show opens its card from the label and from the line. -->
+        <TraceSpanTooltip
+          :span="span"
+          :hint="isLinked(span) ? linkHint(span) : null"
         >
           <div
             class="flex min-w-0 max-w-[14rem] items-center gap-2 md:max-w-[24rem]"
@@ -142,23 +129,11 @@ const iconComponent = (icon: TraceSpan["icon"]) => {
               {{ span.label }}
             </span>
           </div>
-          <template #content>
-            <TraceToolTokenCost
-              v-if="span.toolTokens"
-              :estimate="span.toolTokens"
-              :hint="isLinked(span) ? linkHint(span) : null"
-            />
-            <TraceTokenUsage
-              v-else
-              :span="span"
-              :hint="isLinked(span) ? linkHint(span) : null"
-            />
-          </template>
-        </Tooltip>
+        </TraceSpanTooltip>
         <span class="text-right text-muted-foreground tabular-nums">
           {{ formatDuration(span.durationMs) }}
         </span>
-        <div class="min-w-0">
+        <div class="relative min-w-0">
           <div
             class="h-2 rounded bg-primary/20 overflow-hidden"
             role="presentation"
@@ -171,6 +146,24 @@ const iconComponent = (icon: TraceSpan["icon"]) => {
               }"
             />
           </div>
+          <!-- Laid over the line, taller and never narrower than a fingertip of it, so a
+               12 ms sliver is as easy to hover as a bar that spans the track. The line
+               itself does nothing on click, so its card carries no click hint. -->
+          <TraceSpanTooltip
+            v-if="hasTokenTooltip(span)"
+            :span="span"
+            :hint="null"
+            follow-pointer
+          >
+            <div
+              class="absolute -top-1.5 -bottom-1.5 min-w-[14px]"
+              :style="{
+                left: `${barOffsetPercent(span)}%`,
+                width: `${barWidthPercent(span)}%`,
+              }"
+              :data-testid="`duration-span-bar-${span.id}`"
+            />
+          </TraceSpanTooltip>
         </div>
       </template>
     </div>

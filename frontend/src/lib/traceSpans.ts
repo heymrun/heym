@@ -115,6 +115,11 @@ export function summarizeTraceTokens(trace: LLMTraceDetail): TraceTokenSummary {
   };
 }
 
+/** A row with something to say about tokens shows a card on hover. */
+export function hasTokenTooltip(span: TraceSpan): boolean {
+  return Boolean(span.usage || span.toolTokens);
+}
+
 /** `20593` as `20,593`, and a count the provider never reported as `n/a`. */
 export function formatTokenCount(count: number | null | undefined): string {
   return typeof count === "number" ? count.toLocaleString("en-US") : "n/a";
