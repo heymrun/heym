@@ -18,7 +18,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.analytics import get_accessible_workflow_ids
 from app.api.deps import get_current_user
-from app.db.models import Alert, AlertEvent, AlertShare, AlertTeamShare, Team, User, Workflow
+from app.db.models import (
+    Alert,
+    AlertEvent,
+    AlertShare,
+    AlertTeamShare,
+    Team,
+    TeamMember,
+    User,
+    Workflow,
+)
 from app.db.session import get_db
 from app.models.alert_schemas import (
     ALERT_TYPE_LABELS,
@@ -866,10 +875,17 @@ async def create_alert_team_share(
     if alert is None:
         raise HTTPException(status_code=404, detail="Alert not found")
 
-    team_result = await db.execute(select(Team).where(Team.id == payload.team_id))
+    team_result = await db.execute(
+        select(Team)
+        .join(TeamMember, TeamMember.team_id == Team.id)
+        .where(Team.id == payload.team_id, TeamMember.user_id == current_user.id)
+    )
     team = team_result.scalar_one_or_none()
     if team is None:
-        raise HTTPException(status_code=404, detail="Team not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Team not found or you are not a member",
+        )
 
     existing = await db.execute(
         select(AlertTeamShare).where(
