@@ -518,7 +518,7 @@ class TestCreateAlertTeamShareMembership(unittest.IsolatedAsyncioTestCase):
     """Sharing an alert with a team must only work for teams the owner belongs to."""
 
     @staticmethod
-    def _share_db(is_member, team_id, share_row=None):
+    def _share_db(is_member, team_id, user_id, share_row=None):
         db = _empty_db()
         team_row = SimpleNamespace(id=team_id, name="Finance")
 
@@ -527,7 +527,10 @@ class TestCreateAlertTeamShareMembership(unittest.IsolatedAsyncioTestCase):
             rows = MagicMock()
             rows.all.return_value = []
             if "team_members" in text:
-                rows.scalar_one_or_none.return_value = team_row if is_member else None
+                # Only report a membership row when the query actually binds
+                # the caller's id, so dropping the user filter fails the tests.
+                found = is_member and user_id in stmt.compile().params.values()
+                rows.scalar_one_or_none.return_value = team_row if found else None
             elif "FROM teams" in text:
                 rows.scalar_one_or_none.return_value = team_row
             else:
@@ -541,7 +544,7 @@ class TestCreateAlertTeamShareMembership(unittest.IsolatedAsyncioTestCase):
         user = _user()
         alert = _alert_row(user.id)
         team_id = uuid.uuid4()
-        db = self._share_db(is_member=True, team_id=team_id)
+        db = self._share_db(is_member=True, team_id=team_id, user_id=user.id)
 
         async def _refresh(obj):
             obj.id = uuid.uuid4()
@@ -560,7 +563,7 @@ class TestCreateAlertTeamShareMembership(unittest.IsolatedAsyncioTestCase):
         alert = _alert_row(user.id)
         team_id = uuid.uuid4()
         existing = SimpleNamespace(id=uuid.uuid4(), alert_id=alert.id, team_id=team_id)
-        db = self._share_db(is_member=False, team_id=team_id, share_row=existing)
+        db = self._share_db(is_member=False, team_id=team_id, user_id=user.id, share_row=existing)
         payload = alert_schemas.AlertTeamShareRequest(team_id=team_id)
         with patch(f"{MODULE}.get_owned_alert", new=AsyncMock(return_value=alert)):
             with self.assertRaises(HTTPException) as ctx:
