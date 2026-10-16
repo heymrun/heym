@@ -129,4 +129,4 @@ If usage gets close to the limit, Heym automatically compresses older messages i
 
 ## OpenCode Go models
 
-With a Custom credential that points at the OpenCode Go gateway (`opencode.ai`), Chat and the [AI Assistant](../reference/ai-assistant.md) call each model on the API the gateway serves it on: GPT and Grok on Responses, Claude and MiniMax M2.7 on Anthropic Messages, Gemini on Google's `generateContent`, everything else on Chat Completions. Models on the first three arrive as one complete reply instead of streaming word by word, and older messages are not compressed automatically for them.
+With a Custom credential that points at the OpenCode Go gateway (`opencode.ai`), Chat, [Chat with Heym](../reference/chat-with-heym.md), the `heym_chat` MCP tool and the [AI Assistant](../reference/ai-assistant.md) call each model on the API the gateway serves it on: GPT and Grok on Responses, Claude and MiniMax M2.7 on Anthropic Messages, Gemini on Google's `generateContent`, everything else on Chat Completions. Models on the first three arrive as one complete reply instead of streaming word by word, and older messages are not compressed automatically for them.

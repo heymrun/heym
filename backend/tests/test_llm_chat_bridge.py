@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 
 from app.api import ai_assistant
+from app.db.models import CredentialType
 from app.services import llm_chat_bridge
 from app.services.assistant_yolo import YoloToolOutcome, stream_yolo_assistant_turn
 from app.services.llm_chat_bridge import (
@@ -35,6 +36,7 @@ from app.services.llm_transport_messages import AnthropicMessagesTransport
 from app.services.openai_client import create_openai_client
 
 GATEWAY = "https://opencode.ai/inference/go/v1"
+GATEWAY_CONFIG = {"api_key": "test-key", "base_url": "https://opencode.ai/inference/go"}
 TOOL = {
     "type": "function",
     "function": {
@@ -614,6 +616,126 @@ class TestDashboardChatOnOtherProtocols(unittest.IsolatedAsyncioTestCase):
         client.chat.completions.create.assert_called_once()
         self.assertEqual(client.chat.completions.create.call_args.kwargs["model"], "glm-5.3-flash")
         self.assertEqual(events[-1], {"type": "done"})
+
+
+class TestChatEntryPoints(unittest.IsolatedAsyncioTestCase):
+    """Chat with Heym and the MCP chat model reach the bridge through the shared chat engine."""
+
+    def setUp(self) -> None:
+        forget_remembered_turns()
+        self.addCleanup(forget_remembered_turns)
+
+    @staticmethod
+    def _credential() -> MagicMock:
+        credential = MagicMock()
+        credential.id = uuid.uuid4()
+        credential.type = CredentialType.custom
+        credential.encrypted_config = "encrypted-config"
+        return credential
+
+    def _patch_gateway(self, handler: Handler) -> Any:
+        def http_client(**_kwargs: Any) -> httpx.Client:
+            client = httpx.Client(transport=httpx.MockTransport(handler))
+            self.addCleanup(client.close)
+            return client
+
+        return (
+            patch("app.api.ai_assistant.decrypt_config", return_value=GATEWAY_CONFIG),
+            patch("app.services.openai_client.guard_http_url"),
+            patch("app.services.openai_client.build_guarded_http_client", side_effect=http_client),
+        )
+
+    def test_the_binding_chat_and_mcp_share_lands_on_the_bridge(self) -> None:
+        with (
+            patch("app.services.openai_client.guard_http_url"),
+            patch(
+                "app.services.openai_client.build_guarded_http_client",
+                side_effect=lambda **_kwargs: httpx.Client(),
+            ),
+        ):
+            client, _provider, model, _trace = ai_assistant.resolve_model_binding(
+                self._credential(), GATEWAY_CONFIG, "claude-haiku-5-5", session_id="conv-42"
+            )
+
+        self.assertEqual(model, "claude-haiku-5-5")
+        self.assertEqual(gateway_protocol(client, model), "messages")
+        self.assertEqual(client.default_headers["x-opencode-session"], "conv-42")
+        for chat_only in ("glm-5.3-flash", "kimi-k3"):
+            self.assertIsNone(gateway_protocol(client, chat_only))
+
+    async def test_docs_chat_runs_a_claude_model_on_messages(self) -> None:
+        seen: list[tuple[str, str, dict[str, Any]]] = []
+
+        def respond(request: httpx.Request) -> httpx.Response:
+            seen.append(
+                (
+                    request.url.path,
+                    request.headers["x-opencode-session"],
+                    json.loads(request.content),
+                )
+            )
+            return httpx.Response(
+                200, json=_claude_payload([{"type": "text", "text": "It explains the LLM node."}])
+            )
+
+        credential = self._credential()
+        conversation_id = uuid.uuid4()
+        request = ai_assistant.DashboardChatRequest(
+            credential_id=credential.id,
+            model="claude-haiku-5-5",
+            message="What does this page explain?",
+            conversation_id=conversation_id,
+            conversation_history=[{"role": "assistant", "content": "Earlier answer"}],
+            chat_surface="documentation",
+            user_rules="The user is reading /docs/nodes/llm-node.",
+            client_local_datetime="4/10/2026, 10:15:00 AM",
+        )
+        http_request = MagicMock()
+        http_request.is_disconnected = AsyncMock(return_value=False)
+        current_user = MagicMock()
+        current_user.id = uuid.uuid4()
+        decrypt, guard, build = self._patch_gateway(respond)
+
+        with (
+            decrypt,
+            guard,
+            build,
+            patch(
+                "app.api.ai_assistant.get_credential_for_user",
+                AsyncMock(return_value=credential),
+            ),
+            patch(
+                "app.api.ai_assistant.get_workflows_for_user_with_inputs",
+                AsyncMock(return_value=[]),
+            ),
+            patch("app.api.ai_assistant._load_agents_md_content", return_value="AGENTS context"),
+            patch("app.api.ai_assistant.build_public_base_url", return_value="http://localhost"),
+            patch("app.api.ai_assistant.build_credentials_prompt", AsyncMock(return_value="")),
+            patch("app.api.ai_assistant.load_credential_catalog", AsyncMock(return_value=[])),
+            patch("app.api.ai_assistant.load_data_table_catalog", AsyncMock(return_value=[])),
+            patch.object(ai_assistant, "record_llm_trace"),
+            patch.object(ai_assistant, "record_run_history"),
+        ):
+            response = await ai_assistant.dashboard_chat_stream(
+                http_request=http_request,
+                request=request,
+                current_user=current_user,
+                db=AsyncMock(),
+            )
+            chunks = [
+                chunk.decode() if isinstance(chunk, bytes) else chunk
+                async for chunk in response.body_iterator
+            ]
+
+        events = [json.loads(c[len("data: ") :]) for c in chunks if c.startswith("data: ")]
+        self.assertEqual(len(seen), 1)
+        path, session, body = seen[0]
+        self.assertEqual(path, "/inference/go/v1/messages")
+        self.assertEqual(session, str(conversation_id))
+        self.assertIn("/docs/nodes/llm-node", body["system"])
+        self.assertEqual(body["messages"][0], {"role": "assistant", "content": "Earlier answer"})
+        self.assertIn({"type": "content", "text": "It explains the LLM node."}, events)
+        self.assertFalse([e for e in events if e.get("type") == "error"])
 
 
 class TestAssistantOnOtherProtocols(unittest.IsolatedAsyncioTestCase):
