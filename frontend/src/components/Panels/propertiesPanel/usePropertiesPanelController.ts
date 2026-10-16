@@ -29,6 +29,10 @@ import {
   type ChartOutputExpressionField,
   type ChartOutputExpressionFieldKey,
 } from "@/lib/chartOutputExpressionFields";
+import {
+  getDecisionExpressionFields,
+  type DecisionExpressionField,
+} from "@/lib/decisionExpressionFields";
 import { getGitHubExpressionFields, type GitHubExpressionFieldKey } from "@/lib/githubExpressionFields";
 import { getJiraExpressionFields, type JiraExpressionFieldKey } from "@/lib/jiraExpressionFields";
 import { getLinearExpressionFields, type LinearExpressionFieldKey } from "@/lib/linearExpressionFields";
@@ -624,15 +628,6 @@ export function usePropertiesPanelController() {
 
   const ragExpressionInputRefs = ref<Map<RagExpressionFieldKey, ExpandableFieldRef>>(new Map());
   const currentRagExpressionFieldIndex = ref(0);
-  /**
-   * Decision question fields are created and removed by the user, so their keys are
-   * built from row positions rather than a fixed union: "state", "customBody",
-   * "q:0:instructions", "q:0:option:1", "q:2:level:0".
-   */
-  interface DecisionExpressionField {
-    key: string;
-    label: string;
-  }
 
   const decisionExpressionInputRefs = ref<Map<string, ExpandableFieldRef>>(new Map());
   const currentDecisionExpressionFieldIndex = ref(0);
@@ -5956,34 +5951,7 @@ export function usePropertiesPanelController() {
     if (!n || n.type !== "decision") {
       return [];
     }
-    if (n.data.customBodyEnabled) {
-      return [{ key: "customBody", label: "Request Body" }];
-    }
-    const fields: DecisionExpressionField[] = [{ key: "state", label: "State" }];
-    (n.data.questions ?? []).forEach((question, index) => {
-      const name = (question.id || "").trim() || `question ${index + 1}`;
-      fields.push({ key: `q:${index}:instructions`, label: `${name} - instructions` });
-      if (question.type === "noul") {
-        fields.push({ key: `q:${index}:criteriaTrue`, label: `${name} - yes means` });
-        fields.push({ key: `q:${index}:criteriaFalse`, label: `${name} - no means` });
-      } else if (question.type === "choice") {
-        (question.options ?? []).forEach((option, optionIndex) => {
-          const optionName = (option.key || "").trim() || `option ${optionIndex + 1}`;
-          fields.push({
-            key: `q:${index}:option:${optionIndex}`,
-            label: `${name} - ${optionName}`,
-          });
-        });
-      } else {
-        (question.levels ?? []).forEach((_level, levelIndex) => {
-          fields.push({
-            key: `q:${index}:level:${levelIndex}`,
-            label: `${name} - level ${levelIndex}`,
-          });
-        });
-      }
-    });
-    return fields;
+    return getDecisionExpressionFields(n.data);
   });
 
   const decisionExpressionFieldCount = computed(

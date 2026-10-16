@@ -4,6 +4,7 @@ import json
 from importlib import import_module
 from typing import Any
 
+from app.services.decision_images import PreparedImage, prepare_image
 from app.services.decision_models import (
     DecisionProviderError,
     DecisionRequestError,
@@ -11,7 +12,9 @@ from app.services.decision_models import (
     call_decision_model,
     load_decision_credential,
 )
+from app.services.image_input import load_image_bytes
 from app.services.node_execution.base import NodeExecutionContext
+from app.services.ssrf_guard import SsrfBlockedError
 
 
 def _resolve(executor: Any, template: object, inputs: dict, node_id: str) -> Any:
@@ -55,6 +58,32 @@ def _resolve_questions(executor: Any, questions: list, inputs: dict, node_id: st
     return resolved
 
 
+def _load_images(executor: Any, rows: list, inputs: dict, node_id: str) -> list[PreparedImage]:
+    """Resolve, fetch and prepare each image row, naming the row in any failure."""
+    prepared: list[PreparedImage] = []
+    for row in rows or []:
+        if not isinstance(row, dict):
+            raise DecisionRequestError("Decision node has a malformed image row")
+        name = str(row.get("name") or "").strip()
+        if not name:
+            raise DecisionRequestError("Every decision image needs a name")
+        source = _resolve(executor, row.get("source"), inputs, node_id)
+        if source is None or (isinstance(source, str) and not source.strip()):
+            raise DecisionRequestError(f"Image '{name}' resolved to nothing")
+        if not isinstance(source, str):
+            raise DecisionRequestError(
+                f"Image '{name}' must resolve to a URL, a data URL or base64 text"
+            )
+        try:
+            raw, _mime_type = load_image_bytes(source.strip(), subject="Decision image URL")
+        except SsrfBlockedError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - any fetch or decode failure names the row
+            raise DecisionRequestError(f"Image '{name}': {exc}") from exc
+        prepared.append(prepare_image(name, raw))
+    return prepared
+
+
 def execute(ctx: NodeExecutionContext) -> object:
     """Execute the decision node."""
     _workflow_executor = import_module("app.services.workflow_executor")
@@ -83,12 +112,18 @@ def execute(ctx: NodeExecutionContext) -> object:
             if not isinstance(body, dict):
                 raise DecisionRequestError("Custom request body must be a JSON object")
         else:
+            images = (
+                _load_images(self, node_data.get("images") or [], inputs, node_id)
+                if bool(node_data.get("imagesEnabled"))
+                else []
+            )
             body = build_decision_body(
                 model=str(node_data.get("model") or ""),
                 state=_resolve(self, node_data.get("state"), inputs, node_id),
                 questions=_resolve_questions(
                     self, node_data.get("questions") or [], inputs, node_id
                 ),
+                images=images,
             )
 
         credential = load_decision_credential(credential_id)

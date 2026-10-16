@@ -1,8 +1,17 @@
 """AI-assisted decision question drafting."""
 
+import json
 import unittest
+import unittest.mock as mock
+import uuid
 
-from app.api.decisions import extract_questions_payload, normalize_generated_questions
+from app.api.decisions import (
+    extract_questions_payload,
+    generate_decision_questions,
+    normalize_generated_questions,
+)
+from app.db.models import CredentialType
+from app.models.schemas import DecisionQuestionsGenerateRequest
 
 
 class ExtractQuestionsPayloadTests(unittest.TestCase):
@@ -131,8 +140,81 @@ class NormalizeGeneratedQuestionsTests(unittest.TestCase):
         )
         self.assertEqual([row["id"] for row in rows], ["q"])
 
+    def test_a_box_is_dropped_without_images(self) -> None:
+        rows = normalize_generated_questions(
+            [{"id": "dog", "type": "box", "instructions": "the dog in `photo`"}], set()
+        )
+        self.assertEqual(rows, [])
+
+    def test_a_box_is_kept_with_images_and_loses_any_criteria(self) -> None:
+        rows = normalize_generated_questions(
+            [
+                {
+                    "id": "dog",
+                    "type": "box",
+                    "instructions": "the dog in `photo`",
+                    "criteria": ["ignored", "levels"],
+                }
+            ],
+            set(),
+            allow_box=True,
+        )
+        self.assertEqual(rows, [{"id": "dog", "type": "box", "instructions": "the dog in `photo`"}])
+
     def test_non_list_input_returns_nothing(self) -> None:
         self.assertEqual(normalize_generated_questions({"id": "q"}, set()), [])
+
+
+class GenerateDecisionQuestionsImageTests(unittest.IsolatedAsyncioTestCase):
+    """Image names steer the drafting prompt and unlock box questions."""
+
+    async def _generate(self, image_names: list[str], questions: list[dict]):
+        credential = mock.MagicMock()
+        credential.id = uuid.uuid4()
+        credential.name = "llm"
+        credential.type = CredentialType.openai
+        credential.encrypted_config = "x"
+        llm = mock.AsyncMock(return_value={"text": json.dumps({"questions": questions})})
+        with (
+            mock.patch(
+                "app.api.ai_assistant.get_credential_for_user",
+                mock.AsyncMock(return_value=credential),
+            ),
+            mock.patch("app.api.decisions.decrypt_config", return_value={"api_key": "k"}),
+            mock.patch("app.api.decisions.build_router_for_credential", return_value=None),
+            mock.patch("app.api.decisions.execute_llm", llm),
+        ):
+            result = await generate_decision_questions(
+                DecisionQuestionsGenerateRequest(
+                    credential_id=uuid.uuid4(),
+                    model="gpt-test",
+                    prompt="Is the found dog the lost one?",
+                    image_names=image_names,
+                ),
+                current_user=mock.MagicMock(id=uuid.uuid4()),
+                db=mock.AsyncMock(),
+            )
+        return result, llm.call_args.kwargs["system_instruction"]
+
+    async def test_image_names_reach_the_prompt_and_allow_a_box(self) -> None:
+        result, prompt = await self._generate(
+            ["photo", "poster"],
+            [{"id": "dog", "type": "box", "instructions": "the dog in `photo`"}],
+        )
+        self.assertIn("`photo`, `poster`", prompt)
+        self.assertIn('"box"', prompt)
+        self.assertEqual([question.type for question in result.questions], ["box"])
+
+    async def test_without_images_the_prompt_has_no_box(self) -> None:
+        result, prompt = await self._generate(
+            [],
+            [
+                {"id": "dog", "type": "box", "instructions": "the dog"},
+                {"id": "is_dog", "type": "noul", "instructions": "Is it a dog?"},
+            ],
+        )
+        self.assertNotIn('"box"', prompt)
+        self.assertEqual([question.id for question in result.questions], ["is_dog"])
 
 
 if __name__ == "__main__":

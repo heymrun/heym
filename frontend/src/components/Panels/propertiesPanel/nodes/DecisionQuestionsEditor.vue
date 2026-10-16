@@ -28,6 +28,7 @@ const TYPE_OPTIONS = [
   { value: "noul", label: "Noul - does this hold?" },
   { value: "choice", label: "Choice - pick one" },
   { value: "score", label: "Score - rate on a scale" },
+  { value: "box", label: "Box - where is it in an image?" },
 ];
 
 const expanded = ref<Record<number, boolean>>({ 0: true });
@@ -273,7 +274,7 @@ function fieldKey(index: number, suffix: string): string {
           <ExpressionInput
             :ref="(el: unknown) => setDecisionExpressionInputRef(fieldKey(index, 'instructions'), el)"
             :model-value="row.instructions || ''"
-            placeholder="Does this convey urgency?"
+            :placeholder="row.type === 'box' ? 'the dog in `photo`' : 'Does this convey urgency?'"
             :rows="3"
             :nodes="workflowStore.nodes"
             :node-results="workflowStore.nodeResults"
@@ -410,6 +411,15 @@ function fieldKey(index: number, suffix: string): string {
             </p>
           </div>
         </template>
+
+        <p
+          v-else-if="row.type === 'box'"
+          class="text-xs text-muted-foreground"
+        >
+          Name the target and the image it is in. A box needs at least one image and
+          model jev-1.14.0 or jev-preview. It always returns a box, even when the target
+          is absent, so ask a Noul alongside it ("Is there a dog in `photo`?").
+        </p>
 
         <template v-else>
           <div class="space-y-1">

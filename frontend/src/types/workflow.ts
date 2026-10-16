@@ -424,10 +424,11 @@ export interface DecisionQuestionOption {
 /**
  * One question sent to a decision model. Kept as a flat record rather than a
  * discriminated union so switching `type` preserves what the user already typed.
+ * A box locates something in an image and uses `instructions` only.
  */
 export interface DecisionQuestion {
   id: string;
-  type: "noul" | "choice" | "score";
+  type: "noul" | "choice" | "score" | "box";
   instructions: string;
   /** noul: what a yes means */
   criteriaTrue?: string;
@@ -437,6 +438,14 @@ export interface DecisionQuestion {
   options?: DecisionQuestionOption[];
   /** score: ordered levels, lowest first */
   levels?: string[];
+}
+
+/** One image a decision node sends, placed in the state under `name`. */
+export interface DecisionImage {
+  /** State key; questions refer to the image by this name in backticks. */
+  name: string;
+  /** Expression resolving to an http(s) URL, a data:image/... URL or plain base64. */
+  source: string;
 }
 
 export interface DecisionQuestionsSuggestion {
@@ -586,6 +595,10 @@ export interface NodeData {
   state?: string;
   /** Decision node: ordered question rows, serialised to a map at execution time. */
   questions?: DecisionQuestion[];
+  /** Decision node: send the image rows with the request. */
+  imagesEnabled?: boolean;
+  /** Decision node: ordered image rows, each placed in the state under its name. */
+  images?: DecisionImage[];
   customBodyEnabled?: boolean;
   customBody?: string;
   toolTimeoutSeconds?: number;

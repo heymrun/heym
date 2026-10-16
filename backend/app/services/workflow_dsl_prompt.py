@@ -1077,25 +1077,41 @@ Properties:
 - `questions`: ordered array, at least one entry. Each entry:
   - `id`: snake_case key. The answer comes back under the same key. It is NEVER sent
     to the model, so the full meaning must live in `instructions`.
-  - `type`: "noul" | "choice" | "score"
+  - `type`: "noul" | "choice" | "score" | "box"
   - `instructions`: the judgment to make. Expression-capable.
   - noul only: `criteriaTrue`, `criteriaFalse` - what a yes and a no mean (optional)
   - choice only: `options`: [{ "key": "...", "description": "..." }] - at least one
   - score only: `levels`: ordered array of strings, lowest first - at least two
+  - box: instructions only, no criteria. Needs at least one image.
+- `imagesEnabled`: Boolean to send images with the request (default: false)
+- `images`: ordered array of `{ "name": "photo", "source": "$input.body.imageUrl" }`.
+  `name` is a letters/digits/underscore identifier; `source` is an expression that
+  resolves to an http(s) image URL, a `data:image/...` URL or plain base64. Each image
+  is placed in the state under its name, so questions refer to it in backticks:
+  "Is there a dog in `photo`?". A text state is kept under `context` next to the
+  images; an object state gains the image fields. Heym rotates, resizes and re-encodes
+  each image to the provider's limits and adds the provider's image opt-in header.
+  Images are experimental at TypeSafe: fine for prototypes, not for production gates.
 - `customBodyEnabled` / `customBody`: send a hand-written JSON body instead of the
   form, for an endpoint whose contract differs. Expression-capable. When enabled,
-  `state` and `questions` are ignored.
+  `state`, `questions` and `images` are ignored.
 - `requestTimeoutSeconds`: default 60
 
 Which question type to use:
 - "noul" - whether a condition holds. Returns the probability of yes (0 to 1).
 - "choice" - pick one of a set you define. Returns the option plus a distribution.
 - "score" - rate along an ordered rubric. Returns a value that can land between levels.
+- "box" - where something is in an image. Returns the four edges of a bounding box as
+  fractions of the image size. Needs model "jev-1.14.0" or "jev-preview". There is no
+  "not found" answer, so ask a "noul" alongside it ("Is there a dog in `photo`?") and
+  ignore the box when that answer is low.
 
 Output is the provider response verbatim, so downstream nodes read:
 - `$decisionLabel.answers.<id>.noul` (0 to 1)
 - `$decisionLabel.answers.<id>.choice` and `.confidence`
 - `$decisionLabel.answers.<id>.score` and `.confidence`
+- `$decisionLabel.answers.<id>.box.top` / `.bottom` / `.left` / `.right` (0 to 1) and
+  `.confidence`
 
 Example - triage a support ticket and route on the answer:
 ```json
@@ -1132,6 +1148,26 @@ Example - triage a support ticket and route on the answer:
 Then a `switch` node branches on `$triage.answers.department.choice`, and a `condition`
 node can gate on `$triage.answers.department.confidence` to send low-confidence cases
 to a human instead.
+
+Example - judge and locate a dog in an uploaded photo:
+```json
+{
+  "id": "dogCheck",
+  "type": "decision",
+  "data": {
+    "label": "dogCheck",
+    "credentialId": "<decision credential id>",
+    "model": "jev-1.14.0",
+    "state": "",
+    "imagesEnabled": true,
+    "images": [{ "name": "photo", "source": "$userInput.body.imageUrl" }],
+    "questions": [
+      { "id": "is_dog", "type": "noul", "instructions": "Is there a dog in `photo`?" },
+      { "id": "dog", "type": "box", "instructions": "the dog in `photo`" }
+    ]
+  }
+}
+```
 
 ### 6. condition (If/Else Branch)
 - **Purpose**: Branch workflow based on condition

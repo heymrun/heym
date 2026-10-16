@@ -22,6 +22,8 @@ For text generation, use the [LLM](./llm-node.md) node. For a model that calls t
 | `model` | string | Model name, for example `jev-latest` |
 | `state` | expression | What the model should read (default `$input.text`) |
 | `questions` | array | Ordered question rows; at least one |
+| `imagesEnabled` | boolean | Send the image rows with the request (default: off) |
+| `images` | array | Ordered `{ name, source }` rows; see [Images](#images) |
 | `customBodyEnabled` | boolean | Send a hand-written request body instead of the form |
 | `customBody` | expression (JSON) | The body to send when the toggle is on |
 | `requestTimeoutSeconds` | number | Max seconds to wait (default: 60) |
@@ -94,11 +96,63 @@ Levels run lowest first, at least two and at most ten. Each level should describ
 
 Read it with `$triage.answers.frustration.score`, `.legend` and `.confidence`.
 
+### Box
+
+Finds where something is in an image. Returns the four edges of a bounding box, each a fraction of the image's width or height measured from the top-left corner, plus a confidence.
+
+A box takes instructions only, no criteria. Name the target and the image it is in: "the dog in `photo`" is enough. It needs at least one [image](#images) and the model `jev-1.14.0` or `jev-preview`.
+
+A box always comes back as a box, even when the target is not in the image. Ask a **noul** alongside it and ignore the box when that answer is low.
+
+```json
+[
+  { "id": "is_dog", "type": "noul", "instructions": "Is there a dog in `photo`?" },
+  { "id": "dog", "type": "box", "instructions": "the dog in `photo`" }
+]
+```
+
+Read it with `$check.answers.dog.box.left`, `.top`, `.right`, `.bottom` and `$check.answers.dog.confidence`. To get pixels, multiply `left` and `right` by the image width and `top` and `bottom` by its height.
+
+## Images
+
+Turn on **Send images** to let the questions look at pictures: "Is this a dog?", "Is the dog in `photo` the same dog as in `poster`?", "Did the door open between `before` and `after`?".
+
+> Images and box questions are experimental at TypeSafe. They are good for prototypes and trying ideas, but the provider does not yet recommend them for production decisions, and the request format and accuracy may change between releases.
+
+Each row has a **name** and a **source**:
+
+- **Name** is how questions refer to the image, in backticks: `` `photo` ``. Use letters, digits and underscores, starting with a letter or underscore. Names must be unique.
+- **Source** is an expression that resolves to an `http(s)` image URL, a `data:image/...` URL, or plain base64, the same forms the [LLM](./llm-node.md) node accepts for image input. URLs are fetched with Heym's outbound address guard, so a private or loopback address needs `HEYM_HTTP_ALLOW_PRIVATE_URLS=true`.
+
+At run time each image joins the **State** under its name:
+
+| State resolves to | What the model reads |
+|-------------------|----------------------|
+| empty | `{ "photo": <image> }` |
+| an object | the object with `photo` added; a field already named `photo` is an error |
+| text or a list | `{ "context": <state>, "photo": <image> }` |
+
+So a question about a text state together with an image reads "Does the dog in `photo` match the description in `context`?".
+
+Heym prepares every image before sending it, because the provider rejects images outside its limits instead of resizing them:
+
+- the photo is rotated upright using its EXIF orientation,
+- an animated image is reduced to its first frame,
+- the longest side is scaled down to at most 1568 pixels,
+- a side shorter than 280 pixels is scaled up, or padded when scaling would make the other side too long,
+- the result is re-encoded as JPEG, or PNG when it has transparency.
+
+Heym also adds the `TypeSafe-Danger-Zone-Images: true` header that turns images on at the provider. You do not need to set it yourself. A request with too many or too large images fails with a 413; send fewer images, or split the work across two Decision nodes.
+
+Images count as input tokens, so they show up in `usage.input_tokens` and in [Traces](../tabs/traces-tab.md). Traces record each image's size, not its data.
+
 ## Generate with AI
 
 **Generate with AI** turns a plain sentence into a suggested state template and a set of question rows. Describe what you want judged — "triage an incoming support ticket: how urgent it is, which team owns it, and how frustrated the customer sounds" — and review what comes back before adding it to the node.
 
 The drafting is done by an LLM, so the dialog asks for an LLM credential. The decision model answers the questions later, when the workflow runs. Generated ids are de-duplicated against the rows the node already holds, so generating twice never overwrites an existing answer key.
+
+When **Send images** is on, the dialog passes the image names along, so the drafted questions refer to them (`` `photo` ``) and may include a box question. Without images it never drafts a box.
 
 Each generation is recorded in the [Traces](../tabs/traces-tab.md) tab under the **Decision Questions** source, alongside the `decision.systemone` traces written by the node itself at run time.
 
@@ -106,7 +160,9 @@ Each generation is recorded in the [Traces](../tabs/traces-tab.md) tab under the
 
 Turn on **Custom request body** to send JSON you write yourself instead of the form. Use it for an endpoint whose contract differs from the one the form builds.
 
-The editor is seeded from the current form, and expressions inside it are resolved before the request is sent. While the toggle is on, the State field and the question rows are ignored. The response is passed through unchanged either way, so a different contract simply produces a different shape for your expressions to read.
+The editor is seeded from the current form, and expressions inside it are resolved before the request is sent. While the toggle is on, the State field, the images and the question rows are ignored. The response is passed through unchanged either way, so a different contract simply produces a different shape for your expressions to read.
+
+To send images from a custom body, write the provider's `assets` map yourself. Heym still adds the image opt-in header whenever the body has assets or a box question.
 
 ## Output
 
@@ -170,6 +226,10 @@ Decision models do not appear in the LLM pricing tables Heym syncs, so the **Cos
 | Malformed question | The provider's own field-level message is carried into the node error |
 | Rate limited or overloaded | The node fails with a message saying the condition is transient — turn on [retry](../reference/features.md) for this node to ride it out |
 | Duplicate or empty question id | The node fails before any request is sent |
+| Box question without an image | The node fails before any request is sent |
+| Image name empty, repeated, not a plain name, or already a state field | The node fails before any request is sent, naming the image |
+| Image source resolves to nothing, cannot be fetched, or is not an image | The node fails, naming the image |
+| Too many or too large images (413) | The node fails asking for fewer or smaller images |
 
 ## Related
 

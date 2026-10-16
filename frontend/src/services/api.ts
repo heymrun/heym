@@ -4010,6 +4010,7 @@ export interface DecisionQuestionsGenerateRequest {
   model: string;
   existing_question_ids?: string[];
   state_sample?: string;
+  image_names?: string[];
 }
 
 export const decisionsApi = {

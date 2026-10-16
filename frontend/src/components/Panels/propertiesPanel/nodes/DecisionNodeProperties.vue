@@ -7,7 +7,9 @@ import Input from "@/components/ui/Input.vue";
 import Label from "@/components/ui/Label.vue";
 import Select from "@/components/ui/Select.vue";
 import DecisionAIQuestionsDialog from "@/components/Decision/DecisionAIQuestionsDialog.vue";
+import DecisionImagesEditor from "./DecisionImagesEditor.vue";
 import DecisionQuestionsEditor from "./DecisionQuestionsEditor.vue";
+import { buildDecisionSeedBody } from "./decisionSeedBody";
 import { usePropertiesPanelContext } from "../usePropertiesPanelController";
 
 const {
@@ -27,6 +29,12 @@ const aiDialogOpen = ref(false);
 
 const questions = computed((): DecisionQuestion[] => selectedNode.value?.data.questions ?? []);
 const customBodyEnabled = computed((): boolean => !!selectedNode.value?.data.customBodyEnabled);
+/** Names the AI dialog may refer to; only sent while the node actually sends images. */
+const imageNames = computed((): string[] =>
+  selectedNode.value?.data.imagesEnabled
+    ? (selectedNode.value.data.images ?? []).map((image) => image.name.trim()).filter(Boolean)
+    : [],
+);
 
 function applyGenerated(payload: { state: string | null; questions: DecisionQuestion[] }): void {
   if (payload.state) {
@@ -38,36 +46,10 @@ function applyGenerated(payload: { state: string | null; questions: DecisionQues
 
 /** The request body the form describes, in the shape the provider expects. */
 function buildSeedBody(): string {
-  const wireQuestions: Record<string, unknown> = {};
-  for (const question of questions.value) {
-    const id = (question.id ?? "").trim();
-    if (!id) continue;
-    const entry: Record<string, unknown> = {
-      type: question.type,
-      instructions: question.instructions ?? "",
-    };
-    if (question.type === "noul") {
-      const criteria: Record<string, string> = {};
-      if (question.criteriaTrue) criteria.true = question.criteriaTrue;
-      if (question.criteriaFalse) criteria.false = question.criteriaFalse;
-      if (Object.keys(criteria).length > 0) entry.criteria = criteria;
-    } else if (question.type === "choice") {
-      entry.criteria = Object.fromEntries(
-        (question.options ?? []).map((option) => [option.key, option.description || null]),
-      );
-    } else {
-      entry.criteria = question.levels ?? [];
-    }
-    wireQuestions[id] = entry;
-  }
-  return JSON.stringify(
-    {
-      model: selectedNode.value?.data.model || "jev-latest",
-      state: selectedNode.value?.data.state || "$input.text",
-      questions: wireQuestions,
-    },
-    null,
-    2,
+  return buildDecisionSeedBody(
+    selectedNode.value?.data.model,
+    selectedNode.value?.data.state,
+    questions.value,
   );
 }
 
@@ -153,6 +135,8 @@ function toggleCustomBody(enabled: boolean): void {
         </p>
       </div>
 
+      <DecisionImagesEditor />
+
       <DecisionQuestionsEditor @generate="aiDialogOpen = true" />
     </template>
 
@@ -220,8 +204,8 @@ function toggleCustomBody(enabled: boolean): void {
         </Button>
       </div>
       <p class="text-xs text-muted-foreground">
-        Sent exactly as written. The State field and the question rows are ignored while
-        this is on.
+        Sent exactly as written. The State field, the images and the question rows are
+        ignored while this is on. To send images this way, write the assets map yourself.
       </p>
     </div>
 
@@ -244,6 +228,7 @@ function toggleCustomBody(enabled: boolean): void {
       v-if="aiDialogOpen"
       :existing-question-ids="questions.map((q) => q.id)"
       :state-sample="selectedNode.data.state || ''"
+      :image-names="imageNames"
       @applied="applyGenerated"
       @close="aiDialogOpen = false"
     />

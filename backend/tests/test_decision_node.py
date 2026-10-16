@@ -1,8 +1,11 @@
 """Decision node handler: expression resolution, credential loading, output."""
 
+import io
 import unittest
 import unittest.mock as mock
 import uuid
+
+from PIL import Image
 
 from app.services.node_execution.base import NodeExecutionContext
 from app.services.node_execution.nodes import decision_node
@@ -208,6 +211,128 @@ class DecisionNodeTests(unittest.TestCase):
         kwargs = self.call.call_args.kwargs
         self.assertEqual(kwargs["base_url"], "https://api.typesafe.ai")
         self.assertEqual(kwargs["api_key"], "sk-test")
+
+
+def _png_bytes() -> bytes:
+    buffer = io.BytesIO()
+    Image.new("RGB", (400, 300), "red").save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+class DecisionNodeImageTests(unittest.TestCase):
+    """Image rows are resolved, fetched, prepared and placed in the state."""
+
+    def _run(self, node_data: dict, loader: object = None):
+        loader = loader or mock.Mock(return_value=(_png_bytes(), "image/png"))
+        with (
+            mock.patch.object(decision_node, "load_decision_credential", return_value=_CREDENTIAL),
+            mock.patch.object(decision_node, "load_image_bytes", loader),
+            mock.patch.object(
+                decision_node, "call_decision_model", return_value={"answers": {}}
+            ) as call,
+        ):
+            self.call = call
+            self.loader = loader
+            return decision_node.execute(_ctx(node_data))
+
+    def _image_node(self, **overrides) -> dict:
+        data = {
+            "state": "Found near the park",
+            "imagesEnabled": True,
+            "images": [{"name": "photo", "source": "https://img.example/dog.jpg"}],
+            "questions": [
+                {"id": "is_dog", "type": "noul", "instructions": "Is there a dog in `photo`?"}
+            ],
+        }
+        data.update(overrides)
+        return _base_node(**data)
+
+    def test_rows_are_ignored_while_images_are_off(self) -> None:
+        self._run(self._image_node(imagesEnabled=False))
+        body = self.call.call_args.kwargs["body"]
+        self.assertNotIn("assets", body)
+        self.assertEqual(body["state"], "Found near the park")
+        self.loader.assert_not_called()
+
+    def test_an_image_row_is_fetched_prepared_and_sent(self) -> None:
+        self._run(self._image_node())
+        self.loader.assert_called_once_with(
+            "https://img.example/dog.jpg", subject="Decision image URL"
+        )
+        body = self.call.call_args.kwargs["body"]
+        reference = body["state"]["photo"]
+        self.assertEqual(body["state"]["context"], "Found near the park")
+        asset = body["assets"][reference]
+        self.assertEqual(asset["type"], "image")
+        self.assertEqual(asset["format"], "jpg")
+        self.assertTrue(asset["data_base64"])
+
+    def test_a_box_question_rides_along_with_an_image(self) -> None:
+        self._run(
+            self._image_node(
+                questions=[{"id": "dog", "type": "box", "instructions": "the dog in `photo`"}]
+            )
+        )
+        question = self.call.call_args.kwargs["body"]["questions"]["dog"]
+        self.assertEqual(question, {"type": "box", "instructions": "the dog in `photo`"})
+
+    def test_a_box_question_without_images_fails_before_sending(self) -> None:
+        with self.assertRaises(ValueError) as ctx:
+            self._run(
+                self._image_node(
+                    imagesEnabled=False,
+                    questions=[{"id": "dog", "type": "box", "instructions": "the dog"}],
+                )
+            )
+        self.assertIn("needs an image", str(ctx.exception))
+        self.call.assert_not_called()
+
+    def test_an_empty_source_names_the_row(self) -> None:
+        with self.assertRaises(ValueError) as ctx:
+            self._run(self._image_node(images=[{"name": "photo", "source": "  "}]))
+        self.assertIn("Image 'photo' resolved to nothing", str(ctx.exception))
+
+    def test_a_source_that_resolves_to_an_object_is_rejected(self) -> None:
+        # The fake executor resolves a lone expression to a dict.
+        with self.assertRaises(ValueError) as ctx:
+            self._run(self._image_node(images=[{"name": "photo", "source": "$input.body"}]))
+        self.assertIn("must resolve to a URL", str(ctx.exception))
+
+    def test_a_row_without_a_name_is_rejected(self) -> None:
+        with self.assertRaises(ValueError) as ctx:
+            self._run(self._image_node(images=[{"name": "", "source": "https://x.test/a.png"}]))
+        self.assertIn("needs a name", str(ctx.exception))
+
+    def test_a_fetch_failure_names_the_row(self) -> None:
+        loader = mock.Mock(side_effect=RuntimeError("404 Not Found"))
+        with self.assertRaises(ValueError) as ctx:
+            self._run(self._image_node(), loader=loader)
+        self.assertIn("Image 'photo': 404 Not Found", str(ctx.exception))
+        self.call.assert_not_called()
+
+    def test_an_ssrf_refusal_keeps_its_own_message(self) -> None:
+        from app.services.ssrf_guard import SsrfBlockedError
+
+        loader = mock.Mock(side_effect=SsrfBlockedError("Decision image URL is not allowed"))
+        with self.assertRaises(SsrfBlockedError) as ctx:
+            self._run(self._image_node(), loader=loader)
+        self.assertIn("Decision image URL", str(ctx.exception))
+
+    def test_unreadable_image_bytes_name_the_row(self) -> None:
+        loader = mock.Mock(return_value=(b"not an image", "image/png"))
+        with self.assertRaises(ValueError) as ctx:
+            self._run(self._image_node(), loader=loader)
+        self.assertIn("'photo'", str(ctx.exception))
+
+    def test_images_are_ignored_in_custom_body_mode(self) -> None:
+        self._run(
+            self._image_node(
+                customBodyEnabled=True,
+                customBody='{"model": "m", "state": "x", "questions": {}}',
+            )
+        )
+        self.loader.assert_not_called()
+        self.assertNotIn("assets", self.call.call_args.kwargs["body"])
 
 
 class DecisionNodeTraceLinkTests(unittest.TestCase):

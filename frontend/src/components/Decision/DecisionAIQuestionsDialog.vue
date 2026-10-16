@@ -12,10 +12,15 @@ import Textarea from "@/components/ui/Textarea.vue";
 import { useChatModelSelection } from "@/composables/useChatModelSelection";
 import { decisionsApi } from "@/services/api";
 
-const props = defineProps<{
-  existingQuestionIds: string[];
-  stateSample: string;
-}>();
+const props = withDefaults(
+  defineProps<{
+    existingQuestionIds: string[];
+    stateSample: string;
+    /** Names of the images the node sends; lets the draft refer to them and ask a box. */
+    imageNames?: string[];
+  }>(),
+  { imageNames: () => [] },
+);
 
 const emit = defineEmits<{
   applied: [payload: { state: string | null; questions: DecisionQuestion[] }];
@@ -54,6 +59,7 @@ async function generate(): Promise<void> {
       model: selectedModel.value,
       existing_question_ids: props.existingQuestionIds,
       state_sample: props.stateSample || undefined,
+      image_names: props.imageNames.length > 0 ? props.imageNames : undefined,
     });
     draftState.value = result.state ?? null;
     draftQuestions.value = result.questions;
@@ -80,6 +86,9 @@ function describe(question: DecisionQuestion): string {
   }
   if (question.type === "score") {
     return (question.levels ?? []).join(" -> ");
+  }
+  if (question.type === "box") {
+    return "bounding box";
   }
   return `yes: ${question.criteriaTrue || "-"} / no: ${question.criteriaFalse || "-"}`;
 }

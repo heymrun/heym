@@ -61,6 +61,16 @@ Respond with JSON only, no prose, in exactly this shape:
 }
 """
 
+_IMAGES_PROMPT = """
+The state also holds images, each under its own name: {names}. Refer to an image by its
+name in backticks, for example "Is there a dog in `{first}`?". With images you may also
+use a fourth type:
+
+- "box": finds where something is in an image and returns its bounding box. It takes
+  instructions only and no criteria, for example "the dog in `{first}`". A box has no
+  "not found" answer, so pair it with a "noul" that asks whether the thing is there.
+"""
+
 
 def extract_questions_payload(content: str) -> dict | None:
     """Pull the JSON object out of a model response that may be fenced or padded."""
@@ -88,12 +98,13 @@ def _slug(value: object) -> str:
 
 
 def normalize_generated_questions(
-    raw_questions: Any, existing_ids: set[str]
+    raw_questions: Any, existing_ids: set[str], *, allow_box: bool = False
 ) -> list[dict[str, Any]]:
     """Turn model output into panel rows, dropping anything unusable.
 
     Ids are slugged and de-duplicated against what the node already holds, because an
     answer comes back keyed by its id and a collision would silently overwrite one.
+    A box needs an image, so it is kept only when the node sends images.
     """
     if not isinstance(raw_questions, list):
         return []
@@ -104,6 +115,8 @@ def normalize_generated_questions(
             continue
         question_type = str(raw.get("type") or "").strip()
         if question_type not in QUESTION_TYPES:
+            continue
+        if question_type == "box" and not allow_box:
             continue
         instructions = str(raw.get("instructions") or "").strip()
         if not instructions:
@@ -133,7 +146,7 @@ def normalize_generated_questions(
                 {"key": _slug(key), "description": str(value or "").strip()}
                 for key, value in criteria.items()
             ]
-        else:
+        elif question_type == "score":
             if not isinstance(criteria, list):
                 continue
             levels = [str(level).strip() for level in criteria if str(level).strip()]
@@ -183,13 +196,19 @@ async def generate_decision_questions(
         user_message += "\n\nThese question ids already exist and must not be reused: " + ", ".join(
             request.existing_question_ids
         )
+    image_names = [name.strip() for name in request.image_names if name.strip()]
+    system_instruction = _SYSTEM_PROMPT
+    if image_names:
+        system_instruction += _IMAGES_PROMPT.format(
+            names=", ".join(f"`{name}`" for name in image_names), first=image_names[0]
+        )
 
     result = await execute_llm(
         credential_type=credential.type.value,
         api_key=str(config.get("api_key") or ""),
         base_url=str(raw_base_url) if raw_base_url else None,
         model=request.model,
-        system_instruction=_SYSTEM_PROMPT,
+        system_instruction=system_instruction,
         user_message=user_message,
         temperature=None if is_reasoning_model(request.model) else 0.2,
         extra_body={"disable_reasoning": True},
@@ -211,7 +230,7 @@ async def generate_decision_questions(
         )
 
     questions = normalize_generated_questions(
-        payload.get("questions"), set(request.existing_question_ids)
+        payload.get("questions"), set(request.existing_question_ids), allow_box=bool(image_names)
     )
     if not questions:
         raise HTTPException(

@@ -8,7 +8,6 @@ import time
 import uuid
 from dataclasses import dataclass, replace
 from typing import Any, Callable
-from urllib.parse import urlparse
 
 import httpx
 from openai import OpenAI
@@ -23,6 +22,7 @@ from app.services.agent_tool_observability import (
     sanitize_tool_payload,
     summarize_tool_calls,
 )
+from app.services.image_input import load_image_bytes
 from app.services.json_output import MAX_OUTPUT_REPAIRS, check_json_output, repair_instruction
 from app.services.llm_provider import is_reasoning_model
 from app.services.llm_trace import LLMTraceContext, record_llm_trace
@@ -41,7 +41,6 @@ from app.services.model_router import (
 )
 from app.services.openai_client import create_guarded_openai_client, create_openai_client
 from app.services.opencode_catalog import is_opencode_base_url, opencode_model_protocol
-from app.services.ssrf_guard import get_guarded_http_client, guard_http_url
 
 logger = logging.getLogger(__name__)
 
@@ -346,28 +345,7 @@ def _parse_batch_output(
 
 
 def _load_image_bytes(image_input: str) -> tuple[bytes, str]:
-    if image_input.startswith("data:"):
-        header, data = image_input.split(",", 1)
-        mime_type = header.split(";")[0].replace("data:", "") or "image/png"
-        return base64.b64decode(data), mime_type
-
-    parsed = urlparse(image_input)
-    if parsed.scheme in ("http", "https"):
-        # The URL can be caller-controlled (e.g. "$userInput.body.imageUrl"), so
-        # fetch through the same SSRF guard the HTTP node uses: scheme allowlist,
-        # public-IP-only resolution, and dial-time egress pinning.
-        guard_http_url(image_input, subject="LLM image input URL")
-        response = get_guarded_http_client().get(
-            image_input,
-            timeout=30.0,
-            headers={"User-Agent": HEYM_USER_AGENT},
-        )
-        response.raise_for_status()
-        content_type = response.headers.get("Content-Type", "image/png")
-        mime_type = content_type.split(";")[0] or "image/png"
-        return response.content, mime_type
-
-    return base64.b64decode(image_input), "image/png"
+    return load_image_bytes(image_input, subject="LLM image input URL")
 
 
 def _log_request(method: str, base_url: str | None, kwargs: dict) -> None:

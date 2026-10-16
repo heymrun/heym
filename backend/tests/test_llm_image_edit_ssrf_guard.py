@@ -62,7 +62,7 @@ class LoadImageBytesSsrfTests(unittest.TestCase):
         response.content = b"png-bytes"
         client.get.return_value = response
         with patch(
-            "app.services.llm_service.get_guarded_http_client", return_value=client
+            "app.services.image_input.get_guarded_http_client", return_value=client
         ) as get_client:
             data, mime = _load_image_bytes("http://1.1.1.1/x.png")
         get_client.assert_called_once_with()

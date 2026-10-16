@@ -1775,6 +1775,7 @@ class DecisionQuestionsGenerateRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=10000)
     existing_question_ids: list[str] = Field(default_factory=list)
     state_sample: str | None = None
+    image_names: list[str] = Field(default_factory=list)
 
 
 class DecisionQuestionsSuggestionResponse(BaseModel):

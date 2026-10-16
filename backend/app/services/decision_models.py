@@ -8,9 +8,12 @@ knows lives in this module.
 
 from __future__ import annotations
 
+import base64
 import json
+import re
 import time
-from typing import Any
+import uuid
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx
@@ -19,9 +22,20 @@ from app.http_identity import merge_outbound_headers
 from app.services.llm_trace import LLMTraceContext, record_llm_trace
 from app.services.ssrf_guard import build_guarded_http_client, guard_http_url
 
-QUESTION_TYPES = ("noul", "choice", "score")
+if TYPE_CHECKING:
+    from app.services.decision_images import PreparedImage
+
+QUESTION_TYPES = ("noul", "choice", "score", "box")
 
 DEFAULT_ENDPOINT_PATH = "/v1/systemone"
+
+# TypeSafe's opt-in for images and Box questions. Without it such a request is a 400.
+IMAGES_HEADER = "TypeSafe-Danger-Zone-Images"
+
+# Non-object state is placed under this key when images join it.
+CONTEXT_STATE_KEY = "context"
+
+_IMAGE_NAME_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
 class DecisionRequestError(ValueError):
@@ -76,18 +90,57 @@ def _build_score_criteria(question: dict, question_id: str) -> list[str]:
     return cleaned
 
 
+def _validate_image_names(images: list[PreparedImage]) -> None:
+    seen: set[str] = set()
+    for image in images:
+        if not _IMAGE_NAME_PATTERN.fullmatch(image.name):
+            raise DecisionRequestError(
+                f"Image name '{image.name}' must start with a letter or underscore and "
+                "contain only letters, digits and underscores"
+            )
+        if image.name in seen:
+            raise DecisionRequestError(f"Duplicate image name '{image.name}'")
+        seen.add(image.name)
+
+
+def _merge_images_into_state(state: Any, references: dict[str, str]) -> dict[str, Any]:
+    """Place each image reference in the state under its name.
+
+    Questions refer to an image by that name in backticks, the way TypeSafe refers to
+    any state field. A non-object state keeps its value under `context`.
+    """
+    if state is None or (isinstance(state, str) and not state.strip()):
+        merged: dict[str, Any] = {}
+    elif isinstance(state, dict):
+        merged = dict(state)
+    else:
+        merged = {CONTEXT_STATE_KEY: state}
+    for name, reference in references.items():
+        if name in merged:
+            raise DecisionRequestError(
+                f"Image '{name}' collides with a state field of the same name"
+            )
+        merged[name] = reference
+    return merged
+
+
 def build_decision_body(
     *,
     model: str,
     state: Any,
     questions: list[dict],
+    images: list[PreparedImage] | None = None,
 ) -> dict[str, Any]:
     """Turn node configuration into a decision model request body.
 
     Questions arrive as an ordered list because that is how the panel edits them;
     the wire format is a map keyed by question id, and the answer comes back under
     the same key.
+
+    Each image is listed once in `assets` under a fresh reference, and the reference
+    is placed in the state under the image's name.
     """
+    images = images or []
     resolved_model = _text(model)
     if not resolved_model:
         raise DecisionRequestError("Decision node requires a model")
@@ -121,12 +174,65 @@ def build_decision_body(
                 payload["criteria"] = criteria
         elif question_type == "choice":
             payload["criteria"] = _build_choice_criteria(question, question_id)
-        else:
+        elif question_type == "score":
             payload["criteria"] = _build_score_criteria(question, question_id)
+        elif not images:
+            # A box locates something in an image and takes no criteria.
+            raise DecisionRequestError(
+                f"Question '{question_id}' is a box and needs an image: turn on Images and add one"
+            )
 
         built[question_id] = payload
 
-    return {"model": resolved_model, "state": state, "questions": built}
+    if not images:
+        return {"model": resolved_model, "state": state, "questions": built}
+
+    _validate_image_names(images)
+    # A fresh UUID per image per request cannot match the user's text by accident.
+    references = {image.name: str(uuid.uuid4()) for image in images}
+    assets = {
+        references[image.name]: {
+            "type": "image",
+            "format": image.format,
+            "data_base64": base64.b64encode(image.data).decode("ascii"),
+        }
+        for image in images
+    }
+    return {
+        "model": resolved_model,
+        "state": _merge_images_into_state(state, references),
+        "assets": assets,
+        "questions": built,
+    }
+
+
+def needs_images_header(body: dict) -> bool:
+    """True when the body carries an asset or asks a Box question."""
+    if body.get("assets"):
+        return True
+    questions = body.get("questions")
+    if not isinstance(questions, dict):
+        return False
+    return any(
+        isinstance(question, dict) and question.get("type") == "box"
+        for question in questions.values()
+    )
+
+
+def redact_assets(body: dict) -> dict:
+    """A copy of the body safe to store in a trace: image data replaced by its size."""
+    assets = body.get("assets")
+    if not isinstance(assets, dict) or not assets:
+        return body
+    redacted: dict[str, Any] = {}
+    for reference, asset in assets.items():
+        if isinstance(asset, dict) and isinstance(asset.get("data_base64"), str):
+            encoded = asset["data_base64"]
+            size = len(encoded) * 3 // 4 - encoded[-2:].count("=")
+            redacted[reference] = {**asset, "data_base64": f"[base64 image, {size} bytes]"}
+        else:
+            redacted[reference] = asset
+    return {**body, "assets": redacted}
 
 
 class DecisionProviderError(RuntimeError):
@@ -164,6 +270,11 @@ def _error_message(status_code: int, payload: object, text: str) -> str:
         return "Decision model rejected the API key on this credential"
     if status_code == 422:
         return f"Decision model rejected the request: {detail}"
+    if status_code == 413:
+        return (
+            f"Decision model rejected the request as too large: {detail}. "
+            "Send fewer or smaller images."
+        )
     if status_code in (429, 529):
         cause = "rate limited" if status_code == 429 else "overloaded"
         return (
@@ -196,6 +307,8 @@ def call_decision_model(
     headers: dict[str, str] = {"Content-Type": "application/json"}
     if api_key.strip():
         headers["Authorization"] = f"Bearer {api_key.strip()}"
+    if needs_images_header(body):
+        headers[IMAGES_HEADER] = "true"
 
     started = time.monotonic()
     payload: object = None
@@ -227,7 +340,8 @@ def call_decision_model(
             record_llm_trace(
                 trace_context,
                 request_type="decision.systemone",
-                request=body,
+                # Base64 images would put megabytes into the traces table per call.
+                request=redact_assets(body),
                 response=payload if isinstance(payload, dict) else {"raw": text[:2000]},
                 model=(payload.get("model") if isinstance(payload, dict) else None)
                 or str(body.get("model") or ""),

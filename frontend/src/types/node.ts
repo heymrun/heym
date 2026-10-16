@@ -653,6 +653,8 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
       model: "",
       state: "$input.text",
       questions: [],
+      imagesEnabled: false,
+      images: [],
       customBodyEnabled: false,
       customBody: "",
       requestTimeoutSeconds: 60,

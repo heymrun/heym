@@ -6,11 +6,15 @@ import uuid
 
 import httpx
 
+from app.services.decision_images import PreparedImage
 from app.services.decision_models import (
+    IMAGES_HEADER,
     DecisionProviderError,
     DecisionRequestError,
     build_decision_body,
     call_decision_model,
+    needs_images_header,
+    redact_assets,
 )
 from app.services.llm_trace import LLMTraceContext
 
@@ -232,6 +236,171 @@ class BuildDecisionBodyTests(unittest.TestCase):
         self.assertIn("model", str(ctx.exception).lower())
 
 
+def _image(name: str, data: bytes = b"jpeg-bytes", fmt: str = "jpg") -> PreparedImage:
+    return PreparedImage(name=name, format=fmt, data=data, width=400, height=300)
+
+
+_NOUL = [{"id": "is_dog", "type": "noul", "instructions": "Is there a dog in `photo`?"}]
+
+
+class BuildDecisionBodyImageTests(unittest.TestCase):
+    def test_a_text_only_body_has_no_assets(self) -> None:
+        body = build_decision_body(model="jev-latest", state="x", questions=_NOUL)
+        self.assertNotIn("assets", body)
+        self.assertEqual(body["state"], "x")
+
+    def test_an_image_is_listed_once_and_referenced_from_the_state(self) -> None:
+        body = build_decision_body(
+            model="jev-latest", state=None, questions=_NOUL, images=[_image("photo")]
+        )
+        reference = body["state"]["photo"]
+        self.assertEqual(uuid.UUID(reference).version, 4)
+        self.assertEqual(
+            body["assets"],
+            {reference: {"type": "image", "format": "jpg", "data_base64": "anBlZy1ieXRlcw=="}},
+        )
+
+    def test_every_image_gets_its_own_reference(self) -> None:
+        body = build_decision_body(
+            model="jev-latest",
+            state="",
+            questions=_NOUL,
+            images=[_image("photo"), _image("poster", fmt="png")],
+        )
+        self.assertNotEqual(body["state"]["photo"], body["state"]["poster"])
+        self.assertEqual(set(body["assets"]), {body["state"]["photo"], body["state"]["poster"]})
+        self.assertEqual(body["assets"][body["state"]["poster"]]["format"], "png")
+
+    def test_references_are_fresh_on_every_request(self) -> None:
+        first = build_decision_body(
+            model="m", state=None, questions=_NOUL, images=[_image("photo")]
+        )
+        second = build_decision_body(
+            model="m", state=None, questions=_NOUL, images=[_image("photo")]
+        )
+        self.assertNotEqual(first["state"]["photo"], second["state"]["photo"])
+
+    def test_an_empty_state_becomes_the_images(self) -> None:
+        for state in (None, "", "   "):
+            with self.subTest(state=state):
+                body = build_decision_body(
+                    model="m", state=state, questions=_NOUL, images=[_image("photo")]
+                )
+                self.assertEqual(list(body["state"]), ["photo"])
+
+    def test_an_object_state_gains_the_images(self) -> None:
+        state = {"location": "front door"}
+        body = build_decision_body(
+            model="m", state=state, questions=_NOUL, images=[_image("photo")]
+        )
+        self.assertEqual(body["state"]["location"], "front door")
+        self.assertIn("photo", body["state"])
+        self.assertEqual(state, {"location": "front door"}, "the resolved state is not mutated")
+
+    def test_a_text_state_is_kept_under_context(self) -> None:
+        body = build_decision_body(
+            model="m", state="Found near the park", questions=_NOUL, images=[_image("photo")]
+        )
+        self.assertEqual(body["state"]["context"], "Found near the park")
+        self.assertIn("photo", body["state"])
+
+    def test_a_list_state_is_kept_under_context(self) -> None:
+        body = build_decision_body(
+            model="m", state=["a", "b"], questions=_NOUL, images=[_image("photo")]
+        )
+        self.assertEqual(body["state"]["context"], ["a", "b"])
+
+    def test_an_image_colliding_with_a_state_field_is_rejected(self) -> None:
+        with self.assertRaises(DecisionRequestError) as ctx:
+            build_decision_body(
+                model="m", state={"photo": "old"}, questions=_NOUL, images=[_image("photo")]
+            )
+        self.assertIn("collides", str(ctx.exception))
+
+    def test_an_image_named_context_collides_with_a_text_state(self) -> None:
+        with self.assertRaises(DecisionRequestError):
+            build_decision_body(
+                model="m", state="some text", questions=_NOUL, images=[_image("context")]
+            )
+
+    def test_an_image_name_must_be_an_identifier(self) -> None:
+        for name in ("", "2photo", "my photo", "photo-1", "photo\n"):
+            with self.subTest(name=name), self.assertRaises(DecisionRequestError):
+                build_decision_body(model="m", state=None, questions=_NOUL, images=[_image(name)])
+
+    def test_a_duplicate_image_name_is_rejected(self) -> None:
+        with self.assertRaises(DecisionRequestError) as ctx:
+            build_decision_body(
+                model="m", state=None, questions=_NOUL, images=[_image("photo"), _image("photo")]
+            )
+        self.assertIn("Duplicate image name", str(ctx.exception))
+
+
+class BoxQuestionTests(unittest.TestCase):
+    def test_a_box_sends_instructions_only(self) -> None:
+        body = build_decision_body(
+            model="jev-1.14.0",
+            state=None,
+            questions=[
+                {
+                    "id": "dog",
+                    "type": "box",
+                    "instructions": "the dog in `photo`",
+                    "criteriaTrue": "left over from a noul",
+                    "levels": ["left", "over"],
+                }
+            ],
+            images=[_image("photo")],
+        )
+        self.assertEqual(
+            body["questions"]["dog"], {"type": "box", "instructions": "the dog in `photo`"}
+        )
+
+    def test_a_box_without_an_image_is_rejected_before_sending(self) -> None:
+        with self.assertRaises(DecisionRequestError) as ctx:
+            build_decision_body(
+                model="jev-1.14.0",
+                state="x",
+                questions=[{"id": "dog", "type": "box", "instructions": "the dog"}],
+            )
+        self.assertIn("needs an image", str(ctx.exception))
+
+
+class ImagesHeaderTests(unittest.TestCase):
+    def test_assets_need_the_header(self) -> None:
+        self.assertTrue(needs_images_header({"assets": {"r": {}}, "questions": {}}))
+
+    def test_a_box_question_needs_the_header(self) -> None:
+        self.assertTrue(needs_images_header({"questions": {"q": {"type": "box"}}}))
+
+    def test_a_text_only_body_does_not(self) -> None:
+        self.assertFalse(needs_images_header({"state": "x", "questions": {"q": {"type": "noul"}}}))
+
+    def test_an_empty_assets_map_does_not(self) -> None:
+        self.assertFalse(needs_images_header({"assets": {}, "questions": {}}))
+
+    def test_a_hand_written_body_of_another_shape_does_not(self) -> None:
+        self.assertFalse(needs_images_header({"questions": ["not", "a", "map"]}))
+
+
+class RedactAssetsTests(unittest.TestCase):
+    def test_image_data_is_replaced_by_its_size(self) -> None:
+        body = {
+            "model": "m",
+            "assets": {"r": {"type": "image", "format": "jpg", "data_base64": "anBlZy1ieXRlcw=="}},
+        }
+        redacted = redact_assets(body)
+        self.assertEqual(
+            redacted["assets"]["r"],
+            {"type": "image", "format": "jpg", "data_base64": "[base64 image, 10 bytes]"},
+        )
+        self.assertEqual(body["assets"]["r"]["data_base64"], "anBlZy1ieXRlcw==")
+
+    def test_a_body_without_assets_is_returned_as_is(self) -> None:
+        body = {"model": "m", "state": "x"}
+        self.assertIs(redact_assets(body), body)
+
+
 def _trace_context() -> LLMTraceContext:
     return LLMTraceContext(user_id=uuid.uuid4(), credential_id=uuid.uuid4())
 
@@ -377,6 +546,40 @@ class CallDecisionModelTests(unittest.TestCase):
             self._call(_response(401, {"error": "bad key"}))
         self.record.assert_called_once()
         self.assertIsNotNone(self.record.call_args.kwargs["error"])
+
+    def test_text_only_requests_do_not_opt_into_images(self) -> None:
+        self._call(_response(200, {"answers": {}}))
+        self.assertNotIn(IMAGES_HEADER, self.client.post.call_args.kwargs["headers"])
+
+    def test_a_request_with_images_opts_in_and_traces_no_image_data(self) -> None:
+        self.body = {
+            "model": "jev-latest",
+            "state": {"photo": "ref-1"},
+            "assets": {"ref-1": {"type": "image", "format": "jpg", "data_base64": "QUJD"}},
+            "questions": {"q": {"type": "noul", "instructions": "Dog in `photo`?"}},
+        }
+        self._call(_response(200, {"answers": {}}))
+        kwargs = self.client.post.call_args.kwargs
+        self.assertEqual(kwargs["headers"][IMAGES_HEADER], "true")
+        self.assertEqual(kwargs["json"]["assets"]["ref-1"]["data_base64"], "QUJD")
+        traced = self.record.call_args.kwargs["request"]
+        self.assertEqual(traced["assets"]["ref-1"]["data_base64"], "[base64 image, 3 bytes]")
+
+    def test_a_box_question_opts_in(self) -> None:
+        self.body = {
+            "model": "jev-1.14.0",
+            "state": "x",
+            "questions": {"q": {"type": "box", "instructions": "the mug"}},
+        }
+        self._call(_response(200, {"answers": {}}))
+        self.assertEqual(self.client.post.call_args.kwargs["headers"][IMAGES_HEADER], "true")
+
+    def test_413_says_the_request_is_too_large(self) -> None:
+        with self.assertRaises(DecisionProviderError) as ctx:
+            self._call(_response(413, {"detail": "expanded request over 32 MiB"}))
+        message = str(ctx.exception)
+        self.assertIn("too large", message)
+        self.assertIn("expanded request over 32 MiB", message)
 
     def test_a_non_json_response_is_reported_clearly(self) -> None:
         raw = httpx.Response(
