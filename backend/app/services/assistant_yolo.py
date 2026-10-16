@@ -18,6 +18,7 @@ from typing import Any
 from openai import OpenAI
 
 from app.services.agent_tool_observability import summarize_tool_calls
+from app.services.llm_chat_bridge import completion_caller
 from app.services.llm_provider import is_reasoning_model
 from app.services.llm_trace import LLMTraceContext, record_llm_trace
 from app.services.run_history import record_run_history
@@ -261,7 +262,7 @@ async def stream_yolo_assistant_turn(
     try:
         while not cancel_event.is_set():
             response = await asyncio.to_thread(
-                client.chat.completions.create, messages=conversation, **request_kwargs
+                completion_caller(client, model), messages=conversation, **request_kwargs
             )
             if cancel_event.is_set():
                 return

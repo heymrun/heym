@@ -126,3 +126,7 @@ Each time the assistant invokes a tool (running a workflow, listing executions, 
 A small ring badge below the input shows the current context usage as a percentage of the model's window (e.g. `12% · ~9.2k`). Hover the badge to see a breakdown: system prompt, AGENTS.md, workflows block, user rules, history, and your draft input. When usage crosses 80% the ring turns amber; at 95% it turns red.
 
 If usage gets close to the limit, Heym automatically compresses older messages into a short summary using the same mechanism agent nodes use. A "Context compressed" card appears inline to show what happened.
+
+## OpenCode Go models
+
+With a Custom credential that points at the OpenCode Go gateway (`opencode.ai`), Chat and the [AI Assistant](../reference/ai-assistant.md) call each model on the API the gateway serves it on: GPT and Grok on Responses, Claude and MiniMax M2.7 on Anthropic Messages, Gemini on Google's `generateContent`, everything else on Chat Completions. Models on the first three arrive as one complete reply instead of streaming word by word, and older messages are not compressed automatically for them.

@@ -273,7 +273,8 @@ class YoloTurnOpenCodeSessionTests(unittest.IsolatedAsyncioTestCase):
             http_client=http_client,
         )
 
-        events = await _events(_turn(client, AsyncMock(return_value=_outcome())))
+        # kimi-k3 is served on Chat Completions; OpenCode's gpt-* models are Responses-only.
+        events = await _events(_turn(client, AsyncMock(return_value=_outcome()), model="kimi-k3"))
 
         self.assertEqual(events[-1], {"type": "done"})
         self.assertEqual(sessions, ["conversation-1", "conversation-1"])
