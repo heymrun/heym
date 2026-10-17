@@ -89,6 +89,7 @@ from app.services.execution_cancellation import (
     mark_own_executions_orphaned,
 )
 from app.services.execution_recovery import execution_recovery_service
+from app.services.google_triggers.poller import google_trigger_poller
 from app.services.grist_pool import close_all_clients as close_grist_clients
 from app.services.grist_pool import warm_up_pools as warm_up_grist_pools
 from app.services.heym_event_dispatcher import heym_event_dispatcher
@@ -231,6 +232,7 @@ async def lifespan(app: FastAPI):
 
     await reconcile_orphaned_board_runs()
     await imap_trigger_manager.start()
+    await google_trigger_poller.start()
     await rabbitmq_consumer_manager.start()
     await websocket_trigger_manager.start()
     await heym_event_dispatcher.start()
@@ -239,6 +241,7 @@ async def lifespan(app: FastAPI):
     await heym_event_dispatcher.stop()
     await websocket_trigger_manager.stop()
     await rabbitmq_consumer_manager.stop()
+    await google_trigger_poller.stop()
     await imap_trigger_manager.stop()
     await RabbitMQPool.close_all()
     await cron_scheduler.stop()
