@@ -43,6 +43,8 @@ async def credential_context_value(credential: Credential, config: dict[str, Any
         return f"{header_key}: {header_value}" if header_key else header_value
     if credential.type in (CredentialType.discord, CredentialType.slack):
         return config.get("webhook_url", "")
+    if credential.type == CredentialType.slack_bot:
+        return config.get("bot_token", "")
     if credential.type == CredentialType.notion:
         from app.services.notion_service import NotionService
 

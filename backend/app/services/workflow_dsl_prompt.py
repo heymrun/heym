@@ -224,7 +224,7 @@ In workflow expressions:
 - **DO NOT use** `textInput` as the entry point for Slack-triggered workflows
 - **Data fields**:
   - `label`: Node identifier (e.g., "slackEvent")
-  - `credentialId`: UUID of a `slack_trigger` credential containing the signing secret
+  - `credentialId`: UUID of a `slack_trigger` credential, or a `slack_bot` credential that has a signing secret
 - **Output fields available downstream**:
   - `$<label>.event` — full Slack event object
   - `$<label>.event.type` — event type (e.g., `"message"`, `"reaction_added"`)
@@ -1716,15 +1716,42 @@ Notes:
 }
 ```
 
-### 16. slack (Send Slack Message)
-- **Purpose**: Send a message to Slack channel via webhook
+### 16. slack (Slack Message, Approval, Buttons, Form and more)
+- **Purpose**: Post to Slack, or wait for a person's answer in Slack
 - **Inputs**: 1 | **Outputs**: 1
+- **Credential types**: `slack` (incoming webhook URL: sends `message` to the webhook's channel, no other field) or `slack_bot` (bot token `xoxb-…` + signing secret: every operation below)
 - **Data fields**:
   - `label`: Node identifier
-  - `credentialId`: UUID of the Slack credential (webhook URL stored in credential)
-  - `message`: Message text to send, supports expressions (e.g., `$previousNodeLabel.text`)
+  - `credentialId`: UUID of a `slack` or `slack_bot` credential
+  - `slackOperation` (slack_bot only, default `sendMessage`): `sendMessage` | `sendDirectMessage` | `sendForm` | `sendButtons` | `requestApproval` | `replyInThread` | `updateMessage` | `postOutcome` | `addReaction` | `deleteMessage` | `getMessages` | `findUser`
+  - `slackChannel`: `#name`, channel id (`C…`), or a person (user id `U…` or email) to post in their DM; supports expressions such as `$slackEvent.event.channel`
+  - `slackUser`: person for `sendDirectMessage` / `findUser`: user id or email
+  - `message`: message text in Slack mrkdwn (`*bold*`, `_italic_`, `<url|text>`), supports expressions. Markdown from a model (`**bold**`, `## Title`, `[text](url)`, `- item`) is converted to mrkdwn before posting, so `$draft.text` can go in as it is.
+  - `slackThreadTs`: thread to post in (`replyInThread` requires it; optional for `sendMessage`, `sendForm`, `sendButtons`, `requestApproval`, `postOutcome`, `getMessages`), e.g. `$announce.threadTs`
+  - `slackMessageTs`: message to change for `updateMessage`, `addReaction`, `deleteMessage`, e.g. `$announce.ts`
+  - `slackBroadcast` (bool, `replyInThread`): also show the reply in the channel
+  - `slackButtons` (`sendButtons`): up to 5 `{"label": "Retry", "value": "retry", "style": "primary"|"danger"|""}`
+  - `slackFormTitle`, `slackSubmitLabel`, `slackFormFields` (`sendForm`): up to 10 `{"label": "Amount", "name": "amount", "type": "text"|"multiline"|"number"|"email"|"date"|"select", "required": true, "options": ["a", "b"]}`
+  - `slackAllowedUsers` (`requestApproval`, `sendButtons`, `sendForm`): optional comma-separated user ids or emails; empty lets anyone in the channel answer
+  - `slackOutcomeStatus` (`postOutcome`): `success` | `failure` | `warning` | `info`, or an expression such as `$approval.approval` (approved → success, rejected → failure, changes_requested → warning); `slackOutcomeTitle`: headline of the outcome card
+  - `slackEmoji` (`addReaction`): emoji name such as `white_check_mark`
+  - `slackLimit` (`getMessages`): number of messages, default 20
+- **Outputs**:
+  - Posting operations: `$label.channel`, `$label.ts`, `$label.threadTs`, `$label.text`
+  - `requestApproval`, `sendButtons`, `sendForm` PAUSE the run until someone answers in Slack (or decides the review in Heym), then output the posting fields plus `$label.answeredBy.id`, `$label.answeredBy.name`, `$label.answeredIn` (`slack` | `heym`) and:
+    - approval: `$label.approval` (`approved` | `changes_requested` | `rejected`), `$label.comment`
+    - buttons: `$label.choice.label`, `$label.choice.value`
+    - form: `$label.values.<field name>`
+  - `getMessages`: `$label.transcript` (the messages oldest first, one `[time] name: text` per line: give this to an LLM to summarize), `$label.messages` (list of `{ts, threadTs, user, text, replyCount}`), `$label.count`
+  - `findUser`: `$label.id`, `$label.realName`, `$label.email`, `$label.title`, `$label.timezone`
+- **Branch after an answer** with a condition or switch on `$label.approval` or `$label.choice.value`.
+- **Interactivity**: approvals, buttons and forms need the Slack app's Interactivity Request URL set to `<Heym URL>/api/slack/interactions/<credentialId>` and the signing secret on the `slack_bot` credential. Bot scopes: `chat:write`, `chat:write.public`, `im:write`, `users:read`, `users:read.email`, `channels:read`, `groups:read`, `channels:history`, `groups:history`, `reactions:write`.
 
-**SETUP**: Requires a Slack credential with webhook URL. Create the credential first with the Slack Incoming Webhook URL from your Slack workspace.
+**Example: request approval, then close the loop in the same thread**
+```json
+{"id": "n2", "type": "slack", "data": {"label": "approval", "credentialId": "slack-credential-uuid", "slackOperation": "requestApproval", "slackChannel": "#finance-approvals", "message": "Refund of $userInput.body.amount for $userInput.body.customer"}},
+{"id": "n3", "type": "slack", "data": {"label": "outcome", "credentialId": "slack-credential-uuid", "slackOperation": "postOutcome", "slackChannel": "$approval.channel", "slackThreadTs": "$approval.threadTs", "slackOutcomeStatus": "success", "slackOutcomeTitle": "Refund $approval.approval", "message": "Decided by $approval.answeredBy.name"}}
+```
 
 **Example Message Formats**:
 - Simple: `"Workflow completed successfully!"`
@@ -5114,7 +5141,7 @@ Always include:
 14. **BOOLEAN CONDITIONS** - For booleans, write `$node.isValid` not `$node.isValid == true`. Use `not $node.isValid` for negation.
 15. **ERROR HANDLER** - ONLY add errorHandler when user explicitly requests error handling. It auto-triggers on any error without incoming connections. Do NOT auto-add to workflows.
 16. **ASYNC AFTER OUTPUT** - Set `"allowDownstream": true` in output node data to enable async processing. Connected nodes run asynchronously after response is sent.
-17. **SLACK NOTIFICATIONS** - Use slack node with a Slack credential (webhook URL) to send messages. Perfect for alerts, error notifications, or completion messages.
+17. **SLACK** - Use the slack node: a `slack` webhook credential only sends a message; a `slack_bot` credential adds DMs, thread replies, message updates, outcome cards, reactions, reading messages, and approvals, buttons and forms that pause the run until someone answers in Slack.
 18. **IMAGE GENERATION WITH INPUT** - When workflow has a textInput node and uses LLM for image generation, the userMessage MUST reference the input node via body (e.g., `$userPrompt.body.text`). NEVER hardcode the image prompt when textInput exists! Use `nanobanana` model for best results.
 19. **SET NODE VALUES** - When using functions like `randomInt()` in set node, DO NOT wrap in `str()`. Write `$randomInt(1, 10)` not `$str(randomInt(1, 10))`. Functions return native types.
 20. **HTTP NODE OUTPUT** - HTTP node returns structured response with `status`, `headers`, `body`, and `request` fields. Access response body via `$httpNode.body` or `$httpNode.body.fieldName` for JSON.

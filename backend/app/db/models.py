@@ -41,6 +41,7 @@ class CredentialType(str, PyEnum):
     telegram = "telegram"
     slack = "slack"
     slack_trigger = "slack_trigger"
+    slack_bot = "slack_bot"
     imap = "imap"
     smtp = "smtp"
     redis = "redis"

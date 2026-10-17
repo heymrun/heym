@@ -352,11 +352,11 @@ describe("shipped release registry", () => {
     const catalog = buildReleaseTourCatalog(RELEASE_REGISTRY);
 
     expect(catalog?.slides.map((slide) => slide.id)).toEqual([
+      "slack-bot",
       "heym-work",
       "skill-zip",
       "enable-node",
       "dashboard-hitl",
-      "assistant-data-tables",
     ]);
   });
 
@@ -370,7 +370,7 @@ describe("shipped release registry", () => {
     );
 
     expect(tours.map((tour) => tour.tourVisual)).toContain("heym-work");
-    expect(tours.map((tour) => tour.tourVisual)).toContain("assistant-data-tables");
+    expect(tours.map((tour) => tour.tourVisual)).toContain("slack-bot");
     expect(tours.map((tour) => tour.tourVisual)).toContain("enable-node");
     for (const tour of tours) {
       expect(TOUR_VISUALS[tour.tourVisual], `missing visual for "${tour.tourVisual}"`)

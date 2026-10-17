@@ -453,6 +453,22 @@ export interface DecisionQuestionsSuggestion {
   questions: DecisionQuestion[];
 }
 
+/** A Slack button a person can press; its value is what the step outputs. */
+export interface SlackButton {
+  label: string;
+  value: string;
+  style: "" | "primary" | "danger";
+}
+
+/** One field of a Slack form. Options are comma separated for select fields. */
+export interface SlackFormField {
+  label: string;
+  name: string;
+  type: "text" | "multiline" | "number" | "email" | "date" | "select";
+  required: boolean;
+  options: string;
+}
+
 export interface NodeData {
   label: string;
   value?: string;
@@ -480,6 +496,22 @@ export interface NodeData {
   chatId?: string;
   username?: string;
   avatarUrl?: string;
+  /** slack with a Slack Bot credential: the operation and its fields. */
+  slackOperation?: string;
+  slackChannel?: string;
+  slackUser?: string;
+  slackThreadTs?: string;
+  slackMessageTs?: string;
+  slackBroadcast?: boolean;
+  slackButtons?: SlackButton[];
+  slackFormTitle?: string;
+  slackSubmitLabel?: string;
+  slackFormFields?: SlackFormField[];
+  slackAllowedUsers?: string;
+  slackOutcomeStatus?: string;
+  slackOutcomeTitle?: string;
+  slackEmoji?: string;
+  slackLimit?: string;
   duration?: number;
   cronExpression?: string;
   pollIntervalMinutes?: number;

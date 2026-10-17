@@ -2773,6 +2773,10 @@ async def resolve_hitl_review_tool(
     await db.commit()
 
     asyncio.create_task(resume_hitl_request_in_background(hitl_request.id))
+    if isinstance((hitl_request.original_agent_output or {}).get("_slack"), dict):
+        from app.services.slack_interactions import sync_message_after_heym_decision
+
+        asyncio.create_task(sync_message_after_heym_decision(hitl_request.id))
     return json.dumps(
         {
             "status": "resolved",

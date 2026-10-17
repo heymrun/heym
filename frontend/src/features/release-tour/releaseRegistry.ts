@@ -17,6 +17,53 @@ import type { ReleaseEntry } from "@/features/release-tour/releaseTour.types";
  */
 export const RELEASE_REGISTRY: ReleaseEntry[] = [
   {
+    releaseId: "2026.20",
+    publishedAt: new Date("2026-10-17T12:00:00Z"),
+    headline: "Slack approvals, buttons and forms that pause a run",
+    releaseTour: {
+      label: "New in Heym",
+      introTitle: "New in this release",
+      introDescription:
+        "A quick look at what changed since your last update. Takes about a minute.",
+      tourEnabled: true,
+      sectionOrder: ["slack-bot"],
+    },
+    sections: [
+      {
+        id: "slack-bot",
+        title: "Slack with a bot token: approvals, buttons, forms and threads",
+        publishedAt: new Date("2026-10-17T12:00:00Z"),
+        blocks: [
+          {
+            type: "prose",
+            markdown:
+              "A new **Slack Bot (Token)** credential turns the **Slack** node into a full Slack step: channel messages and DMs, thread replies, message updates, colored outcome cards, reactions, reading messages and looking people up. Each post returns its `channel`, `ts` and `threadTs`, so later steps stay in one thread.",
+          },
+          {
+            type: "prose",
+            markdown:
+              "**Request approval**, **Send message with buttons** and **Send form** pause the run until someone answers in Slack. The same request waits in the inbox, so it can be decided in Heym too, and the step continues with `approval`, `choice` or the form's `values`. **Copy app manifest** in the credential dialog sets up the Slack app with every scope.",
+          },
+        ],
+        tour: {
+          description:
+            "Post to Slack with a bot token, and let a click on Approve or a submitted form continue the run.",
+          useCases: [
+            "Ask a finance channel to approve a refund before it is paid",
+            "Collect incident details through a Slack form, then file them",
+            "Close the loop with an outcome card in the same thread",
+          ],
+          tourVisual: "slack-bot",
+          docTarget: {
+            categoryId: "nodes",
+            slug: "slack-node",
+            title: "Slack",
+          },
+        },
+      },
+    ],
+  },
+  {
     releaseId: "2026.19",
     publishedAt: new Date("2026-10-10T18:00:00Z"),
     headline: "Heym Work for business teams, and skill zips in Chat",
@@ -177,53 +224,6 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
             categoryId: "tabs",
             slug: "dashboard-tab",
             title: "Dashboard",
-          },
-        },
-      },
-    ],
-  },
-  {
-    releaseId: "2026.16",
-    publishedAt: new Date("2026-09-27T00:00:00Z"),
-    headline: "The AI Assistant sets up your data tables",
-    releaseTour: {
-      label: "New in Heym",
-      introTitle: "New in this release",
-      introDescription:
-        "A quick look at what changed since your last update. Takes about a minute.",
-      tourEnabled: true,
-      sectionOrder: ["assistant-data-tables"],
-    },
-    sections: [
-      {
-        id: "assistant-data-tables",
-        title: "The AI Assistant picks or creates your data tables",
-        publishedAt: new Date("2026-09-28T10:00:00Z"),
-        blocks: [
-          {
-            type: "prose",
-            markdown:
-              "When a workflow stores records, the **AI Assistant** now knows your **DataTables**. Name one and it uses it. Otherwise it asks which table to use: the question card lists the tables that fit, each with its description and column types, plus **Create a new table** with the columns the workflow needs. Press **Submit answers** and the card creates the table, then the assistant wires it into the **DataTable** node with its exact column names.",
-          },
-          {
-            type: "prose",
-            markdown:
-              "It works in the canvas assistant, YOLO mode included, in **Chat**, in **Chat with Heym** on the docs, and over MCP through `heym_chat`. The assistant sees table names and columns, never rows, and never changes an existing table's columns: that stays in the **DataTable** tab.",
-          },
-        ],
-        tour: {
-          description:
-            "The AI Assistant asks which data table a workflow should use, or creates one with the right columns.",
-          useCases: [
-            "Ask to save every lead in a table and get the table and the workflow together",
-            "Pick one of your tables from a card that shows its columns and types",
-            "Create and wire tables from Chat or an MCP client, not just the canvas",
-          ],
-          tourVisual: "assistant-data-tables",
-          docTarget: {
-            categoryId: "reference",
-            slug: "ai-assistant",
-            title: "AI Assistant",
           },
         },
       },

@@ -1022,7 +1022,11 @@ export function usePropertiesPanelController() {
 
       if (type === "slack") {
         try {
-          slackCredentials.value = await credentialsApi.listByType("slack");
+          const [webhooks, bots] = await Promise.all([
+            credentialsApi.listByType("slack"),
+            credentialsApi.listByType("slack_bot"),
+          ]);
+          slackCredentials.value = [...bots, ...webhooks];
         } catch {
           slackCredentials.value = [];
         }
@@ -1222,7 +1226,11 @@ export function usePropertiesPanelController() {
 
       if (type === "slackTrigger") {
         try {
-          slackTriggerCredentials.value = await credentialsApi.listByType("slack_trigger");
+          const [secrets, bots] = await Promise.all([
+            credentialsApi.listByType("slack_trigger"),
+            credentialsApi.listByType("slack_bot"),
+          ]);
+          slackTriggerCredentials.value = [...secrets, ...bots];
         } catch {
           slackTriggerCredentials.value = [];
         }
@@ -9295,6 +9303,7 @@ export function usePropertiesPanelController() {
     jsonFormatError,
     extraBodyFormatError,
     slackTriggerCredentials,
+    slackCredentials,
     discordTriggerCredentials,
     loadingNotionDataSources,
     notionDataSourcesError,

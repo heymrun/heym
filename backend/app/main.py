@@ -55,6 +55,7 @@ from app.api import (
     schedules,
     skill_builder,
     slack,
+    slack_bot,
     sso_admin,
     sso_auth,
     teams,
@@ -404,6 +405,7 @@ app.include_router(teams.router, prefix="/api/teams", tags=["Teams"])
 app.include_router(data_tables.router, prefix="/api/data-tables", tags=["Data Tables"])
 app.include_router(decisions.router, prefix="/api/decisions", tags=["Decisions"])
 app.include_router(slack.router, prefix="/api/slack", tags=["Slack"])
+app.include_router(slack_bot.router, prefix="/api/slack", tags=["Slack"])
 app.include_router(discord.router, prefix="/api/discord", tags=["Discord"])
 app.include_router(telegram.router, prefix="/api/telegram", tags=["Telegram"])
 app.include_router(schedules.router, prefix="/api/schedules", tags=["Schedules"])

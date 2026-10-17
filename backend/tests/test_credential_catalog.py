@@ -167,6 +167,7 @@ class HttpScopeTests(unittest.TestCase):
             CredentialType.github,
             CredentialType.notion,
             CredentialType.sentry,
+            CredentialType.slack_bot,
         ):
             with self.subTest(credential_type=credential_type):
                 self.assertIn(credential_type, HTTP_CREDENTIAL_TYPES)

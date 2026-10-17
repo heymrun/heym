@@ -187,6 +187,14 @@ def merge_credential_config_for_update(
                 merged_config[key] = incoming_value
         return merged_config
 
+    if credential_type == CredentialType.slack_bot:
+        merged_config = dict(existing_config)
+        for key in ("bot_token", "signing_secret"):
+            incoming_value = str(incoming_config.get(key, "") or "").strip()
+            if incoming_value:
+                merged_config[key] = incoming_value
+        return merged_config
+
     if credential_type == CredentialType.telegram:
         merged_config = dict(existing_config)
         incoming_bot_token = str(incoming_config.get("bot_token", "") or "").strip()
@@ -388,6 +396,8 @@ def get_masked_value(credential_type: CredentialType, config: dict) -> str | Non
     if credential_type == CredentialType.slack_trigger:
         signing_secret = config.get("signing_secret", "")
         return mask_api_key(signing_secret)
+    if credential_type == CredentialType.slack_bot:
+        return mask_api_key(config.get("bot_token", ""))
     if credential_type == CredentialType.imap:
         imap_username = str(config.get("imap_username", "")).strip()
         imap_host = str(config.get("imap_host", "")).strip()
@@ -530,6 +540,16 @@ def get_public_credential_fields(
     credential_type: CredentialType, config: dict
 ) -> dict[str, str | None]:
     """Return non-secret credential fields that the UI may safely hydrate for editing."""
+    if credential_type == CredentialType.slack_bot:
+        from app.services.hitl_service import build_default_public_base_url
+
+        # Slack must reach Heym itself, so the setup URL is Heym's, not the viewing app's origin.
+        return {
+            "public_base_url": build_default_public_base_url(),
+            "signing_secret_set": "true"
+            if str(config.get("signing_secret") or "").strip()
+            else None,
+        }
     if credential_type == CredentialType.supabase:
         supabase_url = str(config.get("supabase_url", "")).strip() or None
         supabase_schema = str(config.get("supabase_schema", "public")).strip() or "public"
@@ -2203,6 +2223,12 @@ def validate_credential_config(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Slack Trigger credential requires signing_secret",
+            )
+    elif credential_type == CredentialType.slack_bot:
+        if not str(config.get("bot_token") or "").strip().startswith("xox"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Slack Bot credential requires a bot_token that starts with xoxb-",
             )
     elif credential_type == CredentialType.imap:
         if "imap_host" not in config or not config["imap_host"]:

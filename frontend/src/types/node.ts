@@ -423,7 +423,7 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
   slack: {
     type: "slack",
     label: "Slack",
-    description: "Send a message to Slack via webhook",
+    description: "Message, ask for approval or collect answers in Slack",
     color: "node-slack",
     icon: "MessageSquare",
     inputs: 1,

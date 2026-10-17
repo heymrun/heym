@@ -90,7 +90,7 @@ Pairs with [Telegram](../nodes/telegram-node.md), [Agent Node](../nodes/agent-no
 
 #### [Slack Trigger](../nodes/slack-trigger-node.md)
 
-The Slack Trigger node receives Slack Events API webhooks and starts a workflow automatically after verifying the request signature. It exposes the event payload and sanitized headers for downstream routing, [LLM](../nodes/llm-node.md)-based classification, and reply flows.
+The Slack Trigger node receives Slack Events API webhooks and starts a workflow automatically after verifying the request signature with a Slack Trigger or Slack Bot credential. With a Slack Bot credential it ignores the bot's own posts and edits. It exposes the event payload and sanitized headers for downstream routing, [LLM](../nodes/llm-node.md)-based classification, and reply flows.
 
 Pairs with [Slack](../nodes/slack-node.md), [Agent Node](../nodes/agent-node.md), and [Third-Party Integrations](./integrations.md).
 
@@ -248,7 +248,7 @@ See also [Third-Party Integrations](./integrations.md) and [Credentials](./crede
 
 #### [Slack](../nodes/slack-node.md)
 
-The Slack node sends a message to a Slack channel via an Incoming Webhook. Configure a Slack [credential](./credentials.md) and a message expression. Use it for notifications, alerts, and error reporting; output passes through input.
+The Slack node posts to Slack and can wait for a person's answer there. A Slack Webhook [credential](./credentials.md) sends one message; a Slack Bot credential adds channel messages and DMs, thread replies, message updates, colored outcome cards, reactions, reading messages and person lookup, plus approvals, buttons and forms that pause the run until someone answers in Slack or in the [Human-in-the-Loop](./human-in-the-loop.md) inbox. Posting steps output `channel`, `ts` and `threadTs`, so later steps continue in the same thread.
 
 Pairs with [Slack Trigger](../nodes/slack-trigger-node.md), [Error Handler](../nodes/error-handler-node.md), and [Third-Party Integrations](./integrations.md).
 

@@ -102,6 +102,13 @@ class CredentialValueShapeTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(value, "AIza-key")
 
+    async def test_slack_bot_resolves_to_the_bot_token(self) -> None:
+        value = await credential_context_value(
+            _credential(CredentialType.slack_bot), {"bot_token": "xoxb-1", "signing_secret": "s"}
+        )
+
+        self.assertEqual(value, "xoxb-1")
+
     async def test_codex_is_left_out(self) -> None:
         value = await credential_context_value(
             _credential(CredentialType.codex), {"access_token": "chatgpt-token"}

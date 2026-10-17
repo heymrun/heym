@@ -166,6 +166,15 @@ def build_hitl_resolved_output(hitl_request: HITLRequest) -> dict:
     ):
         hitl_history.append(current_entry)
     output["hitlHistory"] = hitl_history
+    if isinstance(output.get("_slack"), dict):
+        from app.services.slack_service import resolved_slack_output
+
+        output = resolved_slack_output(
+            output,
+            decision=hitl_request.decision,
+            edited_text=hitl_request.edited_text,
+            refusal_reason=hitl_request.refusal_reason,
+        )
     return output
 
 
@@ -851,14 +860,26 @@ async def claim_hitl_request_for_decision(
     decision: str,
     edited_text: str | None,
     refusal_reason: str | None,
+    original_agent_output: dict | None = None,
 ) -> bool:
     """Atomically claim a pending request for this decision.
 
     The status/expiry predicates live in the UPDATE itself, so exactly one
     concurrent caller can win; the loser sees rowcount 0 instead of silently
-    overwriting the winner and scheduling a second resume.
+    overwriting the winner and scheduling a second resume. `original_agent_output`
+    replaces the stored output in the same statement (a Slack answer rides on it).
     """
     now = datetime.now(timezone.utc)
+    values: dict = {
+        "decision": decision,
+        "edited_text": edited_text,
+        "refusal_reason": refusal_reason,
+        "status": "resolved",
+        "resolved_at": now,
+        "resume_error": None,
+    }
+    if original_agent_output is not None:
+        values["original_agent_output"] = original_agent_output
     result = await db.execute(
         update(HITLRequest)
         .where(
@@ -866,14 +887,7 @@ async def claim_hitl_request_for_decision(
             HITLRequest.status == "pending",
             HITLRequest.expires_at > now,
         )
-        .values(
-            decision=decision,
-            edited_text=edited_text,
-            refusal_reason=refusal_reason,
-            status="resolved",
-            resolved_at=now,
-            resume_error=None,
-        )
+        .values(**values)
     )
     return result.rowcount == 1
 

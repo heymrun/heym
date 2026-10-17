@@ -42,6 +42,7 @@ Some integration nodes do **not** require credentials. [WebSocket Trigger](../no
 | **Redis** | [Redis node](../nodes/redis-node.md) | `host`, `port`, `password` |
 | **Slack** | [Slack node](../nodes/slack-node.md) | `webhook_url` |
 | **Slack Trigger** | [Slack Trigger node](../nodes/slack-trigger-node.md) | `signing_secret` |
+| **Slack Bot** | [Slack node](../nodes/slack-node.md) operations, [Slack Trigger node](../nodes/slack-trigger-node.md), [HTTP node](../nodes/http-node.md) | `bot_token`, `signing_secret` |
 | **Bearer** | [HTTP node](../nodes/http-node.md) | `token` |
 | **Header** | [HTTP node](../nodes/http-node.md) | `header_key`, `header_value` |
 | **FlareSolverr** | [Crawler node](../nodes/crawler-node.md) | `flaresolverr_url` |
@@ -797,6 +798,32 @@ The Slack credential stores an **Incoming Webhook URL** for posting messages to 
 ### Used By
 
 - [Slack node](../nodes/slack-node.md)
+
+---
+
+## Slack Bot
+
+The Slack Bot credential stores a Slack app's **Bot User OAuth Token** (`xoxb-…`) and its **Signing Secret**. It unlocks every [Slack node](../nodes/slack-node.md) operation: direct messages, thread replies, message updates, outcome cards, reactions, reading messages, and approvals, buttons and forms that wait for an answer.
+
+### Fields
+
+| Field | Description |
+|-------|-------------|
+| `bot_token` | Bot User OAuth Token from **OAuth & Permissions** |
+| `signing_secret` | Signing Secret from **Basic Information**. Needed for approvals, buttons, forms and Slack Trigger events. |
+
+### Notes
+
+- **Copy app manifest** in the credential dialog creates the Slack app with every scope at once: `chat:write`, `chat:write.public`, `im:write`, `users:read`, `users:read.email`, `channels:read`, `groups:read`, `channels:history`, `groups:history`, `reactions:write`.
+- After saving, the dialog shows the credential's **Interactivity Request URL** (`<Heym URL>/api/slack/interactions/<credential id>`). Paste it under **Interactivity & Shortcuts** in the Slack app.
+- The same credential verifies [Slack Trigger](../nodes/slack-trigger-node.md) events, so one Slack app covers listening and replying.
+- `$credentials.<name>` resolves to the bot token, so the [HTTP node](../nodes/http-node.md) can call any Slack Web API method with `Authorization: Bearer $credentials.<name>`.
+
+### Used By
+
+- [Slack node](../nodes/slack-node.md)
+- [Slack Trigger node](../nodes/slack-trigger-node.md)
+- [HTTP node](../nodes/http-node.md)
 
 ---
 

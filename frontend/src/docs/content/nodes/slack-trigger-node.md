@@ -14,7 +14,7 @@ The **Slack Trigger** node is a zero-input entry point that receives Slack Event
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `credentialId` | UUID | `slack_trigger` credential containing the signing secret |
+| `credentialId` | UUID | `slack_trigger` credential, or a `slack_bot` credential with a signing secret |
 
 ## Setup Guide
 

@@ -19,6 +19,7 @@ import {
   type ModelRouterForm,
 } from "@/components/Credentials/modelRouter/modelRouterConfig";
 import OAuthAuthorizeLink from "@/components/Credentials/OAuthAuthorizeLink.vue";
+import SlackBotCredentialFields from "@/components/Credentials/SlackBotCredentialFields.vue";
 import { useOAuthPopup } from "@/components/Credentials/useOAuthPopup";
 import Button from "@/components/ui/Button.vue";
 import Dialog from "@/components/ui/Dialog.vue";
@@ -99,6 +100,7 @@ const telegramBotToken = ref("");
 const telegramSecretToken = ref("");
 const webhookUrl = ref("");
 const signingSecret = ref("");
+const slackBotToken = ref("");
 const discordPublicKey = ref("");
 const imapHost = ref("");
 const imapPort = ref("993");
@@ -367,6 +369,7 @@ const typeOptions = [
   { value: "discord_trigger", label: CREDENTIAL_TYPE_LABELS.discord_trigger },
   { value: "slack", label: CREDENTIAL_TYPE_LABELS.slack },
   { value: "slack_trigger", label: CREDENTIAL_TYPE_LABELS.slack_trigger },
+  { value: "slack_bot", label: CREDENTIAL_TYPE_LABELS.slack_bot },
   { value: "imap", label: CREDENTIAL_TYPE_LABELS.imap },
   { value: "smtp", label: CREDENTIAL_TYPE_LABELS.smtp },
   { value: "redis", label: CREDENTIAL_TYPE_LABELS.redis },
@@ -493,6 +496,7 @@ watch(
         telegramSecretToken.value = "";
         webhookUrl.value = "";
         signingSecret.value = "";
+        slackBotToken.value = "";
         discordPublicKey.value = "";
         imapHost.value =
           props.credential.type === "imap"
@@ -681,6 +685,7 @@ watch(
         telegramSecretToken.value = "";
         webhookUrl.value = "";
         signingSecret.value = "";
+        slackBotToken.value = "";
         discordPublicKey.value = "";
         imapHost.value = "";
         imapPort.value = "993";
@@ -826,6 +831,8 @@ const isValid = computed(() => {
     return !!webhookUrl.value.trim() || isEditing.value;
   } else if (type.value === "slack_trigger") {
     return !!signingSecret.value.trim() || isEditing.value;
+  } else if (type.value === "slack_bot") {
+    return !!slackBotToken.value.trim() || isEditing.value;
   } else if (type.value === "discord_trigger") {
     return !!discordPublicKey.value.trim() || isEditing.value;
   } else if (type.value === "imap") {
@@ -1152,6 +1159,8 @@ function buildConfig(): CredentialConfig {
     return { api_key: cohereApiKey.value };
   } else if (type.value === "slack_trigger") {
     return { signing_secret: signingSecret.value };
+  } else if (type.value === "slack_bot") {
+    return { bot_token: slackBotToken.value.trim(), signing_secret: signingSecret.value.trim() };
   } else if (type.value === "discord_trigger") {
     return { public_key: discordPublicKey.value.trim() };
   } else if (type.value === "flaresolverr") {
@@ -1620,6 +1629,7 @@ async function handleSave(): Promise<void> {
           telegramSecretToken.value.trim() ||
           webhookUrl.value.trim() ||
           signingSecret.value.trim() ||
+          slackBotToken.value.trim() ||
           discordPublicKey.value.trim() ||
           imapHost.value.trim() ||
           imapPort.value.trim() ||
@@ -2440,6 +2450,15 @@ async function handleSave(): Promise<void> {
           </p>
         </div>
       </template>
+
+      <SlackBotCredentialFields
+        v-if="type === 'slack_bot'"
+        v-model:bot-token="slackBotToken"
+        v-model:signing-secret="signingSecret"
+        :credential-id="props.credential?.id ?? ''"
+        :public-base-url="props.credential?.public_fields?.public_base_url ?? ''"
+        :disabled="saving"
+      />
 
       <template v-if="type === 'discord_trigger'">
         <div class="space-y-2">

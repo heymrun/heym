@@ -116,9 +116,13 @@ The `review` output handle is available only when `hitlEnabled` is turned on for
 - The review output handle can notify external channels even when the workflow was triggered by cron, curl, or portal traffic
 - Multiple HITL checkpoints reuse the same execution history entry while creating a new one-time review link for each pause
 
+## Slack Approvals, Buttons and Forms
+
+The [Slack node](../nodes/slack-node.md) with a Slack Bot credential pauses the run the same way for **Request approval**, **Send message with buttons** and **Send form**. Each pause is a review in the inbox, decided by a click in Slack or here. A click in Slack resolves it and takes the buttons off the message; a decision here replaces the buttons with a note, so nobody answers twice. Accept, edit and refuse map to approved, changes requested and rejected.
+
 ## Current Limits
 
-- HITL is available on Agent nodes only
+- Agent nodes and the Slack node's waiting operations can pause a run
 - HITL uses the agent's text output and does not support JSON output in v1
 - A paused execution resumes from the stored workflow snapshot, not the latest edited workflow version
 - Nested sub-workflows cannot enter a pending HITL state in v1; request review from the parent agent before calling them

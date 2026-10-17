@@ -75,8 +75,10 @@ NODE_CREDENTIAL_FIELDS: dict[str, tuple[CredentialField, ...]] = {
     "s3": (_field("credentialId", CredentialType.s3),),
     "sendEmail": (_field("credentialId", CredentialType.smtp),),
     "sentry": (_field("credentialId", CredentialType.sentry),),
-    "slack": (_field("credentialId", CredentialType.slack),),
-    "slackTrigger": (_field("credentialId", CredentialType.slack_trigger),),
+    "slack": (_field("credentialId", CredentialType.slack, CredentialType.slack_bot),),
+    "slackTrigger": (
+        _field("credentialId", CredentialType.slack_trigger, CredentialType.slack_bot),
+    ),
     "supabase": (_field("credentialId", CredentialType.supabase),),
     "telegram": (_field("credentialId", CredentialType.telegram),),
     "telegramTrigger": (_field("credentialId", CredentialType.telegram),),
@@ -112,6 +114,10 @@ CREDENTIAL_TYPE_PURPOSE: dict[CredentialType, str] = {
     CredentialType.telegram: "Telegram bot token; Telegram and Telegram Trigger nodes",
     CredentialType.slack: "Slack incoming webhook URL; Slack node",
     CredentialType.slack_trigger: "Slack signing secret; Slack Trigger node",
+    CredentialType.slack_bot: (
+        "Slack app bot token (xoxb-) and signing secret; Slack node operations, Slack Trigger, "
+        "Slack Web API over http for methods the node lacks"
+    ),
     CredentialType.imap: "IMAP mailbox login; IMAP Trigger node",
     CredentialType.smtp: "SMTP server login; Send Email node",
     CredentialType.redis: "Redis connection; Redis node",
@@ -162,6 +168,7 @@ _DEFAULT_HEADER_KEYS: dict[CredentialType, str | None] = {
     CredentialType.github: "Authorization",
     CredentialType.notion: "Authorization",
     CredentialType.sentry: "Authorization",
+    CredentialType.slack_bot: "Authorization",
 }
 
 HTTP_CREDENTIAL_TYPES: frozenset[CredentialType] = frozenset(_DEFAULT_HEADER_KEYS)

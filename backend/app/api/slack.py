@@ -94,8 +94,31 @@ async def _find_workflow_by_node_id(
     return result.scalar_one_or_none()
 
 
+_ECHO_SUBTYPES = frozenset({"bot_message", "message_changed", "message_deleted"})
+
+
+def _is_bot_echo(body: dict[str, Any]) -> bool:
+    """Whether an event is a bot's own post or an edit, which a Slack Bot flow must not rerun on.
+
+    A flow that replies in the channel it listens to would otherwise trigger itself forever.
+    """
+    event = body.get("event")
+    if not isinstance(event, dict):
+        return False
+    return bool(event.get("bot_id")) or event.get("subtype") in _ECHO_SUBTYPES
+
+
+async def _is_bot_credential(db: AsyncSession, credential_id: str) -> bool:
+    try:
+        cred_uuid = uuid.UUID(credential_id)
+    except (ValueError, AttributeError):
+        return False
+    result = await db.execute(select(Credential.type).where(Credential.id == cred_uuid))
+    return result.scalar_one_or_none() == CredentialType.slack_bot
+
+
 async def _get_signing_secret(db: AsyncSession, credential_id: str) -> str | None:
-    """Decrypt and return the signing_secret from a slack_trigger credential."""
+    """Decrypt and return the signing_secret from a slack_trigger or slack_bot credential."""
     try:
         cred_uuid = uuid.UUID(credential_id)
     except (ValueError, AttributeError):
@@ -103,7 +126,7 @@ async def _get_signing_secret(db: AsyncSession, credential_id: str) -> str | Non
     result = await db.execute(
         select(Credential).where(
             Credential.id == cred_uuid,
-            Credential.type == CredentialType.slack_trigger,
+            Credential.type.in_([CredentialType.slack_trigger, CredentialType.slack_bot]),
         )
     )
     credential = result.scalar_one_or_none()
@@ -355,6 +378,11 @@ async def slack_webhook(node_id: str, request: Request) -> dict[str, Any]:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Invalid Slack signature",
         )
+
+    if _is_bot_echo(body):
+        async with async_session_maker() as db:
+            if await _is_bot_credential(db, credential_id):
+                return {"ok": True}
 
     # Build safe headers (strip sensitive ones)
     safe_headers = {k: v for k, v in request.headers.items() if k.lower() not in _SENSITIVE_HEADERS}

@@ -28,6 +28,7 @@ from app.services.hitl_service import (
     refresh_hitl_request_after_lost_claim,
     resume_hitl_request_in_background,
 )
+from app.services.slack_interactions import sync_message_after_heym_decision
 
 router = APIRouter()
 
@@ -70,6 +71,8 @@ async def _complete_hitl_decision(
     await db.commit()
 
     background_tasks.add_task(resume_hitl_request_in_background, hitl_request.id)
+    if isinstance((hitl_request.original_agent_output or {}).get("_slack"), dict):
+        background_tasks.add_task(sync_message_after_heym_decision, hitl_request.id)
     return HITLDecisionResponse(request_id=hitl_request.id, status=hitl_request.status)
 
 
