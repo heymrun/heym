@@ -13,6 +13,8 @@ Start nodes (no incoming edges) that initiate execution:
 | [Telegram Trigger](../nodes/telegram-trigger-node.md) | Starts when Telegram sends a bot webhook update to the node-specific webhook URL. |
 | [Discord Trigger](../nodes/discord-trigger-node.md) | Starts when Discord sends an Interactions API webhook to the node-specific endpoint. |
 | [IMAP Trigger](../nodes/imap-trigger-node.md) | Polls an IMAP mailbox and starts once for each newly detected email. |
+| [Google Drive Trigger](../nodes/google-drive-trigger-node.md) | Polls a Drive folder or file and starts once per created, updated, or deleted file. |
+| [Google Sheets Trigger](../nodes/google-sheets-trigger-node.md) | Polls a sheet tab and starts once per added, updated, or deleted row. |
 | [Heym Trigger](../nodes/heym-trigger-node.md) | Starts when Heym publishes a platform event. Events in one dispatch window arrive together as an array. |
 | [WebSocket Trigger](../nodes/websocket-trigger-node.md) | Opens an outbound client connection to an external socket and starts on selected socket events. |
 | [File Upload Trigger](../nodes/file-upload-trigger-node.md) | Mints a single-use upload URL and starts when a caller posts a large multipart file. |
@@ -29,6 +31,7 @@ Start nodes (no incoming edges) that initiate execution:
 | **Board** | [Board](../tabs/board-tab.md) card move / follow-up run into a column with a workflow chain (`trigger_source="board"`) | JWT (board owner) |
 | **Cron** | Cron scheduler (runs every 60s, evaluates cron expressions) | N/A |
 | **IMAP** | IMAP trigger manager (leader worker, per-node polling interval) | IMAP username/password |
+| **Google Drive / Sheets** | Google trigger poller (leader worker, per-node polling interval) | Google OAuth2 credential |
 | **WebSocket** | Outbound WebSocket trigger manager (leader worker, persistent client connections) | Optional per-node headers |
 | **File Upload** | `POST /api/file-intake/u/{token}` after a slot is minted | Single-use capability token |
 | **RabbitMQ** | RabbitMQ consumer (leader worker) | N/A |
@@ -61,6 +64,10 @@ The cron scheduler runs every 60 seconds, finds workflows with active `cron` nod
 ### IMAP
 
 The IMAP trigger manager runs in the leader worker and checks active `imapTrigger` nodes on their configured `pollIntervalMinutes`. Each node stores an IMAP cursor (`UIDVALIDITY` + last seen UID). Input includes `email`, `triggered_by: "imap"`, `trigger_node_id`, and `triggered_at`.
+
+### Google Drive and Google Sheets
+
+The Google trigger poller runs in the leader worker and checks active `googleDriveTrigger` and `googleSheetsTrigger` nodes on their `pollIntervalMinutes`. Each node keeps a snapshot in the database: file metadata for Drive, keyed fingerprints of cells for Sheets (never cell values). Polls are claimed per node and each change is consumed with a compare-and-swap, so a change starts one run across every worker and instance. Input includes `change`, `triggered_by` (`"google_drive"` or `"google_sheets"`), `trigger_node_id`, and `triggered_at`.
 
 ### Heym Platform Events
 
@@ -101,6 +108,8 @@ Execution history records `trigger_source` for every entry point:
 | `"Quick Drawer"` | Run from the editor quick-drawer panel, including file runs uploaded from its drop zone |
 | `"cron"` | Cron scheduler |
 | `"imap"` | IMAP trigger manager |
+| `"google_drive"` | Google Drive Trigger poller |
+| `"google_sheets"` | Google Sheets Trigger poller |
 | `"websocket"` | Outbound WebSocket trigger manager |
 | `"file_upload"` | File Upload Trigger upload endpoint (links minted over HTTP, MCP, or the canvas) |
 | `"dashboard"` | Dashboard widget runs, and uploads from a file drop widget |
@@ -121,6 +130,7 @@ Execution history records `trigger_source` for every entry point:
 - **Telegram**: `update` + `message` + optional `callback_query` + sanitized `headers` + `triggered_by: "telegram"` + `trigger_node_id` + `triggered_at`
 - **Discord**: `interaction` + `type` + `data` + sanitized `headers` + `triggered_by: "Discord"` + `trigger_node_id` + `triggered_at`
 - **IMAP**: `email` + `triggered_by: "imap"` + `trigger_node_id` + `triggered_at`
+- **Google Drive / Sheets**: `change` + `triggered_by: "google_drive"` or `"google_sheets"` + `trigger_node_id` + `triggered_at`
 - **WebSocket**: `eventName` + `url` + `triggered_by: "websocket"` + `message` / `connection` / `close`
 - **File Upload**: `file` + `uploaded_at` + `triggered_by: "file_upload"`
 - **RabbitMQ**: `message_data` + `triggered_by: "rabbitmq"`
@@ -131,7 +141,7 @@ Execution history records `trigger_source` for every entry point:
 
 - [Webhooks](./webhooks.md) – Webhook TTL, cache, rate limit, auth
 - [Workflow Structure](./workflow-structure.md) – Nodes and edges
-- [Node Types](./node-types.md) – [Input](../nodes/input-node.md), [Cron](../nodes/cron-node.md), [Telegram Trigger](../nodes/telegram-trigger-node.md), [IMAP Trigger](../nodes/imap-trigger-node.md), [Heym Trigger](../nodes/heym-trigger-node.md), [WebSocket Trigger](../nodes/websocket-trigger-node.md), [File Upload Trigger](../nodes/file-upload-trigger-node.md), [RabbitMQ](../nodes/rabbitmq-node.md)
+- [Node Types](./node-types.md) – [Input](../nodes/input-node.md), [Cron](../nodes/cron-node.md), [Telegram Trigger](../nodes/telegram-trigger-node.md), [IMAP Trigger](../nodes/imap-trigger-node.md), [Google Drive Trigger](../nodes/google-drive-trigger-node.md), [Google Sheets Trigger](../nodes/google-sheets-trigger-node.md), [Heym Trigger](../nodes/heym-trigger-node.md), [WebSocket Trigger](../nodes/websocket-trigger-node.md), [File Upload Trigger](../nodes/file-upload-trigger-node.md), [RabbitMQ](../nodes/rabbitmq-node.md)
 - [Discord Trigger](../nodes/discord-trigger-node.md) – Discord interactions webhook trigger
 - [Quick Start](../getting-started/quick-start.md) – Build a workflow with Input
 - [Portal](./portal.md) – Portal trigger and chat UI

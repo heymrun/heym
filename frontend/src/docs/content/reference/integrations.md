@@ -26,8 +26,8 @@ Some integration nodes do **not** require credentials. [WebSocket Trigger](../no
 | **RAG: Psql + OpenAI** | [RAG](../nodes/rag-node.md), Vectorstores | `openai_api_key` (vectors stored in Heym's own Postgres via pgvector) |
 | **RAG: Custom Embeddings** | [RAG](../nodes/rag-node.md), Vectorstores | `embedding_base_url`, `embedding_model`, `embedding_dimensions`, `db_type`, optional `embedding_api_key`, plus `qdrant_host` when `db_type` is `qdrant` |
 | **Grist** | [Grist node](../nodes/grist-node.md) | `api_key`, `server_url` |
-| **Google Sheets** | [Google Sheets node](../nodes/google-sheets-node.md) | `client_id`, `client_secret` + OAuth2 consent |
-| **Google Drive** | [Google Drive node](../nodes/google-drive-node.md) | `client_id`, `client_secret` + OAuth2 consent (full Drive scope) |
+| **Google Sheets** | [Google Sheets node](../nodes/google-sheets-node.md), [Google Sheets Trigger](../nodes/google-sheets-trigger-node.md) | `client_id`, `client_secret` + OAuth2 consent |
+| **Google Drive** | [Google Drive node](../nodes/google-drive-node.md), [Google Drive Trigger](../nodes/google-drive-trigger-node.md) | `client_id`, `client_secret` + OAuth2 consent (full Drive scope) |
 | **BigQuery** | [BigQuery node](../nodes/bigquery-node.md) | `client_id`, `client_secret` + OAuth2 consent |
 | **Supabase** | [Supabase node](../nodes/supabase-node.md) | `supabase_url`, `supabase_key`, optional `supabase_schema` |
 | **ClickHouse** | [ClickHouse node](../nodes/clickhouse-node.md) | `host`, `port`, `username`, `password`, `database`, `secure` |
@@ -432,6 +432,7 @@ Tokens (`access_token`, `refresh_token`, `token_expiry`) are stored and refreshe
 ### Used By
 
 - [Google Sheets node](../nodes/google-sheets-node.md)
+- [Google Sheets Trigger node](../nodes/google-sheets-trigger-node.md)
 
 ---
 
@@ -476,6 +477,7 @@ Because you supply your own Client ID and Secret from your own Google Cloud proj
 ### Used By
 
 - [Google Drive node](../nodes/google-drive-node.md)
+- [Google Drive Trigger node](../nodes/google-drive-trigger-node.md)
 
 ---
 

@@ -114,3 +114,4 @@ Access output: `$readReport.rows[0]` (first data row object), `$readReport.rows[
 - [Node Types](../reference/node-types.md) – Overview of all node types
 - [Credentials Tab](../tabs/credentials-tab.md) – Add Google Sheets OAuth2 credential
 - [Third-Party Integrations](../reference/integrations.md#google-sheets-oauth2) – Google Sheets credential setup
+- [Google Sheets Trigger](./google-sheets-trigger-node.md): start a workflow when a row changes

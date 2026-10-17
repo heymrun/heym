@@ -203,6 +203,7 @@ For a regular file, `exported` is `false` and `export_format` is `null`.
 
 - [Drive (Heym Drive)](./drive-node.md)
 - [Google Sheets](./google-sheets-node.md)
+- [Google Drive Trigger](./google-drive-trigger-node.md)
 - [Loop](./loop-node.md)
 - [Credentials](../reference/credentials.md)
 - [Credential Sharing](../reference/credentials-sharing.md)

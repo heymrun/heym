@@ -32,6 +32,8 @@ Shared credentials show an indicator in the [Credentials Tab](../tabs/credential
 Sharing a credential grants the recipient everything that credential can do. For most integrations that is scoped to one workspace or one API key's permissions, but some credentials are far broader.
 
 > **Google Drive credentials grant full Drive access.** The [Google Drive](../nodes/google-drive-node.md) credential is authorized with the `https://www.googleapis.com/auth/drive` scope so the node can operate on files you already own. Sharing it with a user or a team gives every one of them the ability to **read, modify, and permanently delete anything in your Google Drive** through a workflow — not just the files you had in mind. Share it only with people you would give full Drive access to directly.
+>
+> The same applies to the [Google Drive Trigger](../nodes/google-drive-trigger-node.md): a shared credential lets that person's workflows watch any folder in your Drive.
 
 If you need to limit exposure, create a dedicated Google account with access to only the folders the workflow needs, and connect the credential with that account instead of your primary one.
 

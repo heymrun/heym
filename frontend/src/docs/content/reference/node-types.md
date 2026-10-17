@@ -12,6 +12,8 @@ Heym provides a variety of node types for building workflows. Use [expressions](
 | [Slack Trigger](../nodes/slack-trigger-node.md) | Trigger when Slack sends an Events API webhook | 1 |
 | [Discord Trigger](../nodes/discord-trigger-node.md) | Trigger when Discord sends an application interaction webhook | 1 |
 | [IMAP Trigger](../nodes/imap-trigger-node.md) | Trigger when a new email arrives in an IMAP mailbox | 1 |
+| [Google Drive Trigger](../nodes/google-drive-trigger-node.md) | Trigger when a file is created, updated, or deleted in a Drive folder | 1 |
+| [Google Sheets Trigger](../nodes/google-sheets-trigger-node.md) | Trigger when a row is added, updated, or deleted in a sheet | 1 |
 | [Heym Trigger](../nodes/heym-trigger-node.md) | Trigger when Heym publishes a platform event (batched array) | 1 |
 | [WebSocket Trigger](../nodes/websocket-trigger-node.md) | Trigger from an outbound connection to an external WebSocket server | 1 |
 | [File Upload Trigger](../nodes/file-upload-trigger-node.md) | Mint a single-use upload link and start when a large file is uploaded | 1 |
