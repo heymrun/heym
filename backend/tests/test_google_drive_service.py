@@ -4,7 +4,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
-from app.services.google_drive_service import GoogleDriveService, parse_drive_id
+from app.services.google_drive_service import FOLDER_MIME, GoogleDriveService, parse_drive_id
 
 
 class TestParseDriveId(unittest.TestCase):
@@ -608,6 +608,86 @@ class TestRemove(unittest.TestCase):
         self.assertEqual(do_patch.call_args.kwargs["json"], {"trashed": True})
         self.assertEqual(result["operation"], "removeFolder")
         self.assertEqual(result["deleted"], "trashed")
+
+
+def _ok(payload: dict) -> MagicMock:
+    response = MagicMock()
+    response.status_code = 200
+    response.json.return_value = payload
+    return response
+
+
+def _status(code: int) -> MagicMock:
+    response = MagicMock()
+    response.status_code = code
+    response.json.return_value = {"error": {"message": "nope"}}
+    response.text = "nope"
+    return response
+
+
+class TestTriggerReads(unittest.TestCase):
+    def setUp(self) -> None:
+        future = datetime.now(timezone.utc) + timedelta(hours=1)
+        self.service = GoogleDriveService("cred-1", _config(future), MagicMock())
+
+    def test_list_folder_entries_checks_the_folder_then_lists_files_only(self) -> None:
+        folder = _ok({"id": "F1", "mimeType": FOLDER_MIME, "trashed": False})
+        listing = _ok({"files": [{"id": "a", "name": "a.pdf"}]})
+        with patch(
+            "app.services.google_drive_service.httpx.get", side_effect=[folder, listing]
+        ) as get:
+            entries = self.service.list_folder_entries("F1", include_folders=False, max_entries=10)
+
+        self.assertEqual(entries, [{"id": "a", "name": "a.pdf"}])
+        params = get.call_args_list[1].kwargs["params"]
+        self.assertIn("'F1' in parents", params["q"])
+        self.assertIn("trashed = false", params["q"])
+        self.assertIn(f"mimeType != '{FOLDER_MIME}'", params["q"])
+        self.assertIn("createdTime", params["fields"])
+        self.assertEqual(params["pageSize"], 10)
+
+    def test_include_folders_drops_the_mime_filter(self) -> None:
+        folder = _ok({"id": "F1", "mimeType": FOLDER_MIME, "trashed": False})
+        with patch(
+            "app.services.google_drive_service.httpx.get", side_effect=[folder, _ok({"files": []})]
+        ) as get:
+            self.service.list_folder_entries("F1", include_folders=True, max_entries=10)
+
+        self.assertNotIn("mimeType", get.call_args_list[1].kwargs["params"]["q"])
+
+    def test_root_is_listed_without_a_folder_check(self) -> None:
+        with patch(
+            "app.services.google_drive_service.httpx.get", return_value=_ok({"files": []})
+        ) as get:
+            self.service.list_folder_entries("", include_folders=False, max_entries=10)
+
+        self.assertEqual(get.call_count, 1)
+        self.assertIn("'root' in parents", get.call_args.kwargs["params"]["q"])
+
+    def test_trashed_folder_raises(self) -> None:
+        folder = _ok({"id": "F1", "mimeType": FOLDER_MIME, "trashed": True})
+        with patch("app.services.google_drive_service.httpx.get", return_value=folder):
+            with self.assertRaises(ValueError):
+                self.service.list_folder_entries("F1", include_folders=False, max_entries=10)
+
+    def test_missing_folder_raises(self) -> None:
+        with patch("app.services.google_drive_service.httpx.get", return_value=_status(404)):
+            with self.assertRaises(ValueError):
+                self.service.list_folder_entries("F1", include_folders=False, max_entries=10)
+
+    def test_get_file_entry_returns_none_when_missing(self) -> None:
+        with patch("app.services.google_drive_service.httpx.get", return_value=_status(404)):
+            self.assertIsNone(self.service.get_file_entry("A1"))
+
+    def test_get_file_entry_returns_none_when_trashed(self) -> None:
+        trashed = _ok({"id": "A1", "name": "a.pdf", "trashed": True})
+        with patch("app.services.google_drive_service.httpx.get", return_value=trashed):
+            self.assertIsNone(self.service.get_file_entry("A1"))
+
+    def test_get_file_entry_returns_the_entry(self) -> None:
+        live = _ok({"id": "A1", "name": "a.pdf", "trashed": False})
+        with patch("app.services.google_drive_service.httpx.get", return_value=live):
+            self.assertEqual(self.service.get_file_entry("A1")["name"], "a.pdf")
 
 
 if __name__ == "__main__":

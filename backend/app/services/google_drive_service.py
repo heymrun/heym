@@ -19,6 +19,9 @@ _NATIVE_MIME_PREFIX = "application/vnd.google-apps."
 # Drive caps pageSize at 1000.
 _MAX_PAGE_SIZE = 1000
 
+# Fields the Google Drive Trigger stores and hands to runs.
+_TRIGGER_FIELDS = "id, name, mimeType, size, createdTime, modifiedTime, webViewLink"
+
 _ID_PATTERNS = (
     re.compile(r"/(?:file|document|spreadsheets|presentation)/d/([a-zA-Z0-9_-]+)"),
     re.compile(r"/folders/([a-zA-Z0-9_-]+)"),
@@ -224,6 +227,68 @@ class GoogleDriveService:
             "count": len(files),
             "files": files,
         }
+
+    def list_folder_entries(
+        self, folder_id: str, *, include_folders: bool, max_entries: int
+    ) -> list[dict[str, Any]]:
+        """Raw Drive entries directly inside a folder, for the Google Drive Trigger.
+
+        Stops after ``max_entries`` so a caller can detect an oversized folder without
+        paging all of it. Raises ValueError when the folder is missing, trashed, or not a
+        folder: an empty listing must never be read as "every file was deleted".
+        """
+        target = parse_drive_id(folder_id) or "root"
+        if target != "root":
+            resp = httpx.get(
+                f"{_DRIVE_BASE}/files/{target}",
+                headers=self._auth_headers(),
+                params={"fields": "id, mimeType, trashed", "supportsAllDrives": True},
+            )
+            self._raise_for_drive_error(resp, target)
+            meta = resp.json()
+            if meta.get("trashed") or meta.get("mimeType") != FOLDER_MIME:
+                raise ValueError(f"Google Drive Trigger: '{target}' is not an available folder")
+
+        clauses = [f"'{target}' in parents", "trashed = false"]
+        if not include_folders:
+            clauses.append(f"mimeType != '{FOLDER_MIME}'")
+
+        entries: list[dict[str, Any]] = []
+        page_token = ""
+        while len(entries) < max_entries:
+            params: dict[str, Any] = {
+                "q": " and ".join(clauses),
+                "pageSize": min(max_entries - len(entries), _MAX_PAGE_SIZE),
+                "fields": f"nextPageToken, files({_TRIGGER_FIELDS})",
+                "supportsAllDrives": True,
+                "includeItemsFromAllDrives": True,
+            }
+            if page_token:
+                params["pageToken"] = page_token
+            resp = httpx.get(f"{_DRIVE_BASE}/files", headers=self._auth_headers(), params=params)
+            self._raise_for_drive_error(resp, target)
+            data = resp.json()
+            entries.extend(data.get("files", []))
+            page_token = data.get("nextPageToken", "")
+            if not page_token:
+                break
+        return entries[:max_entries]
+
+    def get_file_entry(self, file_id: str) -> dict[str, Any] | None:
+        """Raw Drive entry for one file, or None once it is trashed or no longer visible."""
+        target = parse_drive_id(file_id)
+        resp = httpx.get(
+            f"{_DRIVE_BASE}/files/{target}",
+            headers=self._auth_headers(),
+            params={"fields": f"{_TRIGGER_FIELDS}, trashed", "supportsAllDrives": True},
+        )
+        if resp.status_code == 404:
+            return None
+        self._raise_for_drive_error(resp, target)
+        data = resp.json()
+        if data.get("trashed"):
+            return None
+        return data
 
     def get_file_metadata(self, file_id: str) -> dict:
         """Fetch id, name, mimeType, size, and parents for a file."""
