@@ -448,6 +448,64 @@ In workflow expressions:
 {"id": "n1", "type": "heymTrigger", "position": {"x": 100, "y": 100}, "data": {"label": "platformEvents", "eventNames": ["workflow.created", "workflow.deleted"]}}
 ```
 
+### 3g. googleDriveTrigger (Google Drive Change Trigger)
+- **Purpose**: Poll a Google Drive folder, or one file, and start the workflow once for each file that is created, updated, or deleted
+- **Inputs**: 0 | **Outputs**: 1
+- **WHEN TO USE**: When the workflow should react to files landing in, changing in, or leaving a Drive folder (intake folders, shared contract folders, report drops)
+- **DO NOT use** `cron` plus a `googleDrive` `listFolderFiles` step to detect new files; this trigger keeps the snapshot and fires once per change
+- **Data fields** (plain values, not `$` expressions):
+  - `label`: Node identifier (e.g., "contractsFolder")
+  - `credentialId`: UUID of a `google_drive` credential
+  - `gdtScope`: `"folder"` (default) or `"file"`
+  - `gdtFolderId`: Folder ID or URL when scope is `folder`; empty means My Drive root. Only direct children are watched
+  - `gdtFileId`: File ID or URL when scope is `file`
+  - `gdtEvents`: Array of `"created"`, `"updated"`, `"deleted"` (default all three; `created` does not apply to `file` scope)
+  - `gdtIncludeFolders`: Boolean, default `false`; when `true`, subfolders themselves also start runs
+  - `pollIntervalMinutes`: Integer, minimum `1`, default `1`
+- **Behavior**: The first poll records the folder as it is and starts nothing. `deleted` means the item left the folder: trashed, deleted, or moved out. Moving a file in counts as `created`. Each change starts at most one run, also on multi-worker and multi-instance installs. Heym stores file metadata only, never file contents.
+- **Output fields available downstream**:
+  - `$<label>.event`: `"created"`, `"updated"`, or `"deleted"`
+  - `$<label>.file.id`, `$<label>.file.name`, `$<label>.file.mime_type`, `$<label>.file.size_bytes`, `$<label>.file.created_time`, `$<label>.file.modified_time`, `$<label>.file.web_view_link`, `$<label>.file.is_folder`
+  - `$<label>.changed_fields`: Metadata fields that changed (`updated` only)
+  - `$<label>.folder_id`: Watched folder (`"root"` for My Drive), `null` in file scope
+  - `$<label>.triggered_at`: ISO timestamp
+- To read the file, follow with `googleDrive` (`downloadFile` or `syncToHeymDrive`) and `gdFileId: "$<label>.file.id"`.
+
+**Example node JSON:**
+```json
+{"id": "n1", "type": "googleDriveTrigger", "position": {"x": 100, "y": 100}, "data": {"label": "contractsFolder", "credentialId": "google-drive-credential-uuid", "gdtScope": "folder", "gdtFolderId": "https://drive.google.com/drive/folders/FOLDER_ID", "gdtEvents": ["created"], "gdtIncludeFolders": false, "pollIntervalMinutes": 1}}
+```
+
+### 3h. googleSheetsTrigger (Google Sheets Row Trigger)
+- **Purpose**: Poll one sheet tab and start the workflow once for each row that is added, updated, or deleted
+- **Inputs**: 0 | **Outputs**: 1
+- **WHEN TO USE**: When the workflow should react to rows in a spreadsheet: form responses, a lead list, a status column someone edits
+- **DO NOT use** `cron` plus `googleSheets` `readRange` to find new rows; this trigger tracks rows and fires once per change
+- **Data fields** (plain values, not `$` expressions):
+  - `label`: Node identifier (e.g., "newLead")
+  - `credentialId`: UUID of a `google_sheets` credential
+  - `gstSpreadsheetId`: Spreadsheet ID or URL (required)
+  - `gstSheetName`: Tab title (default `"Sheet1"`)
+  - `gstHasHeader`: Boolean, default `true`; row 1 holds column names
+  - `gstKeyColumn`: Optional, recommended. Header name (or column letter without a header) whose value identifies a row, so inserting, deleting, or sorting rows is detected correctly. Without it rows are matched by row number, and deleting a row in the middle reads as updates for the rows below it plus one delete at the end
+  - `gstEvents`: Array of `"created"`, `"updated"`, `"deleted"` (default all three)
+  - `pollIntervalMinutes`: Integer, minimum `1`, default `1`
+- **Behavior**: The first poll records the tab as it is and starts nothing. Blank rows are ignored; rows with an empty key are ignored until the key is filled. Editing the header row records the tab again without starting runs. Heym stores only keyed fingerprints of cells, never cell values, so a run gets the row's current values and which columns changed, not the old values.
+- **⚠️ Write-back loop**: A workflow that writes to the sheet it watches causes its own `updated` events. In that case set `gstEvents` to `["created"]`.
+- **Output fields available downstream**:
+  - `$<label>.event`: `"created"`, `"updated"`, or `"deleted"`
+  - `$<label>.row`: Current cells keyed by header (or column letter) plus `rowIndex`; for `deleted` only `rowIndex`
+  - `$<label>.row.rowIndex`: 1-based sheet row number
+  - `$<label>.changed_columns`: Columns that changed (`created` lists every non-empty column)
+  - `$<label>.key`: Key column value (`null` for `deleted` or without a key column)
+  - `$<label>.spreadsheet_id`, `$<label>.sheet_name`, `$<label>.triggered_at`
+- To write back to the same row, use `googleSheets` `updateRange` with `gsUpdateRow: "$<label>.row.rowIndex"`.
+
+**Example node JSON:**
+```json
+{"id": "n1", "type": "googleSheetsTrigger", "position": {"x": 100, "y": 100}, "data": {"label": "newLead", "credentialId": "google-sheets-credential-uuid", "gstSpreadsheetId": "https://docs.google.com/spreadsheets/d/SPREADSHEET_ID/edit", "gstSheetName": "Leads", "gstHasHeader": true, "gstKeyColumn": "Email", "gstEvents": ["created"], "pollIntervalMinutes": 1}}
+```
+
 ### 4. llm (Language Model)
 - **Purpose**: Process text with AI language model or generate images
 - **Inputs**: 1 | **Outputs**: 1
@@ -5148,7 +5206,7 @@ Always include:
 21. **MULTIPLE INPUT FIELDS** - textInput nodes support multiple input fields via `inputFields` array. Define fields like `[{"key": "text"}, {"key": "base64"}]`. Access via `$nodeLabel.body.fieldKey`. Input values are sent in the `body` object.
 22. **⚠️ NO UNNECESSARY textInput!** - NEVER add textInput unless user explicitly needs to provide input data. For static URLs, scheduled tasks, or fixed operations, START DIRECTLY with http, cron, or other nodes. textInput is ONLY for workflows that receive dynamic data from users/API callers.
 23. **⚠️ PRESERVE CREDENTIALS & MODEL** - When modifying an existing workflow, ALWAYS preserve existing `credentialId` and `model` values in nodes. NEVER replace, remove, or change credential IDs or model names unless the user explicitly asks to use a different credential or model. If a node already has a `credentialId` or `model`, keep them exactly as is.
-23a. **⚠️ CREDENTIALS & INTEGRATIONS - OWNED ONLY (NO SHARED)** - For **every** node field that references a credential or secret (`credentialId`, `githubCredentialId`, `fallbackCredentialId`, `guardrailCredentialId`, Playwright `aiStep` credential, etc.), use ONLY credentials **owned** by the workflow owner. **NEVER** put shared credentials (shared with you by another user or via team share) in generated JSON—the UI labels these as shared; they must not appear in AI output. Use placeholders such as `YOUR_CREDENTIAL_ID`, `codex-credential-uuid`, `opencode-credential-uuid`, `github-credential-uuid`, `jira-credential-uuid`, `google-drive-credential-uuid`, `slack-credential-uuid`, `telegram-credential-uuid`, or `imap-credential-uuid` and let the user pick an owned credential in the editor. Applies to: `llm`, `agent`, `codex`, `opencodeGo`, `slack`, `telegram`, `slackTrigger`, `telegramTrigger`, `imapTrigger`, `sendEmail`, `redis`, `grist`, `github`, `jira`, `linear`, `googleSheets`, `googleDrive`, `bigquery`, `supabase`, `notion`, `rabbitmq`, `crawler`, `playwright` (including `aiStep`), and any other integration that stores a credential id. When modifying an existing workflow (rule 23), still preserve existing ids if they are already non-shared; when **adding** new nodes, never insert shared credential UUIDs.
+23a. **⚠️ CREDENTIALS & INTEGRATIONS - OWNED ONLY (NO SHARED)** - For **every** node field that references a credential or secret (`credentialId`, `githubCredentialId`, `fallbackCredentialId`, `guardrailCredentialId`, Playwright `aiStep` credential, etc.), use ONLY credentials **owned** by the workflow owner. **NEVER** put shared credentials (shared with you by another user or via team share) in generated JSON—the UI labels these as shared; they must not appear in AI output. Use placeholders such as `YOUR_CREDENTIAL_ID`, `codex-credential-uuid`, `opencode-credential-uuid`, `github-credential-uuid`, `jira-credential-uuid`, `google-drive-credential-uuid`, `google-sheets-credential-uuid`, `slack-credential-uuid`, `telegram-credential-uuid`, or `imap-credential-uuid` and let the user pick an owned credential in the editor. Applies to: `llm`, `agent`, `codex`, `opencodeGo`, `slack`, `telegram`, `slackTrigger`, `telegramTrigger`, `imapTrigger`, `sendEmail`, `redis`, `grist`, `github`, `jira`, `linear`, `googleSheets`, `googleDrive`, `googleSheetsTrigger`, `googleDriveTrigger`, `bigquery`, `supabase`, `notion`, `rabbitmq`, `crawler`, `playwright` (including `aiStep`), and any other integration that stores a credential id. When modifying an existing workflow (rule 23), still preserve existing ids if they are already non-shared; when **adding** new nodes, never insert shared credential UUIDs.
 24. **EXECUTE NODE OUTPUT** - Execute node returns `{status, outputs, workflow_id, execution_time_ms}`. Access the called workflow's result via `$executeNodeLabel.outputs.output.result`. The `outputs.output` object contains the result from the executed workflow's output node.
 25. **EXECUTE NODE MULTIPLE INPUTS** - When calling a workflow that expects multiple input fields: (1) Add matching `inputFields` to your textInput node to collect all required data, (2) Use `executeInputMappings` array to map each field. Example: If target needs `text` and `imageUrl`, your textInput should have `inputFields: [{"key": "prompt"}, {"key": "image"}]`, then execute node uses `"executeInputMappings": [{"key": "text", "value": "$userInput.body.prompt"}, {"key": "imageUrl", "value": "$userInput.body.image"}]`
 26. **REQUEST BODY, HEADERS & QUERY** - When workflow is executed via API, textInput nodes receive `body`, `headers` and `query` objects. Access via `$textInputLabel.body.fieldName`, `$textInputLabel.headers.headerName` and `$textInputLabel.query.paramName`. Useful for accessing raw request data, authentication, and dynamic behavior.

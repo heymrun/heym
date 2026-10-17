@@ -52,6 +52,15 @@ class TestBuildAssistantPromptNodeTemplates(unittest.TestCase):
         self.assertIn("pollIntervalMinutes", prompt)
         self.assertIn("imap-credential-uuid", prompt)
 
+    def test_includes_google_trigger_guidance(self) -> None:
+        prompt = build_assistant_prompt()
+
+        self.assertIn("googleDriveTrigger", prompt)
+        self.assertIn("googleSheetsTrigger", prompt)
+        self.assertIn("gstKeyColumn", prompt)
+        self.assertIn("google-sheets-credential-uuid", prompt)
+        self.assertIn("writes to the sheet it watches", prompt)
+
     def test_includes_telegram_guidance(self) -> None:
         prompt = build_assistant_prompt()
 
