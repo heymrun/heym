@@ -26,7 +26,7 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
       introDescription:
         "A quick look at what changed since your last update. Takes about a minute.",
       tourEnabled: true,
-      sectionOrder: ["heym-work", "skill-zip"],
+      sectionOrder: ["jira-pat-auth", "heym-work", "skill-zip"],
     },
     sections: [
       {
@@ -89,6 +89,38 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
             "Start a new workflow whose agent carries the skill",
           ],
           tourVisual: "skill-zip",
+        },
+      },
+      {
+        id: "jira-pat-auth",
+        title: "Connect Jira Data Center with a personal access token",
+        publishedAt: new Date("2026-10-14T12:00:00Z"),
+        blocks: [
+          {
+            type: "prose",
+            markdown:
+              "A **Jira** credential for **Data Center / Server** can now sign in with a **personal access token** instead of a username and password. Pick **Personal Access Token** under **Authentication** in the credential dialog and paste the token. No username is needed, and Heym sends it as a Bearer token to your Jira site only.",
+          },
+          {
+            type: "prose",
+            markdown:
+              "Username and password still works, and existing Jira credentials keep using it with no change. Switching the method clears the stored secret, so you enter the new one when you switch. Personal access tokens need Jira Data Center / Server 8.14 or later.",
+          },
+        ],
+        tour: {
+          description:
+            "Jira Data Center credentials can use a personal access token instead of a password.",
+          useCases: [
+            "Connect Jira when your organization disables password-based API auth",
+            "Use a token you can revoke on its own, without sharing a real login",
+            "Keep username and password for Jira sites that still allow it",
+          ],
+          tourVisual: "jira-pat-auth",
+          docTarget: {
+            categoryId: "reference",
+            slug: "integrations",
+            title: "Third-Party Integrations",
+          },
         },
       },
     ],
@@ -177,53 +209,6 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
             categoryId: "tabs",
             slug: "dashboard-tab",
             title: "Dashboard",
-          },
-        },
-      },
-    ],
-  },
-  {
-    releaseId: "2026.16",
-    publishedAt: new Date("2026-09-27T00:00:00Z"),
-    headline: "The AI Assistant sets up your data tables",
-    releaseTour: {
-      label: "New in Heym",
-      introTitle: "New in this release",
-      introDescription:
-        "A quick look at what changed since your last update. Takes about a minute.",
-      tourEnabled: true,
-      sectionOrder: ["assistant-data-tables"],
-    },
-    sections: [
-      {
-        id: "assistant-data-tables",
-        title: "The AI Assistant picks or creates your data tables",
-        publishedAt: new Date("2026-09-28T10:00:00Z"),
-        blocks: [
-          {
-            type: "prose",
-            markdown:
-              "When a workflow stores records, the **AI Assistant** now knows your **DataTables**. Name one and it uses it. Otherwise it asks which table to use: the question card lists the tables that fit, each with its description and column types, plus **Create a new table** with the columns the workflow needs. Press **Submit answers** and the card creates the table, then the assistant wires it into the **DataTable** node with its exact column names.",
-          },
-          {
-            type: "prose",
-            markdown:
-              "It works in the canvas assistant, YOLO mode included, in **Chat**, in **Chat with Heym** on the docs, and over MCP through `heym_chat`. The assistant sees table names and columns, never rows, and never changes an existing table's columns: that stays in the **DataTable** tab.",
-          },
-        ],
-        tour: {
-          description:
-            "The AI Assistant asks which data table a workflow should use, or creates one with the right columns.",
-          useCases: [
-            "Ask to save every lead in a table and get the table and the workflow together",
-            "Pick one of your tables from a card that shows its columns and types",
-            "Create and wire tables from Chat or an MCP client, not just the canvas",
-          ],
-          tourVisual: "assistant-data-tables",
-          docTarget: {
-            categoryId: "reference",
-            slug: "ai-assistant",
-            title: "AI Assistant",
           },
         },
       },

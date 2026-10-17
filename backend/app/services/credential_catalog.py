@@ -97,7 +97,8 @@ CREDENTIAL_TYPE_PURPOSE: dict[CredentialType, str] = {
         "over http"
     ),
     CredentialType.jira: (
-        "Jira Cloud email and API token, or Data Center username and password; Jira node"
+        "Jira Cloud email and API token, or Data Center username and password or personal "
+        "access token; Jira node"
     ),
     CredentialType.linear: "Linear API key or OAuth app; Linear node",
     CredentialType.custom: (

@@ -181,10 +181,22 @@ def merge_credential_config_for_update(
 
     if credential_type == CredentialType.jira:
         merged_config = dict(existing_config)
+        existing_auth_mode = _jira_auth_mode(existing_config)
+        incoming_auth_mode = str(incoming_config.get("auth_mode", "") or "").strip().lower()
+        if incoming_auth_mode and incoming_auth_mode != existing_auth_mode:
+            # Switching modes never carries the old secret over: it would be sent
+            # under the wrong scheme, and an orphaned secret should not stay stored.
+            merged_config.pop("api_token", None)
+            merged_config.pop("api_key", None)
+            if incoming_auth_mode == _JIRA_AUTH_MODE_PAT:
+                merged_config.pop("email", None)
+            merged_config["auth_mode"] = incoming_auth_mode
         for key in ("email", "api_token", "base_url", "api_version", "deployment"):
             incoming_value = str(incoming_config.get(key, "") or "").strip()
             if incoming_value:
                 merged_config[key] = incoming_value
+        if _jira_auth_mode(merged_config) == _JIRA_AUTH_MODE_PAT:
+            merged_config.pop("email", None)
         return merged_config
 
     if credential_type == CredentialType.telegram:
@@ -364,6 +376,16 @@ def merge_credential_config_for_update(
             merged_config["base_url"] = incoming_base_url
 
     return merged_config
+
+
+_JIRA_AUTH_MODE_BASIC = "basic"
+_JIRA_AUTH_MODE_PAT = "pat"
+
+
+def _jira_auth_mode(config: dict) -> str:
+    """Return the Jira auth mode; a missing value means legacy Basic auth."""
+    raw_mode = str(config.get("auth_mode", "") or "").strip().lower()
+    return raw_mode or _JIRA_AUTH_MODE_BASIC
 
 
 def get_masked_value(credential_type: CredentialType, config: dict) -> str | None:
@@ -557,6 +579,7 @@ def get_public_credential_fields(
             "email": email,
             "api_version": api_version,
             "deployment": deployment,
+            "auth_mode": _jira_auth_mode(config),
         }
     if credential_type == CredentialType.codex:
         auth_mode = str(config.get("auth_mode", "access_token")).strip() or "access_token"
@@ -1355,7 +1378,11 @@ async def run_credential_connection_test(
         elif test_data.type == CredentialType.linear:
             config = _merge_linear_test_config(config, stored_config)
         elif test_data.type == CredentialType.jira:
-            config = {**stored_config, **{k: v for k, v in config.items() if v}}
+            config = merge_credential_config_for_update(
+                CredentialType.jira,
+                stored_config,
+                {k: v for k, v in config.items() if v},
+            )
         elif test_data.type == CredentialType.clickhouse:
             config = _merge_clickhouse_test_config(config, stored_config)
         elif test_data.type == CredentialType.sentry:
@@ -2087,7 +2114,15 @@ def validate_credential_config(
                     detail="GitHub credential base_url must be a valid http(s) URL",
                 )
     elif credential_type == CredentialType.jira:
-        if "email" not in config or not str(config["email"]).strip():
+        jira_auth_mode = _jira_auth_mode(config)
+        if jira_auth_mode not in {_JIRA_AUTH_MODE_BASIC, _JIRA_AUTH_MODE_PAT}:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Jira credential auth_mode must be basic or pat",
+            )
+        if jira_auth_mode == _JIRA_AUTH_MODE_BASIC and (
+            "email" not in config or not str(config["email"]).strip()
+        ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Jira credential requires email",
@@ -2114,6 +2149,11 @@ def validate_credential_config(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Jira credential deployment must be cloud or data_center",
+            )
+        if jira_auth_mode == _JIRA_AUTH_MODE_PAT and deployment != "data_center":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Jira personal access token auth requires a Data Center deployment",
             )
     elif credential_type == CredentialType.sentry:
         if "api_token" not in config or not str(config["api_token"]).strip():

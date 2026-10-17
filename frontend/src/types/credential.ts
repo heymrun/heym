@@ -174,10 +174,14 @@ export interface CredentialConfigGitHub {
 }
 
 export interface CredentialConfigJira {
-  email: string;
+  /** Basic auth username/email; not used when `auth_mode` is `pat`. */
+  email?: string;
+  /** Cloud API token, Basic auth password, or a Data Center personal access token. */
   api_token: string;
   base_url: string;
   deployment?: "cloud" | "data_center";
+  /** Missing means `basic`. `pat` (Bearer) is only valid with `data_center`. */
+  auth_mode?: "basic" | "pat";
   api_version?: string;
 }
 
