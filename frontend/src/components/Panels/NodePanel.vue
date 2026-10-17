@@ -226,6 +226,8 @@ const DASHBOARD_HIDDEN_NODE_TYPES = new Set<NodeType>([
   "slackTrigger",
   "discordTrigger",
   "imapTrigger",
+  "googleDriveTrigger",
+  "googleSheetsTrigger",
   "heymTrigger",
   "websocketTrigger",
   "fileUploadTrigger",

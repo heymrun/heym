@@ -24,6 +24,8 @@ export const BLOCKED_AS_TOOL_NODE_TYPES: ReadonlySet<NodeType> = new Set<NodeTyp
   "slackTrigger",
   "discordTrigger",
   "imapTrigger",
+  "googleDriveTrigger",
+  "googleSheetsTrigger",
   "heymTrigger",
   "mcpCall",
   "jsonOutputMapper",
@@ -42,6 +44,8 @@ export const NO_REGULAR_INPUT_NODE_TYPES: ReadonlySet<NodeType> = new Set<NodeTy
   "slackTrigger",
   "discordTrigger",
   "imapTrigger",
+  "googleDriveTrigger",
+  "googleSheetsTrigger",
   "heymTrigger",
 ]);
 

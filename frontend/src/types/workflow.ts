@@ -165,6 +165,9 @@ export interface AgentSkill {
   driveFilesEnabled?: boolean;
 }
 
+/** Changes a Google Drive or Google Sheets trigger can start a run for. */
+export type GoogleTriggerEvent = "created" | "updated" | "deleted";
+
 export type NodeType =
   | "textInput"
   | "cron"
@@ -207,6 +210,8 @@ export type NodeType =
   | "linear"
   | "googleSheets"
   | "googleDrive"
+  | "googleDriveTrigger"
+  | "googleSheetsTrigger"
   | "bigquery"
   | "supabase"
   | "clickhouse"
@@ -1072,6 +1077,21 @@ export interface NodeData {
   gdNewParentId?: string;
   /** When false (default) the item is trashed and recoverable; true deletes permanently. */
   gdPermanentDelete?: boolean;
+  /** googleDriveTrigger: "folder" (default) watches direct children; "file" watches one file. */
+  gdtScope?: "folder" | "file";
+  gdtFolderId?: string;
+  gdtFileId?: string;
+  /** googleDriveTrigger: changes that start a run. */
+  gdtEvents?: GoogleTriggerEvent[];
+  /** googleDriveTrigger: subfolders themselves also start runs. */
+  gdtIncludeFolders?: boolean;
+  gstSpreadsheetId?: string;
+  gstSheetName?: string;
+  gstHasHeader?: boolean;
+  /** googleSheetsTrigger: header name (or column letter without a header) that identifies a row. */
+  gstKeyColumn?: string;
+  /** googleSheetsTrigger: changes that start a run. */
+  gstEvents?: GoogleTriggerEvent[];
   connection?: AgentMCPConnection;
   selectedTool?: string;
   toolArguments?: Record<string, string>;

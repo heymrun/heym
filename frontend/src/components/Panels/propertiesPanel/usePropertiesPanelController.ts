@@ -134,6 +134,8 @@ export function usePropertiesPanelController() {
     discord: "node-discord",
     discordTrigger: "node-discord",
     imapTrigger: "node-email",
+    googleDriveTrigger: "node-google-drive",
+    googleSheetsTrigger: "node-google-sheets",
     heym: "node-heym",
     heymTrigger: "node-heym",
     sendEmail: "node-email",
@@ -200,6 +202,8 @@ export function usePropertiesPanelController() {
     discord: "discord-node",
     discordTrigger: "discord-trigger-node",
     imapTrigger: "imap-trigger-node",
+    googleDriveTrigger: "google-drive-trigger-node",
+    googleSheetsTrigger: "google-sheets-trigger-node",
     heym: "heym-node",
     heymTrigger: "heym-trigger-node",
     sendEmail: "send-email-node",
@@ -1152,7 +1156,7 @@ export function usePropertiesPanelController() {
         }
       }
 
-      if (type === "googleSheets") {
+      if (type === "googleSheets" || type === "googleSheetsTrigger") {
         try {
           googleSheetsCredentials.value = await credentialsApi.listByType("google_sheets");
         } catch {
@@ -1160,7 +1164,7 @@ export function usePropertiesPanelController() {
         }
       }
 
-      if (type === "googleDrive") {
+      if (type === "googleDrive" || type === "googleDriveTrigger") {
         try {
           googleDriveCredentials.value = await credentialsApi.listByType("google_drive");
         } catch {
@@ -6584,7 +6588,7 @@ export function usePropertiesPanelController() {
   const googleDriveCredentialOptions = computed(() => {
     const node = selectedNode.value;
     const selectedCredentialId =
-      node && node.type === "googleDrive"
+      node && (node.type === "googleDrive" || node.type === "googleDriveTrigger")
         ? (node.data.credentialId as string | undefined)
         : undefined;
 
@@ -6599,7 +6603,7 @@ export function usePropertiesPanelController() {
   const googleSheetsCredentialOptions = computed(() => {
     const node = selectedNode.value;
     const selectedCredentialId =
-      node && node.type === "googleSheets"
+      node && (node.type === "googleSheets" || node.type === "googleSheetsTrigger")
         ? (node.data.credentialId as string | undefined)
         : undefined;
 

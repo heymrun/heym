@@ -1154,6 +1154,8 @@ function getDefaultNodeData(type: NodeType): WorkflowNode["data"] {
     throwError: { label: "throwError", errorMessage: "$input.text", httpStatusCode: 400 },
     rabbitmq: { label: "rabbitmq", credentialId: "", rabbitmqOperation: undefined, rabbitmqExchange: "", rabbitmqRoutingKey: "", rabbitmqQueueName: "", rabbitmqMessageBody: "$input", rabbitmqDelayMs: undefined },
     imapTrigger: { label: "imapTrigger", credentialId: "", pollIntervalMinutes: 5 },
+    googleDriveTrigger: { label: "driveTrigger", credentialId: "", gdtScope: "folder", gdtFolderId: "", gdtFileId: "", gdtEvents: ["created", "updated", "deleted"], gdtIncludeFolders: false, pollIntervalMinutes: 1 },
+    googleSheetsTrigger: { label: "sheetTrigger", credentialId: "", gstSpreadsheetId: "", gstSheetName: "Sheet1", gstHasHeader: true, gstKeyColumn: "", gstEvents: ["created", "updated", "deleted"], pollIntervalMinutes: 1 },
     heymTrigger: { label: "heymTrigger", eventNames: [] },
     heym: { label: "heym", heymOperation: "listWorkflows", heymWorkflowId: "", heymLimit: "", heymStatus: "", heymSinceDays: "" },
     crawler: { label: "crawler", credentialId: "", crawlerUrl: "$input.text", crawlerWaitSeconds: 0, crawlerMaxTimeout: 60000, crawlerMode: "basic", crawlerSelectors: [] },

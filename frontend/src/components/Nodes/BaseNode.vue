@@ -78,6 +78,8 @@ const nodeColorMap = {
   linear: "node-linear",
   googleSheets: "node-google-sheets",
   googleDrive: "node-google-drive",
+  googleDriveTrigger: "node-google-drive",
+  googleSheetsTrigger: "node-google-sheets",
   bigquery: "node-google-sheets",
   supabase: "node-datatable",
   clickhouse: "node-datatable",
@@ -119,6 +121,8 @@ const hasInput = computed(
     && props.type !== "slackTrigger"
     && props.type !== "discordTrigger"
     && props.type !== "imapTrigger"
+    && props.type !== "googleDriveTrigger"
+    && props.type !== "googleSheetsTrigger"
     && props.type !== "heymTrigger"
     && !(props.type === "rabbitmq" && props.data.rabbitmqOperation === "receive")
 );

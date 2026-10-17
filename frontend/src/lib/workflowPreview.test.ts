@@ -7,6 +7,7 @@ import {
   humanizeNodeType,
   orderWorkflowSteps,
   summarizeTrigger,
+  TRIGGER_NODE_TYPES,
 } from "@/lib/workflowPreview";
 
 function node(id: string, type: string, data: Record<string, unknown> = {}): WorkflowNode {
@@ -274,5 +275,12 @@ describe("buildWorkflowCurl", () => {
 
     expect(command).toContain(`-d '{"text":"hi"}'`);
     expect(command).not.toContain("downstream");
+  });
+});
+
+describe("Google triggers", () => {
+  it("count as triggers that start a workflow on their own", () => {
+    expect(TRIGGER_NODE_TYPES.has("googleDriveTrigger")).toBe(true);
+    expect(TRIGGER_NODE_TYPES.has("googleSheetsTrigger")).toBe(true);
   });
 });
