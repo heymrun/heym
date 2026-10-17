@@ -4,6 +4,7 @@ from decimal import Decimal
 from enum import Enum as PyEnum
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     DateTime,
     Enum,
@@ -2627,3 +2628,56 @@ class ClusterDispatchState(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
+
+
+class TriggerPollState(Base):
+    """Snapshot header of a polling trigger node (Google Drive / Google Sheets Trigger).
+
+    ``next_poll_at`` is the claim that keeps two workers from polling one node together.
+    ``version`` is the compare-and-swap counter that lets exactly one worker consume each
+    change. See ``app/services/google_triggers/state_store.py``.
+    """
+
+    __tablename__ = "trigger_poll_states"
+    __table_args__ = (
+        UniqueConstraint("workflow_id", "node_id", name="uq_trigger_poll_state_node"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workflow_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workflows.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    node_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    node_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    scope_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    key_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    version: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
+    next_poll_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class TriggerPollItem(Base):
+    """One watched item: Drive file metadata, or a sheet row's keyed fingerprints.
+
+    Never a cell value.
+    """
+
+    __tablename__ = "trigger_poll_items"
+    __table_args__ = (UniqueConstraint("state_id", "item_key", name="uq_trigger_poll_item_key"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    state_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("trigger_poll_states.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    item_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
