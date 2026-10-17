@@ -333,3 +333,38 @@ class TestGetSheetInfo(unittest.TestCase):
         self.assertEqual(len(result["sheets"]), 2)
         self.assertEqual(result["sheets"][0]["title"], "Sheet1")
         self.assertTrue(result["success"])
+
+
+class TestReadSheetValues(unittest.TestCase):
+    def setUp(self) -> None:
+        from app.services.google_sheets_service import GoogleSheetsService
+
+        self.service = GoogleSheetsService("cred-1", _make_config(), MagicMock())
+
+    def _response(self, values: list) -> MagicMock:
+        response = MagicMock()
+        response.json.return_value = {"values": values}
+        return response
+
+    def test_returns_every_value_as_text(self) -> None:
+        with patch(
+            "app.services.google_sheets_service.httpx.get",
+            return_value=self._response([["Name", "Score"], ["Ada", 3]]),
+        ):
+            values = self.service.read_sheet_values("S1", "Leads")
+        self.assertEqual(values, [["Name", "Score"], ["Ada", "3"]])
+
+    def test_quotes_the_sheet_name(self) -> None:
+        with patch(
+            "app.services.google_sheets_service.httpx.get", return_value=self._response([])
+        ) as get:
+            self.service.read_sheet_values("S1", "Q1's Leads")
+        url = get.call_args.args[0]
+        self.assertTrue(url.endswith("/S1/values/%27Q1%27%27s%20Leads%27"), url)
+
+    def test_raises_on_http_error(self) -> None:
+        response = self._response([])
+        response.raise_for_status.side_effect = RuntimeError("403")
+        with patch("app.services.google_sheets_service.httpx.get", return_value=response):
+            with self.assertRaises(RuntimeError):
+                self.service.read_sheet_values("S1", "Leads")

@@ -2,6 +2,7 @@
 
 import re
 from datetime import datetime, timedelta, timezone
+from urllib.parse import quote
 
 import httpx
 
@@ -155,6 +156,22 @@ class GoogleSheetsService:
                 rows.append({**cells, "rowIndex": row_index_1based})
 
         return {"rows": rows, "total": len(rows), "success": True}
+
+    def read_sheet_values(self, spreadsheet_id: str, sheet_name: str) -> list[list[str]]:
+        """Every value in the tab's used range as text, for the Google Sheets Trigger.
+
+        Unlike read_range this is not limited to columns A to Z. The sheet name is quoted
+        so names with spaces or apostrophes resolve.
+        """
+        quoted = "'" + sheet_name.replace("'", "''") + "'"
+        url = f"{_SHEETS_BASE}/{spreadsheet_id}/values/{quote(quoted, safe='')}"
+        resp = httpx.get(
+            url,
+            headers=self._auth_headers(),
+            params={"majorDimension": "ROWS", "valueRenderOption": "FORMATTED_VALUE"},
+        )
+        resp.raise_for_status()
+        return [[str(cell) for cell in row] for row in resp.json().get("values", [])]
 
     def _sheet_id_for_title(self, spreadsheet_id: str, sheet_name: str) -> int:
         """Return numeric sheetId for a tab title, or raise if missing."""
