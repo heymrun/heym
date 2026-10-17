@@ -110,6 +110,8 @@ export interface TraceStatsByModel {
   cost_usd: string;
   is_priced: boolean;
   is_other?: boolean;
+  /** Completion tokens per second of waiting on the model; null for "Other" or no output. */
+  output_tokens_per_second?: number | null;
 }
 
 export interface TraceStatsByTime {

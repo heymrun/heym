@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from sqlalchemy.dialects import postgresql
 
-from app.api.traces import _apply_source_filter, list_traces
+from app.api.traces import _apply_source_filter, get_trace_stats, list_traces
 
 
 class _ExecResult:
@@ -164,3 +164,73 @@ class SourceFilterTests(unittest.TestCase):
         )
         self.assertIn("assistant", compiled)
         self.assertIn("AI Builder", compiled)
+
+
+class ModelFilterTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        self.user = MagicMock()
+        self.user.id = uuid.uuid4()
+
+    def _sql(self, statement) -> str:
+        return str(
+            statement.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True})
+        )
+
+    async def _listed_sql(self, model: str | None) -> str:
+        db = AsyncMock()
+        db.execute = AsyncMock(side_effect=[_ExecResult([]), _ExecResult([])])
+        await list_traces(
+            limit=25,
+            offset=0,
+            credential_id=None,
+            workflow_id=None,
+            source=None,
+            status_filter=None,
+            search=None,
+            model=model,
+            order="desc",
+            range=None,
+            current_user=self.user,
+            db=db,
+        )
+        return self._sql(db.execute.await_args_list[1].args[0])
+
+    async def test_list_narrows_to_the_exact_model(self) -> None:
+        self.assertIn(
+            "llm_traces.model = 'claude-haiku-5-5'", await self._listed_sql("claude-haiku-5-5")
+        )
+
+    async def test_list_without_model_lists_every_model(self) -> None:
+        self.assertNotIn("llm_traces.model =", await self._listed_sql(None))
+
+    async def test_stats_narrow_kpis_and_series_to_the_model(self) -> None:
+        db = AsyncMock()
+        kpi_result = MagicMock()
+        kpi_result.one = MagicMock(
+            return_value=MagicMock(
+                total_calls=0,
+                error_calls=0,
+                prompt_tokens=0,
+                completion_tokens=0,
+                total_tokens=0,
+                avg_elapsed_ms=None,
+            )
+        )
+        db.execute = AsyncMock(side_effect=[kpi_result, _ExecResult([]), _ExecResult([])])
+        with (
+            patch("app.api.traces.resolve_costs_for_user", AsyncMock(return_value=[])),
+            patch("app.api.traces.ensure_pricing_synced", AsyncMock(return_value=False)),
+        ):
+            await get_trace_stats(
+                range="7d",
+                source=None,
+                credential_id=None,
+                workflow_id=None,
+                status_filter=None,
+                search=None,
+                model="claude-haiku-5-5",
+                current_user=self.user,
+                db=db,
+            )
+        for call in db.execute.await_args_list:
+            self.assertIn("llm_traces.model = 'claude-haiku-5-5'", self._sql(call.args[0]))

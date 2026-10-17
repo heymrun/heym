@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
-from sqlalchemy import ColumnElement, Select, String, case, cast, func, or_, select
+from sqlalchemy import ColumnElement, Float, Select, String, case, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Credential, LLMTrace, Workflow
@@ -58,6 +58,7 @@ class TraceModelRow:
     cost_usd: Decimal
     is_priced: bool
     is_other: bool = False
+    output_tokens_per_second: float | None = None
 
 
 @dataclass(frozen=True)
@@ -93,6 +94,35 @@ def resolve_range(
     return (now - delta, now, bucket)
 
 
+def model_wait_ms() -> ColumnElement[float]:
+    """How long the caller waited on the model for one trace, network and first token included.
+
+    A Dashboard Chat turn is one trace whose ``elapsed_ms`` also covers the tools it ran, so
+    its provider calls are summed from ``turn_timings`` instead.
+    """
+    turn = func.json_array_elements(LLMTrace.response["turn_timings"]).table_valued("value")
+    turn_ms = (
+        select(func.sum(cast(turn.c.value.op("->>")("durationMs"), Float)))
+        .select_from(turn)
+        .scalar_subquery()
+    )
+    return case(
+        (
+            (LLMTrace.source == "dashboard_chat")
+            & (func.json_typeof(LLMTrace.response["turn_timings"]) == "array"),
+            func.coalesce(turn_ms, LLMTrace.elapsed_ms),
+        ),
+        else_=LLMTrace.elapsed_ms,
+    )
+
+
+def output_tokens_per_second(tokens: int, wait_ms: float) -> float | None:
+    """Completion tokens over the time spent waiting for them; None without both."""
+    if tokens <= 0 or wait_ms <= 0:
+        return None
+    return round(tokens / (wait_ms / 1000.0), 1)
+
+
 def apply_source_filter(filters: list, source: str) -> None:
     """Apply source filter, including legacy expression-builder traces stored as assistant."""
     if source == "expression_builder":
@@ -121,11 +151,14 @@ def trace_filters(
     workflow_id: uuid.UUID | None = None,
     source: str | None = None,
     status: str | None = None,
+    model: str | None = None,
 ) -> list:
     """WHERE clauses for the user's traces with the optional filters applied."""
     filters: list = [LLMTrace.user_id == user_id]
     if credential_id:
         filters.append(LLMTrace.credential_id == credential_id)
+    if model:
+        filters.append(LLMTrace.model == model)
     if workflow_id:
         filters.append(LLMTrace.workflow_id == workflow_id)
     if source:
@@ -188,6 +221,10 @@ async def compute_trace_stats(
     )
     kpi_row = (await db.execute(kpi_stmt)).one()
 
+    # Speed counts successful calls that produced output; embeddings and images have none.
+    speed_eligible = (
+        LLMTrace.error.is_(None) & (LLMTrace.completion_tokens > 0) & (LLMTrace.elapsed_ms > 0)
+    )
     # Skip NULL-model rows like MCP workflow-server invocations.
     by_model_stmt = apply_trace_search(
         select(
@@ -197,6 +234,12 @@ async def compute_trace_stats(
             func.coalesce(func.sum(LLMTrace.total_tokens), 0).label("total_tokens"),
             func.coalesce(func.sum(LLMTrace.prompt_tokens), 0).label("prompt_tokens"),
             func.coalesce(func.sum(LLMTrace.completion_tokens), 0).label("completion_tokens"),
+            func.coalesce(
+                func.sum(case((speed_eligible, LLMTrace.completion_tokens), else_=0)), 0
+            ).label("speed_tokens"),
+            func.coalesce(func.sum(case((speed_eligible, model_wait_ms()), else_=0)), 0).label(
+                "speed_wait_ms"
+            ),
         )
         .where(*filters, LLMTrace.model.is_not(None))
         .group_by(LLMTrace.model, LLMTrace.provider)
@@ -258,6 +301,9 @@ async def compute_trace_stats(
                     total_tokens=int(row.total_tokens or 0),
                     cost_usd=cost_value,
                     is_priced=is_priced,
+                    output_tokens_per_second=output_tokens_per_second(
+                        int(row.speed_tokens or 0), float(row.speed_wait_ms or 0.0)
+                    ),
                 )
             )
         else:

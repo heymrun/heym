@@ -3,27 +3,24 @@ import { computed } from "vue";
 
 import type { TraceStatsResponse } from "@/types/trace";
 
+import TraceModelDonut from "@/components/Traces/TraceModelDonut.vue";
+import TraceModelSpeedChart from "@/components/Traces/TraceModelSpeedChart.vue";
 import Card from "@/components/ui/Card.vue";
 import { useThemeStore } from "@/stores/theme";
 
 interface Props {
+  /** Every model in the window; the model charts offer these to pick from. */
   stats: TraceStatsResponse | null;
+  /** Narrowed to the picked model, or the same as `stats` when none is picked. */
+  scopedStats: TraceStatsResponse | null;
   loading: boolean;
-}
-
-interface ApexDonutTooltipContext {
-  series: number[];
-  seriesIndex: number;
-  w: {
-    globals?: {
-      labels?: string[];
-    };
-  };
+  selectedModel: string | null;
 }
 
 const props = defineProps<Props>();
 const emit = defineEmits<{
   (e: "configure-pricing", model: string): void;
+  (e: "select-model", model: string | null): void;
 }>();
 const themeStore = useThemeStore();
 
@@ -46,28 +43,12 @@ function fmtMs(value: number): string {
   return `${Math.round(value)} ms`;
 }
 
-const htmlEscapeMap: Record<string, string> = {
-  "&": "&amp;",
-  "<": "&lt;",
-  ">": "&gt;",
-  "\"": "&quot;",
-  "'": "&#39;",
-};
-
-function escapeHtml(value: string): string {
-  return value.replace(/[&<>"']/g, (char) => htmlEscapeMap[char] ?? char);
+function fmtTokens(value: number): string {
+  return `${fmtNum(value)} tokens`;
 }
 
-function formatDonutTooltip(
-  context: ApexDonutTooltipContext,
-  valueFormatter: (value: number) => string,
-): string {
-  const label = context.w.globals?.labels?.[context.seriesIndex] ?? "Model";
-  const value = context.series[context.seriesIndex] ?? 0;
-  return `<div class="trace-donut-tooltip">${escapeHtml(label)}: <strong>${escapeHtml(valueFormatter(value))}</strong></div>`;
-}
-
-const kpis = computed(() => props.stats?.kpis ?? null);
+const kpis = computed(() => props.scopedStats?.kpis ?? null);
+const models = computed(() => props.stats?.by_model ?? []);
 const chartTheme = computed(() => themeStore.isDark ? "dark" : "light");
 const chartTextColor = computed(() => themeStore.isDark ? "#e5e7eb" : "#111827");
 const chartMutedTextColor = computed(() => themeStore.isDark ? "#94a3b8" : "#64748b");
@@ -75,54 +56,17 @@ const chartGridColor = computed(() =>
   themeStore.isDark ? "rgba(148, 163, 184, 0.24)" : "rgba(100, 116, 139, 0.22)",
 );
 
-const hasModelData = computed(() => (props.stats?.by_model.length ?? 0) > 0);
-const hasTimeData = computed(() => (props.stats?.by_time.length ?? 0) > 0);
+const hasModelData = computed(() => models.value.length > 0);
+const hasTimeData = computed(() => (props.scopedStats?.by_time.length ?? 0) > 0);
 
-const tokensByModelOptions = computed(() => ({
-  chart: {
-    type: "donut" as const,
-    fontFamily: "inherit",
-    background: "transparent",
-    foreColor: chartMutedTextColor.value,
-    toolbar: { show: false },
-  },
-  labels: (props.stats?.by_model ?? []).map((m) => m.model),
-  legend: { position: "bottom" as const, labels: { colors: chartTextColor.value } },
-  dataLabels: { enabled: false },
-  theme: { mode: chartTheme.value },
-  tooltip: {
-    fillSeriesColor: false,
-    custom: (context: ApexDonutTooltipContext): string =>
-      formatDonutTooltip(context, (val) => `${fmtNum(val)} tokens`),
-    y: { formatter: (val: number) => `${fmtNum(val)} tokens` },
-  },
-}));
-const tokensByModelSeries = computed(() =>
-  (props.stats?.by_model ?? []).map((m) => m.total_tokens),
-);
-
-const costByModelOptions = computed(() => ({
-  chart: {
-    type: "donut" as const,
-    fontFamily: "inherit",
-    background: "transparent",
-    foreColor: chartMutedTextColor.value,
-    toolbar: { show: false },
-  },
-  labels: (props.stats?.by_model ?? []).map((m) => m.model),
-  legend: { position: "bottom" as const, labels: { colors: chartTextColor.value } },
-  dataLabels: { enabled: false },
-  theme: { mode: chartTheme.value },
-  tooltip: {
-    fillSeriesColor: false,
-    custom: (context: ApexDonutTooltipContext): string =>
-      formatDonutTooltip(context, (val) => fmtCost(val)),
-    y: { formatter: (val: number) => fmtCost(val) },
-  },
-}));
+const tokensByModelSeries = computed(() => models.value.map((m) => m.total_tokens));
 const costByModelSeries = computed(() =>
-  (props.stats?.by_model ?? []).map((m) => parseFloat(m.cost_usd) || 0),
+  models.value.map((m) => parseFloat(m.cost_usd) || 0),
 );
+
+function selectModel(model: string | null): void {
+  emit("select-model", model);
+}
 
 const callsOverTimeOptions = computed(() => ({
   chart: {
@@ -153,7 +97,7 @@ const callsOverTimeOptions = computed(() => ({
   tooltip: { theme: chartTheme.value },
 }));
 const callsOverTimeSeries = computed(() => {
-  const buckets = props.stats?.by_time ?? [];
+  const buckets = props.scopedStats?.by_time ?? [];
   return [
     {
       name: "Success",
@@ -167,7 +111,7 @@ const callsOverTimeSeries = computed(() => {
 });
 
 const hasCostData = computed(() => costByModelSeries.value.some((v) => v > 0));
-const unpricedModels = computed(() => kpis.value?.unpriced_models ?? []);
+const unpricedModels = computed(() => props.stats?.kpis.unpriced_models ?? []);
 const showUnpriced = computed(() => unpricedModels.value.length > 0);
 </script>
 
@@ -238,7 +182,7 @@ const showUnpriced = computed(() => unpricedModels.value.length > 0);
       </Card>
     </div>
 
-    <div class="grid gap-4 md:grid-cols-3">
+    <div class="grid gap-4 md:grid-cols-2">
       <Card
         variant="flat"
         :hover="false"
@@ -253,12 +197,13 @@ const showUnpriced = computed(() => unpricedModels.value.length > 0);
         >
           No data
         </div>
-        <apexchart
+        <TraceModelDonut
           v-else
-          type="donut"
-          height="240"
-          :options="tokensByModelOptions"
-          :series="tokensByModelSeries"
+          :models="models"
+          :values="tokensByModelSeries"
+          :format-value="fmtTokens"
+          :selected-model="selectedModel"
+          @select="selectModel"
         />
       </Card>
       <Card
@@ -275,12 +220,13 @@ const showUnpriced = computed(() => unpricedModels.value.length > 0);
         >
           {{ !hasModelData ? "No data" : "No pricing configured" }}
         </div>
-        <apexchart
+        <TraceModelDonut
           v-else
-          type="donut"
-          height="240"
-          :options="costByModelOptions"
-          :series="costByModelSeries"
+          :models="models"
+          :values="costByModelSeries"
+          :format-value="fmtCost"
+          :selected-model="selectedModel"
+          @select="selectModel"
         />
         <div
           v-if="showUnpriced"
@@ -319,6 +265,28 @@ const showUnpriced = computed(() => unpricedModels.value.length > 0);
           height="240"
           :options="callsOverTimeOptions"
           :series="callsOverTimeSeries"
+        />
+      </Card>
+      <Card
+        variant="flat"
+        :hover="false"
+        class="trace-chart-card p-3"
+      >
+        <div class="flex items-baseline justify-between gap-2 mb-2">
+          <div class="text-sm font-medium truncate">
+            Tokens/sec by Model
+          </div>
+          <div
+            class="text-[11px] text-muted-foreground shrink-0"
+            title="Output tokens divided by the time spent waiting on the model, network and first token included. Successful calls only; tool time is excluded."
+          >
+            output, end to end
+          </div>
+        </div>
+        <TraceModelSpeedChart
+          :models="models"
+          :selected-model="selectedModel"
+          @select="selectModel"
         />
       </Card>
     </div>
@@ -360,22 +328,5 @@ const showUnpriced = computed(() => unpricedModels.value.length > 0);
 .trace-chart-card :deep(.apexcharts-xaxistooltip) {
   background: hsl(var(--popover)) !important;
   border-color: hsl(var(--border)) !important;
-}
-
-:global(.trace-donut-tooltip) {
-  border: 1px solid hsl(var(--border));
-  border-radius: 0.5rem;
-  background: hsl(var(--popover));
-  color: hsl(var(--popover-foreground));
-  padding: 0.5rem 0.75rem;
-  box-shadow: 0 12px 30px hsl(var(--background) / 0.3);
-  font-size: 0.875rem;
-  font-weight: 500;
-  line-height: 1.4;
-}
-
-:global(.trace-donut-tooltip strong) {
-  color: hsl(var(--foreground));
-  font-weight: 700;
 }
 </style>

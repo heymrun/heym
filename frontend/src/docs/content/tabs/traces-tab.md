@@ -13,6 +13,7 @@ The page opens with a stats summary above the trace list, computed across the se
 - **Tokens by Model** – Donut chart of token volume per model
 - **Cost by Model** – Donut chart of USD spend per model. Models without pricing show a "Configure pricing" link to the [LLM Cost Table](./datatable-tab.md#llm-cost-table-system-table)
 - **Calls Over Time** – Stacked area chart of successful vs failed calls per bucket (5 min / 1 h / 6 h / 1 day, chosen automatically per range)
+- **Tokens/sec by Model**: Output speed per model as the caller experiences it: completion tokens divided by the time spent waiting on the model, network and first-token wait included. Only successful calls with output count; for Dashboard Chat turns, time spent running tools is left out. Models are sorted fastest first
 - **Unpriced models notice** – Appears below the charts when some traced models have no pricing row, linking to the LLM Cost Table
 
 ## Time Range

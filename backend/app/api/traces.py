@@ -38,6 +38,7 @@ async def list_traces(
     source: str | None = None,
     status_filter: str | None = Query(None, alias="status"),
     search: str | None = Query(None),
+    model: str | None = None,
     order: str = Query("desc", pattern="^(asc|desc)$"),
     range: str | None = Query(None, description="Optional time window: 1h|24h|7d|30d|all"),
     current_user: User = Depends(get_current_user),
@@ -50,6 +51,7 @@ async def list_traces(
         workflow_id=workflow_id,
         source=source,
         status=status_filter,
+        model=model,
     )
     if range is not None:
         start_dt, _, _ = _resolve_range(range)
@@ -123,6 +125,7 @@ async def get_trace_stats(
     workflow_id: uuid.UUID | None = None,
     status_filter: str | None = Query(None, alias="status"),
     search: str | None = Query(None),
+    model: str | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> TraceStatsResponse:
@@ -137,6 +140,7 @@ async def get_trace_stats(
         workflow_id=workflow_id,
         source=source,
         status=status_filter,
+        model=model,
     )
     if start_dt is not None:
         filters.append(LLMTrace.created_at >= start_dt)

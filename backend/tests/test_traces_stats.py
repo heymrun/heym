@@ -4,7 +4,11 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from sqlalchemy import select
+from sqlalchemy.dialects import postgresql
+
 from app.api.traces import _resolve_range, get_trace_stats
+from app.services import trace_metrics
 
 
 class RangeResolverTests(unittest.TestCase):
@@ -106,6 +110,8 @@ class StatsEndpointTests(unittest.IsolatedAsyncioTestCase):
                 total_tokens=1000,
                 prompt_tokens=700,
                 completion_tokens=300,
+                speed_tokens=300,
+                speed_wait_ms=2000.0,
             ),
             MagicMock(
                 model="unknown-x",
@@ -114,6 +120,8 @@ class StatsEndpointTests(unittest.IsolatedAsyncioTestCase):
                 total_tokens=500,
                 prompt_tokens=300,
                 completion_tokens=200,
+                speed_tokens=0,
+                speed_wait_ms=0,
             ),
         ]
         m_result = MagicMock()
@@ -170,6 +178,8 @@ class StatsEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.by_model[0].cost_usd, Decimal("0.10"))
         self.assertFalse(response.by_model[1].is_priced)
         self.assertEqual(response.by_model[1].cost_usd, Decimal("0"))
+        self.assertEqual(response.by_model[0].output_tokens_per_second, 150.0)
+        self.assertIsNone(response.by_model[1].output_tokens_per_second)
 
     async def test_by_model_collapses_other_after_top8(self):
         db = AsyncMock()
@@ -194,6 +204,8 @@ class StatsEndpointTests(unittest.IsolatedAsyncioTestCase):
                     total_tokens=1000 - i * 50,
                     prompt_tokens=500 - i * 25,
                     completion_tokens=500 - i * 25,
+                    speed_tokens=500 - i * 25,
+                    speed_wait_ms=1000.0,
                 )
             )
         m_result = MagicMock()
@@ -223,3 +235,27 @@ class StatsEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(response.by_model), 9)
         self.assertEqual(response.by_model[-1].model, "Other")
         self.assertTrue(response.by_model[-1].is_other)
+        self.assertEqual(response.by_model[0].output_tokens_per_second, 500.0)
+        # A speed across mixed models means nothing, so "Other" carries none.
+        self.assertIsNone(response.by_model[-1].output_tokens_per_second)
+
+
+class OutputSpeedTests(unittest.TestCase):
+    def test_tokens_over_wait_seconds(self):
+        self.assertEqual(trace_metrics.output_tokens_per_second(450, 3000.0), 150.0)
+        self.assertEqual(trace_metrics.output_tokens_per_second(1, 3.0), 333.3)
+
+    def test_none_without_tokens_or_time(self):
+        self.assertIsNone(trace_metrics.output_tokens_per_second(0, 1000.0))
+        self.assertIsNone(trace_metrics.output_tokens_per_second(100, 0.0))
+
+    def test_dashboard_chat_waits_on_turn_timings_not_the_whole_turn(self):
+        sql = str(
+            select(trace_metrics.model_wait_ms()).compile(
+                dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+            )
+        )
+        self.assertIn("llm_traces.source = 'dashboard_chat'", sql)
+        self.assertIn("json_array_elements(llm_traces.response -> 'turn_timings')", sql)
+        self.assertIn("->> 'durationMs'", sql)
+        self.assertIn("ELSE llm_traces.elapsed_ms END", sql)

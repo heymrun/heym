@@ -1941,6 +1941,7 @@ class TraceStatsByModel(BaseModel):
     cost_usd: Decimal
     is_priced: bool
     is_other: bool = False
+    output_tokens_per_second: float | None = None
 
 
 class TraceStatsByTime(BaseModel):

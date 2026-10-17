@@ -2644,6 +2644,7 @@ export const traceApi = {
     source?: string;
     status?: string;
     search?: string;
+    model?: string;
     order?: "asc" | "desc";
     range?: TraceTimeRange;
   }): Promise<LLMTraceListResponse> => {
@@ -2656,6 +2657,7 @@ export const traceApi = {
         source: params.source,
         status: params.status,
         search: params.search,
+        model: params.model,
         order: params.order,
         range: params.range,
       },
@@ -2679,6 +2681,7 @@ export const traceApi = {
     workflowId?: string;
     status?: string;
     search?: string;
+    model?: string;
   }): Promise<TraceStatsResponse> => {
     const response = await api.get<TraceStatsResponse>("/traces/stats", {
       params: {
@@ -2688,6 +2691,7 @@ export const traceApi = {
         workflow_id: params.workflowId,
         status: params.status,
         search: params.search,
+        model: params.model,
       },
     });
     return response.data;

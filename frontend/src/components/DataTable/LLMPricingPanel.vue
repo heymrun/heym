@@ -23,6 +23,9 @@ const props = withDefaults(defineProps<Props>(), {
   embedded: false,
   autoOpenAddDialog: false,
 });
+const emit = defineEmits<{
+  (e: "pricing-changed"): void;
+}>();
 
 const rows = ref<LLMPricingRow[]>([]);
 const syncStatus = ref<LLMPricingSyncStatus | null>(null);
@@ -106,6 +109,7 @@ function pollUntilSyncSettles(timeoutMs = 30_000, intervalMs = 1_500): void {
       if (changed) {
         syncStatus.value = status;
         rows.value = await llmPricingApi.list();
+        emit("pricing-changed");
         return;
       }
     } catch {
@@ -172,6 +176,7 @@ async function clearAll(): Promise<void> {
   clearing.value = true;
   try {
     await llmPricingApi.clearAll();
+    emit("pricing-changed");
     await loadAll();
   } catch {
     error.value = "Failed to clear customizations";
@@ -216,6 +221,7 @@ async function saveEdit(row: LLMPricingRow): Promise<void> {
     const idx = rows.value.findIndex((r) => r.model === row.model);
     if (idx >= 0) rows.value[idx] = updated;
     editingId.value = null;
+    emit("pricing-changed");
   } catch {
     error.value = `Failed to update ${row.model}`;
   }
@@ -226,6 +232,7 @@ async function resetOverride(row: LLMPricingRow): Promise<void> {
   if (!confirm(`Reset pricing for ${row.model} to default?`)) return;
   try {
     await llmPricingApi.deleteOverride(row.model);
+    emit("pricing-changed");
     await loadAll();
   } catch {
     error.value = `Failed to reset ${row.model}`;
@@ -237,6 +244,7 @@ async function deleteCustom(row: LLMPricingRow): Promise<void> {
   if (!confirm(`Delete custom row ${row.model}?`)) return;
   try {
     await llmPricingApi.deleteOverride(row.model);
+    emit("pricing-changed");
     await loadAll();
   } catch {
     error.value = `Failed to delete ${row.model}`;
@@ -258,6 +266,7 @@ async function submitAdd(): Promise<void> {
     });
     showAddDialog.value = false;
     addForm.value = { model: "", input: "", output: "" };
+    emit("pricing-changed");
     await loadAll();
   } catch (err) {
     addError.value =

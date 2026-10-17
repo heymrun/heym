@@ -76,6 +76,12 @@ const error = ref("");
 const timeRange = ref<TraceTimeRange>("7d");
 const stats = ref<TraceStatsResponse | null>(null);
 const statsLoading = ref(false);
+// A model picked on a chart narrows the KPIs, Calls Over Time and the list; the model
+// charts keep `stats` so the other models stay there to pick.
+const modelFilter = ref<string | null>(null);
+const modelStats = ref<TraceStatsResponse | null>(null);
+const modelStatsLoading = ref(false);
+let modelStatsRequest = 0;
 
 const credentials = ref<CredentialListItem[]>([]);
 const workflows = ref<WorkflowListItem[]>([]);
@@ -315,6 +321,7 @@ async function loadTraces(): Promise<void> {
           ? workflowFilter.value
           : undefined,
       search: searchQuery.value || undefined,
+      model: modelFilter.value ?? undefined,
       order: "desc",
       range: timeRange.value,
     });
@@ -349,8 +356,72 @@ async function loadStats(): Promise<void> {
   }
 }
 
+async function loadModelStats(): Promise<void> {
+  const requestId = ++modelStatsRequest;
+  if (!modelFilter.value) {
+    modelStats.value = null;
+    modelStatsLoading.value = false;
+    return;
+  }
+  modelStatsLoading.value = true;
+  try {
+    const response = await traceApi.stats({
+      range: timeRange.value,
+      source: sourceFilter.value === "all" ? undefined : sourceFilter.value,
+      credentialId: credentialFilter.value === "all" ? undefined : credentialFilter.value,
+      workflowId:
+        isWorkflowSource.value && workflowFilter.value !== "all"
+          ? workflowFilter.value
+          : undefined,
+      search: searchQuery.value || undefined,
+      model: modelFilter.value,
+    });
+    if (requestId === modelStatsRequest) modelStats.value = response;
+  } catch {
+    if (requestId === modelStatsRequest) modelStats.value = null;
+  } finally {
+    if (requestId === modelStatsRequest) modelStatsLoading.value = false;
+  }
+}
+
 async function loadAll(): Promise<void> {
-  await Promise.all([loadTraces(), loadStats()]);
+  await Promise.all([loadTraces(), loadStats(), loadModelStats()]);
+}
+
+// While the first narrowed response is in flight, keep drawing the unnarrowed one.
+const scopedStats = computed(() => {
+  if (!modelFilter.value) return stats.value;
+  return modelStats.value ?? (modelStatsLoading.value ? stats.value : null);
+});
+const scopedStatsLoading = computed(() =>
+  modelFilter.value ? modelStatsLoading.value : statsLoading.value,
+);
+
+function selectModel(model: string | null): void {
+  modelFilter.value = model;
+}
+
+// Pressing anything but a model mark or a control drops the picked model. This listens
+// for pointerdown because the chart redraws on selection, and the click that follows
+// lands on its container instead of the slice that was pressed.
+const KEEPS_MODEL_PICK = [
+  ".apexcharts-pie-area",
+  ".apexcharts-bar-area",
+  ".apexcharts-legend-series",
+  "button",
+  "a",
+  "input",
+  "select",
+  "textarea",
+  "label",
+  "[role='button']",
+  "[role='dialog']",
+].join(", ");
+
+function dropModelOnOutsidePress(event: PointerEvent): void {
+  if (!modelFilter.value || detailOpen.value || pricingDialogOpen.value) return;
+  if (event.target instanceof Element && event.target.closest(KEEPS_MODEL_PICK)) return;
+  modelFilter.value = null;
 }
 
 function resetPagination(): void {
@@ -479,9 +550,15 @@ function handlePricingDialogEscape(event: KeyboardEvent): void {
   }
 }
 
+// Escape and mobile back arrive here. An open dialog closes first, so backing out of a
+// trace keeps the picked model; the next dismiss drops it.
 function closeOverlays(): void {
-  closeDetail();
-  closePricingDialog();
+  if (detailOpen.value || pricingDialogOpen.value) {
+    closeDetail();
+    closePricingDialog();
+    return;
+  }
+  modelFilter.value = null;
 }
 
 async function openTraceFromRoute(): Promise<void> {
@@ -549,6 +626,12 @@ watch([timeRange, sourceFilter, credentialFilter, workflowFilter], () => {
   loadAll();
 });
 
+watch(modelFilter, () => {
+  resetPagination();
+  loadTraces();
+  loadModelStats();
+});
+
 watch(
   () => route.query.traceId,
   async (traceId) => {
@@ -575,9 +658,11 @@ onMounted(async () => {
   await openTraceFromRoute();
   const unsub = onDismissOverlays(closeOverlays);
   document.addEventListener("keydown", handleKeyDown);
+  document.addEventListener("pointerdown", dropModelOnOutsidePress);
   onBeforeUnmount(() => {
     unsub();
     document.removeEventListener("keydown", handleKeyDown);
+    document.removeEventListener("pointerdown", dropModelOnOutsidePress);
   });
 });
 </script>
@@ -594,6 +679,17 @@ onMounted(async () => {
         </p>
       </div>
       <div class="flex items-center gap-2 w-full md:w-auto">
+        <button
+          v-if="modelFilter"
+          type="button"
+          class="inline-flex min-w-0 max-w-[16rem] items-center gap-1.5 rounded-full border border-primary/40 bg-primary/10 px-3 h-8 text-xs text-foreground transition-colors hover:bg-primary/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+          :title="`Showing ${modelFilter} only. Click to show every model.`"
+          @click="selectModel(null)"
+        >
+          <span class="text-muted-foreground shrink-0">Model</span>
+          <span class="font-mono truncate">{{ modelFilter }}</span>
+          <X class="w-3.5 h-3.5 shrink-0" />
+        </button>
         <Button
           variant="outline"
           size="sm"
@@ -652,8 +748,11 @@ onMounted(async () => {
 
     <TracesStatsHeader
       :stats="stats"
-      :loading="statsLoading"
+      :scoped-stats="scopedStats"
+      :loading="scopedStatsLoading"
+      :selected-model="modelFilter"
       @configure-pricing="openPricingDialog"
+      @select-model="selectModel"
     />
 
     <div class="space-y-4">
@@ -815,6 +914,7 @@ onMounted(async () => {
         :initial-models="pricingDialogModels"
         auto-open-add-dialog
         embedded
+        @pricing-changed="loadAll"
       />
     </Dialog>
 
