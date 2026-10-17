@@ -25,6 +25,7 @@ from app.api.workflows import (
 from app.db.models import Credential, CredentialType, ExecutionHistory, Workflow
 from app.db.session import async_session_maker
 from app.services.cluster.dispatch import dispatch_workflow, log_offloaded_run
+from app.services.credential_access import get_accessible_credential
 from app.services.encryption import decrypt_config
 from app.services.global_variables_service import get_global_variables_context
 from app.services.hitl_service import build_default_public_base_url
@@ -106,6 +107,90 @@ def _is_bot_echo(body: dict[str, Any]) -> bool:
     if not isinstance(event, dict):
         return False
     return bool(event.get("bot_id")) or event.get("subtype") in _ECHO_SUBTYPES
+
+
+# Message subtypes that are still a person writing; joins, topic changes and the like are not.
+_PERSON_SUBTYPES = frozenset({None, "", "file_share", "thread_broadcast"})
+EVENT_SCOPES = frozenset({"all", "messages", "directMessages", "mentions", "channel"})
+
+
+def _event_matches(node_data: dict[str, Any], body: dict[str, Any]) -> bool:
+    """Whether a Slack Trigger node's `slackEventScope` lets this event start a run.
+
+    `all` (the default, and what older nodes have) starts on every event. The other scopes
+    start on a person's message: `messages` anywhere the bot hears, `directMessages` in a
+    DM with the bot, `mentions` when the bot is mentioned, `channel` in `slackEventChannel`.
+    """
+    scope = str(node_data.get("slackEventScope") or "all")
+    if scope == "all":
+        return True
+    event = body.get("event")
+    if not isinstance(event, dict):
+        return False
+    if scope == "mentions":
+        return event.get("type") == "app_mention"
+    if event.get("type") != "message" or event.get("subtype") not in _PERSON_SUBTYPES:
+        return False
+    if scope == "directMessages":
+        return event.get("channel_type") == "im"
+    if scope == "channel":
+        wanted = str(node_data.get("slackEventChannel") or "").strip()
+        return bool(wanted) and event.get("channel") == wanted
+    return scope == "messages"
+
+
+# event_id of deliveries already handled; Slack redelivers an event it believes timed out.
+_SEEN_EVENTS: dict[str, float] = {}
+_SEEN_EVENT_TTL_SECONDS = 3600
+
+
+def _first_delivery(event_id: object) -> bool:
+    """False for an event_id handled within the last hour."""
+    now = time.time()
+    for key, seen_at in list(_SEEN_EVENTS.items()):
+        if now - seen_at > _SEEN_EVENT_TTL_SECONDS:
+            _SEEN_EVENTS.pop(key, None)
+    key = str(event_id or "")
+    if not key:
+        return True
+    if key in _SEEN_EVENTS:
+        return False
+    _SEEN_EVENTS[key] = now
+    return True
+
+
+async def _listening_triggers(
+    db: AsyncSession, credential_id: str
+) -> list[tuple[Workflow, str, dict[str, Any]]]:
+    """Active Slack Trigger nodes on this credential, in workflows whose owner may use it."""
+    try:
+        cred_uuid = uuid.UUID(credential_id)
+    except (ValueError, AttributeError):
+        return []
+    result = await db.execute(
+        select(Workflow).where(
+            text("nodes::jsonb @> (:node_filter)::jsonb").bindparams(
+                node_filter=json.dumps(
+                    [{"type": "slackTrigger", "data": {"credentialId": credential_id}}]
+                )
+            )
+        )
+    )
+    targets: list[tuple[Workflow, str, dict[str, Any]]] = []
+    for workflow in result.scalars():
+        # Someone else's credential id pasted into a node must not receive that workspace's events.
+        if await get_accessible_credential(db, cred_uuid, workflow.owner_id) is None:
+            continue
+        for node in workflow.nodes or []:
+            data = node.get("data") if isinstance(node, dict) else None
+            if (
+                isinstance(data, dict)
+                and node.get("type") == "slackTrigger"
+                and data.get("credentialId") == credential_id
+                and data.get("active", True) is not False
+            ):
+                targets.append((workflow, str(node.get("id")), data))
+    return targets
 
 
 async def _is_bot_credential(db: AsyncSession, credential_id: str) -> bool:
@@ -383,6 +468,8 @@ async def slack_webhook(node_id: str, request: Request) -> dict[str, Any]:
         async with async_session_maker() as db:
             if await _is_bot_credential(db, credential_id):
                 return {"ok": True}
+    if trigger_node and not _event_matches(trigger_node.get("data") or {}, body):
+        return {"ok": True}
 
     # Build safe headers (strip sensitive ones)
     safe_headers = {k: v for k, v in request.headers.items() if k.lower() not in _SENSITIVE_HEADERS}
@@ -390,4 +477,50 @@ async def slack_webhook(node_id: str, request: Request) -> dict[str, Any]:
     # Fire workflow execution as background task — Slack requires 200 within 3s
     asyncio.create_task(_execute_workflow_background(workflow, node_id, body, safe_headers))
 
+    return {"ok": True}
+
+
+@router.post("/events/{credential_id}")
+async def slack_events(credential_id: str, request: Request) -> dict[str, Any]:
+    """Receive a Slack app's events once and start every Slack Trigger that listens to them.
+
+    A Slack app has one Event Subscriptions URL. Pointing it here, at the credential, lets
+    any number of workflows on that credential listen, each with its own scope (DMs,
+    mentions, one channel). Signatures are checked with the credential's signing secret.
+    """
+    raw_body = await request.body()
+    try:
+        body: dict[str, Any] = json.loads(raw_body)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON body")
+    if body.get("type") == "url_verification":
+        return {"challenge": body.get("challenge", "")}
+
+    async with async_session_maker() as db:
+        signing_secret = await _get_signing_secret(db, credential_id)
+    if not signing_secret:
+        logger.warning("Slack events rejected: credential %s has no signing secret", credential_id)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="invalid webhook credential configuration",
+        )
+    timestamp = request.headers.get("x-slack-request-timestamp", "")
+    signature = request.headers.get("x-slack-signature", "")
+    if not _verify_slack_signature(signing_secret, raw_body, timestamp, signature):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid Slack signature")
+    if not _first_delivery(body.get("event_id")):
+        return {"ok": True}
+
+    async with async_session_maker() as db:
+        if _is_bot_echo(body) and await _is_bot_credential(db, credential_id):
+            return {"ok": True}
+        targets = await _listening_triggers(db, credential_id)
+
+    safe_headers = {k: v for k, v in request.headers.items() if k.lower() not in _SENSITIVE_HEADERS}
+    started = 0
+    for workflow, node_id, node_data in targets:
+        if _event_matches(node_data, body):
+            asyncio.create_task(_execute_workflow_background(workflow, node_id, body, safe_headers))
+            started += 1
+    logger.info("Slack event for credential %s started %d workflow(s)", credential_id, started)
     return {"ok": True}

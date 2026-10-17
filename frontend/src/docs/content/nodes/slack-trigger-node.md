@@ -15,6 +15,16 @@ The **Slack Trigger** node is a zero-input entry point that receives Slack Event
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `credentialId` | UUID | `slack_trigger` credential, or a `slack_bot` credential with a signing secret |
+| `slackEventScope` | string | What starts a run: `all` (default, every event), `messages` (a person's message in a channel or DM), `directMessages` (DMs to the bot), `mentions` (the bot is mentioned), `channel` (messages in one channel) |
+| `slackEventChannel` | string | Channel ID for the `channel` scope, e.g. `C0123ABCD` |
+
+## One Slack app, many workflows
+
+A Slack app has a single Event Subscriptions Request URL. Use the credential's events URL, `<Heym URL>/api/slack/events/<credential id>`, shown in the node panel and in the Slack Bot credential dialog. Every Slack Trigger that uses the credential hears the app's events, and each starts only for its own scope: one workflow can answer DMs while another watches `#support`. The node's own webhook URL still works when only that workflow should hear the app.
+
+## Direct messages
+
+To start on DMs, the app needs the `im:history` scope, the `message.im` bot event, and its **Messages Tab** turned on with "Allow users to send Slash commands and messages from the messages tab". The manifest from a Slack Bot credential sets all three. A DM arrives with `$nodeLabel.event.channel_type` set to `im`, and a reply to `$nodeLabel.event.channel` answers in the same DM.
 
 ## Setup Guide
 

@@ -72,9 +72,10 @@ Branch on the answer with a [Condition](./condition-node.md) or [Switch](./switc
 
 1. In the credential dialog, choose **Slack Bot (Token)** and select **Copy app manifest**.
 2. At [api.slack.com/apps](https://api.slack.com/apps), create an app **from a manifest** and paste it. The manifest asks for every scope the operations need.
-3. Install the app to your workspace, then paste the **Bot User OAuth Token** and the **Signing Secret** into the credential and save it.
+3. Install the app to your workspace, then paste the **Bot User OAuth Token** and the **Signing Secret** into the credential and save it. Copy the manifest again after saving: it then also carries the credential's interactivity and events URLs.
 4. Open the credential again and copy its **Interactivity Request URL** into the Slack app under **Interactivity & Shortcuts**. Approvals, buttons and forms send their answers there.
-5. Invite the bot to private channels it should post in (`/invite @Heym`).
+5. For a [Slack Trigger](./slack-trigger-node.md), copy the credential's **Event Subscriptions Request URL** too. Every Slack Trigger on the credential hears messages, DMs and mentions through it.
+6. Invite the bot to private channels it should post in (`/invite @Heym`).
 
 The same Slack Bot credential also verifies [Slack Trigger](./slack-trigger-node.md) events. A flow that listens with it ignores the bot's own posts and edits, so replying in the channel it listens to does not start it again.
 

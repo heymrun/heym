@@ -39,6 +39,7 @@ from app.api import (
     folders,
     global_variables,
     google_drive_oauth,
+    google_sheets,
     google_sheets_oauth,
     hitl,
     linear_oauth,
@@ -409,6 +410,7 @@ app.include_router(data_tables.router, prefix="/api/data-tables", tags=["Data Ta
 app.include_router(decisions.router, prefix="/api/decisions", tags=["Decisions"])
 app.include_router(slack.router, prefix="/api/slack", tags=["Slack"])
 app.include_router(slack_bot.router, prefix="/api/slack", tags=["Slack"])
+app.include_router(google_sheets.router, prefix="/api/google-sheets", tags=["Google Sheets"])
 app.include_router(discord.router, prefix="/api/discord", tags=["Discord"])
 app.include_router(telegram.router, prefix="/api/telegram", tags=["Telegram"])
 app.include_router(schedules.router, prefix="/api/schedules", tags=["Schedules"])

@@ -225,8 +225,12 @@ In workflow expressions:
 - **Data fields**:
   - `label`: Node identifier (e.g., "slackEvent")
   - `credentialId`: UUID of a `slack_trigger` credential, or a `slack_bot` credential that has a signing secret
+  - `slackEventScope` (optional, default `"all"`): `"all"` (every event) | `"messages"` (a person's message in a channel or DM; no duplicate for mentions) | `"directMessages"` (DMs to the bot, `channel_type` `im`) | `"mentions"` (`app_mention`) | `"channel"` (messages in `slackEventChannel`)
+  - `slackEventChannel`: channel id (`C…`) for `slackEventScope: "channel"`
+- **Request URL**: `<Heym URL>/api/slack/events/<credentialId>` is one URL per Slack app that starts every Slack Trigger on that credential, each filtered by its own scope; `/api/slack/webhook/<node id>` starts only that node. With a `slack_bot` credential the bot's own posts and edits never start a run.
 - **Output fields available downstream**:
   - `$<label>.event` — full Slack event object
+  - `$<label>.event.channel_type` — `"im"` for a DM, `"channel"` or `"group"` otherwise
   - `$<label>.event.type` — event type (e.g., `"message"`, `"reaction_added"`)
   - `$<label>.event.text` — message text (when applicable)
   - `$<label>.event.user` — Slack user ID who triggered the event
@@ -2670,7 +2674,7 @@ When creating or updating records in Grist, you MUST use **column IDs** (interna
   - `gsUpdateRow`: for `updateRange` — 1-based sheet row where values are written (columns A–Z); if omitted, `gsStartRow` is used. Single values API PUT, not spreadsheets.batchUpdate. Supports expressions.
   - `gsRange`: A1 notation range, e.g., "A1:D10" (legacy examples; read uses start/max/header fields in the product)
   - `gsKeepHeader`: boolean, optional for `clearRange` — when true, row 1 is preserved and rows below are cleared (columns A–Z)
-  - `gsValues`: JSON 2D array of values, e.g., `[["Name","Age"],["Alice",30]]` (required for appendRows, updateRange)
+  - `gsValues`: JSON 2D array of values, e.g., `[["Name","Age"],["Alice",30]]` (required for appendRows, updateRange). Put one expression per cell, e.g. `[["$mail.email.subject", "$mail.email.text"]]`: each cell is resolved on its own, so quotes and line breaks in values cannot break the JSON
   - `gsAppendPlacement`: optional `"append"` | `"prepend"` for appendRows — prepend inserts under row 1 via the Sheets API (batch insert rows + write)
   - `gsValuesInputMode`: optional `"raw"` | `"selective"` for appendRows/updateRange — selective is one row, per-column fields; stored `gsValues` is a JSON 2D array (usually one inner row)
 

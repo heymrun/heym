@@ -28,7 +28,7 @@ The **Google Sheets** node reads, writes, and manages data in Google Sheets spre
 | `gsAppendPlacement` | `append` \| `prepend` | For `appendRows` only: **Bottom** adds after the last row with data; **Top** inserts new rows directly under row 1 (shifts data down). |
 | `gsValuesInputMode` | `raw` \| `selective` | For `appendRows` / `updateRange`: **Raw** = full JSON array; **Selective** = one sheet row, column fields only (no A1 labels). |
 | `gsValuesSelectiveCols` | string | Selective mode: number of columns (A–Z). |
-| `gsValues` | expression | JSON 2D array of values (e.g. `[["Name","Age"],["Alice",30]]`). Required for `appendRows`, `updateRange`. |
+| `gsValues` | expression | JSON 2D array of values (e.g. `[["Name","Age"],["Alice",30]]`). Required for `appendRows`, `updateRange`. Each cell is resolved on its own, so a value with quotes or line breaks, such as an email body, is written as it is. |
 
 ## Spreadsheet ID
 

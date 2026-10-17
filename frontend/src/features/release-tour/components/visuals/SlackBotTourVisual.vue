@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { CircleCheck, Hash, MessageSquareReply, PauseCircle } from "lucide-vue-next";
+import { CircleCheck, CornerDownRight, Hash, PauseCircle } from "lucide-vue-next";
 
 import { useCycleStep } from "@/features/release-tour/useCycleStep";
 
 // Mock UI only. 0: the approval is posted and the run waits · 1: someone presses Approve ·
 // 2: the buttons turn into who approved · 3: the outcome lands in the same thread.
-const step = useCycleStep(4, 1500);
+const step = useCycleStep(4, 1600);
 
 const pressed = computed<boolean>(() => step.value === 1);
 const answered = computed<boolean>(() => step.value >= 2);
@@ -21,12 +21,12 @@ const caption = computed<string>(() => {
 </script>
 
 <template>
-  <div class="flex h-full w-full flex-col justify-between gap-2 rounded-lg bg-card p-3">
-    <div class="flex items-center gap-1 text-[10px] leading-none text-muted-foreground">
-      <Hash class="h-3 w-3" />finance-approvals
+  <div class="flex h-full w-full flex-col gap-2.5 rounded-lg bg-card p-3.5">
+    <div class="flex items-center gap-1 text-[11px] leading-none text-muted-foreground">
+      <Hash class="h-3.5 w-3.5" />finance-approvals
       <span
-        class="ml-auto flex items-center gap-1 rounded px-1.5 py-0.5 transition-colors duration-500"
-        :class="answered ? 'bg-success/15 text-success' : 'bg-primary/10 text-primary'"
+        class="ml-auto flex items-center gap-1 rounded-full px-2 py-1 transition-colors duration-500"
+        :class="answered ? 'bg-[hsl(var(--success)/0.15)] text-[hsl(var(--success))]' : 'bg-primary/10 text-primary'"
       >
         <PauseCircle
           v-if="!answered"
@@ -40,41 +40,51 @@ const caption = computed<string>(() => {
       </span>
     </div>
 
-    <div class="rounded-md border border-border/60 bg-background p-2">
-      <p class="text-[10px] font-semibold leading-tight text-foreground">
-        Heym
-      </p>
-      <p class="mt-0.5 text-[10px] leading-tight text-muted-foreground">
-        Refund of $420 for Acme Ltd?
-      </p>
-      <div
-        v-if="!answered"
-        class="mt-1.5 flex gap-1"
+    <div class="flex gap-2.5 rounded-md border border-border/60 bg-background p-2.5">
+      <img
+        src="/fav.svg"
+        alt=""
+        class="h-6 w-6 shrink-0"
       >
-        <span
-          class="rounded border px-1.5 py-0.5 text-[9px] leading-none transition-all duration-300"
-          :class="pressed ? 'scale-95 border-success bg-success text-success-foreground' : 'border-success/60 text-success'"
-        >Approve</span>
-        <span class="rounded border border-border/60 px-1.5 py-0.5 text-[9px] leading-none text-muted-foreground">Request changes</span>
-        <span class="rounded border border-destructive/60 px-1.5 py-0.5 text-[9px] leading-none text-destructive">Reject</span>
+      <div class="min-w-0 flex-1">
+        <p class="text-[11px] font-semibold leading-tight text-foreground">
+          Heym
+        </p>
+        <p class="mt-1 text-[11px] leading-tight text-muted-foreground">
+          Refund of $420 for Acme Ltd?
+        </p>
+        <div class="mt-2 flex h-5 items-center gap-1.5">
+          <template v-if="!answered">
+            <span
+              class="rounded border px-2 py-1 text-[9px] leading-none transition-all duration-300"
+              :class="pressed ? 'scale-95 border-[hsl(var(--success))] bg-[hsl(var(--success))] text-[hsl(var(--success-foreground))]' : 'border-[hsl(var(--success)/0.6)] text-[hsl(var(--success))]'"
+            >Approve</span>
+            <span class="rounded border border-border/60 px-2 py-1 text-[9px] leading-none text-muted-foreground">Request changes</span>
+            <span class="rounded border border-destructive/60 px-2 py-1 text-[9px] leading-none text-destructive">Reject</span>
+          </template>
+          <span
+            v-else
+            class="flex items-center gap-1 text-[10px] leading-none text-[hsl(var(--success))]"
+          >
+            <CircleCheck class="h-3 w-3" />Approved by @ana
+          </span>
+        </div>
       </div>
-      <p
-        v-else
-        class="mt-1.5 text-[9px] leading-none text-muted-foreground"
-      >
-        Approved by @ana
-      </p>
     </div>
 
     <div
-      class="flex items-center gap-1.5 rounded-md border-l-2 border-success bg-background px-2 py-1 text-[10px] leading-none transition-opacity duration-500"
-      :class="outcome ? 'opacity-100' : 'opacity-0'"
+      class="ml-4 flex items-center gap-2 transition-all duration-500"
+      :class="outcome ? 'translate-y-0 opacity-100' : 'translate-y-1 opacity-0'"
     >
-      <MessageSquareReply class="h-3 w-3 text-muted-foreground" />
-      <span class="text-foreground">Refund approved</span>
+      <CornerDownRight class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+      <span class="flex flex-1 items-center gap-2 rounded-md border border-border/60 bg-background px-2.5 py-1.5 text-[11px] leading-none text-foreground">
+        <span class="h-2 w-2 shrink-0 rounded-full bg-[hsl(var(--success))]" />
+        Refund approved
+        <span class="ml-auto text-[9px] text-muted-foreground">in thread</span>
+      </span>
     </div>
 
-    <p class="truncate text-[10px] leading-none text-muted-foreground">
+    <p class="mt-auto truncate text-[10px] leading-4 text-muted-foreground">
       {{ caption }}
     </p>
   </div>

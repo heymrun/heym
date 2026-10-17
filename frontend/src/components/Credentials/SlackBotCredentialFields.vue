@@ -4,7 +4,7 @@ import { Check, Copy } from "lucide-vue-next";
 
 import Input from "@/components/ui/Input.vue";
 import Label from "@/components/ui/Label.vue";
-import { slackAppManifest, slackInteractivityUrl } from "@/components/Credentials/slackBotSetup";
+import { slackAppManifest, slackEventsUrl, slackInteractivityUrl } from "@/components/Credentials/slackBotSetup";
 
 const props = defineProps<{
   credentialId: string;
@@ -14,14 +14,16 @@ const props = defineProps<{
 
 const botToken = defineModel<string>("botToken", { required: true });
 const signingSecret = defineModel<string>("signingSecret", { required: true });
-const copied = ref<"url" | "manifest" | null>(null);
+const copied = ref<"url" | "events" | "manifest" | null>(null);
 
 const interactivityUrl = computed((): string =>
   slackInteractivityUrl(props.publicBaseUrl, props.credentialId),
 );
+const eventsUrl = computed((): string => slackEventsUrl(props.publicBaseUrl, props.credentialId));
 
-async function copy(kind: "url" | "manifest"): Promise<void> {
-  const text = kind === "url" ? interactivityUrl.value : slackAppManifest(interactivityUrl.value);
+async function copy(kind: "url" | "events" | "manifest"): Promise<void> {
+  const urls = { url: interactivityUrl.value, events: eventsUrl.value };
+  const text = kind === "manifest" ? slackAppManifest(interactivityUrl.value, eventsUrl.value) : urls[kind];
   try {
     await navigator.clipboard.writeText(text);
     copied.value = kind;
@@ -92,8 +94,34 @@ async function copy(kind: "url" | "manifest"): Promise<void> {
       v-else
       class="text-muted-foreground"
     >
-      Save this credential to get its URL. Slack sends approvals, button clicks and forms there.
+      Save this credential to get its URLs. Slack sends approvals, button clicks and forms there.
     </p>
+    <template v-if="eventsUrl">
+      <p class="font-medium text-foreground">
+        Event Subscriptions Request URL
+      </p>
+      <div class="flex items-center gap-2">
+        <code class="min-w-0 flex-1 truncate rounded bg-background px-2 py-1">{{ eventsUrl }}</code>
+        <button
+          type="button"
+          class="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+          aria-label="Copy events URL"
+          @click="copy('events')"
+        >
+          <Check
+            v-if="copied === 'events'"
+            class="h-3.5 w-3.5"
+          />
+          <Copy
+            v-else
+            class="h-3.5 w-3.5"
+          />
+        </button>
+      </div>
+      <p class="text-muted-foreground">
+        Messages, DMs and mentions reach every Slack Trigger that uses this credential.
+      </p>
+    </template>
     <p class="text-muted-foreground">
       Create the Slack app from a manifest to get every scope at once:
       <button

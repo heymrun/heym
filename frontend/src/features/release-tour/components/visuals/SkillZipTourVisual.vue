@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { FileArchive, Sparkles } from "lucide-vue-next";
+import { FileArchive, FileCode2, Sparkles } from "lucide-vue-next";
 
 import { useCycleStep } from "@/features/release-tour/useCycleStep";
 
@@ -15,13 +15,14 @@ const caption = computed<string>(() => {
 </script>
 
 <template>
-  <div class="flex h-full w-full flex-col justify-between rounded-lg bg-card p-3">
-    <div class="flex items-center gap-2 text-[10px] text-muted-foreground">
+  <div class="flex h-full w-full flex-col gap-3 rounded-lg bg-card p-3.5">
+    <div class="flex items-center gap-2 text-[11px] leading-4 text-muted-foreground">
       <FileArchive class="h-3.5 w-3.5" />
       invoice-helper.zip
+      <span class="ml-auto rounded bg-muted px-1.5 text-[10px] leading-4">2 files</span>
     </div>
     <div
-      class="rounded-md border px-2 py-2 text-[10px] leading-snug transition-colors duration-500"
+      class="rounded-md border px-2.5 py-2.5 text-[11px] leading-snug transition-colors duration-500"
       :class="step > 0 ? 'border-primary/60 bg-primary/10 text-foreground' : 'border-border bg-background text-muted-foreground'"
     >
       <p class="font-medium">
@@ -30,8 +31,19 @@ const caption = computed<string>(() => {
       <p class="mt-1">
         Read the invoice and list the line items.
       </p>
+      <p class="text-muted-foreground">
+        Total them and flag any line that does not add up.
+      </p>
     </div>
-    <div class="flex items-center justify-between text-[10px]">
+    <div
+      class="flex items-center gap-2 rounded-md border px-2.5 py-2.5 text-[11px] leading-4 transition-colors duration-500"
+      :class="step > 0 ? 'border-primary/30 text-foreground' : 'border-border bg-background text-muted-foreground'"
+    >
+      <FileCode2 class="h-3.5 w-3.5 shrink-0" />
+      line_items.py
+      <span class="ml-auto text-[10px] text-muted-foreground">Python tool</span>
+    </div>
+    <div class="mt-auto flex items-center justify-between text-[10px] leading-4">
       <span class="text-muted-foreground">{{ caption }}</span>
       <span
         class="flex items-center gap-1 rounded-md px-2 py-1 transition-colors duration-500"

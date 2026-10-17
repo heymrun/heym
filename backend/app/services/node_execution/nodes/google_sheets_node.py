@@ -1,6 +1,36 @@
 from __future__ import annotations
 
+import json
+from typing import Any
+
 from app.services.node_execution.base import NodeExecutionContext
+
+
+def _resolve_values(executor: Any, template: object, inputs: dict, node_id: str) -> list:
+    """The rows to write, with each cell's expressions resolved on its own.
+
+    Substituting into the whole JSON first breaks it as soon as a value holds a quote or
+    a line break, as email subjects and bodies do. A template that is not JSON yet, such as
+    one expression for every row, is resolved first and parsed after.
+    """
+    if isinstance(template, list):
+        rows = template
+    else:
+        try:
+            rows = json.loads(str(template or "[]"))
+        except ValueError:
+            return json.loads(executor.evaluate_message_template(str(template), inputs, node_id))
+    if not isinstance(rows, list):
+        raise ValueError("Google Sheets values must be a list of rows")
+    return [
+        [
+            executor.evaluate_message_template(cell, inputs, node_id)
+            if isinstance(cell, str) and "$" in cell
+            else cell
+            for cell in (row if isinstance(row, list) else [row])
+        ]
+        for row in rows
+    ]
 
 
 def execute(ctx: NodeExecutionContext) -> object:
@@ -9,8 +39,6 @@ def execute(ctx: NodeExecutionContext) -> object:
     node_id = ctx.node_id
     inputs = ctx.inputs
     node_data = ctx.node_data
-
-    import json as _json
 
     from app.db.session import SessionLocal
     from app.services.encryption import decrypt_config
@@ -73,20 +101,14 @@ def execute(ctx: NodeExecutionContext) -> object:
         if operation == "readRange":
             output = service.read_range(spreadsheet_id, sheet_name, start_row, max_rows, has_header)
         elif operation == "appendRows":
-            raw_values = self.evaluate_message_template(
-                node_data.get("gsValues", "[]"), inputs, node_id
-            )
-            values = _json.loads(raw_values)
+            values = _resolve_values(self, node_data.get("gsValues", "[]"), inputs, node_id)
             placement = (node_data.get("gsAppendPlacement") or "append").strip().lower()
             if placement == "prepend":
                 output = service.prepend_rows(spreadsheet_id, sheet_name, values)
             else:
                 output = service.append_rows(spreadsheet_id, sheet_name, values)
         elif operation == "updateRange":
-            raw_values = self.evaluate_message_template(
-                node_data.get("gsValues", "[]"), inputs, node_id
-            )
-            values = _json.loads(raw_values)
+            values = _resolve_values(self, node_data.get("gsValues", "[]"), inputs, node_id)
             output = service.update_range(spreadsheet_id, sheet_name, update_row, values)
         elif operation == "clearRange":
             keep_header = bool(node_data.get("gsKeepHeader", False))

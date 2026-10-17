@@ -237,7 +237,7 @@ onUnmounted(() => {
           v-else-if="currentSlide"
           class="p-4"
         >
-          <div class="h-[168px] overflow-hidden rounded-lg border border-border bg-surface-elevated">
+          <div class="h-[208px] overflow-hidden rounded-lg border border-border bg-surface-elevated">
             <Transition
               mode="out-in"
               enter-active-class="transition duration-200 ease-out"

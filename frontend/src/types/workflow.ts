@@ -517,6 +517,9 @@ export interface NodeData {
   slackOutcomeTitle?: string;
   slackEmoji?: string;
   slackLimit?: string;
+  /** slackTrigger: which events start a run (default all) and the channel for `channel`. */
+  slackEventScope?: string;
+  slackEventChannel?: string;
   duration?: number;
   cronExpression?: string;
   pollIntervalMinutes?: number;
