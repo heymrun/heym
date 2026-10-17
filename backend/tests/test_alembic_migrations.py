@@ -15,7 +15,13 @@ class AlembicMigrationGraphTest(unittest.TestCase):
         self.script = ScriptDirectory.from_config(config)
 
     def test_revision_graph_has_one_head(self) -> None:
-        self.assertEqual(self.script.get_heads(), ["139_add_slack_bot_credential"])
+        self.assertEqual(self.script.get_heads(), ["140_add_trigger_poll_state"])
+
+    def test_trigger_poll_state_follows_slack_bot_credential(self) -> None:
+        revision = self.script.get_revision("140_add_trigger_poll_state")
+
+        self.assertIsNotNone(revision)
+        self.assertEqual(revision.down_revision, "139_add_slack_bot_credential")
 
     def test_smtp_from_key_follows_chat_skill_write(self) -> None:
         revision = self.script.get_revision("137_add_smtp_from_key")
