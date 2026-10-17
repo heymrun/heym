@@ -6,6 +6,8 @@ import TelegramTriggerNodeProperties from "./TelegramTriggerNodeProperties.vue";
 import SlackTriggerNodeProperties from "./SlackTriggerNodeProperties.vue";
 import DiscordTriggerNodeProperties from "./DiscordTriggerNodeProperties.vue";
 import ImapTriggerNodeProperties from "./ImapTriggerNodeProperties.vue";
+import GoogleDriveTriggerNodeProperties from "./GoogleDriveTriggerNodeProperties.vue";
+import GoogleSheetsTriggerNodeProperties from "./GoogleSheetsTriggerNodeProperties.vue";
 import WebsocketTriggerNodeProperties from "./WebsocketTriggerNodeProperties.vue";
 import LlmNodeProperties from "./LlmNodeProperties.vue";
 import AgentNodeProperties from "./AgentNodeProperties.vue";
@@ -73,6 +75,8 @@ const { selectedNode } = usePropertiesPanelContext();
   <SlackTriggerNodeProperties v-else-if="selectedNode?.type === 'slackTrigger'" />
   <DiscordTriggerNodeProperties v-else-if="selectedNode?.type === 'discordTrigger'" />
   <ImapTriggerNodeProperties v-else-if="selectedNode?.type === 'imapTrigger'" />
+  <GoogleDriveTriggerNodeProperties v-else-if="selectedNode?.type === 'googleDriveTrigger'" />
+  <GoogleSheetsTriggerNodeProperties v-else-if="selectedNode?.type === 'googleSheetsTrigger'" />
   <HeymTriggerNodeProperties v-else-if="selectedNode?.type === 'heymTrigger'" />
   <WebsocketTriggerNodeProperties v-else-if="selectedNode?.type === 'websocketTrigger'" />
   <LlmNodeProperties v-else-if="selectedNode?.type === 'llm'" />
