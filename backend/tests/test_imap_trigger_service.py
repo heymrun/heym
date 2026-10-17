@@ -6,13 +6,11 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from app.db.models import ExecutionHistory
 from app.services.imap_trigger_service import (
     ImapCursor,
     ImapDispatchNotStartedError,
     ImapTriggerManager,
 )
-from app.services.workflow_executor import ExecutionResult, SubWorkflowExecution
 
 
 class ImapTriggerManagerPollingTests(unittest.IsolatedAsyncioTestCase):
@@ -128,123 +126,20 @@ class ImapTriggerRetryTests(unittest.IsolatedAsyncioTestCase):
         execute_mock.assert_awaited_once()
 
 
-class ImapTriggerExecutionHistoryTests(unittest.IsolatedAsyncioTestCase):
-    async def test_execute_workflow_persists_imap_trigger_source(self) -> None:
-        manager = ImapTriggerManager()
-        owner_id = uuid.uuid4()
-        workflow_id = uuid.uuid4()
-        sub_workflow_id = uuid.uuid4()
-        workflow = SimpleNamespace(
-            id=workflow_id,
-            owner_id=owner_id,
-            name="Inbox workflow",
-            nodes=[],
-            edges=[],
-        )
-
-        added_rows: list[object] = []
-
-        def add_row(row: object) -> None:
-            added_rows.append(row)
-
-        db = SimpleNamespace(
-            execute=AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: workflow)),
-            add=add_row,
-            commit=AsyncMock(),
-        )
-        execution_result = ExecutionResult(
-            workflow_id=workflow_id,
-            status="success",
-            outputs={"ok": True},
-            execution_time_ms=14.2,
-            node_results=[],
-            sub_workflow_executions=[
-                SubWorkflowExecution(
-                    workflow_id=str(sub_workflow_id),
-                    inputs={"source": "imap"},
-                    outputs={"done": True},
-                    status="success",
-                    execution_time_ms=4.1,
-                    node_results=[],
-                    workflow_name="Child workflow",
-                )
-            ],
-        )
-
-        email_payload = {
-            "uid": "123",
-            "subject": "New ticket",
-            "from": "customer@example.com",
-            "text": "Please help",
-        }
-
-        with (
-            patch("app.services.imap_trigger_service.async_session_maker") as mock_session_maker,
-            patch(
-                "app.services.imap_trigger_service.collect_referenced_workflows",
-                AsyncMock(return_value={}),
-            ),
-            patch(
-                "app.services.imap_trigger_service.get_credentials_context",
-                AsyncMock(return_value={}),
-            ),
-            patch(
-                "app.services.imap_trigger_service.get_global_variables_context",
-                AsyncMock(return_value={}),
-            ),
-            patch(
-                "app.services.imap_trigger_service.dispatch_workflow",
-                AsyncMock(return_value=execution_result),
-            ),
-            patch(
-                "app.services.imap_trigger_service.upsert_workflow_analytics_snapshot",
-                AsyncMock(),
-            ),
-            patch(
-                "app.services.imap_trigger_service._persist_global_variables_from_execution",
-                AsyncMock(),
-            ),
-        ):
-            mock_session = AsyncMock()
-            mock_session.__aenter__.return_value = db
-            mock_session.__aexit__.return_value = None
-            mock_session_maker.return_value = mock_session
-
-            await manager._execute_workflow_for_email(workflow, "imap-node", email_payload)
-
-        history_rows = [row for row in added_rows if isinstance(row, ExecutionHistory)]
-        self.assertEqual(len(history_rows), 2)
-        parent = next(r for r in history_rows if r.workflow_id == workflow_id)
-        child = next(r for r in history_rows if r.workflow_id == sub_workflow_id)
-        self.assertEqual(parent.trigger_source, "imap")
-        self.assertEqual(child.trigger_source, "SUB_WORKFLOW")
-        self.assertEqual(parent.inputs["triggered_by"], "imap")
-        self.assertEqual(parent.inputs["trigger_node_id"], "imap-node")
-        self.assertEqual(parent.inputs["email"]["subject"], "New ticket")
-
-    async def test_pre_dispatch_failure_raises_retriable_error_without_dispatching(self) -> None:
+class ImapTriggerDelegationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_execute_workflow_hands_the_email_to_the_shared_dispatch(self) -> None:
         manager = ImapTriggerManager()
         workflow = SimpleNamespace(id=uuid.uuid4(), owner_id=uuid.uuid4())
 
-        db = SimpleNamespace(
-            execute=AsyncMock(side_effect=RuntimeError("db unreachable")),
-        )
+        with patch("app.services.imap_trigger_service.run_trigger_workflow", AsyncMock()) as run:
+            await manager._execute_workflow_for_email(workflow, "imap-node", {"uid": "7"})
 
-        with (
-            patch("app.services.imap_trigger_service.async_session_maker") as mock_session_maker,
-            patch(
-                "app.services.imap_trigger_service.dispatch_workflow", AsyncMock()
-            ) as mock_dispatch,
-        ):
-            mock_session = AsyncMock()
-            mock_session.__aenter__.return_value = db
-            mock_session.__aexit__.return_value = None
-            mock_session_maker.return_value = mock_session
-
-            with self.assertRaises(ImapDispatchNotStartedError):
-                await manager._execute_workflow_for_email(workflow, "imap-node", {"uid": "1"})
-
-        mock_dispatch.assert_not_awaited()
+        kwargs = run.await_args.kwargs
+        self.assertEqual(kwargs["workflow_id"], workflow.id)
+        self.assertEqual(kwargs["trigger_source"], "imap")
+        self.assertEqual(kwargs["inputs"]["triggered_by"], "imap")
+        self.assertEqual(kwargs["inputs"]["trigger_node_id"], "imap-node")
+        self.assertEqual(kwargs["inputs"]["email"], {"uid": "7"})
 
 
 if __name__ == "__main__":
