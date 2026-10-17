@@ -13,6 +13,8 @@ INITIAL_INPUT_TRIGGER_TYPES = frozenset(
         "discordTrigger",
         "telegramTrigger",
         "heymTrigger",
+        "googleDriveTrigger",
+        "googleSheetsTrigger",
     }
 )
 

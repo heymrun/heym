@@ -59,7 +59,9 @@ NODE_CREDENTIAL_FIELDS: dict[str, tuple[CredentialField, ...]] = {
     "discordTrigger": (_field("credentialId", CredentialType.discord_trigger),),
     "github": (_field("credentialId", CredentialType.github),),
     "googleDrive": (_field("credentialId", CredentialType.google_drive),),
+    "googleDriveTrigger": (_field("credentialId", CredentialType.google_drive),),
     "googleSheets": (_field("credentialId", CredentialType.google_sheets),),
+    "googleSheetsTrigger": (_field("credentialId", CredentialType.google_sheets),),
     "grist": (_field("credentialId", CredentialType.grist),),
     "imapTrigger": (_field("credentialId", CredentialType.imap),),
     "jira": (_field("credentialId", CredentialType.jira),),
@@ -128,12 +130,12 @@ CREDENTIAL_TYPE_PURPOSE: dict[CredentialType, str] = {
     CredentialType.cohere: "Cohere API key; RAG reranking, Cohere API over http",
     CredentialType.flaresolverr: "FlareSolverr URL; Crawler node",
     CredentialType.google_sheets: (
-        "Google OAuth client for Google Sheets; Google Sheets node, Sheets API over http for "
-        "operations the node lacks"
+        "Google OAuth client for Google Sheets; Google Sheets and Google Sheets Trigger nodes, "
+        "Sheets API over http for operations the node lacks"
     ),
     CredentialType.google_drive: (
-        "Google OAuth client for Google Drive; Google Drive node, Drive API over http for "
-        "operations the node lacks"
+        "Google OAuth client for Google Drive; Google Drive and Google Drive Trigger nodes, "
+        "Drive API over http for operations the node lacks"
     ),
     CredentialType.bigquery: "Google OAuth client for BigQuery; BigQuery node",
     CredentialType.supabase: "Supabase project URL and key; Supabase node",

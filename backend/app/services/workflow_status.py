@@ -36,6 +36,8 @@ TRIGGER_NODE_TYPES: frozenset[str] = frozenset(
         "slackTrigger",
         "discordTrigger",
         "imapTrigger",
+        "googleDriveTrigger",
+        "googleSheetsTrigger",
         "websocketTrigger",
         "fileUploadTrigger",
         "heymTrigger",
