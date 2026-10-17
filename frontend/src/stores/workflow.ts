@@ -4,6 +4,7 @@ import axios from "axios";
 
 import { buildLegacyWebhookBody, getHistoryWebhookBody, parseWebhookJson, stringifyWebhookJson } from "@/lib/webhookBody";
 import { getLatestNodeResultForNode } from "@/lib/executionLog";
+import { googleTriggerProblems } from "@/lib/googleTriggerConfig";
 import { getSentryOperationMetadata } from "@/lib/sentryExpressionFields";
 import { replaceNodeLabelRefs } from "@/lib/utils";
 import { workflowRunNodeIds } from "@/lib/workflowRunScope";
@@ -2506,6 +2507,22 @@ export const useWorkflowStore = defineStore("workflow", () => {
             nodeType: "IMAP Trigger",
             message: "Poll interval must be at least 1 minute",
           });
+        }
+      }
+
+      if (node.type === "googleDriveTrigger" || node.type === "googleSheetsTrigger") {
+        const nodeType =
+          node.type === "googleDriveTrigger" ? "Google Drive Trigger" : "Google Sheets Trigger";
+        if (!node.data.credentialId || !isValidUUID(node.data.credentialId)) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType,
+            message: "Credential is not selected",
+          });
+        }
+        for (const message of googleTriggerProblems(node.type, node.data)) {
+          errors.push({ nodeId: node.id, nodeLabel: node.data.label, nodeType, message });
         }
       }
 
