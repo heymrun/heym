@@ -353,10 +353,10 @@ describe("shipped release registry", () => {
 
     expect(catalog?.slides.map((slide) => slide.id)).toEqual([
       "slack-bot",
+      "google-triggers",
       "heym-work",
       "skill-zip",
       "enable-node",
-      "dashboard-hitl",
     ]);
   });
 
@@ -371,6 +371,7 @@ describe("shipped release registry", () => {
 
     expect(tours.map((tour) => tour.tourVisual)).toContain("heym-work");
     expect(tours.map((tour) => tour.tourVisual)).toContain("slack-bot");
+    expect(tours.map((tour) => tour.tourVisual)).toContain("google-triggers");
     expect(tours.map((tour) => tour.tourVisual)).toContain("enable-node");
     for (const tour of tours) {
       expect(TOUR_VISUALS[tour.tourVisual], `missing visual for "${tour.tourVisual}"`)

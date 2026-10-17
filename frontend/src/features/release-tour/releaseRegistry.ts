@@ -26,7 +26,7 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
       introDescription:
         "A quick look at what changed since your last update. Takes about a minute.",
       tourEnabled: true,
-      sectionOrder: ["slack-bot"],
+      sectionOrder: ["slack-bot", "google-triggers"],
     },
     sections: [
       {
@@ -58,6 +58,38 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
             categoryId: "nodes",
             slug: "slack-node",
             title: "Slack",
+          },
+        },
+      },
+      {
+        id: "google-triggers",
+        title: "Start a run when a Drive file or a sheet row changes",
+        publishedAt: new Date("2026-10-17T12:00:00Z"),
+        blocks: [
+          {
+            type: "prose",
+            markdown:
+              "Two new trigger nodes. **Google Drive Trigger** starts a run when a file is created, updated, or deleted in a folder you choose. **Google Sheets Trigger** starts a run when a row is added, updated, or deleted, and tells the run which columns changed.",
+          },
+          {
+            type: "prose",
+            markdown:
+              "Each change starts exactly one run, even on a multi-instance install. Heym keeps file metadata and keyed fingerprints of cells, never cell values. Set a key column such as `Email` so inserted or sorted rows are matched correctly.",
+          },
+        ],
+        tour: {
+          description:
+            "Start a run when a file lands in a Drive folder or a row changes in a sheet, once per change.",
+          useCases: [
+            "Summarize every contract dropped into a shared folder",
+            "Score each new lead as soon as its row appears",
+            "Notify an owner when a status column changes",
+          ],
+          tourVisual: "google-triggers",
+          docTarget: {
+            categoryId: "nodes",
+            slug: "google-sheets-trigger-node",
+            title: "Google Sheets Trigger",
           },
         },
       },
@@ -182,48 +214,6 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
             categoryId: "nodes",
             slug: "enable-node",
             title: "Enable Node",
-          },
-        },
-      },
-    ],
-  },
-  {
-    releaseId: "2026.17",
-    publishedAt: new Date("2026-09-28T18:00:00Z"),
-    headline: "Review pending human approvals from the dashboard",
-    releaseTour: {
-      label: "New in Heym",
-      introTitle: "New in this release",
-      introDescription:
-        "A quick look at what changed since your last update. Takes about a minute.",
-      tourEnabled: true,
-      sectionOrder: ["dashboard-hitl"],
-    },
-    sections: [
-      {
-        id: "dashboard-hitl",
-        title: "Clear pending reviews from a dashboard widget",
-        publishedAt: new Date("2026-09-28T18:00:00Z"),
-        blocks: [
-          {
-            type: "prose",
-            markdown:
-              "Add a **HITL** widget and the header shows how many reviews are waiting, as `1/n pending`. Move left and right through each one; the arrows stop at the ends. The workflow name opens that run on the canvas. **Approve**, **Request changes**, and **Reject** resolve the draft. The history icon beside the widget title opens that run in the history dialog on the same page. The queue is yours: a shared dashboard does not reveal someone else's drafts.",
-          },
-        ],
-        tour: {
-          description:
-            "A dashboard carousel of your pending human reviews, with the count in the header.",
-          useCases: [
-            "See how many reviews are waiting before you open the first one",
-            "Approve, request changes, or reject a draft without leaving the dashboard",
-            "Open that run in the history dialog from the icon beside the widget title",
-          ],
-          tourVisual: "dashboard-hitl",
-          docTarget: {
-            categoryId: "tabs",
-            slug: "dashboard-tab",
-            title: "Dashboard",
           },
         },
       },
