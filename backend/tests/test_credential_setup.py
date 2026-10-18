@@ -231,6 +231,61 @@ class CredentialFormToolTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(sessions.added, [])
 
 
+class ConversationFormsPromptTests(unittest.IsolatedAsyncioTestCase):
+    def _tool(
+        self, sessions: _FakeSessions, conversation_id: uuid.UUID | None
+    ) -> CredentialFormTool:
+        return CredentialFormTool(
+            user_id=uuid.uuid4(),
+            conversation_id=conversation_id,
+            public_base_url=BASE_URL,
+            client=None,
+            session_factory=sessions,
+        )
+
+    async def test_the_next_turn_learns_what_became_of_each_form(self) -> None:
+        later = datetime.now(timezone.utc) + timedelta(hours=1)
+        earlier = datetime.now(timezone.utc) - timedelta(hours=1)
+        saved_id, open_id = uuid.uuid4(), uuid.uuid4()
+        rows = [
+            (
+                uuid.uuid4(),
+                "create",
+                "header",
+                "tanay",
+                "completed",
+                later,
+                saved_id,
+                "tanay",
+                CredentialType.header,
+            ),
+            (open_id, "create", "github", "GitHub", "pending", later, None, None, None),
+            (uuid.uuid4(), "create", "notion", None, "declined", later, None, None, None),
+            (uuid.uuid4(), "update", "slack_bot", "Ops bot", "pending", earlier, None, None, None),
+        ]
+        sessions = _FakeSessions([MagicMock(all=MagicMock(return_value=rows))])
+
+        prompt = await self._tool(sessions, uuid.uuid4()).conversation_forms_prompt()
+
+        self.assertIn("## Credential forms in this conversation", prompt)
+        self.assertIn("never a credential id", prompt)
+        self.assertIn(f'- Created: "tanay" (header), credential id `{saved_id}`', prompt)
+        self.assertIn(
+            f'- Still open: the github form for "GitHub", {BASE_URL}/credentials/setup/{open_id}',
+            prompt,
+        )
+        self.assertIn("- Declined: the notion form.", prompt)
+        self.assertIn('- Expired: the slack_bot form for "Ops bot".', prompt)
+
+    async def test_nothing_is_added_without_forms(self) -> None:
+        sessions = _FakeSessions([MagicMock(all=MagicMock(return_value=[]))])
+        self.assertEqual(await self._tool(sessions, uuid.uuid4()).conversation_forms_prompt(), "")
+
+        sessions = _FakeSessions()
+        self.assertEqual(await self._tool(sessions, None).conversation_forms_prompt(), "")
+        sessions.session.execute.assert_not_awaited()
+
+
 class ElicitationReplyTests(unittest.IsolatedAsyncioTestCase):
     async def test_a_reply_only_touches_the_users_pending_request(self) -> None:
         user_id, elicitation_id = uuid.uuid4(), uuid.uuid4()

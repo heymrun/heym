@@ -406,6 +406,9 @@ async def _run_chat_turn(
                     full_system_prompt=parts.full_system_prompt + build_block,
                     build_block=build_block,
                 )
+            if turn.credential_form is not None:
+                forms_block = await turn.credential_form.conversation_forms_prompt()
+                parts = replace(parts, full_system_prompt=parts.full_system_prompt + forms_block)
 
             client, provider, model, trace_context = resolve_model_binding(
                 credential,

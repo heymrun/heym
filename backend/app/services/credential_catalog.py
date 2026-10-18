@@ -346,7 +346,9 @@ _LINK_RULES = (
     "again. `declined` means the user closed the form: continue without it. "
     "`waiting_for_user` gives a `url`: put it in your reply as a markdown link, tell the user "
     "to open it, save the credential and then reply, and stop. Open one form per credential "
-    "and never open a second one for the same credential in a turn.",
+    "and never open a second one for the same credential in a turn. When the user says they "
+    "saved a form, check Credential forms in this conversation and the list below: Heym "
+    "reloads both at the start of every turn, so they are current.",
     _PICK_RULE,
     _OFFER_RULE,
     _NONE_OWNED_RULE,

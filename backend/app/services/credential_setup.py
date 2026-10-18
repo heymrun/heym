@@ -42,6 +42,7 @@ SETUP_REQUEST_TTL = timedelta(hours=24)
 # How long one tool call waits for the form before it hands the link back.
 FORM_WAIT_SECONDS = 600.0
 FORM_POLL_SECONDS = 1.0
+_MAX_FORMS_IN_PROMPT = 10
 _MAX_REASON_LENGTH = 500
 _MAX_NAME_LENGTH = 100
 
@@ -93,12 +94,16 @@ def credential_setup_url(public_base_url: str, request_id: uuid.UUID) -> str:
     return f"{public_base_url.rstrip('/')}/credentials/setup/{request_id}"
 
 
+def _effective_status(status: str, expires_at: datetime, now: datetime | None = None) -> str:
+    moment = now or datetime.now(timezone.utc)
+    if status == STATUS_PENDING and expires_at <= moment:
+        return STATUS_EXPIRED
+    return status
+
+
 def setup_request_status(row: CredentialSetupRequest, now: datetime | None = None) -> str:
     """The request's status, with a pending request past its expiry reported as expired."""
-    moment = now or datetime.now(timezone.utc)
-    if row.status == STATUS_PENDING and row.expires_at <= moment:
-        return STATUS_EXPIRED
-    return row.status
+    return _effective_status(row.status, row.expires_at, now)
 
 
 async def record_elicitation_reply(
@@ -233,6 +238,70 @@ class CredentialFormTool:
                 "success",
             )
         return self._waiting(url)
+
+    async def conversation_forms_prompt(self) -> str:
+        """What became of the forms this conversation opened, as the next turn starts.
+
+        Earlier tool results are not replayed into later turns, so without this the model
+        forgets it opened a form and cannot tell a credential the form created from an old one.
+        """
+        if self.conversation_id is None:
+            return ""
+        async with self._session_factory() as db:
+            result = await db.execute(
+                select(
+                    CredentialSetupRequest.id,
+                    CredentialSetupRequest.action,
+                    CredentialSetupRequest.credential_type,
+                    CredentialSetupRequest.suggested_name,
+                    CredentialSetupRequest.status,
+                    CredentialSetupRequest.expires_at,
+                    Credential.id,
+                    Credential.name,
+                    Credential.type,
+                )
+                .outerjoin(Credential, Credential.id == CredentialSetupRequest.credential_id)
+                .where(CredentialSetupRequest.conversation_id == self.conversation_id)
+                .order_by(CredentialSetupRequest.created_at.desc())
+                .limit(_MAX_FORMS_IN_PROMPT)
+            )
+            rows = result.all()
+        if not rows:
+            return ""
+        lines = [
+            "## Credential forms in this conversation",
+            "",
+            "The credential forms you opened in this conversation, as of the start of this "
+            "turn, newest first. This is the source of truth for them: the id in a form link is "
+            "the form's id, never a credential id.",
+            "",
+        ]
+        for row in rows:
+            request_id, action, credential_type, suggested_name, status, expires_at = row[:6]
+            credential_id, credential_name, saved_type = row[6:]
+            form = (
+                f'the {credential_type} form for "{suggested_name}"'
+                if suggested_name
+                else (f"the {credential_type} form")
+            )
+            current = _effective_status(status, expires_at)
+            if current == STATUS_COMPLETED and credential_id is not None:
+                verb = "Updated" if action == "update" else "Created"
+                lines.append(
+                    f'- {verb}: "{credential_name}" ({saved_type.value}), credential id '
+                    f"`{credential_id}`. The user saved it on the form and it is in the "
+                    "credential list. Use it without asking again."
+                )
+            elif current == STATUS_PENDING:
+                url = credential_setup_url(self.public_base_url, request_id)
+                lines.append(f"- Still open: {form}, {url}. The user has not saved it yet.")
+            elif current == STATUS_DECLINED:
+                lines.append(f"- Declined: {form}. Continue without it unless the user asks again.")
+            elif current == STATUS_EXPIRED:
+                lines.append(
+                    f"- Expired: {form}. Open a new form if the user still wants the credential."
+                )
+        return "\n\n" + "\n".join(lines) + "\n"
 
     async def _spec(self, args: dict[str, Any]) -> _FormSpec:
         action = str(args.get("action") or "").strip()

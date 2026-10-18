@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import secrets
 import uuid
 from collections.abc import AsyncGenerator
@@ -86,6 +87,7 @@ from app.services.secret_tokens import hash_secret
 from app.services.workflow_access import workflow_access_clause
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 T = TypeVar("T")
 _MCP_PROTOCOL_SEMAPHORE = asyncio.Semaphore(max(1, settings.mcp_protocol_max_concurrency))
 _MCP_PROGRESS_INTERVAL_SECONDS = 30.0
@@ -365,12 +367,21 @@ def _reject_if_sse_channel_missing(request: Request) -> None:
 def _initialize_response(request: Request, msg: MCPJSONRPCRequest) -> dict[str, Any]:
     """Answer `initialize`, and keep what a legacy SSE client declared on its channel."""
     session_token = request.query_params.get("session")
+    modes = elicitation_modes(msg.params.get("capabilities"))
     if session_token:
-        mcp_sse_channels.set_elicitation_modes(
-            session_token, elicitation_modes(msg.params.get("capabilities"))
-        )
-    result = MCPInitializeResult(
-        protocolVersion=negotiate_protocol_version(msg.params.get("protocolVersion"))
+        mcp_sse_channels.set_elicitation_modes(session_token, modes)
+    requested = msg.params.get("protocolVersion")
+    result = MCPInitializeResult(protocolVersion=negotiate_protocol_version(requested))
+    client_info = msg.params.get("clientInfo")
+    client = client_info if isinstance(client_info, dict) else {}
+    # Says whether a client can open credential forms itself (URL elicitation).
+    logger.info(
+        "MCP initialize: client=%s/%s protocol=%s->%s elicitation=%s",
+        client.get("name"),
+        client.get("version"),
+        requested,
+        result.protocolVersion,
+        ",".join(sorted(modes)) or "none",
     )
     return {"jsonrpc": "2.0", "id": msg.id, "result": result.model_dump()}
 

@@ -77,7 +77,7 @@ How the page reaches you depends on the client:
 | Client | What happens |
 |--------|--------------|
 | Supports MCP URL elicitation | The client asks you to open the Heym page. The call waits while you fill in the form, up to ten minutes, then continues with the new credential. |
-| Anything else | The result carries the link. Open it, save the credential, then reply with the same `conversation_id`. |
+| Anything else | The result carries the link. Open it, save the credential, then reply with the same `conversation_id`. The next call knows the form was saved and which credential it created. |
 
 The page only opens for the Heym account that started the request, so a forwarded link is useless to anyone else. A form stays open for 24 hours, and you can decline it from the page.
 
