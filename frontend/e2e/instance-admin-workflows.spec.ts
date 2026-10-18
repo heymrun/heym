@@ -12,6 +12,13 @@ async function signInAsAdmin(page: Page): Promise<void> {
   }
 }
 
+/** Other people's workflows sit under Heym Users, collapsed until these folders are opened. */
+async function openAnotherUsersWorkflow(page: Page, workflowId: string): Promise<void> {
+  await page.getByTestId("workflow-folder-header-heym-users").click();
+  await page.getByTestId(`workflow-folder-header-heym-user:${E2E_USER.email.toLowerCase()}`).click();
+  await page.getByTestId(`workflow-card-${workflowId}`).click();
+}
+
 test("instance admin opens, pauses, resumes, and deletes another user's workflow", async ({ page, baseURL }) => {
   await prepareAuthenticatedPage(page);
   await page.setViewportSize({ width: 1600, height: 1000 });
@@ -45,7 +52,7 @@ test("instance admin opens, pauses, resumes, and deletes another user's workflow
     await expectOk(detail);
     expect((await detail.json()).permission).toBe("write");
     await page.goto("/");
-    await page.getByTestId(`workflow-card-${workflow.id}`).click();
+    await openAnotherUsersWorkflow(page, workflow.id);
     const controls = page.getByTestId("workflow-admin-controls");
     await expect(controls).toContainText(E2E_USER.email);
     await expect(controls.getByRole("button", { name: "Stop runs" })).toHaveCount(0);
@@ -68,7 +75,7 @@ test("instance admin opens, pauses, resumes, and deletes another user's workflow
     await expect(page.getByTestId("workflow-admin-resume")).toBeVisible();
     await expect(page.getByTestId("workflow-admin-pause")).toHaveCount(0);
     await page.reload();
-    await page.getByTestId(`workflow-card-${workflow.id}`).click();
+    await openAnotherUsersWorkflow(page, workflow.id);
     await expect(page.getByTestId("workflow-admin-resume")).toBeVisible();
     const paused = await page.request.get("/api/schedules", {
       params: { start: "2026-12-31T00:00:00Z", end: "2027-01-02T00:00:00Z", include_shared: true },
