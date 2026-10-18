@@ -38,15 +38,17 @@ def create_oauth_state(
     user_id: str,
     credential_id: str | None,
     client_id: str,
-    client_secret: str,
     redirect_uri: str,
 ) -> str:
-    """Encode OAuth2 state as a signed JWT."""
+    """Encode OAuth2 state as a signed JWT.
+
+    It rides in the authorization URL, so it carries no secret: the callback reads the
+    client secret from the credential.
+    """
     payload = {
         "user_id": user_id,
         "credential_id": credential_id,
         "client_id": client_id,
-        "client_secret": client_secret,
         "redirect_uri": redirect_uri,
         "type": _STATE_TYPE,
         "exp": datetime.now(timezone.utc) + timedelta(minutes=_STATE_TTL_MINUTES),
@@ -151,7 +153,6 @@ async def authorize(
         user_id=str(current_user.id),
         credential_id=str(cred_uuid),
         client_id=client_id,
-        client_secret=client_secret,
         redirect_uri=redirect_uri,
     )
     auth_url = build_auth_url(client_id, redirect_uri, state)
@@ -175,9 +176,21 @@ async def callback(
 
     redirect_uri = payload["redirect_uri"]
     client_id = payload["client_id"]
-    client_secret = payload["client_secret"]
     user_id = uuid.UUID(payload["user_id"])
     credential_id = payload.get("credential_id")
+
+    cred: Credential | None = None
+    if credential_id:
+        result = await db.execute(
+            select(Credential).where(Credential.id == uuid.UUID(credential_id))
+        )
+        cred = result.scalar_one_or_none()
+    # States minted before the secret left the URL still carry it.
+    client_secret = payload.get("client_secret") or (
+        decrypt_config(cred.encrypted_config).get("client_secret", "") if cred else ""
+    )
+    if not client_secret:
+        return HTMLResponse(_popup_html(False, message="Credential not found"))
 
     try:
         resp = httpx.post(
@@ -210,14 +223,10 @@ async def callback(
     }
     encrypted = encrypt_config(config)
 
-    if credential_id:
-        cred_uuid = uuid.UUID(credential_id)
-        result = await db.execute(select(Credential).where(Credential.id == cred_uuid))
-        cred = result.scalar_one_or_none()
-        if cred:
-            cred.encrypted_config = encrypted
-            await db.commit()
-            return HTMLResponse(_popup_html(True, credential_id=str(cred.id)))
+    if cred:
+        cred.encrypted_config = encrypted
+        await db.commit()
+        return HTMLResponse(_popup_html(True, credential_id=str(cred.id)))
 
     new_cred = Credential(
         name="Google Sheets",

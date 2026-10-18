@@ -77,14 +77,13 @@ class TestCreateOAuthState(unittest.TestCase):
                 user_id=str(uuid.uuid4()),
                 credential_id=None,
                 client_id="cid",
-                client_secret="csecret",
                 redirect_uri="http://testserver/callback",
             )
 
         decoded = jwt.decode(state, _TEST_SECRET, algorithms=[_ALGORITHM])
         self.assertEqual(decoded["type"], "gs_oauth_state")
         self.assertEqual(decoded["client_id"], "cid")
-        self.assertEqual(decoded["client_secret"], "csecret")
+        self.assertNotIn("client_secret", decoded)
 
 
 class TestHandleCallbackState(unittest.TestCase):

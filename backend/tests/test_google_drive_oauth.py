@@ -21,7 +21,6 @@ class TestGoogleDriveOAuthState(unittest.TestCase):
             user_id="11111111-1111-1111-1111-111111111111",
             credential_id="22222222-2222-2222-2222-222222222222",
             client_id="client-abc",
-            client_secret="secret-xyz",
             redirect_uri="https://app.example.com/api/credentials/google-drive/oauth/callback",
         )
         payload = handle_callback_state(state)
@@ -31,7 +30,7 @@ class TestGoogleDriveOAuthState(unittest.TestCase):
         self.assertEqual(payload["user_id"], "11111111-1111-1111-1111-111111111111")
         self.assertEqual(payload["credential_id"], "22222222-2222-2222-2222-222222222222")
         self.assertEqual(payload["client_id"], "client-abc")
-        self.assertEqual(payload["client_secret"], "secret-xyz")
+        self.assertNotIn("client_secret", payload)
         self.assertEqual(payload["type"], "gd_oauth_state")
 
     def test_rejects_state_from_a_different_flow(self) -> None:
