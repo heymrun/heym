@@ -126,6 +126,8 @@ class MCPSSEChannelStore:
 
     def __init__(self) -> None:
         self._channels: dict[str, asyncio.Queue[str]] = {}
+        # Elicitation modes each session's client declared in `initialize`.
+        self._elicitation_modes: dict[str, frozenset[str]] = {}
         self._lock = threading.Lock()
 
     def can_register(self) -> bool:
@@ -160,10 +162,22 @@ class MCPSSEChannelStore:
         await queue.put(payload)
         return True
 
+    def set_elicitation_modes(self, token: str, modes: frozenset[str]) -> None:
+        """Remember the elicitation modes the client on an active session declared."""
+        with self._lock:
+            if token in self._channels:
+                self._elicitation_modes[token] = modes
+
+    def elicitation_modes(self, token: str) -> frozenset[str]:
+        """The elicitation modes the client on a session declared, or none."""
+        with self._lock:
+            return self._elicitation_modes.get(token, frozenset())
+
     def unregister(self, token: str) -> None:
         """Remove the SSE response queue for a session token."""
         with self._lock:
             self._channels.pop(token, None)
+            self._elicitation_modes.pop(token, None)
 
 
 mcp_sse_channels = MCPSSEChannelStore()

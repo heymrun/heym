@@ -94,6 +94,12 @@ const router = createRouter({
       meta: { guest: false, requiresAuth: false },
     },
     {
+      path: "/credentials/setup/:id",
+      name: "credential-setup",
+      component: () => import("@/views/CredentialSetupView.vue"),
+      meta: { requiresAuth: true },
+    },
+    {
       path: "/evals",
       name: "evals",
       component: () => import("@/views/EvalsView.vue"),
@@ -143,7 +149,11 @@ router.beforeEach(async (to, _from, next) => {
   }
 
   if (to.meta.requiresAuth && !authStore.isAuthenticated) {
-    next({ name: "login" });
+    // An MCP credential form is opened from another app: come back to it after sign-in.
+    next({
+      name: "login",
+      query: to.name === "credential-setup" ? { redirect: to.fullPath } : {},
+    });
   } else if (to.meta.guest && authStore.isAuthenticated) {
     next({ name: "dashboard" });
   } else {

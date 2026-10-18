@@ -1,4 +1,4 @@
-"""Chat tab turns get the credential flow; MCP turns never do."""
+"""Chat tab turns open the credential dialog; MCP turns open a form on a Heym page."""
 
 import contextlib
 import unittest
@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.api import chats
 from app.services.credential_catalog import CredentialPromptMode
+from app.services.mcp_elicitation import MCPClientChannel
 
 SECTION = "\n\n## Credentials\n\nCATALOG\n"
 
@@ -37,7 +38,13 @@ class ChatSystemPromptCredentialTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(parts.credentials_block, SECTION)
         build.assert_awaited_once()
 
-    async def test_mcp_turns_get_no_credentials_section(self) -> None:
+    async def test_mcp_turns_get_the_credentials_section(self) -> None:
+        parts, build = await self._parts(CredentialPromptMode.ASK_AND_LINK)
+
+        self.assertIn("CATALOG", parts.full_system_prompt)
+        build.assert_awaited_once()
+
+    async def test_off_turns_get_no_credentials_section(self) -> None:
         parts, build = await self._parts(CredentialPromptMode.OFF)
 
         self.assertNotIn("CATALOG", parts.full_system_prompt)
@@ -57,7 +64,7 @@ class ChatSystemPromptCredentialTests(unittest.IsolatedAsyncioTestCase):
 
 
 class MCPChatTurnCredentialModeTests(unittest.IsolatedAsyncioTestCase):
-    async def test_mcp_turns_run_with_credentials_off(self) -> None:
+    async def test_mcp_turns_open_credential_forms_on_a_heym_page(self) -> None:
         conversation = SimpleNamespace(
             id=uuid.uuid4(),
             is_running=False,
@@ -79,6 +86,8 @@ class MCPChatTurnCredentialModeTests(unittest.IsolatedAsyncioTestCase):
             yield session
 
         captured: dict[str, chats.ChatTurn] = {}
+        client = MCPClientChannel(frozenset({"url"}), AsyncMock())
+        user_id = uuid.uuid4()
 
         async def fake_run_chat_turn(
             _conv_id: str, _user_id: uuid.UUID, turn: chats.ChatTurn, _base_url: str
@@ -99,15 +108,22 @@ class MCPChatTurnCredentialModeTests(unittest.IsolatedAsyncioTestCase):
             patch.object(chats.registry, "finish", AsyncMock()),
         ):
             await chats.run_mcp_chat_turn(
-                user_id=uuid.uuid4(),
+                user_id=user_id,
                 message="list my GitHub repositories",
                 conversation_id=None,
                 credential_id=uuid.uuid4(),
                 model="gpt-4o",
                 public_base_url="https://heym.test",
+                client=client,
             )
 
-        self.assertEqual(captured["turn"].credential_mode, CredentialPromptMode.OFF)
+        turn = captured["turn"]
+        self.assertEqual(turn.credential_mode, CredentialPromptMode.ASK_AND_LINK)
+        self.assertIsNotNone(turn.credential_form)
+        self.assertIs(turn.credential_form.client, client)
+        self.assertEqual(turn.credential_form.user_id, user_id)
+        self.assertEqual(turn.credential_form.conversation_id, conversation.id)
+        self.assertEqual(turn.credential_form.public_base_url, "https://heym.test")
 
 
 if __name__ == "__main__":

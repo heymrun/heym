@@ -51,13 +51,22 @@ const ssoError = computed<string>(() => {
   return typeof code === "string" ? (SSO_ERRORS[code] ?? SSO_ERRORS.invalid_token) : "";
 });
 
+// Only same-app paths: an absolute or protocol-relative URL would be an open redirect.
+function redirectTarget(): string {
+  const target = route.query.redirect;
+  if (typeof target === "string" && target.startsWith("/") && !target.startsWith("//")) {
+    return target;
+  }
+  return "/";
+}
+
 async function handleSubmit(): Promise<void> {
   error.value = "";
   loading.value = true;
 
   try {
     await authStore.login({ email: email.value, password: password.value });
-    router.push("/");
+    router.push(redirectTarget());
   } catch (err) {
     const detail = axios.isAxiosError(err) ? err.response?.data?.detail : null;
     error.value =

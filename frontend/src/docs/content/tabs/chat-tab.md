@@ -41,7 +41,7 @@ The Chat engine can also be reached from outside the browser. Enable the **Heym 
 
 Those conversations land in this tab's history, marked with a plug icon in the conversation list. Open one to read what the client asked, see the tool cards it triggered, and continue the thread yourself. Answering a clarification question works the same way whether the turn started here or from an MCP client.
 
-Over MCP, Chat does not list, pick or create credentials. Workflows it builds leave credential fields empty, and the reply names the nodes that need a credential so you can set them in the editor.
+Over MCP, Chat asks which credential a workflow should use as a question in the result. To create or update a credential it opens Heym's credential form on a Heym page in your browser, so the value never passes through the MCP client. See [MCP tab › Credentials](./mcp-tab.md#credentials).
 
 Data tables work over MCP too: Chat lists your tables, creates new ones and wires them into the workflows it builds. Its table question arrives as text in the result, so answer it with the same `conversation_id`.
 

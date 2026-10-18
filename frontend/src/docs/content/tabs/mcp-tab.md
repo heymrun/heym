@@ -49,6 +49,7 @@ When it is on, `heym_chat` appears in `tools/list` alongside your workflow tools
 - Report what is running right now: how many executions are active, their workflow names, how long each has been running, the node each is currently on, and a link to the live run
 - List boards, create cards, and read card detail on the [Board tab](./board-tab.md)
 - List your data tables with their columns, create new ones, and wire them into the workflows it builds
+- Create or update your credentials on Heym's own page (see [Credentials](#credentials))
 - Read teams and global variables, and search the documentation
 - Approve, edit, or refuse pending human-in-the-loop reviews
 
@@ -63,9 +64,22 @@ Capabilities added to the Chat tab later become available through `heym_chat` au
 - To change a workflow it built earlier, continue the thread with the same `conversation_id`. The assistant updates that workflow instead of creating a new one, and it only changes workflows you can edit.
 - When the five test runs are used up, the assistant stops and explains what still fails.
 
-Credentials stay in the UI: `heym_chat` never lists, chooses or creates them. When it builds or edits a workflow, new nodes that need a credential are left empty and the reply names them, so you can set them in the editor.
+A table holds no secret, so `heym_chat` can list your tables, ask which one a workflow should use, and create a new one with its columns. It never reads or writes rows.
 
-Data tables are different. A table holds no secret, so `heym_chat` can list your tables, ask which one a workflow should use, and create a new one with its columns. It never reads or writes rows.
+### Credentials
+
+`heym_chat` sees your credentials by name and type, the same way the Chat tab does. When a workflow it builds needs a credential, it asks which one to use, as a question in the result. Answer it with the same `conversation_id`.
+
+To add a credential, or to update one you own, the assistant opens Heym's credential form on a Heym page, `/credentials/setup/<id>`. You sign in to Heym there, enter the key or connect the account, and press save. The value goes straight to Heym: the MCP client and its model only learn the credential's name and type. Do not paste keys into the MCP client; ask for the form instead.
+
+How the page reaches you depends on the client:
+
+| Client | What happens |
+|--------|--------------|
+| Supports MCP URL elicitation | The client asks you to open the Heym page. The call waits while you fill in the form, up to ten minutes, then continues with the new credential. |
+| Anything else | The result carries the link. Open it, save the credential, then reply with the same `conversation_id`. |
+
+The page only opens for the Heym account that started the request, so a forwarded link is useless to anyone else. A form stays open for 24 hours, and you can decline it from the page.
 
 ### Credential and model
 

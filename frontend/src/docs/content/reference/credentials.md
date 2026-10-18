@@ -91,7 +91,7 @@ Use the Notion **node** for native database, page, and block operations. Use `$c
 
 ## Creating Credentials from Chat
 
-The [AI Assistant](./ai-assistant.md#credentials), the [Chat tab](../tabs/chat-tab.md) and [Chat with Heym](./chat-with-heym.md) can create a credential when a workflow needs one, or whenever you ask for one. The assistant suggests the type and a name, and the regular credential form opens in the conversation. Ask to update a credential you own and the same form opens on it, with its secrets masked. The assistant only sees the name and type. `heym_chat` over [MCP](../tabs/mcp-tab.md) cannot create, update or choose credentials.
+The [AI Assistant](./ai-assistant.md#credentials), the [Chat tab](../tabs/chat-tab.md) and [Chat with Heym](./chat-with-heym.md) can create a credential when a workflow needs one, or whenever you ask for one. The assistant suggests the type and a name, and the regular credential form opens in the conversation. Ask to update a credential you own and the same form opens on it, with its secrets masked. The assistant only sees the name and type. `heym_chat` over [MCP](../tabs/mcp-tab.md#credentials) asks the same questions as text and opens the form on a Heym page in your browser instead, so the value never passes through the MCP client.
 
 ## Related
 

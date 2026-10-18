@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import LLM_CREDENTIAL_TYPES, Credential, MCPServer, User
 from app.models.schemas import MCPTool, MCPToolInputProperty, MCPToolInputSchema
 from app.services.credential_access import get_accessible_credential
+from app.services.mcp_elicitation import MCPClientChannel
 
 MCP_CHAT_TOOL_NAME = "heym_chat"
 
@@ -36,8 +37,10 @@ MCP_CHAT_TOOL_DESCRIPTION = (
     "running right now (with elapsed time, current node, and a link to each live run); "
     "read and resolve "
     "human-in-the-loop reviews; list and act on agentic kanban boards, cards and "
-    "comments; read schedules, teams and global variables; and search the Heym "
-    "documentation. New Heym capabilities become available here automatically. "
+    "comments; read schedules, teams and global variables; search the Heym documentation; "
+    "and create or update the user's credentials on a secure Heym page the user opens in "
+    "their browser, so keys and tokens never pass through this client. Never put a secret "
+    "in `message`. New Heym capabilities become available here automatically. "
     "Send one natural-language instruction or question as `message` and read the reply. "
     "Every call is recorded in the user's Chat tab history. To continue an earlier "
     "exchange instead of starting a new thread, pass the `conversation_id` returned by a "
@@ -74,6 +77,8 @@ class MCPChatResult:
     awaiting_clarification: bool
     # True when the turn ended with build mode's finish: the latest test run passed.
     verified: bool = False
+    # Credential form links the user still has to open in a browser.
+    credential_form_urls: tuple[str, ...] = ()
 
 
 def build_chat_mcp_tool() -> MCPTool:
@@ -213,6 +218,7 @@ async def run_chat_tool(
     settings: MCPChatSettings,
     arguments: dict,
     public_base_url: str,
+    client: MCPClientChannel | None = None,
 ) -> MCPChatResult:
     """Run one dashboard-chat turn on behalf of an MCP client.
 
@@ -230,12 +236,21 @@ async def run_chat_tool(
         credential_id=resolved.credential.id,
         model=resolved.model,
         public_base_url=public_base_url,
+        client=client,
     )
 
 
 def format_chat_tool_text(result: MCPChatResult) -> str:
     """Render a chat result as the text block an MCP client reads."""
-    lines = [result.text.strip() or "(The assistant returned no text.)"]
+    text = result.text.strip()
+    lines = [text or "(The assistant returned no text.)"]
+    for url in result.credential_form_urls:
+        if url not in text:
+            lines.append("")
+            lines.append(
+                "Open this Heym page in a browser signed in to Heym to enter the credential; "
+                f"its values never pass through this client: {url}"
+            )
     lines.append("")
     lines.append(f"conversation_id: {result.conversation_id}")
     if result.tool_names:

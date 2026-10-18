@@ -61,10 +61,12 @@ from app.services import chat_task_registry as registry
 from app.services.chat_build_mode import BuildRequest
 from app.services.credential_access import get_accessible_credential
 from app.services.credential_catalog import CredentialPromptMode, build_credentials_prompt
+from app.services.credential_setup import CredentialFormTool
 from app.services.encryption import decrypt_config
 from app.services.hitl_service import build_public_base_url
 from app.services.llm_trace import LLMTraceContext
 from app.services.mcp_chat_service import MCPChatError, MCPChatResult
+from app.services.mcp_elicitation import MCPClientChannel
 from app.services.workflow_access import user_can_write_workflow
 
 router = APIRouter()
@@ -93,10 +95,12 @@ class ChatTurn:
     model: str
     attachment_data: dict | None
     should_generate_title: bool
-    # MCP turns never list, pick or create credentials; turns typed in the UI do.
+    # UI turns open the credential dialog; MCP turns open a Heym page instead.
     credential_mode: CredentialPromptMode = CredentialPromptMode.ASK_AND_CREATE
     # Set when the turn may build (chat build mode); None keeps the classic chat.
     build: BuildRequest | None = None
+    # MCP turns: opens credential forms on Heym's own page (`request_credential_form`).
+    credential_form: CredentialFormTool | None = None
 
 
 @dataclass(frozen=True)
@@ -394,6 +398,7 @@ async def _run_chat_turn(
                     cancel_event=cancel_event,
                     llm_session_id=conv_id,
                     attachment=attachment,
+                    credential_form=turn.credential_form,
                 )
                 build_block = await build.prompt()
                 parts = replace(
@@ -811,11 +816,13 @@ async def run_mcp_chat_turn(
     credential_id: uuid.UUID,
     model: str,
     public_base_url: str,
+    client: MCPClientChannel | None = None,
 ) -> MCPChatResult:
     """Run one dashboard chat turn started by the `heym_chat` MCP tool.
 
     Reuses the Chat tab's turn worker so MCP-driven turns stream to any open Chat
     tab and persist messages, tool calls, and clarification pauses identically.
+    `client` lets a credential form open in the user's browser while the turn waits.
     """
     async with async_session_maker() as db:
         conversation, is_new = await _get_or_create_mcp_conversation(
@@ -847,15 +854,22 @@ async def run_mcp_chat_turn(
         await db.commit()
 
     conv_id = str(conv_uuid)
+    credential_form = CredentialFormTool(
+        user_id=user_id,
+        conversation_id=conv_uuid,
+        public_base_url=public_base_url,
+        client=client,
+    )
     turn = ChatTurn(
         content=message,
         credential_id=credential_id,
         model=model,
         attachment_data=None,
         should_generate_title=should_generate_title,
-        credential_mode=CredentialPromptMode.OFF,
+        credential_mode=CredentialPromptMode.ASK_AND_LINK,
         # heym_chat exists only when MCP chat is enabled, and it always builds.
         build=BuildRequest(),
+        credential_form=credential_form,
     )
     await registry.create_task(conv_id)
     try:
@@ -885,6 +899,7 @@ async def run_mcp_chat_turn(
         tool_names=tool_names,
         awaiting_clarification=result.paused_for_clarification,
         verified=verified,
+        credential_form_urls=tuple(credential_form.waiting_urls),
     )
 
 

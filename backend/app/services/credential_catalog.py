@@ -27,6 +27,9 @@ class CredentialPromptMode(str, Enum):
     """How much of the credential flow an assistant surface may run."""
 
     ASK_AND_CREATE = "ask_and_create"
+    # MCP turns: questions travel as text, and credentials are created or updated on a
+    # Heym page the user opens (`request_credential_form`), never in the chat.
+    ASK_AND_LINK = "ask_and_link"
     APPLY_CHOICES = "apply_choices"
     OFF = "off"
 
@@ -252,6 +255,51 @@ _NODE_RULES = (
     "`agent` nodes as a placeholder; Heym fills it with the model this assistant runs on.",
 )
 
+_PICK_RULE = (
+    "Never pick a credential silently. Before you build a node with a required credential "
+    "field, or an `http` call that needs authentication, emit a `heym-clarify` block with one "
+    "`single` question per service and stop."
+)
+
+_OFFER_RULE = (
+    "When the user owns credentials of a fitting type, offer each of them, then a create "
+    "option, then an option to continue without a credential. Offer only the credentials "
+    "that fit that API and never pad the question with unrelated ones. For `http`, give each "
+    'credential as `{"label": "<credential name>", "prefill": "<header key>"}` with '
+    '`"prefillLabel": "Header"`; leave out `prefill` for credentials that set their own '
+    "header name."
+)
+
+_NONE_OWNED_RULE = (
+    "When the user owns none, ask whether to create one, with the create option and an "
+    "option to continue without a credential."
+)
+
+_TYPE_RULE = (
+    "Use the node field's credential type. For `http`, use the service's own HTTP-capable "
+    "type when it has one (for example `google_sheets`), otherwise `bearer` for "
+    "`Authorization: Bearer` APIs or `header` for a key in a custom header. The suggested "
+    "name must differ from every credential name listed here."
+)
+
+_REPEAT_RULE = (
+    "Do not ask again about a service already answered in this conversation, or about a "
+    "node you are editing that already has a credential."
+)
+
+_CONTINUE_WITHOUT_RULE = (
+    "When the user continues without a credential, leave the field empty or send the "
+    "request without authentication, and tell the user they can add the credential later."
+)
+
+_CHOICES_RULE = (
+    "If a tool builds or edits the workflow, pass every answer in its `credential_choices` "
+    'argument: `{"credential_type": "<type>", "credential_name": "<name>"}`, an empty '
+    "`credential_name` for continue-without, and `header_key` for `http`. If the tool "
+    "returns `requires_credentials`, ask about each listed need the same way, then call the "
+    "tool again with `credential_choices`."
+)
+
 _ASK_RULES = (
     "You can open the credential form for the user from a `heym-clarify` card; the user fills "
     "it in and you never see the values. When the user asks to create, add or connect a "
@@ -265,36 +313,53 @@ _ASK_RULES = (
     "opens with that credential loaded and its secrets masked. The answer comes back as "
     '`Updated credential "<name>" (<type>)`. When no listed credential matches, say so and '
     "offer a create option instead.",
-    "Never pick a credential silently. Before you build a node with a required credential "
-    "field, or an `http` call that needs authentication, emit a `heym-clarify` block with one "
-    "`single` question per service and stop.",
-    "When the user owns credentials of a fitting type, offer each of them, then a create "
-    "option, then an option to continue without a credential. Offer only the credentials "
-    "that fit that API and never pad the question with unrelated ones. For `http`, give each "
-    'credential as `{"label": "<credential name>", "prefill": "<header key>"}` with '
-    '`"prefillLabel": "Header"`; leave out `prefill` for credentials that set their own '
-    "header name.",
-    "When the user owns none, ask whether to create one, with the create option and an "
-    "option to continue without a credential.",
+    _PICK_RULE,
+    _OFFER_RULE,
+    _NONE_OWNED_RULE,
     'The create option is `{"label": "<short text in the user\'s language>", "create": '
-    '{"type": "<credential type>", "name": "<suggested name>"}}`. Use the node field\'s '
-    "credential type. For `http`, use the service's own HTTP-capable type when it has one "
-    "(for example `google_sheets`), otherwise `bearer` for `Authorization: Bearer` APIs or "
-    "`header` for a key in a custom header. The suggested name must differ from every "
-    "credential name listed here. Credential questions are never optional.",
+    '{"type": "<credential type>", "name": "<suggested name>"}}`. '
+    + _TYPE_RULE
+    + " Credential questions are never optional.",
     'Answers come back as `<name>`, `<name> (Header: "<header key>")`, '
     '`Created credential "<name>" (<type>)`, or your continue-without label. A created '
     "credential appears in this list on the next turn with its id; use it without asking "
     "again, and for `http` use its suggested header key.",
-    "Do not ask again about a service already answered in this conversation, or about a "
-    "node you are editing that already has a credential.",
-    "When the user continues without a credential, leave the field empty or send the "
-    "request without authentication, and tell the user they can add the credential later.",
-    "If a tool builds or edits the workflow, pass every answer in its `credential_choices` "
-    'argument: `{"credential_type": "<type>", "credential_name": "<name>"}`, an empty '
-    "`credential_name` for continue-without, and `header_key` for `http`. If the tool "
-    "returns `requires_credentials`, ask about each listed need the same way, then call the "
-    "tool again with `credential_choices`.",
+    _REPEAT_RULE,
+    _CONTINUE_WITHOUT_RULE,
+    _CHOICES_RULE,
+)
+
+_LINK_RULES = (
+    "This chat reaches the user through another app, so it cannot show the credential form. "
+    "`request_credential_form` opens Heym's own credential form in the user's browser "
+    "instead: the user types the values there, and they never pass through this chat, that "
+    "app, or you. Never ask the user to paste a key, token, password or secret into the "
+    "chat, and never send them to the Credentials tab. If they paste one anyway, do not "
+    "repeat it or put it in a workflow; offer the form instead.",
+    "When the user asks to create, add or connect a credential, call `request_credential_form` "
+    "with `action` `create`, the `credential_type` and a suggested `name`, plus a one-sentence "
+    "`reason`. When they ask to update, edit, rename, rotate, reconnect or re-authorize one "
+    "of their credentials, call it with `action` `update` and the `credential_id` of the "
+    "listed credential that matches; when none matches, say so and offer to create one.",
+    "The tool waits while the user fills in the form when their app can open it. `created` "
+    "or `updated` gives the credential's name, type and id: use it right away without asking "
+    "again. `declined` means the user closed the form: continue without it. "
+    "`waiting_for_user` gives a `url`: put it in your reply as a markdown link, tell the user "
+    "to open it, save the credential and then reply, and stop. Open one form per credential "
+    "and never open a second one for the same credential in a turn.",
+    _PICK_RULE,
+    _OFFER_RULE,
+    _NONE_OWNED_RULE,
+    'The create option is `{"label": "<short text in the user\'s language>"}`; when the user '
+    "picks it, call `request_credential_form` with `action` `create`. "
+    + _TYPE_RULE
+    + " Credential questions are never optional.",
+    'Answers come back as `<name>`, `<name> (Header: "<header key>")`, your create label, or '
+    "your continue-without label. A credential created through the form appears in this "
+    "list on the next turn with its id; for `http` use its suggested header key.",
+    _REPEAT_RULE,
+    _CONTINUE_WITHOUT_RULE,
+    _CHOICES_RULE,
 )
 
 _APPLY_RULES = (
@@ -354,7 +419,10 @@ def format_credentials_prompt(
     """Return the assistant prompt section for `mode`."""
     if mode is CredentialPromptMode.OFF:
         return OFF_CREDENTIALS_PROMPT
-    mode_rules = _ASK_RULES if mode is CredentialPromptMode.ASK_AND_CREATE else _APPLY_RULES
+    mode_rules = {
+        CredentialPromptMode.ASK_AND_CREATE: _ASK_RULES,
+        CredentialPromptMode.ASK_AND_LINK: _LINK_RULES,
+    }.get(mode, _APPLY_RULES)
     rules = [*_NODE_RULES, *mode_rules, _SAFETY_RULE]
     http_types = ", ".join(
         f"`{t.value}`" for t in sorted(HTTP_CREDENTIAL_TYPES, key=lambda t: t.value)

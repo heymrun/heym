@@ -4130,3 +4130,29 @@ export const alertsApi = {
     await api.delete(`/alerts/${alertId}/team-shares/${teamId}`);
   },
 };
+
+// ---------- Credential setup (MCP credential forms) ----------
+
+import type { CredentialSetupRequest } from "@/types/credentialSetup";
+
+export const credentialSetupApi = {
+  get: async (requestId: string): Promise<CredentialSetupRequest> => {
+    const response = await api.get<CredentialSetupRequest>(`/credential-setup/${requestId}`);
+    return response.data;
+  },
+
+  complete: async (requestId: string, credentialId: string): Promise<CredentialSetupRequest> => {
+    const response = await api.post<CredentialSetupRequest>(
+      `/credential-setup/${requestId}/complete`,
+      { credential_id: credentialId },
+    );
+    return response.data;
+  },
+
+  decline: async (requestId: string): Promise<CredentialSetupRequest> => {
+    const response = await api.post<CredentialSetupRequest>(
+      `/credential-setup/${requestId}/decline`,
+    );
+    return response.data;
+  },
+};

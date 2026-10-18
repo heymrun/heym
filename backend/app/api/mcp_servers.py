@@ -13,8 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.analytics import upsert_workflow_analytics_snapshot
 from app.api.deps import get_current_user
 from app.api.mcp import (
+    _accept_client_response,
     _accept_sse_response_if_active,
     _add_mcp_workflow_trace,
+    _initialize_response,
     _is_mcp_tool_call_with_response,
     _maybe_mint_file_upload_jsonrpc_response,
     _mcp_keepalive_comment,
@@ -26,6 +28,8 @@ from app.api.mcp import (
     _schedule_legacy_sse_jsonrpc_response,
     _session_user_from_id,
     _stream_mcp_jsonrpc_response,
+    _streamable_elicitation_modes,
+    _with_client_session,
     build_tools_with_chat,
     dispatch_chat_tool_call,
     get_credentials_context_for_user,
@@ -44,7 +48,6 @@ from app.db.session import async_session_maker, get_db
 from app.models.schemas import (
     MCPChatToolConfig,
     MCPChatToolUpdate,
-    MCPInitializeResult,
     MCPJSONRPCRequest,
     MCPServerCreate,
     MCPServerListResponse,
@@ -58,6 +61,7 @@ from app.services.execution_cancellation import clear_execution as clear_active_
 from app.services.execution_cancellation import register_execution
 from app.services.global_variables_service import get_global_variables_context
 from app.services.hitl_service import build_default_public_base_url
+from app.services.mcp_elicitation import MCPClientChannel
 from app.services.mcp_session import mcp_session_store, mcp_sse_channels
 from app.services.oauth_tokens import hash_oauth_token
 from app.services.pending_execution import (
@@ -434,24 +438,32 @@ async def named_server_sse_post(
     server_id: uuid.UUID,
     request: Request,
     server: tuple[User, MCPServer] = Depends(_get_named_server_context_for_sse),
-) -> dict[str, object] | StreamingResponse:
+) -> dict[str, object] | Response:
     """Streamable HTTP transport (MCP 2025-03-26): POST directly to SSE endpoint."""
+    user, mcp_server = server
     body = await request.json()
+    accepted = await _accept_client_response(body, user.id)
+    if accepted is not None:
+        return accepted
     msg = MCPJSONRPCRequest(**body)
     if _is_mcp_tool_call_with_response(msg):
         return _stream_mcp_jsonrpc_response(
             msg=msg,
-            operation=lambda: _run_mcp_protocol_limited_with_session(
+            operation=lambda client: _run_mcp_protocol_limited_with_session(
                 lambda bg_db: _dispatch_named_server_jsonrpc(
                     server_id=server_id,
                     request=request,
                     server=server,
                     db=bg_db,
+                    client=client,
                 )
+            ),
+            client_elicitation_modes=_streamable_elicitation_modes(
+                request, user_id=user.id, server_id=mcp_server.id
             ),
         )
 
-    return await _run_mcp_protocol_limited_with_session(
+    response = await _run_mcp_protocol_limited_with_session(
         lambda bg_db: _dispatch_named_server_jsonrpc(
             server_id=server_id,
             request=request,
@@ -459,6 +471,7 @@ async def named_server_sse_post(
             db=bg_db,
         )
     )
+    return _with_client_session(response, msg, user_id=user.id, server_id=mcp_server.id)
 
 
 async def _dispatch_named_server_jsonrpc(
@@ -466,6 +479,7 @@ async def _dispatch_named_server_jsonrpc(
     request: Request,
     server: tuple[User, MCPServer],
     db: AsyncSession,
+    client: MCPClientChannel | None = None,
 ) -> dict:
     body = await request.json()
     msg = MCPJSONRPCRequest(**body)
@@ -475,11 +489,7 @@ async def _dispatch_named_server_jsonrpc(
         return {"jsonrpc": "2.0"}
 
     if msg.method == "initialize":
-        return {
-            "jsonrpc": "2.0",
-            "id": msg.id,
-            "result": MCPInitializeResult().model_dump(),
-        }
+        return _initialize_response(request, msg)
 
     if msg.method == "tools/list":
         workflows = await _get_server_workflows(db, mcp_server.id)
@@ -512,6 +522,7 @@ async def _dispatch_named_server_jsonrpc(
                 user_id=user.id,
                 chat_settings=chat_settings,
                 arguments=arguments,
+                client=client,
             )
 
         workflows = await _get_server_workflows(db, mcp_server.id)
@@ -703,15 +714,18 @@ async def handle_named_server_message(
 ) -> dict | Response:
     _reject_if_sse_channel_missing(request)
     body = await request.json()
+    accepted = await _accept_client_response(body, server[0].id)
+    if accepted is not None:
+        return accepted
     msg = MCPJSONRPCRequest(**body)
     session_token = request.query_params.get("session")
     if session_token and _is_mcp_tool_call_with_response(msg):
         _schedule_legacy_sse_jsonrpc_response(
             session_token=session_token,
             msg=msg,
-            operation_factory=lambda bg_db: _run_mcp_protocol_limited(
+            operation_factory=lambda bg_db, client: _run_mcp_protocol_limited(
                 lambda: _dispatch_named_server_jsonrpc(
-                    server_id=server_id, request=request, server=server, db=bg_db
+                    server_id=server_id, request=request, server=server, db=bg_db, client=client
                 )
             ),
         )

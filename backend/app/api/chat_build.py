@@ -50,6 +50,11 @@ from app.services.credential_catalog import (
     format_credentials_prompt,
     load_credential_catalog,
 )
+from app.services.credential_setup import (
+    REQUEST_CREDENTIAL_FORM_TOOL,
+    REQUEST_CREDENTIAL_FORM_TOOL_SCHEMA,
+    CredentialFormTool,
+)
 from app.services.dashboard_widget_policy import dashboard_widget_blocked_nodes_error
 from app.services.data_table_catalog import (
     DataTablePromptMode,
@@ -248,6 +253,7 @@ class ChatBuildSession:
         cancel_event: Event | None,
         llm_session_id: str | None,
         attachment: FileAttachment | None = None,
+        credential_form: CredentialFormTool | None = None,
     ) -> None:
         self.db = db
         self.user = user
@@ -260,6 +266,8 @@ class ChatBuildSession:
         # Every model request and test run in the turn carries one non-empty session id.
         self.llm_session_id = llm_session_id or str(uuid.uuid4())
         self.attachment = attachment
+        # MCP turns: credentials are created on a Heym page, never in the chat.
+        self.credential_form = credential_form
         self.progress = BuildProgress(workflow_id=request.target_workflow_id)
 
     @property
@@ -319,6 +327,8 @@ class ChatBuildSession:
     def tools(self, base_tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """The chat's own tools without the AI Builder, plus what build mode allows now."""
         tools = [t for t in base_tools if t["function"]["name"] not in AI_BUILDER_TOOL_NAMES]
+        if self.credential_form is not None:
+            tools.append(REQUEST_CREDENTIAL_FORM_TOOL_SCHEMA)
         if self.request.skill_only:
             return tools + [APPLY_SKILL_TOOL_SCHEMA]
         if not self.progress.budget_spent:
@@ -333,6 +343,8 @@ class ChatBuildSession:
         return tools + [APPLY_SKILL_TOOL_SCHEMA]
 
     def handles(self, name: str) -> bool:
+        if name == REQUEST_CREDENTIAL_FORM_TOOL:
+            return self.credential_form is not None
         if self.request.skill_only:
             return name == APPLY_SKILL_TOOL
         return name in BUILD_TOOL_NAMES or name == APPLY_SKILL_TOOL
@@ -360,6 +372,8 @@ class ChatBuildSession:
         }
 
     def step_label(self, name: str) -> str:
+        if name == REQUEST_CREDENTIAL_FORM_TOOL:
+            return "Opening the credential form..."
         if name == APPLY_SKILL_TOOL:
             return "Saving the skill..."
         if name == SAVE_WORKFLOW_TOOL:
@@ -370,6 +384,9 @@ class ChatBuildSession:
         return "Finishing..."
 
     async def call(self, name: str, args: dict[str, Any]) -> BuildToolOutcome:
+        if name == REQUEST_CREDENTIAL_FORM_TOOL and self.credential_form is not None:
+            form = await self.credential_form.call(args, cancel_event=self.cancel_event)
+            return BuildToolOutcome(result=form.result, summary=form.summary, status=form.status)
         if name == APPLY_SKILL_TOOL:
             return await self._apply_skill(args)
         if self.request.skill_only:

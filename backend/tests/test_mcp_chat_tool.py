@@ -347,6 +347,7 @@ class ChatToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                     credential_id=credential.id,
                     model="auto",
                     public_base_url="https://heym.test",
+                    client=None,
                 )
 
     async def test_config_error_becomes_an_error_result_not_a_500(self) -> None:

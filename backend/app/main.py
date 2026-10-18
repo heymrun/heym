@@ -27,6 +27,7 @@ from app.api import (
     codex_followups,
     codex_oauth,
     config,
+    credential_setup,
     credentials,
     dashboards,
     data_tables,
@@ -345,6 +346,9 @@ app.include_router(agent_memory.router, prefix="/api/workflows", tags=["Agent Me
 app.include_router(playwright.router, prefix="/api/playwright", tags=["Playwright"])
 app.include_router(folders.router, prefix="/api", tags=["Folders"])
 app.include_router(credentials.router, prefix="/api/credentials", tags=["Credentials"])
+app.include_router(
+    credential_setup.router, prefix="/api/credential-setup", tags=["Credential Setup"]
+)
 app.include_router(
     google_sheets_oauth.router,
     prefix="/api/credentials/google-sheets/oauth",

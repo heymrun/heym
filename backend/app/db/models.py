@@ -2681,3 +2681,41 @@ class TriggerPollItem(Base):
     )
     item_key: Mapped[str] = mapped_column(String(255), nullable=False)
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+
+
+class CredentialSetupRequest(Base):
+    """A credential form an assistant turn asked the user to fill in on Heym's own page.
+
+    MCP clients cannot show the credential dialog, and a secret must never pass through them,
+    so the `heym_chat` assistant opens one of these and the user completes it at
+    `/credentials/setup/<id>`, signed in as the same user. The id doubles as the MCP
+    `elicitationId`. It grants nothing alone: the page and its API need the owner's session.
+    """
+
+    __tablename__ = "credential_setup_requests"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    conversation_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("dashboard_conversations.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    # "create" or "update".
+    action: Mapped[str] = mapped_column(String(16), nullable=False)
+    credential_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    suggested_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # The credential to update, or the one the form created.
+    credential_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("credentials.id", ondelete="SET NULL"), nullable=True
+    )
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # "pending", "completed" or "declined"; a pending request past `expires_at` is expired.
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    # The MCP client's answer to the elicitation: "accept", "decline", "cancel" or "error".
+    client_action: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

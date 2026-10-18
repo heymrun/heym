@@ -109,6 +109,13 @@ A dashboard chat turn that carries `allow_build` (Heym's Chat tab, Heym Work's C
 - `finish` is refused until a test run of the latest save has passed. The Verified card depends on that; keep it.
 - Every model request and test run in a build turn carries the conversation id as its OpenCode session (`ChatBuildSession.llm_session_id`); see the OpenCode section above.
 
+### Credentials over MCP (URL elicitation)
+MCP `heym_chat` turns run with `CredentialPromptMode.ASK_AND_LINK`: credential questions travel as text, and credentials are created or updated only through `request_credential_form` (`backend/app/services/credential_setup.py`), which opens Heym's form at `/credentials/setup/<id>`. Chat tab, Chat with Heym and Heym Work turns keep `ASK_AND_CREATE` and the in-chat dialog.
+
+- Never collect a secret through form-mode elicitation or chat text; the MCP spec forbids form mode for secrets. URL mode only, and the URL carries no secret.
+- The setup page and its API (`backend/app/api/credential_setup.py`) answer only the user the request was opened for. Keep every lookup scoped to the signed-in user; `tests/test_advisory_credential_setup_owner_only.py` guards it.
+- What a client declared in `initialize` comes back in the signed `Mcp-Session-Id` (Streamable HTTP) or on the SSE channel (legacy), see `backend/app/services/mcp_elicitation.py`. Send `elicitation/create` only to clients that declared `url`; everything else gets the link in the result.
+
 ### Node and operation integration
 When adding a new node type, operation, or operation-specific field, keep the canvas affordances in sync with the schema:
 
