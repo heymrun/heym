@@ -113,10 +113,10 @@ class EmbeddingService:
         raise ValueError(f"{problem} {fix}")
 
     def _count_tokens(self, text: str) -> int:
-        return len(self.encoding.encode(text))
+        return len(self.encoding.encode(text, disallowed_special=()))
 
     def _split_large_text(self, text: str, max_tokens: int) -> list[str]:
-        tokens = self.encoding.encode(text)
+        tokens = self.encoding.encode(text, disallowed_special=())
         if len(tokens) <= max_tokens:
             return [text]
 
