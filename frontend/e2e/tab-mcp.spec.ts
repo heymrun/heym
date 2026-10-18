@@ -1,6 +1,11 @@
 import { expect, test } from "@playwright/test";
 
-import { acceptNextDialog, deleteMcpServer, prepareAuthenticatedPage } from "./support";
+import {
+  acceptNextDialog,
+  deleteMcpServer,
+  expectInsideViewport,
+  prepareAuthenticatedPage,
+} from "./support";
 
 test.beforeEach(async ({ page }) => {
   await prepareAuthenticatedPage(page);
@@ -53,5 +58,27 @@ test("creates a named MCP server, reveals its endpoint, and deletes it", async (
     await expect(page.getByText(serverName, { exact: true })).toBeHidden();
   } finally {
     await deleteMcpServer(page, server.id);
+  }
+});
+
+test("lays out the MCP connection card for a phone screen", async ({ page }) => {
+  const viewportWidth = 390;
+  await page.setViewportSize({ width: viewportWidth, height: 844 });
+  await page.goto("/?tab=mcp");
+
+  const main = page.getByRole("main");
+  const heading = await expectInsideViewport(
+    main.getByRole("heading", { name: "MCP Connection" }),
+    viewportWidth,
+  );
+  const apiKeyTab = await expectInsideViewport(
+    main.getByRole("button", { name: "API Key", exact: true }),
+    viewportWidth,
+  );
+  // The icon sits beside the heading, so the tabs below start left of it rather than under it.
+  expect(apiKeyTab.x).toBeLessThan(heading.x);
+
+  for (const tabName of ["Claude Connector", "ChatGPT Connector", "Gemini App"]) {
+    await expectInsideViewport(main.getByRole("button", { name: tabName, exact: true }), viewportWidth);
   }
 });

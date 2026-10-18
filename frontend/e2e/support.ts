@@ -1,4 +1,4 @@
-import { expect, type APIResponse, type Page } from "@playwright/test";
+import { expect, type APIResponse, type Locator, type Page } from "@playwright/test";
 
 import { RELEASE_REGISTRY } from "../src/features/release-tour/releaseRegistry";
 import { buildReleaseTours } from "../src/features/release-tour/releaseTourMapper";
@@ -307,4 +307,25 @@ export async function acceptNextDialog(
   }
   await dialog.accept();
   await actionPromise;
+}
+
+export interface ElementBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** Asserts the element lies horizontally inside a viewport of the given width and returns its box. */
+export async function expectInsideViewport(
+  locator: Locator,
+  viewportWidth: number,
+): Promise<ElementBox> {
+  await expect(locator).toBeVisible();
+  const box = await locator.boundingBox();
+  expect(box).not.toBeNull();
+  const { x, width } = box as ElementBox;
+  expect(x).toBeGreaterThanOrEqual(0);
+  expect(x + width).toBeLessThanOrEqual(viewportWidth);
+  return box as ElementBox;
 }

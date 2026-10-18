@@ -689,38 +689,44 @@ onUnmounted(() => window.removeEventListener("keydown", handleCreateDialogEscape
     </template>
 
     <template v-else-if="!selectedTable">
-      <div class="flex items-center justify-between gap-3">
-        <div class="relative flex-1">
-          <Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            v-model="searchQuery"
-            placeholder="Search data tables..."
-            class="pl-9"
-          />
+      <!-- Mobile: search + refresh, then the two create buttons; sm: one row (wrappers become contents). -->
+      <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+        <div class="flex items-center gap-2 sm:contents">
+          <div class="relative min-w-0 flex-1">
+            <Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              v-model="searchQuery"
+              placeholder="Search data tables..."
+              class="pl-9"
+            />
+          </div>
+          <Button
+            size="sm"
+            variant="ghost"
+            class="shrink-0 sm:order-last"
+            @click="loadTables"
+          >
+            <RefreshCw
+              class="h-4 w-4"
+              :class="{ 'animate-spin': loading }"
+            />
+          </Button>
         </div>
-        <Button
-          size="sm"
-          @click="showCreateDialog = true"
-        >
-          <Plus class="mr-1 h-4 w-4" /> New DataTable
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          @click="openAICreate"
-        >
-          <Sparkles class="mr-1 h-4 w-4" /> Generate with AI
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          @click="loadTables"
-        >
-          <RefreshCw
-            class="h-4 w-4"
-            :class="{ 'animate-spin': loading }"
-          />
-        </Button>
+        <div class="grid grid-cols-2 gap-2 sm:contents">
+          <Button
+            size="sm"
+            @click="showCreateDialog = true"
+          >
+            <Plus class="mr-1 h-4 w-4" /> New DataTable
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            @click="openAICreate"
+          >
+            <Sparkles class="mr-1 h-4 w-4" /> Generate with AI
+          </Button>
+        </div>
       </div>
 
       <div class="space-y-2">
@@ -773,14 +779,15 @@ onUnmounted(() => window.removeEventListener("keydown", handleCreateDialogEscape
       </div>
 
       <!-- Table list -->
+      <!-- grid-cols-1 caps the track at the container width; an auto track grows to the longest nowrap name. -->
       <div
         v-else
-        class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
+        class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3"
       >
         <div
           v-for="table in filtered"
           :key="table.id"
-          class="group relative cursor-pointer rounded-lg border bg-card p-4 transition-colors hover:border-primary/40 hover:bg-accent/30"
+          class="group relative min-w-0 cursor-pointer rounded-lg border bg-card p-4 transition-colors hover:border-primary/40 hover:bg-accent/30"
           @click="openTable(table.id, $event)"
         >
           <div class="flex items-start justify-between">
@@ -1229,7 +1236,8 @@ onUnmounted(() => window.removeEventListener("keydown", handleCreateDialogEscape
       </div>
 
       <!-- Footer: add row + pagination -->
-      <div class="flex items-center justify-between">
+      <!-- Mobile: Add Row on its own line, pagination below it spanning the width. -->
+      <div class="flex flex-wrap items-center justify-between gap-2">
         <Button
           size="sm"
           variant="outline"
@@ -1238,43 +1246,47 @@ onUnmounted(() => window.removeEventListener("keydown", handleCreateDialogEscape
         >
           <Plus class="mr-1 h-4 w-4" /> Add Row
         </Button>
-        <div class="flex items-center gap-3 text-sm text-muted-foreground">
-          <span>{{ rowTotal }} rows</span>
-          <label class="flex items-center">
-            <span class="relative inline-flex">
-              <select
-                :value="String(rowPageSize)"
-                class="h-8 min-w-24 appearance-none rounded-md border bg-background pl-3 pr-9 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-                @change="handleRowPageSizeChange"
-              >
-                <option
-                  v-for="option in rowPageSizeOptions"
-                  :key="option.label"
-                  :value="String(option.value)"
+        <div class="flex w-full items-center justify-between gap-3 text-sm text-muted-foreground sm:w-auto sm:justify-end">
+          <div class="flex items-center gap-3">
+            <span class="whitespace-nowrap">{{ rowTotal }} rows</span>
+            <label class="flex items-center">
+              <span class="relative inline-flex">
+                <select
+                  :value="String(rowPageSize)"
+                  class="h-8 min-w-24 appearance-none rounded-md border bg-background pl-3 pr-9 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  @change="handleRowPageSizeChange"
                 >
-                  {{ option.label }}
-                </option>
-              </select>
-              <ChevronDown class="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            </span>
-          </label>
-          <Button
-            size="sm"
-            variant="ghost"
-            :disabled="rowPageSize === 'all' || rowPage === 0"
-            @click="prevPage"
-          >
-            <ChevronLeft class="h-4 w-4" />
-          </Button>
-          <span>{{ rowPage + 1 }} / {{ totalPages }}</span>
-          <Button
-            size="sm"
-            variant="ghost"
-            :disabled="rowPageSize === 'all' || rowPage >= totalPages - 1"
-            @click="nextPage"
-          >
-            <ChevronRight class="h-4 w-4" />
-          </Button>
+                  <option
+                    v-for="option in rowPageSizeOptions"
+                    :key="option.label"
+                    :value="String(option.value)"
+                  >
+                    {{ option.label }}
+                  </option>
+                </select>
+                <ChevronDown class="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              </span>
+            </label>
+          </div>
+          <div class="flex items-center gap-1 sm:gap-3">
+            <Button
+              size="sm"
+              variant="ghost"
+              :disabled="rowPageSize === 'all' || rowPage === 0"
+              @click="prevPage"
+            >
+              <ChevronLeft class="h-4 w-4" />
+            </Button>
+            <span class="whitespace-nowrap tabular-nums">{{ rowPage + 1 }} / {{ totalPages }}</span>
+            <Button
+              size="sm"
+              variant="ghost"
+              :disabled="rowPageSize === 'all' || rowPage >= totalPages - 1"
+              @click="nextPage"
+            >
+              <ChevronRight class="h-4 w-4" />
+            </Button>
+          </div>
         </div>
       </div>
     </template>

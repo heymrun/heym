@@ -1,6 +1,11 @@
 import { expect, test } from "@playwright/test";
 
-import { createDataTable, deleteDataTable, prepareAuthenticatedPage } from "./support";
+import {
+  createDataTable,
+  deleteDataTable,
+  expectInsideViewport,
+  prepareAuthenticatedPage,
+} from "./support";
 
 test.beforeEach(async ({ page }) => {
   await prepareAuthenticatedPage(page);
@@ -65,6 +70,37 @@ test("adds and deletes a row in a seeded table", async ({ page }) => {
     await dataRow.getByRole("button").last().click();
     await expect(page.getByText("hello-row")).toBeHidden();
     await expect(page.getByText('No rows yet. Click "Add Row" to get started.')).toBeVisible();
+  } finally {
+    await deleteDataTable(page, table.id);
+  }
+});
+
+test("fits the table list and the detail footer on a phone screen", async ({ page }) => {
+  const viewportWidth = 390;
+  // A name wider than the screen: the card must truncate it instead of growing past the edge.
+  const table = await createDataTable(page, `E2E Phone ${Date.now()} ${"wide-name-".repeat(12)}`, [
+    { name: "title", type: "string", order: 0 },
+  ]);
+
+  try {
+    await page.setViewportSize({ width: viewportWidth, height: 844 });
+    await page.goto("/?tab=datatable");
+
+    const listControls = [
+      page.getByPlaceholder("Search data tables..."),
+      page.getByRole("button", { name: "New DataTable", exact: true }),
+      page.getByRole("button", { name: "Generate with AI" }),
+      page.getByRole("heading", { name: table.name, exact: true }),
+    ];
+    for (const control of listControls) {
+      await expectInsideViewport(control, viewportWidth);
+    }
+
+    await page.goto(`/?tab=datatable/${table.id}`);
+    await expectInsideViewport(page.getByRole("button", { name: "Add Row" }), viewportWidth);
+    // The page counter stays on one line instead of stacking "1", "/", "1".
+    const pageCounter = page.getByText("1 / 1", { exact: true });
+    expect((await expectInsideViewport(pageCounter, viewportWidth)).height).toBeLessThan(24);
   } finally {
     await deleteDataTable(page, table.id);
   }
