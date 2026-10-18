@@ -9,12 +9,30 @@ Heym Work runs as its own container next to your Heym, with a separate license f
 | Area | What it does |
 |------|--------------|
 | **Chat** | Describe a job by typing or by voice. Heym asks what it needs, builds the workflow, tests it, and marks it Verified. |
-| **Flows** | Editors build a flow from choices instead of a canvas: what starts it, an optional AI draft, and Slack actions such as messages, DMs, approvals, buttons, forms and a final outcome. Answers from Slack continue the run, and approvals also wait in Activity. |
+| **Flows** | Editors build a flow from choices instead of a canvas: what starts it, an optional AI draft, and actions in Slack, Google Sheets and email. Answers from Slack continue the run, and approvals also wait in Activity. See [Flows](#flows). |
 | **Pages** | Pinned pages of widgets: numbers, charts, tables with status chips, file drops and approvals. A table row can open its own detail page. |
 | **Approvals** | Reviews from [Human-in-the-Loop](./human-in-the-loop.md) steps wait in Activity and on pages, with Approve, Request changes and Reject. |
 | **Activity** | Every run, with the person who started it and the instance that ran it. |
 | **Roles** | Owner, Editor and Viewer. People sign in with the [single sign-on](./sso.md) Heym already uses. |
-| **Industry editions** | Legal, education, finance, logistics, energy and e-commerce editions open with pages, sample data and workflows for that industry. |
+| **Industry and team editions** | Legal, education, finance, logistics, energy and e-commerce editions, plus IT, sales, marketing and HR editions for company teams, open with pages, sample data and workflows for that work. |
+
+## Flows
+
+**Flows** is in Heym Work's menu for Editors and Owners. A flow is made from choices rather than nodes, and Heym Work saves it as an ordinary Heym workflow through Heym's API, as the person who built it. Heym's access rules, Edit History and trigger sync apply as they do in the editor, and every run shows in Activity like any other.
+
+| Part | Choices |
+|------|---------|
+| **What starts it** | On demand, on a schedule, on a Slack message, when a Google Sheets tab changes (rows added, changed or deleted), or when an email reaches an inbox. Sheet and email triggers check every 1, 5, 15 or 60 minutes. |
+| **AI draft** (optional) | A model and instructions turn what started the flow into text for the steps after it. A flow that does not start from a sheet or an email can first read recent Slack messages from a channel or a thread. |
+| **What happens next** | Actions in order, in any of the three tools, whatever started the flow. **Slack:** channel message, direct message, form, message with buttons, approval, thread reply, message update and final outcome. **Google Sheets:** add a row, or update the row that changed. **Email:** send an email. |
+
+- **Answers continue the run.** An approval, buttons or a form pause the run until someone answers in Slack. An approval also waits in Activity, and a decision in either place takes the buttons off the Slack message. Later Slack steps stay in the first message's thread.
+- **One Connections card.** Each flow shows the Slack workspace, the Google Sheets account and the inboxes it reads from and sends with. They are Heym credentials: **Slack Bot** (a bot token, `xoxb-…`), **Google Sheets**, **IMAP** and **SMTP**, and a missing one can be added from the flow itself.
+- **One Slack app for every flow.** In the Slack app, set the Interactivity Request URL to `https://<your Heym>/api/slack/interactions/<credential id>` and the Event Subscriptions Request URL to `https://<your Heym>/api/slack/events/<credential id>`. Heym Work shows both for the chosen connection. Every flow on that credential shares them.
+- **Slack triggers choose what they hear:** messages in channels and DMs, direct messages to the bot, mentions of the bot, or messages in one channel. The bot's own posts never start a flow.
+- **Requirements.** Flows need Heym 0.0.131 or later.
+
+The steps a flow builds are the same nodes you can use on the canvas: [Slack](../nodes/slack-node.md), [Slack Trigger](../nodes/slack-trigger-node.md), [Google Sheets](../nodes/google-sheets-node.md), [Google Sheets Trigger](../nodes/google-sheets-trigger-node.md), [IMAP Trigger](../nodes/imap-trigger-node.md), [Send Email](../nodes/send-email-node.md) and [Cron](../nodes/cron-node.md).
 
 ## Connecting Heym Work
 
