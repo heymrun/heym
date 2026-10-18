@@ -3746,7 +3746,7 @@ export const chatApi = {
       content,
       credential_id: credentialId,
       model,
-      allow_skill_write: true,
+      allow_build: true,
       ...(attachment ? { attachment } : {}),
     });
     return response.data;

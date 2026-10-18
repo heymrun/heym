@@ -18,7 +18,7 @@ You can also start a conversation from the chat box on the [Workflows tab](./wor
 - **Global variables context** – Your [Global Variables](../reference/global-variables.md) are available to the LLM, so you can ask about or reference stored values
 - **Workspace template context** – Shared workflow and node templates in your workspace are included as context, so Chat can answer questions about available templates
 - **Long-running agent** – Chat keeps working on the backend even if the browser closes, so you can come back from another device and continue the same conversation
-- **Workflow creation** – Ask Chat to create or set up a workflow, and it uses the same Workflow AI Builder engine as the editor assistant to generate and save the workflow
+- **Workflow creation** – Ask Chat to create or change a workflow, and it saves the workflow, test-runs it with sample inputs, fixes what failed, and finishes when a run passes. See [Creating Workflows](#creating-workflows)
 - **Kanban task creation** – Ask naturally to add a task or create a card. Chat adds it to the first column of the requested board; when you have multiple boards and do not name one, Chat presents a board picker before creating the card
 - **Queued follow-ups** – Send more messages while an answer is streaming. Queued messages are persisted, can be edited or deleted before they start, and run in order after the active response
 - **Planning pauses** – When Chat needs planning details, it asks clarification questions and pauses queued follow-ups until you answer. After the planning answer finishes, queued messages resume
@@ -51,9 +51,21 @@ The chat keeps up to 25 recent messages in context. Older messages are trimmed t
 
 ## Creating Workflows
 
-When you ask Chat to create, build, generate, or set up a workflow, it creates a new saved workflow with a generated name and description. The response includes a read-only canvas preview of the generated nodes and edges, plus an **Open workflow** link that opens the workflow editor in a new browser tab. Use the preview card's **Run** button when you want to execute the workflow.
+When you ask Chat to create, build, generate, or set up a workflow, it saves a new workflow with a generated name and description, then tests it in the same turn:
 
-Follow-up feedback in the same chat edits that workflow instead of creating another one. For example, after Chat creates a workflow you can say "add an approval step", "change the output format", or "şöyle yap" and Chat updates the saved workflow and refreshes the preview.
+1. **Save:** Chat saves the complete workflow. The response shows a read-only canvas preview of its nodes and edges, plus an **Open workflow** link that opens the editor in a new browser tab.
+2. **Test:** Chat runs the saved workflow with realistic sample inputs and reads the run report: the status, each node's result and the outputs.
+3. **Fix:** When the run failed or returned the wrong thing, Chat changes only what the report shows is wrong, saves again and runs again.
+4. **Finish:** When the latest run of the latest save passes, Chat ends the turn with one sentence on what the workflow now does.
+
+Each step appears as a row in the conversation: **Saving the workflow**, **Testing the workflow · attempt 1/5**, and **Finishing** with the result **Verified**.
+
+- Test runs are real runs. Their side effects happen, and they appear in the workflow's run history like any other run.
+- A turn has at most five test runs. When they are used up, Chat stops and tells you what still fails and what it would change next.
+- Saves take the editor's path: a change to the graph keeps the previous graph in the workflow's Edit History.
+- When Chat needs something from you, such as a credential, a data table or a decision, it asks and pauses. The turn continues after you answer.
+
+Follow-up feedback in the same chat changes that workflow instead of creating another one. For example, after Chat creates a workflow you can say "add an approval step" or "change the output format", and Chat saves, tests and fixes it again. Chat can also change an existing workflow you name, as long as you can edit it.
 
 This is best for requests where you want the work done as a reusable automation, not just a one-off answer.
 

@@ -56,7 +56,7 @@ Capabilities added to the Chat tab later become available through `heym_chat` au
 
 ### Build mode
 
-`heym_chat` always runs the Chat engine in build mode. In one call the assistant can save a new workflow, run it with realistic sample inputs, read the run report, fix what failed, and run it again, up to five test runs per call. When the latest run of the latest save passes, it finishes with a one-sentence summary, and the reply ends with `Verified: the latest test run of the saved workflow passed.`
+`heym_chat` always runs the Chat engine in build mode, the same mode the [Chat tab](./chat-tab.md#creating-workflows) uses. In one call the assistant can save a new workflow, run it with realistic sample inputs, read the run report, fix what failed, and run it again, up to five test runs per call. When the latest run of the latest save passes, it finishes with a one-sentence summary, and the reply ends with `Verified: the latest test run of the saved workflow passed.`
 
 - Test runs are real runs. Their side effects happen, and they appear in the workflow's run history like any other run.
 - Saves take the editor's path: a change to the graph keeps the previous graph in the workflow's Edit History.

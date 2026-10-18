@@ -275,6 +275,7 @@ class ChatBuildSessionTests(unittest.IsolatedAsyncioTestCase):
             prompt = await self._session(target=self.target.id).prompt()
 
         self.assertIn("## Build mode", prompt)
+        self.assertIn("## Skills", prompt)
         self.assertIn(f'"Lead intake" ({self.target.id})', prompt)
         self.assertIn("## Workflow DSL reference", prompt)
         self.assertIn("## Current Workflow Context", prompt)
@@ -293,6 +294,19 @@ class ChatBuildSessionTests(unittest.IsolatedAsyncioTestCase):
             await session.call("run_workflow_test", {"inputs": {}, "expect": ""})
         spent = [t["function"]["name"] for t in session.tools(DASHBOARD_CHAT_TOOLS)]
         self.assertFalse({"save_workflow", "run_workflow_test", "finish"} & set(spent))
+
+    async def test_build_mode_keeps_skill_writes_through_the_budget(self) -> None:
+        session = self._session()
+        names = [t["function"]["name"] for t in session.tools(DASHBOARD_CHAT_TOOLS)]
+        self.assertIn("apply_skill", names)
+        self.assertTrue(session.handles("apply_skill"))
+
+        self.runner.return_value = _run_result("error")
+        await session.call("save_workflow", {"workflow": DSL})
+        for _ in range(MAX_BUILD_TEST_RUNS):
+            await session.call("run_workflow_test", {"inputs": {}, "expect": ""})
+        spent = [t["function"]["name"] for t in session.tools(DASHBOARD_CHAT_TOOLS)]
+        self.assertIn("apply_skill", spent)
 
 
 if __name__ == "__main__":
