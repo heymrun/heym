@@ -297,6 +297,12 @@ class TestEmbeddingServiceCustomEndpoint(unittest.TestCase):
 
         self.assertEqual(results[0].text, "Docs about <|endoftext|> in GPT")
         self.assertEqual(service._split_large_text("a <|endoftext|> b", 100), ["a <|endoftext|> b"])
+        self.assertEqual(service.embed_text("<|endoftext|>"), [0.1, 0.2, 0.3])
+
+        text = "<|endoftext|> " * 20
+        parts = service._split_large_text(text, 5)
+        self.assertGreater(len(parts), 1)
+        self.assertEqual("".join(parts), text)
 
     def test_blank_api_key_uses_placeholder(self):
         config = EmbeddingConfig(base_url="http://localhost:11434/v1", model="m")
