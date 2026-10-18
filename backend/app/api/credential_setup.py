@@ -20,6 +20,7 @@ from app.services.credential_setup import (
     STATUS_DECLINED,
     STATUS_EXPIRED,
     STATUS_PENDING,
+    settle_form_step,
     setup_request_status,
 )
 
@@ -84,10 +85,12 @@ async def complete_credential_setup(
     """Record the credential the user saved; the waiting chat turn picks it up."""
     row = await _owned_request(db, request_id, current_user.id, for_update=True)
     _ensure_pending(row)
-    owner_id = (
-        await db.execute(select(Credential.owner_id).where(Credential.id == body.credential_id))
-    ).scalar_one_or_none()
-    if owner_id != current_user.id:
+    credential = (
+        await db.execute(
+            select(Credential.owner_id, Credential.name).where(Credential.id == body.credential_id)
+        )
+    ).first()
+    if credential is None or credential.owner_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Credential not found")
     if row.action == "update" and body.credential_id != row.credential_id:
         raise HTTPException(
@@ -97,6 +100,8 @@ async def complete_credential_setup(
     row.credential_id = body.credential_id
     row.status = STATUS_COMPLETED
     row.completed_at = datetime.now(timezone.utc)
+    verb = "Updated" if row.action == "update" else "Created"
+    await settle_form_step(db, row, f'{verb} credential "{credential.name}"')
     await db.commit()
     return _response(row)
 
@@ -112,5 +117,6 @@ async def decline_credential_setup(
     _ensure_pending(row)
     row.status = STATUS_DECLINED
     row.completed_at = datetime.now(timezone.utc)
+    await settle_form_step(db, row, "Credential form declined")
     await db.commit()
     return _response(row)

@@ -625,6 +625,12 @@ async def dispatch_chat_tool_call(
     client: MCPClientChannel | None = None,
 ) -> dict[str, Any]:
     """Run `heym_chat` and package the reply as a JSON-RPC tool result."""
+    logger.info(
+        "heym_chat call: elicitation=%s",
+        ",".join(sorted(client.elicitation_modes))
+        if client and client.elicitation_modes
+        else "none",
+    )
     try:
         result = await mcp_chat_service.run_chat_tool(
             db,

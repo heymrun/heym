@@ -77,9 +77,9 @@ How the page reaches you depends on the client:
 | Client | What happens |
 |--------|--------------|
 | Supports MCP URL elicitation | The client asks you to open the Heym page. The call waits while you fill in the form, up to ten minutes, then continues with the new credential. |
-| Anything else | The result carries the link. Open it, save the credential, then reply with the same `conversation_id`. The next call knows the form was saved and which credential it created. |
+| Anything else | The result carries the link and asks the client to call `heym_chat` again with `wait_for_credential_form`. That call waits up to five minutes while you fill in the form, then continues the conversation. If the client does not wait, save the form and reply with the same `conversation_id`; the next call knows the form was saved and which credential it created. |
 
-The page only opens for the Heym account that started the request, so a forwarded link is useless to anyone else. A form stays open for 24 hours, and you can decline it from the page.
+The page only opens for the Heym account that started the request, so a forwarded link is useless to anyone else. A form stays open for 24 hours, and you can decline it from the page. Once you save or decline it, the step in the Chat tab conversation shows the result.
 
 ### Credential and model
 
@@ -98,6 +98,7 @@ If either is missing, the tool still appears in `tools/list` but each call retur
 |----------|----------|-------------|
 | `message` | Yes | The instruction or question, in natural language. |
 | `conversation_id` | No | A `conversation_id` from a previous `heym_chat` result, to continue that thread. |
+| `wait_for_credential_form` | No | With `conversation_id`: wait until the user saves or declines the credential form the thread opened, then send `message`. |
 
 Every call is written to your [Chat tab](./chat-tab.md) history as a normal conversation, marked with a plug icon in the conversation list. Messages, tool cards, and clarification pauses look exactly like a conversation you started yourself, and you can open the thread and keep talking in the browser. Each result returns its `conversation_id` so the MCP client can continue the same thread instead of opening a new one on every call.
 

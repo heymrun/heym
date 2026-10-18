@@ -38,8 +38,13 @@ def _row(user_id: uuid.UUID, **overrides: object) -> CredentialSetupRequest:
 
 def _db(row: CredentialSetupRequest | None, credential_owner: uuid.UUID | None = None) -> AsyncMock:
     db = AsyncMock()
+    credential = (
+        SimpleNamespace(owner_id=credential_owner, name="GitHub") if credential_owner else None
+    )
     results = [MagicMock(scalar_one_or_none=MagicMock(return_value=row))]
-    results.append(MagicMock(scalar_one_or_none=MagicMock(return_value=credential_owner)))
+    if credential_owner is not None:
+        results.append(MagicMock(first=MagicMock(return_value=credential)))
+    results.append(MagicMock(scalars=MagicMock(return_value=[])))
     db.execute = AsyncMock(side_effect=results)
     return db
 

@@ -22,7 +22,7 @@ from typing import Any
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Credential, CredentialSetupRequest, CredentialType
+from app.db.models import Credential, CredentialSetupRequest, CredentialType, DashboardMessage
 from app.db.session import async_session_maker
 from app.services.mcp_elicitation import (
     ElicitationReply,
@@ -42,6 +42,8 @@ SETUP_REQUEST_TTL = timedelta(hours=24)
 # How long one tool call waits for the form before it hands the link back.
 FORM_WAIT_SECONDS = 600.0
 FORM_POLL_SECONDS = 1.0
+# How long a `heym_chat` call with `wait_for_credential_form` waits for the user.
+FORM_FOLLOW_UP_WAIT_SECONDS = 300.0
 _MAX_FORMS_IN_PROMPT = 10
 _MAX_REASON_LENGTH = 500
 _MAX_NAME_LENGTH = 100
@@ -122,6 +124,81 @@ async def record_elicitation_reply(
         )
         .values(**values)
     )
+
+
+def _opened_by(row: CredentialSetupRequest, args: object) -> bool:
+    """Whether a `request_credential_form` call with `args` opened this request."""
+    if not isinstance(args, dict) or args.get("action") != row.action:
+        return False
+    if row.action == "update":
+        return str(args.get("credential_id") or "").strip().lower() == str(row.credential_id)
+    return (
+        str(args.get("credential_type") or "").strip() == row.credential_type
+        and _text(args.get("name"), _MAX_NAME_LENGTH) == row.suggested_name
+    )
+
+
+async def settle_form_step(db: AsyncSession, row: CredentialSetupRequest, summary: str) -> None:
+    """Finish the chat step that opened this form, so the Chat tab stops showing it pending.
+
+    The step only stores the call's arguments, so the newest pending step whose arguments
+    opened this request is the one. The caller commits.
+    """
+    if row.conversation_id is None:
+        return
+    result = await db.execute(
+        select(DashboardMessage)
+        .where(
+            DashboardMessage.conversation_id == row.conversation_id,
+            DashboardMessage.role == "assistant",
+        )
+        .order_by(DashboardMessage.created_at.desc())
+        .limit(_MAX_FORMS_IN_PROMPT)
+    )
+    for message in result.scalars():
+        calls = list(message.tool_calls or [])
+        for index, call in enumerate(calls):
+            if (
+                isinstance(call, dict)
+                and call.get("name") == REQUEST_CREDENTIAL_FORM_TOOL
+                and call.get("status") == "pending"
+                and _opened_by(row, call.get("args"))
+            ):
+                calls[index] = {**call, "status": "success", "response_summary": summary}
+                message.tool_calls = calls
+                return
+
+
+async def wait_for_conversation_forms(
+    *,
+    user_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+    public_base_url: str,
+    session_factory: Callable[[], Any] = async_session_maker,
+) -> list[str]:
+    """Wait until no form this conversation opened is still open.
+
+    Returns the links of the forms still open when the wait ends, or none once the user has
+    saved or declined every one.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + FORM_FOLLOW_UP_WAIT_SECONDS
+    while True:
+        async with session_factory() as db:
+            result = await db.execute(
+                select(CredentialSetupRequest.id).where(
+                    CredentialSetupRequest.conversation_id == conversation_id,
+                    CredentialSetupRequest.user_id == user_id,
+                    CredentialSetupRequest.status == STATUS_PENDING,
+                    CredentialSetupRequest.expires_at > datetime.now(timezone.utc),
+                )
+            )
+            open_ids = list(result.scalars())
+        if not open_ids:
+            return []
+        if loop.time() >= deadline:
+            return [credential_setup_url(public_base_url, request_id) for request_id in open_ids]
+        await asyncio.sleep(FORM_POLL_SECONDS)
 
 
 @dataclass(frozen=True)

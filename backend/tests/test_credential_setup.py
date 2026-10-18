@@ -19,8 +19,16 @@ from app.services.credential_setup import (
     REQUEST_CREDENTIAL_FORM_TOOL,
     CredentialFormTool,
     record_elicitation_reply,
+    settle_form_step,
+    wait_for_conversation_forms,
 )
-from app.services.mcp_chat_service import MCPChatResult, format_chat_tool_text
+from app.services.mcp_chat_service import (
+    MCPChatResult,
+    MCPChatSettings,
+    build_chat_mcp_tool,
+    format_chat_tool_text,
+    run_chat_tool,
+)
 from app.services.mcp_elicitation import ElicitationReply, MCPClientChannel
 
 BASE_URL = "https://heym.run"
@@ -286,6 +294,187 @@ class ConversationFormsPromptTests(unittest.IsolatedAsyncioTestCase):
         sessions.session.execute.assert_not_awaited()
 
 
+def _form_step(args: dict[str, Any], status: str = "pending") -> dict[str, Any]:
+    return {
+        "id": "call_1",
+        "name": REQUEST_CREDENTIAL_FORM_TOOL,
+        "label": "Opening the credential form...",
+        "args": args,
+        "status": status,
+        "response_summary": "Waiting for the credential form",
+    }
+
+
+class SettleFormStepTests(unittest.IsolatedAsyncioTestCase):
+    def _row(self, **overrides: Any) -> CredentialSetupRequest:
+        values: dict[str, Any] = {
+            "id": uuid.uuid4(),
+            "user_id": uuid.uuid4(),
+            "conversation_id": uuid.uuid4(),
+            "action": "create",
+            "credential_type": "header",
+            "suggested_name": "tanay",
+            "credential_id": None,
+            "status": "completed",
+            "expires_at": datetime.now(timezone.utc) + timedelta(hours=1),
+        }
+        values.update(overrides)
+        return CredentialSetupRequest(**values)
+
+    async def _settle(self, row: CredentialSetupRequest, messages: list[Any]) -> None:
+        db = AsyncMock()
+        db.execute = AsyncMock(return_value=MagicMock(scalars=MagicMock(return_value=messages)))
+        await settle_form_step(db, row, 'Created credential "tanay"')
+
+    async def test_the_step_that_opened_the_form_is_finished(self) -> None:
+        other = _form_step({"action": "create", "credential_type": "github", "name": "GitHub"})
+        opened = _form_step({"action": "create", "credential_type": "header", "name": " tanay "})
+        message = SimpleNamespace(tool_calls=[other, opened])
+
+        await self._settle(self._row(), [message])
+
+        self.assertEqual(message.tool_calls[0], other)
+        self.assertEqual(message.tool_calls[1]["status"], "success")
+        self.assertEqual(message.tool_calls[1]["response_summary"], 'Created credential "tanay"')
+        self.assertEqual(message.tool_calls[1]["label"], "Opening the credential form...")
+
+    async def test_an_update_matches_by_credential_id(self) -> None:
+        credential_id = uuid.uuid4()
+        step = _form_step({"action": "update", "credential_id": str(credential_id).upper()})
+        message = SimpleNamespace(tool_calls=[step])
+
+        await self._settle(self._row(action="update", credential_id=credential_id), [message])
+
+        self.assertEqual(message.tool_calls[0]["status"], "success")
+
+    async def test_finished_or_unrelated_steps_stay_as_they_are(self) -> None:
+        done = _form_step(
+            {"action": "create", "credential_type": "header", "name": "tanay"}, "success"
+        )
+        unrelated = {"id": "call_2", "name": "save_workflow", "status": "pending", "args": {}}
+        message = SimpleNamespace(tool_calls=[done, unrelated])
+
+        await self._settle(self._row(), [message])
+
+        self.assertEqual(message.tool_calls, [done, unrelated])
+
+    async def test_a_form_without_a_conversation_touches_nothing(self) -> None:
+        db = AsyncMock()
+        await settle_form_step(db, self._row(conversation_id=None), "x")
+        db.execute.assert_not_awaited()
+
+
+class FollowUpWaitTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        for name, value in (("FORM_POLL_SECONDS", 0), ("FORM_FOLLOW_UP_WAIT_SECONDS", 0.05)):
+            patcher = patch.object(credential_setup, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    async def _wait(self, sessions: _FakeSessions) -> list[str]:
+        return await wait_for_conversation_forms(
+            user_id=uuid.uuid4(),
+            conversation_id=uuid.uuid4(),
+            public_base_url=BASE_URL,
+            session_factory=sessions,
+        )
+
+    async def test_the_wait_ends_when_the_user_saves_the_form(self) -> None:
+        open_id = uuid.uuid4()
+        sessions = _FakeSessions(
+            [
+                MagicMock(scalars=MagicMock(return_value=[open_id])),
+                MagicMock(scalars=MagicMock(return_value=[])),
+            ]
+        )
+
+        self.assertEqual(await self._wait(sessions), [])
+        self.assertEqual(sessions.session.execute.await_count, 2)
+
+    async def test_a_form_still_open_comes_back_as_its_link(self) -> None:
+        open_id = uuid.uuid4()
+        sessions = _FakeSessions()
+        sessions.session.execute = AsyncMock(
+            return_value=MagicMock(scalars=MagicMock(return_value=[open_id]))
+        )
+
+        self.assertEqual(await self._wait(sessions), [f"{BASE_URL}/credentials/setup/{open_id}"])
+
+
+class ChatToolFormWaitTests(unittest.IsolatedAsyncioTestCase):
+    async def _run(
+        self, arguments: dict[str, Any], still_open: list[str]
+    ) -> tuple[Any, AsyncMock, AsyncMock]:
+        resolved = SimpleNamespace(credential=SimpleNamespace(id=uuid.uuid4()), model="gpt-5.5")
+        turn = AsyncMock(
+            return_value=MCPChatResult(
+                uuid.uuid4(), "Created it.", [], awaiting_clarification=False
+            )
+        )
+        with (
+            patch(
+                "app.services.mcp_chat_service.resolve_chat_llm", AsyncMock(return_value=resolved)
+            ),
+            patch(
+                "app.services.mcp_chat_service.wait_for_conversation_forms",
+                AsyncMock(return_value=still_open),
+            ) as wait,
+            patch("app.api.chats.run_mcp_chat_turn", turn),
+        ):
+            result = await run_chat_tool(
+                AsyncMock(),
+                user_id=uuid.uuid4(),
+                settings=MCPChatSettings(enabled=True, credential_id=None, model=None),
+                arguments=arguments,
+                public_base_url=BASE_URL,
+            )
+        return result, turn, wait
+
+    async def test_a_saved_form_continues_the_conversation(self) -> None:
+        conversation_id = str(uuid.uuid4())
+        args = {
+            "message": "I saved the credential form.",
+            "conversation_id": conversation_id,
+            "wait_for_credential_form": True,
+        }
+
+        result, turn, wait = await self._run(args, [])
+
+        wait.assert_awaited_once()
+        turn.assert_awaited_once()
+        self.assertEqual(turn.await_args.kwargs["message"], "I saved the credential form.")
+        self.assertEqual(result.text, "Created it.")
+
+    async def test_a_form_still_open_returns_its_link_without_a_turn(self) -> None:
+        url = f"{BASE_URL}/credentials/setup/{uuid.uuid4()}"
+        args = {
+            "message": "I saved the credential form.",
+            "conversation_id": str(uuid.uuid4()),
+            "wait_for_credential_form": True,
+        }
+
+        result, turn, _wait = await self._run(args, [url])
+
+        turn.assert_not_awaited()
+        self.assertEqual(result.credential_form_urls, (url,))
+        self.assertIn(url, format_chat_tool_text(result))
+
+    async def test_calls_without_the_flag_never_wait(self) -> None:
+        for args in (
+            {"message": "hi", "conversation_id": str(uuid.uuid4())},
+            {"message": "hi", "wait_for_credential_form": True},
+        ):
+            with self.subTest(args=args):
+                _result, turn, wait = await self._run(args, ["unused"])
+                wait.assert_not_awaited()
+                turn.assert_awaited_once()
+
+    def test_the_tool_offers_the_wait_flag(self) -> None:
+        schema = build_chat_mcp_tool().inputSchema
+        self.assertEqual(schema.properties["wait_for_credential_form"].type, "boolean")
+        self.assertEqual(schema.required, ["message"])
+
+
 class ElicitationReplyTests(unittest.IsolatedAsyncioTestCase):
     async def test_a_reply_only_touches_the_users_pending_request(self) -> None:
         user_id, elicitation_id = uuid.uuid4(), uuid.uuid4()
@@ -339,6 +528,13 @@ class MCPResultTextTests(unittest.TestCase):
         self.assertEqual(added.count(url), 1)
         self.assertIn("never pass through this client", added)
         self.assertEqual(kept.count(url), 1)
+        for text in (added, kept):
+            self.assertIn("wait_for_credential_form set to true", text)
+
+    def test_no_wait_instruction_without_an_open_form(self) -> None:
+        self.assertNotIn(
+            "wait_for_credential_form", format_chat_tool_text(self._result("Done.", ()))
+        )
 
 
 class BuildSessionCredentialFormTests(unittest.IsolatedAsyncioTestCase):
