@@ -24,7 +24,7 @@ The default server is always available at `{origin}/api/mcp/sse`. All workflows 
 
 - **API Key** – Use the MCP API key for programmatic connections. The tab can copy a ready-to-use JSON config and includes an **Add to Cursor** button for one-click Cursor setup.
 - **Claude** – The tab shows the MCP server URL and setup steps for Claude. Leave OAuth Client ID and Secret blank; Claude registers automatically and authenticates via Heym OAuth.
-- **ChatGPT** – The tab shows the MCP server URL and setup steps for a ChatGPT app. Turn on Developer mode, create an app with the URL and choose OAuth; ChatGPT registers automatically.
+- **ChatGPT** – The tab shows the MCP server URL and setup steps. In ChatGPT, open **Plugins** (`chatgpt.com/plugins`), select **+** and **Add custom MCP server**, paste the URL under **Connection**, choose **OAuth**, and select **Create as a plugin**; ChatGPT registers automatically. If **Add custom MCP server** is missing, turn on **Developer mode** under **Settings → Security and login** (a workspace admin may need to allow it).
 - **Gemini** – The tab shows the MCP server URL and setup steps for a Gemini custom app: in gemini.google.com, **Settings → Connected Apps → Add a custom app**, paste the URL and leave **Advanced features** closed; Gemini registers automatically and authenticates via Heym OAuth. Once connected, Heym also works in the Gemini mobile app.
 
 ### Workflow MCP Toggle
@@ -137,7 +137,7 @@ Toggling a workflow moves it to the top of the assigned list, so the row you jus
 Named servers support the same authentication methods as the default server:
 
 - **X-MCP-Key header** – Pass the server's API key directly (API clients, Cursor). Header only: keys are not accepted as a `?key=` query parameter, because URLs end up in access logs, proxy logs and browser history.
-- **Claude, ChatGPT and Gemini OAuth** – Add the server URL to the client's connectors or custom apps; leave credentials blank and the client registers via OAuth automatically. The bearer token must travel in the `Authorization` header, not as `?token=`.
+- **Claude, ChatGPT and Gemini OAuth** – Add the server URL to the client's connectors, plugins or custom apps; leave credentials blank and the client registers via OAuth automatically. The bearer token must travel in the `Authorization` header, not as `?token=`.
 - **Session token** – Issued during the SSE handshake; scoped to the specific server so tokens from one named server cannot access another. This short-lived `?session=` parameter is unaffected.
 
 ### Deleting a Named Server

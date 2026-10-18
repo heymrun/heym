@@ -647,18 +647,18 @@ function addToCursor(): void {
                 Setup Instructions
               </h4>
               <ol class="text-sm text-muted-foreground space-y-2 list-decimal list-inside">
-                <li>Open <strong class="text-foreground">chatgpt.com</strong> in your browser and go to Settings</li>
-                <li>Navigate to <strong class="text-foreground">Apps → Advanced settings</strong> and enable <strong class="text-foreground">Developer mode</strong></li>
-                <li>Go to <strong class="text-foreground">Settings → Apps → Create app</strong></li>
-                <li>Enter the name <strong class="text-foreground">Heym</strong> and paste the MCP Server URL above</li>
-                <li>Choose <strong class="text-foreground">OAuth</strong> for authentication — ChatGPT will register automatically</li>
-                <li>Click <strong class="text-foreground">Create</strong> and authorize with your Heym credentials</li>
+                <li>Open <strong class="text-foreground">chatgpt.com/plugins</strong> in your browser</li>
+                <li>Select <strong class="text-foreground">+</strong>, then <strong class="text-foreground">Add custom MCP server</strong></li>
+                <li>Enter the name <strong class="text-foreground">Heym</strong> and a short description</li>
+                <li>Under <strong class="text-foreground">Connection</strong>, keep the public endpoint and paste the MCP Server URL above</li>
+                <li>Choose <strong class="text-foreground">OAuth</strong> for authentication. ChatGPT registers itself, so leave any client ID and secret empty</li>
+                <li>Confirm <strong class="text-foreground">I understand and want to continue</strong>, select <strong class="text-foreground">Create as a plugin</strong>, then sign in to Heym to authorize</li>
               </ol>
             </div>
 
             <div class="flex items-start gap-2 p-3 rounded-md bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800/50 text-sm">
               <Info class="w-4 h-4 shrink-0 mt-0.5" />
-              <span>ChatGPT uses OAuth 2.1 to securely authenticate. Your Heym credentials are used to authorize access and are never shared with ChatGPT. Developer mode is required to add custom MCP connectors.</span>
+              <span>ChatGPT uses OAuth 2.1 to securely authenticate. Your Heym credentials are used to authorize access and are never shared with ChatGPT. No <strong>Add custom MCP server</strong> option? Turn on <strong>Developer mode</strong> under <strong>Settings → Security and login</strong>. On a ChatGPT workspace, an admin may need to allow it.</span>
             </div>
           </div>
 

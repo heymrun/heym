@@ -22,6 +22,17 @@ test("shows the MCP connection config and named servers section", async ({ page 
   ).toBeVisible();
 });
 
+test("sends ChatGPT users to Plugins to add Heym as a custom MCP server", async ({ page }) => {
+  await page.goto("/?tab=mcp");
+  const main = page.getByRole("main");
+  await main.getByRole("button", { name: "ChatGPT Connector", exact: true }).click();
+
+  await expect(main.getByText("chatgpt.com/plugins", { exact: true })).toBeVisible();
+  await expect(main.getByText("Create as a plugin", { exact: true })).toBeVisible();
+  await expect(main.getByText("Settings → Security and login", { exact: true })).toBeVisible();
+  await expect(main.getByText("Apps → Advanced settings")).toHaveCount(0);
+});
+
 test("creates a named MCP server, reveals its endpoint, and deletes it", async ({ page }) => {
   const serverName = `E2E MCP ${Date.now()}`;
 
