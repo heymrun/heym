@@ -87,9 +87,11 @@ const folderPath = computed((): string => {
   return props.parentPath ? `${props.parentPath} / ${props.folder.name}` : props.folder.name;
 });
 const isActiveDropTarget = computed((): boolean => {
+  if (props.folder.virtual) return false;
   return props.draggedWorkflowId !== null && props.dragOverFolderId === props.folder.id;
 });
 const isValidDropTarget = computed((): boolean => {
+  if (props.folder.virtual) return false;
   return props.draggedWorkflowFolderId !== props.folder.id;
 });
 
@@ -110,6 +112,7 @@ function handleFolderClick(): void {
 }
 
 function handleContextMenu(event: MouseEvent): void {
+  if (props.folder.virtual) return;
   emit("contextMenu", event, props.folder);
 }
 
@@ -121,7 +124,7 @@ function clearExpandTimer(): void {
 }
 
 function handleDragOver(event: DragEvent): void {
-  if (!props.draggedWorkflowId) return;
+  if (props.folder.virtual || !props.draggedWorkflowId) return;
   event.preventDefault();
   event.stopPropagation();
   if (event.dataTransfer) {
@@ -152,7 +155,7 @@ function handleDragLeave(event: DragEvent): void {
 }
 
 function handleDrop(event: DragEvent): void {
-  if (!props.draggedWorkflowId) return;
+  if (props.folder.virtual || !props.draggedWorkflowId) return;
   event.preventDefault();
   event.stopPropagation();
   clearExpandTimer();
@@ -230,6 +233,7 @@ onUnmounted(clearExpandTimer);
       </span>
 
       <Button
+        v-if="!folder.virtual"
         variant="ghost"
         size="icon"
         class="h-8 w-8 shrink-0 rounded-lg text-muted-foreground sm:hidden"
@@ -240,6 +244,7 @@ onUnmounted(clearExpandTimer);
       </Button>
 
       <div
+        v-if="!folder.virtual"
         class="hidden shrink-0 items-center gap-0.5 sm:flex"
         @click.stop
       >

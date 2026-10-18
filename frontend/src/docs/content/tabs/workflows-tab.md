@@ -47,7 +47,7 @@ The panel stays pinned beside the list while you scroll, so it remains readable 
 
 Accounts listed in `HEYM_ADMIN_EMAILS` can list, open, edit, inspect execution history, and delete any workflow on the instance without a share or ownership transfer. The setting is a comma-separated list of email addresses, matched case-insensitively. An empty list grants nobody this access. Restart the backend after changing it.
 
-Administrators see the owner's email in the workflow list and can search by that address. Select a workflow to open **Instance administration** in its preview:
+Administrators see the owner's email in the workflow list and can search by that address. Workflows owned by other people, when they are not already filed in one of the administrator's folders, are grouped under **Heym Users**, with one sub-folder per owner. That grouping is only in this list: the folders are not stored, and they cannot be renamed, moved, or deleted. A workflow the administrator has pinned, or one scheduled for deletion, stays in that section. Select a workflow to open **Instance administration** in its preview:
 
 1. **Pause triggers** is shown only for workflows containing a Cron node. It disables the workflow's Cron and other automatic trigger nodes through a normal versioned save. Existing runs can finish. Manual, API, portal, and sub-workflow calls remain available; this action is not a workflow-wide execution lock.
 2. The button changes to **Resume triggers** while paused, including after a page reload. Resume re-enables the triggers paused by the administrator and leaves triggers that were already disabled unchanged. For older paused workflows without a saved admin pause state, Resume enables their automatic triggers.

@@ -108,6 +108,8 @@ export interface FolderTree {
   icon?: string | null;
   children: FolderTree[];
   workflows: WorkflowListItem[];
+  /** Client-only grouping. These folders are not stored and accept no folder actions. */
+  virtual?: boolean;
 }
 
 export interface WorkflowNode {

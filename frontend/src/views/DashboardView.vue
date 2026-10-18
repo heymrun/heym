@@ -83,6 +83,11 @@ import { resolveShowcaseContext } from "@/features/showcase/showcaseResolver";
 import TemplatesPage from "@/features/templates/components/TemplatesPage.vue";
 import { useRunbookPlayer } from "@/features/runbook/useRunbookPlayer";
 import { joinOriginAndPath } from "@/lib/appUrl";
+import {
+  buildHeymUsersFolder,
+  collectHeymUsersWorkflowIds,
+  isHeymUsersFolderId,
+} from "@/lib/heymUsersFolder";
 import { previewRunStartsImmediately, shouldRunInsidePreviewSheet } from "@/lib/previewRun";
 import { isPaletteOpenInNewTab } from "@/lib/paletteNavigate";
 import { cn } from "@/lib/utils";
@@ -369,13 +374,24 @@ function onWorkflowCardTouchMove(): void {
   longPressHandlers.onTouchMove();
 }
 
+const heymUsersFolder = computed(() =>
+  buildHeymUsersFolder(
+    workflows.value,
+    authStore.user?.email,
+    new Set(quickDrawerPinnedWorkflowIds.value),
+  ),
+);
+
+const otherUsersWorkflowIds = computed(() => collectHeymUsersWorkflowIds(heymUsersFolder.value));
+
 const rootWorkflows = computed(() => {
   const pinnedIds = new Set(quickDrawerPinnedWorkflowIds.value);
   return workflows.value.filter(
     (workflow) =>
       !workflow.folder_id &&
       !workflow.scheduled_for_deletion &&
-      !pinnedIds.has(workflow.id),
+      !pinnedIds.has(workflow.id) &&
+      !otherUsersWorkflowIds.value.has(workflow.id),
   );
 });
 
@@ -597,11 +613,13 @@ const isWorkflowFilterActive = computed((): boolean => {
 });
 
 const displayedFolderTree = computed<FolderTree[]>(() => {
-  if (!isWorkflowFilterActive.value) {
-    return folderStore.folderTree;
-  }
-
-  return filterFolderTree(folderStore.folderTree);
+  const real = isWorkflowFilterActive.value
+    ? filterFolderTree(folderStore.folderTree)
+    : folderStore.folderTree;
+  const virtual = heymUsersFolder.value;
+  if (!virtual) return real;
+  const virtualTree = isWorkflowFilterActive.value ? filterFolderTree([virtual]) : [virtual];
+  return [...real, ...virtualTree];
 });
 
 const workflowSearchExpandedFolderIds = computed<Set<string>>(() => {
@@ -1194,6 +1212,10 @@ function onDragLeaveRoot(event: DragEvent): void {
 async function onDropToFolder(event: DragEvent, folderId: string): Promise<void> {
   event.preventDefault();
   event.stopPropagation();
+  if (isHeymUsersFolderId(folderId)) {
+    resetWorkflowDragState();
+    return;
+  }
   const workflowId = event.dataTransfer?.getData("workflowId") || draggedWorkflowId.value;
   const workflow = workflows.value.find((item) => item.id === workflowId);
   resetWorkflowDragState();
@@ -1251,6 +1273,7 @@ async function onDropToRoot(event: DragEvent): Promise<void> {
 function openContextMenu(event: MouseEvent, folder: FolderTree): void {
   event.preventDefault();
   event.stopPropagation();
+  if (folder.virtual) return;
   contextMenuFolder.value = folderStore.findFolderById(folder.id) ?? folder;
 
   const menuWidth = 160;
