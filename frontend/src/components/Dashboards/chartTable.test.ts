@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { cellText, statusTone, tableRowRecord } from "@/components/Dashboards/chartTable";
+import { cellText, sortTableRows, statusTone, tableRowRecord } from "@/components/Dashboards/chartTable";
 
 describe("statusTone", () => {
   it("reads the tone the server resolved for the cell's text", () => {
@@ -39,5 +39,23 @@ describe("tableRowRecord", () => {
 
   it("shows objects as JSON", () => {
     expect(cellText({ a: 1 })).toBe('{"a":1}');
+  });
+});
+
+describe("sortTableRows", () => {
+  const rows = [
+    ["LV-812", "Ravi N.", ""],
+    ["LV-802", "Omar S.", "2"],
+    ["LV-810", "omar s.", "10"],
+  ];
+
+  it("sorts text ascending, then descending, without losing the original order of ties", () => {
+    expect(sortTableRows(rows, 1, "asc").map((row) => row[0])).toEqual(["LV-802", "LV-810", "LV-812"]);
+    expect(sortTableRows(rows, 1, "desc").map((row) => row[0])).toEqual(["LV-812", "LV-802", "LV-810"]);
+  });
+
+  it("sorts numbers numerically and keeps empty cells last", () => {
+    expect(sortTableRows(rows, 2, "asc").map((row) => row[0])).toEqual(["LV-802", "LV-810", "LV-812"]);
+    expect(sortTableRows(rows, 2, "desc").map((row) => row[0])).toEqual(["LV-810", "LV-802", "LV-812"]);
   });
 });

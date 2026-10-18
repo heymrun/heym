@@ -28,7 +28,7 @@ const dangerClass =
 </script>
 
 <template>
-  <div class="mt-2 flex w-full min-w-0 shrink-0 flex-nowrap items-center gap-2 bg-card">
+  <div class="mt-2 flex w-full min-w-0 shrink-0 flex-nowrap items-center gap-2">
     <template v-if="editing">
       <button
         type="button"

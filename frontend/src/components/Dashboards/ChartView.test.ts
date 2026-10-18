@@ -35,6 +35,8 @@ describe("ChartView", () => {
     const html = await render({ type: "table", columns: ["Lead"], rows: [["Acme"]] });
 
     expect(html).toContain("Lead");
+    expect(html).toContain('aria-sort="none"');
+    expect(html).toContain("Sort by Lead");
     expect(html).toContain("Acme");
     expect(await render({ type: "table", columns: ["Lead"], rows: [] })).toContain("No data");
   });

@@ -32,6 +32,49 @@ export function statusTone(cell: unknown, tones: Record<string, StatusTone> | un
   return tones?.[cellText(cell)] ?? "neutral";
 }
 
+export type TableSortDirection = "asc" | "desc";
+
+/** Which column a table widget is sorted by, and which way. */
+export interface TableSort {
+  column: number;
+  direction: TableSortDirection;
+}
+
+/**
+ * Orders rows by one column. Numbers compare numerically, everything else by text.
+ * Empty cells stay last either way, and equal values keep their original order.
+ */
+export function sortTableRows(
+  rows: unknown[][],
+  column: number,
+  direction: TableSortDirection,
+): unknown[][] {
+  const factor = direction === "asc" ? 1 : -1;
+  return rows
+    .map((row, index) => ({ row, index }))
+    .sort((left, right) => {
+      const leftEmpty = cellText(left.row[column]).trim() === "";
+      const rightEmpty = cellText(right.row[column]).trim() === "";
+      if (leftEmpty || rightEmpty) {
+        if (leftEmpty && rightEmpty) return left.index - right.index;
+        return leftEmpty ? 1 : -1;
+      }
+      const byValue = compareCells(left.row[column], right.row[column]);
+      if (byValue === 0) return left.index - right.index;
+      return byValue * factor;
+    })
+    .map((entry) => entry.row);
+}
+
+function compareCells(left: unknown, right: unknown): number {
+  const a = cellText(left).trim();
+  const b = cellText(right).trim();
+  const aNumber = Number(a);
+  const bNumber = Number(b);
+  if (Number.isFinite(aNumber) && Number.isFinite(bNumber)) return aNumber - bNumber;
+  return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
+}
+
 /** The record a row links to, or null when the row has no value in the record column. */
 export function tableRowRecord(
   columns: string[],
