@@ -75,6 +75,7 @@ import { useDialogStackLayer } from "@/composables/useDialogStack";
 import { useLongPress } from "@/composables/useLongPress";
 import { useWorkflowPreview } from "@/composables/useWorkflowPreview";
 import { useWorkflowRowStatus } from "@/composables/useWorkflowRowStatus";
+import { bindWorkflowDragEdgeScroll } from "@/composables/useWorkflowDragEdgeScroll";
 import { onDismissOverlays, pushOverlayState } from "@/composables/useOverlayBackHandler";
 import { useRecentWorkflows } from "@/composables/useRecentWorkflows";
 import { getDocPath } from "@/docs/manifest";
@@ -289,6 +290,7 @@ const savingFolderIcon = ref(false);
 const draggedWorkflowId = ref<string | null>(null);
 const dragOverFolderId = ref<string | null>(null);
 const dragOverRoot = ref(false);
+const workflowDragEdgeScroll = bindWorkflowDragEdgeScroll();
 let workflowDragGhost: HTMLElement | null = null;
 
 const contextMenuFolder = ref<FolderTree | null>(null);
@@ -855,6 +857,7 @@ onUnmounted(() => {
   window.removeEventListener("storage", onQuickDrawerPreferencesStorage);
   removeOverlayDismiss?.();
   removeOverlayDismiss = null;
+  workflowDragEdgeScroll.stop();
   removeWorkflowDragGhost();
 });
 
@@ -1151,6 +1154,7 @@ function createWorkflowDragGhost(event: DragEvent): void {
 }
 
 function resetWorkflowDragState(): void {
+  workflowDragEdgeScroll.stop();
   draggedWorkflowId.value = null;
   dragOverFolderId.value = null;
   dragOverRoot.value = false;
@@ -1165,6 +1169,7 @@ function onDragStartWorkflow(event: DragEvent, workflowId: string): void {
   }
   draggedWorkflowId.value = workflowId;
   createWorkflowDragGhost(event);
+  workflowDragEdgeScroll.start();
 }
 
 function onDragEndWorkflow(): void {
