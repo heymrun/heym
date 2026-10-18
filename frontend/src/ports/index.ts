@@ -1,6 +1,8 @@
 import { inject, type InjectionKey } from "vue";
 
 import type {
+  CodexDeviceSignInPoll,
+  CodexDeviceSignInStart,
   CreateCredentialRequest,
   Credential,
   CredentialListItem,
@@ -88,6 +90,8 @@ export interface CredentialsPort {
     state: string,
     redirectUrl: string,
   ) => Promise<{ config: Record<string, unknown>; account_id: string }>;
+  codexDeviceStart: () => Promise<CodexDeviceSignInStart>;
+  codexDevicePoll: (state: string) => Promise<CodexDeviceSignInPoll>;
 }
 
 export const credentialsPortKey: InjectionKey<CredentialsPort> = Symbol("credentialsPort");

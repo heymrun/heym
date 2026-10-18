@@ -25,6 +25,8 @@ import type {
   WorkflowTemplate,
 } from "@/features/templates/types/template.types";
 import type {
+  CodexDeviceSignInPoll,
+  CodexDeviceSignInStart,
   CodexUsage,
   Credential,
   CredentialForIntellisense,
@@ -1612,6 +1614,22 @@ export const credentialsApi = {
     const response = await api.post<{ config: Record<string, unknown>; account_id: string }>(
       "/credentials/codex/oauth/complete",
       { state, redirect_url: redirectUrl },
+    );
+    return response.data;
+  },
+
+  codexDeviceStart: async (): Promise<CodexDeviceSignInStart> => {
+    const response = await api.post<CodexDeviceSignInStart>(
+      "/credentials/codex/oauth/device/start",
+      {},
+    );
+    return response.data;
+  },
+
+  codexDevicePoll: async (state: string): Promise<CodexDeviceSignInPoll> => {
+    const response = await api.post<CodexDeviceSignInPoll>(
+      "/credentials/codex/oauth/device/poll",
+      { state },
     );
     return response.data;
   },

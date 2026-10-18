@@ -17,6 +17,53 @@ import type { ReleaseEntry } from "@/features/release-tour/releaseTour.types";
  */
 export const RELEASE_REGISTRY: ReleaseEntry[] = [
   {
+    releaseId: "2026.21",
+    publishedAt: new Date("2026-10-18T12:00:00Z"),
+    headline: "Sign in to ChatGPT for Codex with a short code",
+    releaseTour: {
+      label: "New in Heym",
+      introTitle: "New in this release",
+      introDescription:
+        "A quick look at what changed since your last update. Takes about a minute.",
+      tourEnabled: false,
+      sectionOrder: ["codex-device-sign-in"],
+    },
+    sections: [
+      {
+        id: "codex-device-sign-in",
+        title: "Sign in to ChatGPT for Codex with a short code",
+        publishedAt: new Date("2026-10-18T12:00:00Z"),
+        blocks: [
+          {
+            type: "prose",
+            markdown:
+              "The **OpenAI Codex** credential now signs in to ChatGPT with a short code. Click **Sign in with ChatGPT**, enter the code Heym shows (it is already copied) on OpenAI's page, and approve. Heym finishes on its own and closes the OpenAI window. There is no `localhost:1455` address to copy back anymore.",
+          },
+          {
+            type: "prose",
+            markdown:
+              "Device code sign-in has to be allowed in ChatGPT under **Settings → Security**, and a workspace admin has to allow it for workspace accounts. Where it is off, **paste a redirect URL instead** keeps the previous flow.",
+          },
+        ],
+        tour: {
+          description:
+            "Connect a ChatGPT subscription to the Codex node with a short code. Nothing to paste back.",
+          useCases: [
+            "Run Codex on a ChatGPT Plus or Pro plan instead of API credits",
+            "Reconnect a Codex credential without leaving the dialog",
+            "Sign in from a phone or another computer by entering the code there",
+          ],
+          tourVisual: "codex-device-sign-in",
+          docTarget: {
+            categoryId: "nodes",
+            slug: "codex-node",
+            title: "Codex",
+          },
+        },
+      },
+    ],
+  },
+  {
     releaseId: "2026.20",
     publishedAt: new Date("2026-10-17T12:00:00Z"),
     headline: "Slack approvals, buttons and forms that pause a run",

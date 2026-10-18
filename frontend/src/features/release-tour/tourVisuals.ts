@@ -1,5 +1,6 @@
 import type { Component } from "vue";
 
+import CodexSignInTourVisual from "@/features/release-tour/components/visuals/CodexSignInTourVisual.vue";
 import GoogleTriggersTourVisual from "@/features/release-tour/components/visuals/GoogleTriggersTourVisual.vue";
 import HeymWorkTourVisual from "@/features/release-tour/components/visuals/HeymWorkTourVisual.vue";
 import SkillZipTourVisual from "@/features/release-tour/components/visuals/SkillZipTourVisual.vue";
@@ -8,6 +9,7 @@ import FallbackTourVisual from "@/features/release-tour/components/visuals/Fallb
 
 /** Maps a section's `tourVisual` key to the mock UI that demonstrates it. */
 export const TOUR_VISUALS: Record<string, Component> = {
+  "codex-device-sign-in": CodexSignInTourVisual,
   "google-triggers": GoogleTriggersTourVisual,
   "heym-work": HeymWorkTourVisual,
   "skill-zip": SkillZipTourVisual,

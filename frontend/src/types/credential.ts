@@ -423,6 +423,23 @@ export interface CredentialTestResponse {
   message: string;
 }
 
+/** A ChatGPT device code sign-in for a Codex credential: the user enters `user_code` at OpenAI. */
+export interface CodexDeviceSignInStart {
+  user_code: string;
+  verification_url: string;
+  /** Seconds between polls, as OpenAI asks. */
+  interval: number;
+  expires_at: string;
+  /** Sealed by the server; only `codexDevicePoll` can read it. */
+  state: string;
+}
+
+export interface CodexDeviceSignInPoll {
+  status: "pending" | "complete";
+  config: Record<string, unknown> | null;
+  account_id: string;
+}
+
 export interface SupabaseTablesResponse {
   tables: string[];
   success: boolean;

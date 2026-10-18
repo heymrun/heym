@@ -422,3 +422,79 @@ test("configures a Notion node with a saved credential and operation", async ({ 
     await deleteCredential(page, credential.id);
   }
 });
+
+test("signs in to ChatGPT with a device code and saves the Codex credential", async ({
+  page,
+  context,
+}) => {
+  const credentialName = `e2e-codex-device-${Date.now()}`;
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  let approved = false;
+  await page.route("**/api/credentials/codex/oauth/device/start", (route) =>
+    route.fulfill({
+      json: {
+        user_code: "E2E-CODE1",
+        verification_url: "https://auth.openai.com/codex/device",
+        interval: 1,
+        expires_at: new Date(Date.now() + 15 * 60_000).toISOString(),
+        state: "sealed-e2e-state",
+      },
+    }),
+  );
+  await page.route("**/api/credentials/codex/oauth/device/poll", async (route) => {
+    expect(route.request().postDataJSON()).toEqual({ state: "sealed-e2e-state" });
+    await route.fulfill({
+      json: approved
+        ? {
+            status: "complete",
+            config: {
+              auth_mode: "chatgpt",
+              access_token: "e2e-access-token",
+              refresh_token: "e2e-refresh-token",
+              id_token: "",
+              account_id: "acct-e2e",
+              expires_at: null,
+            },
+            account_id: "acct-e2e",
+          }
+        : { status: "pending", config: null, account_id: "" },
+    });
+  });
+  await context.route("https://auth.openai.com/**", (route) =>
+    route.fulfill({ contentType: "text/html", body: "<title>OpenAI</title>" }),
+  );
+
+  await openCredentialDialog(page);
+  await page.getByLabel("Name").fill(credentialName);
+  await selectCredentialType(page, "OpenAI Codex");
+  await page.getByTestId("codex-device-sign-in").click();
+
+  await expect(page.getByTestId("codex-device-code")).toHaveText("E2E-CODE1");
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe("E2E-CODE1");
+  await expect(page.getByRole("button", { name: "Create", exact: true })).toBeDisabled();
+
+  const popupPromise = page.waitForEvent("popup");
+  await page.getByTestId("codex-open-openai").click();
+  const popup = await popupPromise;
+  expect(popup.url()).toBe("https://auth.openai.com/codex/device");
+  approved = true;
+
+  await expect(page.getByText(/Connected to ChatGPT \(acct-e2e\)/)).toBeVisible();
+  await expect.poll(() => popup.isClosed()).toBe(true);
+  await expect(page.getByTestId("codex-device-code-panel")).toBeHidden();
+
+  const credentialResponsePromise = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname === "/api/credentials",
+  );
+  await page.getByRole("button", { name: "Create", exact: true }).click();
+  const credentialResponse = await credentialResponsePromise;
+  expect(credentialResponse.status()).toBe(201);
+  const credential = (await credentialResponse.json()) as { id: string };
+  try {
+    await expect(page.getByTestId(`credential-card-${credential.id}`)).toBeVisible();
+  } finally {
+    await deleteCredential(page, credential.id);
+  }
+});

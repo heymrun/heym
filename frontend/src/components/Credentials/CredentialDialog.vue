@@ -8,8 +8,10 @@ import type {
   CredentialType,
   VectorStoreBackend,
 } from "@/types/credential";
+import type { CodexSignInResult } from "@/components/Credentials/codexDeviceSignIn";
 import type { OAuthPopup } from "@/components/Credentials/useOAuthPopup";
 
+import CodexChatGptSignIn from "@/components/Credentials/CodexChatGptSignIn.vue";
 import ModelRouterFields from "@/components/Credentials/modelRouter/ModelRouterFields.vue";
 import {
   buildModelRouterConfig,
@@ -60,12 +62,7 @@ const apiKey = ref("");
 const codexAccessToken = ref("");
 const codexAuthMode = ref<"chatgpt" | "access_token">("chatgpt");
 const codexOAuthConfig = ref<Record<string, unknown> | null>(null);
-const codexOAuthState = ref("");
-const codexRedirectUrl = ref("");
-const codexSigningIn = ref(false);
-const codexSignInError = ref("");
 const codexSignedInAccount = ref("");
-const codexAuthorizeUrl = ref("");
 const baseUrl = ref("");
 const jiraEmail = ref("");
 const jiraDeployment = ref<"cloud" | "data_center">("cloud");
@@ -969,53 +966,12 @@ const canTestJiraConnection = computed((): boolean => {
 });
 
 function resetCodexOAuthState(): void {
-  codexAuthorizeUrl.value = "";
   codexOAuthConfig.value = null;
-  codexOAuthState.value = "";
-  codexRedirectUrl.value = "";
-  codexSignInError.value = "";
-  codexSigningIn.value = false;
 }
 
-async function startCodexSignIn(): Promise<void> {
-  codexSignInError.value = "";
-  codexOAuthConfig.value = null;
-  try {
-    const { authorize_url, state } = await credentialsApi.codexOAuthStart();
-    codexOAuthState.value = state;
-    codexAuthorizeUrl.value = authorize_url;
-    window.open(authorize_url, "_blank", "noopener,noreferrer");
-  } catch {
-    codexSignInError.value = "Could not start ChatGPT sign-in. Try again.";
-  }
-}
-
-async function completeCodexSignIn(): Promise<void> {
-  if (!codexOAuthState.value) {
-    codexSignInError.value = "Start the sign-in first.";
-    return;
-  }
-  if (!codexRedirectUrl.value.trim()) {
-    codexSignInError.value = "Paste the redirect URL from your browser.";
-    return;
-  }
-  codexSigningIn.value = true;
-  codexSignInError.value = "";
-  try {
-    const { config, account_id } = await credentialsApi.codexOAuthComplete(
-      codexOAuthState.value,
-      codexRedirectUrl.value.trim(),
-    );
-    codexOAuthConfig.value = config;
-    codexSignedInAccount.value = account_id || "ChatGPT account";
-    codexRedirectUrl.value = "";
-  } catch (error) {
-    codexSignInError.value =
-      (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
-      "ChatGPT sign-in failed. Restart and try again.";
-  } finally {
-    codexSigningIn.value = false;
-  }
+function onCodexSignedIn(result: CodexSignInResult): void {
+  codexOAuthConfig.value = result.config;
+  codexSignedInAccount.value = result.accountId || "ChatGPT account";
 }
 
 function buildConfig(): CredentialConfig {
@@ -1862,53 +1818,11 @@ async function handleSave(): Promise<void> {
             </template>
           </div>
 
-          <div class="space-y-2">
-            <Button
-              type="button"
-              variant="outline"
-              :disabled="saving || codexSigningIn"
-              class="w-full"
-              @click="startCodexSignIn"
-            >
-              {{ codexOAuthConfig || codexSignedInAccount ? "Re-sign in with ChatGPT" : "Sign in with ChatGPT" }}
-            </Button>
-            <p class="text-xs text-muted-foreground">
-              A new tab opens the OpenAI sign-in. After you authorize, your browser lands on a
-              <code class="bg-muted px-1 rounded">localhost:1455</code> page (it may fail to load —
-              that is expected). Copy that full URL from the address bar and paste it below.
-            </p>
-            <p
-              v-if="codexAuthorizeUrl"
-              class="text-xs text-muted-foreground"
-            >
-              Sign-in tab didn't open?
-              <a
-                :href="codexAuthorizeUrl"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="text-primary underline"
-              >Open the OpenAI sign-in page</a>
-            </p>
-            <Input
-              v-model="codexRedirectUrl"
-              placeholder="http://localhost:1455/auth/callback?code=..."
-              :disabled="saving || codexSigningIn || !codexOAuthState"
-            />
-            <Button
-              type="button"
-              :disabled="saving || codexSigningIn || !codexOAuthState || !codexRedirectUrl.trim()"
-              class="w-full"
-              @click="completeCodexSignIn"
-            >
-              {{ codexSigningIn ? "Finishing sign-in..." : "Finish sign-in" }}
-            </Button>
-            <p
-              v-if="codexSignInError"
-              class="text-xs text-destructive"
-            >
-              {{ codexSignInError }}
-            </p>
-          </div>
+          <CodexChatGptSignIn
+            :saving="saving"
+            :connected="!!codexOAuthConfig || !!codexSignedInAccount"
+            @signed-in="onCodexSignedIn"
+          />
         </div>
 
         <div

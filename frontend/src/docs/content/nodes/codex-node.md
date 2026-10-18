@@ -17,8 +17,21 @@ The **OpenAI Codex** credential supports two authentication modes:
 
 | Mode | Description |
 |------|-------------|
-| **Sign in with ChatGPT** (recommended) | OAuth (PKCE) sign-in that uses your ChatGPT Plus/Pro subscription, so runs do **not** incur per-token API costs. Click **Sign in with ChatGPT** in the credential dialog, authorize in your browser, then paste the `localhost:1455` redirect URL back into Heym. Heym stores the resulting token bundle and refreshes it automatically as it expires. |
+| **Sign in with ChatGPT** (recommended) | Sign-in that uses your ChatGPT Plus/Pro subscription, so runs do **not** incur per-token API costs. See [Signing in with ChatGPT](#signing-in-with-chatgpt). Heym stores the resulting token bundle and refreshes it automatically as it expires. |
 | **Access token** | Paste a ChatGPT/Codex `access_token` used only by the local Codex runner. |
+
+### Signing in with ChatGPT
+
+1. In the credential dialog, choose **Sign in with ChatGPT** and click the button of the same name.
+2. Heym shows a short code and copies it for you.
+3. Click **Open the OpenAI page**, sign in to ChatGPT, and enter the code.
+4. Approve the request. Heym notices on its own, closes the OpenAI window, and shows **Connected to ChatGPT**. Click **Create** to save the credential.
+
+The code is valid for 15 minutes. Nothing is pasted back into Heym.
+
+This uses OpenAI's device code sign-in, the same one as `codex login --device-auth`. If OpenAI says device code sign-in is off, turn it on in ChatGPT under **Settings → Security**. On a ChatGPT workspace account an admin has to allow it.
+
+If you cannot turn it on, click **paste a redirect URL instead**. Heym then opens the OpenAI sign-in in a new tab. After you authorize, copy the `localhost:1455` address your browser lands on (the page itself may fail to load) and paste it into Heym.
 
 API keys are not accepted for the Codex credential. The node does not submit cloud Codex tasks; it clones the repository inside the Heym runtime, writes the ChatGPT token bundle to an isolated `auth.json` (or passes `CODEX_ACCESS_TOKEN`) only to the Codex process, and keeps the token out of `$credentials`.
 
