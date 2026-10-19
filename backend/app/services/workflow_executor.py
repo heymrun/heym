@@ -82,7 +82,21 @@ _DRIVE_DOWNLOAD_REDIRECT_STATUS_CODES = {301, 302, 303, 307, 308}
 
 # Dict methods that commonly collide with JSON keys when using dot access (e.g. `$data.items`).
 _DOTDICT_BUILTIN_METHOD_NAMES: frozenset[str] = frozenset(
-    {"items", "keys", "values", "entries", "map", "filter"}
+    {
+        "clear",
+        "copy",
+        "entries",
+        "filter",
+        "fromkeys",
+        "items",
+        "keys",
+        "map",
+        "pop",
+        "popitem",
+        "setdefault",
+        "update",
+        "values",
+    }
 )
 _ITEM_DOT_PATH_RE = re.compile(r"^item(?:\.[a-zA-Z_][a-zA-Z0-9_]*)+$")
 _ITEM_REF_IN_TEMPLATE_RE = re.compile(r"item\.[a-zA-Z_][a-zA-Z0-9_]*\b(?!\()")
@@ -792,7 +806,7 @@ class DotDict(dict):
 
     def __getattr__(self, key: str):
         try:
-            if key == "length":
+            if key == "length" and not dict.__contains__(self, key):
                 return len(self)
             value = self[key]
             if isinstance(value, dict) and not isinstance(value, DotDict):

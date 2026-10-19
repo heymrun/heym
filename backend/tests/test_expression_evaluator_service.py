@@ -1677,6 +1677,86 @@ class TestExpressionEvaluatorServiceEvaluate(unittest.TestCase):
         self.assertIsInstance(response, ExpressionEvaluateResponse)
 
 
+class TestDotDictDataKeyPrecedence(unittest.TestCase):
+    def test_data_keys_match_in_preview_execution_and_templates(self) -> None:
+        payload = {
+            name: f"data-{name}"
+            for name in (
+                "items",
+                "keys",
+                "values",
+                "entries",
+                "map",
+                "filter",
+                "clear",
+                "copy",
+                "fromkeys",
+                "pop",
+                "popitem",
+                "setdefault",
+                "update",
+            )
+        }
+        payload["length"] = 120
+        executor = WorkflowExecutor(nodes=[], edges=[])
+        service = ExpressionEvaluatorService()
+        for name, expected in payload.items():
+            with self.subTest(key=name):
+                context = {"n": {name: expected}}
+                unchanged = json.loads(json.dumps(context))
+                expression = f"$n.{name}"
+                self.assertEqual(
+                    executor.resolve_expression(expression, context, preserve_type=True), expected
+                )
+                response = service.evaluate(expression, context)
+                self.assertIsNone(response.error)
+                self.assertEqual(response.result, expected)
+                self.assertEqual(
+                    executor.evaluate_message_template(expression, context), str(expected)
+                )
+                self.assertEqual(context, unchanged)
+
+    def test_missing_length_and_get_keep_their_existing_behavior(self) -> None:
+        context = {"n": {"get": "data-get", "value": 5}}
+        executor = WorkflowExecutor(nodes=[], edges=[])
+        service = ExpressionEvaluatorService()
+        for expression, expected in (
+            ("$n.length", 2),
+            ("$n.get('value')", 5),
+            ("$n.get('get')", "data-get"),
+            ("$n.get('missing', 'fallback')", "fallback"),
+            ('$n["get"]', "data-get"),
+        ):
+            with self.subTest(expression=expression):
+                self.assertEqual(
+                    executor.resolve_expression(expression, context, preserve_type=True), expected
+                )
+                response = service.evaluate(expression, context)
+                self.assertIsNone(response.error)
+                self.assertEqual(response.result, expected)
+                self.assertEqual(
+                    executor.evaluate_message_template(expression, context), str(expected)
+                )
+
+    def test_collision_values_keep_nested_wrapping(self) -> None:
+        context = {"n": {"update": {"copy": [{"length": False}]}}}
+        unchanged = json.loads(json.dumps(context))
+        executor = WorkflowExecutor(nodes=[], edges=[])
+        service = ExpressionEvaluatorService()
+        for expression, expected in (
+            ("$n.update.copy[0].length", False),
+            ("$n.update.copy.length", 1),
+        ):
+            with self.subTest(expression=expression):
+                self.assertEqual(
+                    executor.resolve_expression(expression, context, preserve_type=True), expected
+                )
+                response = service.evaluate(expression, context)
+                self.assertIsNone(response.error)
+                self.assertEqual(response.result, expected)
+        self.assertEqual(context, unchanged)
+
+
 class TestConditionEvalRejectsDunderTraversalService(unittest.TestCase):
     """Service-path coverage for GHSA-pm6h-x3h5-j38h finding C1.
 
@@ -1872,6 +1952,8 @@ class TestPreviewCallableAllowlist(unittest.TestCase):
             ("$arr.pop", "arr", {"arr": [1, 2, 3]}, [1, 2, 3]),
             ("$arr.clear", "arr", {"arr": [1, 2]}, [1, 2]),
             ("$d.popitem", "d", {"d": {"a": 1, "b": 2}}, {"a": 1, "b": 2}),
+            ("$d.pop", "d", {"d": {"a": 1, "b": 2}}, {"a": 1, "b": 2}),
+            ("$d.clear", "d", {"d": {"a": 1, "b": 2}}, {"a": 1, "b": 2}),
         ]
         for expression, key, context, unchanged in cases:
             with self.subTest(expression=expression):
