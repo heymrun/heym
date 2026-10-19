@@ -57,3 +57,11 @@ class TestRagNodeSearchLimit(unittest.TestCase):
         output, _ = _run({"searchLimit": 5}, None)
 
         self.assertEqual(output["count"], 5)
+
+    def test_negative_search_limit_returns_no_results(self) -> None:
+        output, _ = _run(
+            {"searchLimit": -5, "enableReranker": True, "rerankerCredentialId": "gone"},
+            None,
+        )
+
+        self.assertEqual(output["count"], 0)
