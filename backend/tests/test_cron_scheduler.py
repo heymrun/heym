@@ -475,6 +475,9 @@ class CronSlotClaimTests(unittest.IsolatedAsyncioTestCase):
 
         failed.assert_not_awaited()
         execute.assert_awaited_once()
+        self.assertEqual(self.claim.await_count, 2)
+        first, second = self.claim.await_args_list
+        self.assertEqual(first.kwargs["slot_at"], second.kwargs["slot_at"])
 
 
 class CronExecutorThreadingTests(unittest.IsolatedAsyncioTestCase):
