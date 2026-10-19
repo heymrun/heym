@@ -203,6 +203,8 @@ class TestQdrantUpsertAndDeleteByField(unittest.TestCase):
 
         self.assertEqual([c[0] for c in calls.mock_calls], ["upsert", "delete"])
         stale = client.delete.call_args.kwargs["points_selector"].filter
+        self.assertEqual(stale.must[0].key, "sku")
+        self.assertEqual(stale.must[0].match.value, "a-1")
         self.assertEqual(stale.must_not[0].has_id, [point_id])
 
     def test_upsert_is_stable_so_repeated_calls_reuse_one_point(self) -> None:

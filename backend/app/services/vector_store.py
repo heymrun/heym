@@ -399,8 +399,10 @@ class QdrantVectorStoreService:
             point_id=point_id,
         )
         if replaced:
-            stale = self._field_filter(id_field, id_value)
-            stale.must_not = [HasIdCondition(has_id=[point_id])]
+            stale = Filter(
+                must=[FieldCondition(key=id_field, match=MatchValue(value=id_value))],
+                must_not=[HasIdCondition(has_id=[point_id])],
+            )
             self.client.delete(
                 collection_name=collection_name,
                 points_selector=FilterSelector(filter=stale),
