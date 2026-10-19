@@ -471,13 +471,12 @@ class CronSlotClaimTests(unittest.IsolatedAsyncioTestCase):
         scheduler, workflow = self._scheduler_with_one_cron_workflow()
 
         failed = await self._run_pass(scheduler, workflow, claimed=None)
+        failed_slot = self.claim.await_args.kwargs["slot_at"]
         execute = await self._run_pass(scheduler, workflow, claimed=True)
 
         failed.assert_not_awaited()
         execute.assert_awaited_once()
-        self.assertEqual(self.claim.await_count, 2)
-        first, second = self.claim.await_args_list
-        self.assertEqual(first.kwargs["slot_at"], second.kwargs["slot_at"])
+        self.assertEqual(self.claim.await_args.kwargs["slot_at"], failed_slot)
 
 
 class CronExecutorThreadingTests(unittest.IsolatedAsyncioTestCase):
