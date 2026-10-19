@@ -14,7 +14,6 @@ from croniter import croniter
 from sqlalchemy import ColumnElement, or_, select
 
 from app.db.models import TeamMember, Workflow, WorkflowTeamShare
-from app.services.timezone_utils import normalize_datetime_to_timezone
 from app.services.workflow_access import explicit_workflow_share_ids
 
 MAX_RANGE_DAYS = 62
@@ -62,8 +61,8 @@ def cron_occurrences(
     tz: tzinfo,
 ) -> list[ScheduleOccurrence]:
     """Every run of every active cron node in ``[start, end]``, earliest first."""
-    start_tz = normalize_datetime_to_timezone(start, tz)
-    end_tz = normalize_datetime_to_timezone(end, tz)
+    start_tz = start.replace(tzinfo=tz) if start.tzinfo is None else start.astimezone(tz)
+    end_tz = end.replace(tzinfo=tz) if end.tzinfo is None else end.astimezone(tz)
     events: list[ScheduleOccurrence] = []
 
     for workflow in workflows:
