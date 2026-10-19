@@ -42,7 +42,8 @@ class TestScheduleRange(unittest.TestCase):
     def test_parse_iso_range_mixed_naive_and_aware(self) -> None:
         tz = ZoneInfo("Asia/Tokyo")
         a, b = parse_iso_range("2026-10-20T00:00:00", "2026-10-21T00:00:00Z", tz=tz)
-        self.assertLess(a, b)
+        self.assertEqual(a, datetime(2026, 10, 19, 15, 0, 0, tzinfo=timezone.utc))
+        self.assertEqual(b, datetime(2026, 10, 21, 0, 0, 0, tzinfo=timezone.utc))
 
     def test_week_bounds_monday_sunday(self) -> None:
         tz = ZoneInfo("UTC")

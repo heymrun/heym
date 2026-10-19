@@ -1,5 +1,5 @@
 from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -17,7 +17,7 @@ from app.services.schedule_events import (
     cron_occurrences,
     schedule_workflows_clause,
 )
-from app.services.timezone_utils import get_configured_timezone
+from app.services.timezone_utils import get_configured_timezone, normalize_datetime_to_timezone
 from app.services.workflow_access import workflow_access_clause
 
 router = APIRouter()
@@ -52,9 +52,12 @@ async def fetch_schedule_events_for_user(
     include_shared: bool,
 ) -> ScheduleListResponse:
     """Return cron occurrences within [start, end] for owned and optionally shared workflows."""
+    tz = get_configured_timezone()
+    start = normalize_datetime_to_timezone(start, tz)
+    end = normalize_datetime_to_timezone(end, tz)
     if end <= start:
         raise ValueError("end must be after start")
-    if (end - start).days > _MAX_RANGE_DAYS:
+    if end - start > timedelta(days=_MAX_RANGE_DAYS):
         raise ValueError(f"Date range must not exceed {_MAX_RANGE_DAYS} days")
     where_clause = _workflows_where_clause(current_user, include_shared)
     result = await db.execute(select(Workflow).where(where_clause))

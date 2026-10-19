@@ -116,6 +116,25 @@ class TestFetchScheduleEventsForUser(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             await fetch_schedule_events_for_user(db, user, start, end, True)
 
+    async def test_mixed_naive_and_aware_bounds(self) -> None:
+        db = AsyncMock()
+        db.execute = AsyncMock(return_value=_WorkflowQueryResult(rows=[]))
+        user = MagicMock()
+        user.id = uuid.uuid4()
+        start = datetime(2026, 4, 17, 0, 0, 0)
+        end = datetime(2026, 4, 18, 0, 0, 0, tzinfo=timezone.utc)
+        resp = await fetch_schedule_events_for_user(db, user, start, end, include_shared=False)
+        self.assertEqual(resp.total, 0)
+
+    async def test_rejects_partial_day_over_62_days(self) -> None:
+        user = MagicMock()
+        user.id = uuid.uuid4()
+        db = AsyncMock()
+        start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        end = start + timedelta(days=62, hours=1)
+        with self.assertRaises(ValueError):
+            await fetch_schedule_events_for_user(db, user, start, end, True)
+
     async def test_returns_events_for_mock_workflow(self) -> None:
         wf = MagicMock()
         wf.id = uuid.uuid4()
