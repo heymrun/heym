@@ -29,6 +29,21 @@ class TestScheduleRange(unittest.TestCase):
                 "2026-06-01T00:00:00Z",
             )
 
+    def test_parse_iso_range_rejects_span_with_partial_day(self) -> None:
+        with self.assertRaises(ValueError):
+            parse_iso_range("2026-10-01T00:00:00Z", "2026-12-02T23:00:00Z")
+
+    def test_parse_iso_range_naive_uses_configured_timezone(self) -> None:
+        tz = ZoneInfo("Asia/Tokyo")
+        a, b = parse_iso_range("2026-10-20T00:00:00", "2026-10-21T00:00:00", tz=tz)
+        self.assertEqual(a, datetime(2026, 10, 19, 15, 0, 0, tzinfo=timezone.utc))
+        self.assertEqual(b, datetime(2026, 10, 20, 15, 0, 0, tzinfo=timezone.utc))
+
+    def test_parse_iso_range_mixed_naive_and_aware(self) -> None:
+        tz = ZoneInfo("Asia/Tokyo")
+        a, b = parse_iso_range("2026-10-20T00:00:00", "2026-10-21T00:00:00Z", tz=tz)
+        self.assertLess(a, b)
+
     def test_week_bounds_monday_sunday(self) -> None:
         tz = ZoneInfo("UTC")
         # 2026-04-20 is Monday

@@ -3,9 +3,11 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
+from zoneinfo import ZoneInfo
 
 from app.api.schedules import _get_schedule_events, fetch_schedule_events_for_user
 from app.models.schemas import ScheduleEvent
+from app.services.schedule_events import cron_occurrences
 
 
 class _WorkflowQueryResult:
@@ -41,6 +43,14 @@ class TestGetScheduleEvents(unittest.IsolatedAsyncioTestCase):
         events = await _get_schedule_events(workflows, start, end)
         self.assertEqual(len(events), 24)  # hours 00:00..23:00 inclusive (start boundary included)
         self.assertIsInstance(events[0], ScheduleEvent)
+
+    async def test_naive_range_uses_configured_timezone(self) -> None:
+        tz = ZoneInfo("Asia/Tokyo")
+        workflows = [_make_workflow([_cron_node("0 3 * * *")])]
+        events = cron_occurrences(
+            workflows, datetime(2026, 10, 20, 0, 0), datetime(2026, 10, 21, 0, 0), tz
+        )
+        self.assertEqual(events[0].scheduled_at, datetime(2026, 10, 19, 18, 0, tzinfo=timezone.utc))
 
     async def test_inactive_cron_filtered_out(self) -> None:
         start = datetime(2026, 4, 17, 0, 0, 0, tzinfo=timezone.utc)

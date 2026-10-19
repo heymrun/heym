@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import date, datetime, time, timedelta, tzinfo
 from typing import Literal
 
+from app.services.timezone_utils import normalize_datetime_to_timezone
+
 ViewWindow = Literal["day", "week", "month"]
 
 _MAX_RANGE_DAYS = 62
@@ -16,14 +18,20 @@ def _parse_iso_datetime(value: str) -> datetime:
 
 
 def parse_iso_range(
-    start_iso: str, end_iso: str, max_days: int = _MAX_RANGE_DAYS
+    start_iso: str,
+    end_iso: str,
+    max_days: int = _MAX_RANGE_DAYS,
+    tz: tzinfo | None = None,
 ) -> tuple[datetime, datetime]:
     """Parse start/end ISO datetimes and enforce ordering and max span (same rules as GET /api/schedules)."""
     start = _parse_iso_datetime(start_iso)
     end = _parse_iso_datetime(end_iso)
+    if tz is not None:
+        start = normalize_datetime_to_timezone(start, tz)
+        end = normalize_datetime_to_timezone(end, tz)
     if end <= start:
         raise ValueError("end must be after start")
-    if (end - start).days > max_days:
+    if end - start > timedelta(days=max_days):
         raise ValueError(f"Date range must not exceed {max_days} days")
     return start, end
 
@@ -37,7 +45,7 @@ def resolve_schedule_tool_range(
 ) -> tuple[datetime, datetime]:
     """Compute [start, end] for dashboard chat get_schedule_events tool."""
     if start_iso and end_iso and str(start_iso).strip() and str(end_iso).strip():
-        return parse_iso_range(str(start_iso), str(end_iso))
+        return parse_iso_range(str(start_iso), str(end_iso), tz=tz)
     if not view_window or view_window not in ("day", "week", "month"):
         raise ValueError(
             "Provide view_window (day, week, or month) with optional reference_date, "
