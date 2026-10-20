@@ -1,6 +1,35 @@
 import { describe, expect, it } from "vitest";
 
-import { cellText, sortTableRows, statusTone, tableRowRecord } from "@/components/Dashboards/chartTable";
+import {
+  cellText,
+  sortTableRows,
+  statusTone,
+  tableLinkHref,
+  tableRowRecord,
+} from "@/components/Dashboards/chartTable";
+
+describe("tableLinkHref", () => {
+  it("opens http(s) URLs and paths inside the app", () => {
+    expect(tableLinkHref("https://jira.example.com/browse/T-1?x=1")).toBe(
+      "https://jira.example.com/browse/T-1?x=1",
+    );
+    expect(tableLinkHref(" http://example.com ")).toBe("http://example.com/");
+    expect(tableLinkHref("/dashboards")).toBe("/dashboards");
+    expect(tableLinkHref("/dashboards/abc?record=V-1")).toBe("/dashboards/abc?record=V-1");
+  });
+
+  it("is not a link for empty cells or schemes that could run code", () => {
+    expect(tableLinkHref("")).toBeNull();
+    expect(tableLinkHref(null)).toBeNull();
+    expect(tableLinkHref("javascript:alert(1)")).toBeNull();
+    expect(tableLinkHref("data:text/html,<b>x</b>")).toBeNull();
+    expect(tableLinkHref("ftp://example.com/file")).toBeNull();
+    expect(tableLinkHref("//evil.example.com")).toBeNull();
+    expect(tableLinkHref("/\\evil.example.com")).toBeNull();
+    expect(tableLinkHref("dashboards")).toBeNull();
+    expect(tableLinkHref({ url: "https://example.com" })).toBeNull();
+  });
+});
 
 describe("statusTone", () => {
   it("reads the tone the server resolved for the cell's text", () => {

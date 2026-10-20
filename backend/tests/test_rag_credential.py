@@ -287,6 +287,23 @@ class TestEmbeddingServiceCustomEndpoint(unittest.TestCase):
         with self.assertRaises(ValueError):
             service.embed_texts(["hello"])
 
+    def test_text_with_special_token_string_is_embedded(self):
+        """Text such as "<|endoftext|>" is plain content, not a tiktoken control token."""
+        config = EmbeddingConfig(base_url="http://localhost:11434/v1", model="m", dimensions=3)
+        service, client = self._service(config)
+        client.embeddings.create.return_value = self._response([0.1, 0.2, 0.3])
+
+        results = service.embed_texts(["Docs about <|endoftext|> in GPT"])
+
+        self.assertEqual(results[0].text, "Docs about <|endoftext|> in GPT")
+        self.assertEqual(service._split_large_text("a <|endoftext|> b", 100), ["a <|endoftext|> b"])
+        self.assertEqual(service.embed_text("<|endoftext|>"), [0.1, 0.2, 0.3])
+
+        text = "<|endoftext|> " * 20
+        parts = service._split_large_text(text, 5)
+        self.assertGreater(len(parts), 1)
+        self.assertEqual("".join(parts), text)
+
     def test_blank_api_key_uses_placeholder(self):
         config = EmbeddingConfig(base_url="http://localhost:11434/v1", model="m")
         with patch("app.services.embedding.create_guarded_openai_client") as make_client:

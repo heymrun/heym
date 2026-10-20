@@ -3882,6 +3882,10 @@ Access the saved file downstream: `$saveAudio.id`, `$saveAudio.download_url`
     `"failure"` | `"waiting"` | `"neutral"`, for values the defaults do not cover. Common words
     already have a tone (paid, done, approved: success; overdue, needs review: attention; failed,
     rejected: failure; pending, running, queued: waiting); anything else is neutral
+  - `linkColumn`: optional column of a `table` whose cells hold a URL, shown as a button that opens
+    it in a new tab (it must be one of the shown columns). A cell is an `https://` / `http://` URL
+    or a path inside Heym such as `/dashboards`; any other value stays plain text
+  - `linkLabel`: optional text of that button (left empty, the button shows only a link icon)
   - `xField` / `yField`: row keys for the X and Y numeric axes (scatter)
   - `min` / `max`: numeric range for `gauge` (default `0` / `100`)
   - `unit`: optional unit string for `numeric`/`gauge`
@@ -3962,6 +3966,12 @@ Table with status chips (upstream rows `[{invoice, customer, state}]`; `Disputed
 word, so it gets a tone in `statusTones`):
 ```json
 {"type": "chartOutput", "data": {"label": "invoices", "chartType": "table", "dataPath": "rows", "columns": ["invoice", "customer", "state"], "statusColumn": "state", "statusTones": {"Disputed": "failure"}}}
+```
+
+Table with a link button (upstream rows `[{ticket, owner, url}]`, where `url` holds the page each
+row opens in a new tab):
+```json
+{"type": "chartOutput", "data": {"label": "tickets", "chartType": "table", "dataPath": "rows", "columns": ["ticket", "owner", "url"], "linkColumn": "url", "linkLabel": "Open ticket"}}
 ```
 
 Numeric / KPI (upstream rows `[{total}]`, first row used):
@@ -5062,14 +5072,14 @@ The credential requests the full `https://www.googleapis.com/auth/drive` scope, 
 - **Data fields**:
   - `label`: Node identifier (e.g., "heymData")
   - `heymOperation`: One of `listWorkflows`, `getWorkflow`, `getExecutionHistory`
-  - `heymWorkflowId`: Target workflow UUID. Required for `getWorkflow` and `getExecutionHistory`. Expression-capable.
+  - `heymWorkflowId`: Target workflow UUID. Required for `getWorkflow` and `getExecutionHistory`. Use `all` with `getExecutionHistory` to read the history of every workflow the owner can reach. Expression-capable.
   - `heymLimit`: Maximum rows for `listWorkflows` and `getExecutionHistory`. **Empty or `0` returns everything** - that is the default. Expression-capable.
   - `heymStatus`: Optional status filter for `getExecutionHistory` (e.g. `success`, `error`). Expression-capable.
   - `heymSinceDays`: Optional lookback in days for `getExecutionHistory`. Empty covers the full history. Expression-capable.
 - **Output fields available downstream**:
   - `listWorkflows` -> `$<label>.workflows` (array of `id`, `name`, `description`, `active`, `folder_id`, `updated_at`, `node_count`), `$<label>.total`
   - `getWorkflow` -> `$<label>.id`, `$<label>.name`, `$<label>.nodes` (array of `id`, `type`, `label`, `position`, `data` - the full node configuration), `$<label>.edges` (with `sourceHandle` / `targetHandle`), `$<label>.updated_at`. Use it to audit workflows, e.g. scanning `data` for hardcoded API keys or tokens.
-  - `getExecutionHistory` -> `$<label>.executions` (array of `id`, `status`, `started_at`, `execution_time_ms`, `trigger_source`, `recovered`, `inputs`, `outputs`), `$<label>.workflow_id`, `$<label>.workflow_name`, `$<label>.total`, `$<label>.by_status`, `$<label>.since`. `total` and `by_status` always describe the full history, even when `heymLimit` caps the returned entries.
+  - `getExecutionHistory` -> `$<label>.executions` (array of `id`, `status`, `started_at`, `execution_time_ms`, `trigger_source`, `recovered`, `inputs`, `outputs`), `$<label>.workflow_id`, `$<label>.workflow_name`, `$<label>.total`, `$<label>.by_status`, `$<label>.since`. `total` and `by_status` always describe the full history, even when `heymLimit` caps the returned entries. With `heymWorkflowId` set to `all`, `workflow_id` and `workflow_name` are `null` and every entry carries its own `workflow_id` and `workflow_name`.
 
 **Example node JSON:**
 ```json

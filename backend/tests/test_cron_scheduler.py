@@ -416,7 +416,7 @@ class CronSlotClaimTests(unittest.IsolatedAsyncioTestCase):
         return scheduler, workflow
 
     async def _run_pass(
-        self, scheduler: CronScheduler, workflow: SimpleNamespace, *, claimed: bool
+        self, scheduler: CronScheduler, workflow: SimpleNamespace, *, claimed: bool | None
     ) -> AsyncMock:
         execute = AsyncMock()
         claim = AsyncMock(return_value=claimed)
@@ -466,6 +466,17 @@ class CronSlotClaimTests(unittest.IsolatedAsyncioTestCase):
 
         execute.assert_not_awaited()
         self.claim.assert_not_awaited()
+
+    async def test_claim_database_error_leaves_the_slot_due_for_the_next_pass(self) -> None:
+        scheduler, workflow = self._scheduler_with_one_cron_workflow()
+
+        failed = await self._run_pass(scheduler, workflow, claimed=None)
+        failed_slot = self.claim.await_args.kwargs["slot_at"]
+        execute = await self._run_pass(scheduler, workflow, claimed=True)
+
+        failed.assert_not_awaited()
+        execute.assert_awaited_once()
+        self.assertEqual(self.claim.await_args.kwargs["slot_at"], failed_slot)
 
 
 class CronExecutorThreadingTests(unittest.IsolatedAsyncioTestCase):

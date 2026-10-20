@@ -7,8 +7,15 @@ function keys(chartType: Parameters<typeof getChartOutputExpressionFields>[0]): 
 }
 
 describe("getChartOutputExpressionFields", () => {
-  it("offers the status column for tables", () => {
-    expect(keys("table")).toEqual(["dataPath", "statusColumn", "title", "url"]);
+  it("offers the status column and the link button for tables", () => {
+    expect(keys("table")).toEqual([
+      "dataPath",
+      "statusColumn",
+      "linkColumn",
+      "linkLabel",
+      "title",
+      "url",
+    ]);
   });
 
   it("keeps the fields of the other chart types", () => {

@@ -32,6 +32,7 @@ from app.db.models import (
     TeamMember,
     User,
     Workflow,
+    WorkflowVersion,
 )
 from app.db.session import get_db
 from app.models.dashboard_schemas import (
@@ -57,6 +58,7 @@ from app.models.dashboard_schemas import (
     WidgetDataResponse,
     WidgetExampleResponse,
     WidgetProposalResponse,
+    WidgetRevertRequest,
     WidgetRunRequest,
     WidgetRunResponse,
     WidgetUpdateRequest,
@@ -101,11 +103,14 @@ from app.services.page_params import (
 from app.services.widget_page_record import (
     detail_page_context,
     example_record,
+    listing_page_context,
+    open_detail_page_context,
     repair_page_record_paths,
 )
 from app.services.workflow_access import revoke_execution_tokens_without_access
 from app.services.workflow_dsl_prompt import build_assistant_prompt
 from app.services.workflow_inputs import start_input_fields
+from app.services.workflow_save import WorkflowSnapshot, add_workflow_version
 
 router = APIRouter()
 
@@ -231,6 +236,29 @@ async def _detail_page_context(db: AsyncSession, dashboard: Dashboard, user: Use
         None,
     )
     return detail_page_context(list(dict.fromkeys(row.link_record_field for row in links)), example)
+
+
+async def _refine_page_context(
+    db: AsyncSession,
+    dashboard: Dashboard,
+    user: User,
+    page_kind: str | None,
+    prompt: str,
+) -> str:
+    """What a fine-tune is told about the page: a detail page has a record, a listing has none.
+
+    A page some table's rows open is a detail page. Without a table link and without the
+    caller saying so, the page is a listing page, unless the request itself names
+    ``$page.record``.
+    """
+    if page_kind == "listing":
+        return listing_page_context()
+    detail = await _detail_page_context(db, dashboard, user)
+    if detail:
+        return detail
+    if page_kind == "detail":
+        return open_detail_page_context()
+    return "" if "$page.record" in prompt else listing_page_context()
 
 
 async def _ensure_own_dashboard(db: AsyncSession, user: User) -> None:
@@ -1384,7 +1412,7 @@ async def ai_refine_widget(
     if dashboard.owner_id != current_user.id:
         await _table_contexts(db, body.data_table_ids, dashboard.owner_id, for_owner=True)
     context = describe_tables(tables, with_data=True)
-    detail = await _detail_page_context(db, dashboard, current_user)
+    detail = await _refine_page_context(db, dashboard, current_user, body.page_kind, body.prompt)
     dsl = await generate_widget_dsl(
         "\n\n".join(part for part in (body.prompt, detail, context) if part),
         credential=credential,
@@ -1410,7 +1438,7 @@ async def ai_refine_widget(
         )
 
     # Snapshot the pre-edit workflow so the AI fine-tune shows up in Edit History.
-    await _record_chat_workflow_edit_version(
+    previous_version = await _record_chat_workflow_edit_version(
         db=db,
         workflow=workflow,
         user_id=current_user.id,
@@ -1427,6 +1455,81 @@ async def ai_refine_widget(
     widget.cached_workflow_version = None
     await db.commit()
     await db.refresh(widget)
+    response = _widget_to_response(widget)
+    if isinstance(previous_version, int):
+        response.previous_version_number = previous_version
+    return response
+
+
+@router.post("/widgets/{widget_id}/revert", response_model=DashboardWidgetResponse)
+async def revert_widget(
+    widget_id: uuid.UUID,
+    body: WidgetRevertRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> DashboardWidgetResponse:
+    """Undo an AI fine-tune: restore the workflow snapshot it stored before it ran.
+
+    Only the newest snapshot can be restored, so a revert never overwrites a change made
+    after the fine-tune. What it replaces is stored as the next snapshot, so Edit History
+    keeps it.
+    """
+    widget, dashboard, _ = await _load_widget_for_user(db, widget_id, current_user, write=True)
+    if widget.chart_type == FILE_RUN_WIDGET_TYPE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A file-run widget runs an existing workflow; change it in the editor",
+        )
+    workflow = await _load_widget_workflow(db, widget)
+    version = (
+        await db.execute(
+            select(WorkflowVersion).where(
+                WorkflowVersion.workflow_id == workflow.id,
+                WorkflowVersion.version_number == body.version_number,
+            )
+        )
+    ).scalar_one_or_none()
+    if version is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
+    newest = (
+        await db.execute(
+            select(func.max(WorkflowVersion.version_number)).where(
+                WorkflowVersion.workflow_id == workflow.id
+            )
+        )
+    ).scalar()
+    if newest != version.version_number:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This widget changed after that edit, so it can no longer be reverted",
+        )
+    nodes = copy.deepcopy(version.nodes or [])
+    edges = copy.deepcopy(version.edges or [])
+    blocked_error = dashboard_widget_blocked_nodes_error(nodes)
+    if blocked_error is not None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=blocked_error)
+    chart_nodes = [n for n in nodes if isinstance(n, dict) and n.get("type") == "chartOutput"]
+
+    await add_workflow_version(db, workflow, WorkflowSnapshot.capture(workflow), current_user.id)
+    workflow.nodes = nodes
+    workflow.edges = edges
+    if chart_nodes:
+        widget.chart_type = (chart_nodes[-1].get("data") or {}).get("chartType", widget.chart_type)
+    widget.cached_payload = None
+    widget.cached_at = None
+    widget.cached_workflow_version = None
+    await db.commit()
+    await db.refresh(widget)
+    audit(
+        action="dashboard.widget_revert",
+        actor=current_user,
+        target_type="dashboard",
+        target_id=dashboard.id,
+        target_name=dashboard.name,
+        widget_id=widget.id,
+        widget_title=widget.title,
+        version_number=version.version_number,
+    )
     return _widget_to_response(widget)
 
 

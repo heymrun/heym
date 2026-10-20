@@ -11,6 +11,9 @@ from app.services.node_execution.base import NodeExecutionContext
 # would only be theatre.
 NO_LIST_LIMIT = 0
 
+# `heymWorkflowId` value that reads the history of every workflow the owner can reach.
+ALL_WORKFLOWS = "all"
+
 
 def _resolve(ctx: NodeExecutionContext, key: str) -> str:
     """Resolve one node field through the executor's expression engine."""
@@ -171,7 +174,11 @@ def execute(ctx: NodeExecutionContext) -> object:
             }
 
         if operation in ("getWorkflow", "getExecutionHistory"):
-            workflow = _require_workflow(ctx, db, Workflow, access)
+            all_workflows = (
+                operation == "getExecutionHistory"
+                and _resolve(ctx, "heymWorkflowId").lower() == ALL_WORKFLOWS
+            )
+            workflow = None if all_workflows else _require_workflow(ctx, db, Workflow, access)
 
             if operation == "getWorkflow":
                 return _workflow_detail(workflow)
@@ -182,7 +189,12 @@ def execute(ctx: NodeExecutionContext) -> object:
             )
             status_filter = _resolve(ctx, "heymStatus")
 
-            filters = [ExecutionHistory.workflow_id == workflow.id]
+            if all_workflows:
+                # Same set `listWorkflows` returns, so "all" means what the list shows.
+                reachable = select(Workflow.id).where(access).where(Workflow.kind == "workflow")
+                filters = [ExecutionHistory.workflow_id.in_(reachable)]
+            else:
+                filters = [ExecutionHistory.workflow_id == workflow.id]
             if since is not None:
                 filters.append(ExecutionHistory.started_at >= since)
             if status_filter:
@@ -201,20 +213,40 @@ def execute(ctx: NodeExecutionContext) -> object:
             total = sum(by_status.values())
 
             # Only the requested slice is fetched, and never the node_results trace.
-            query = (
-                select(ExecutionHistory)
-                .options(defer(ExecutionHistory.node_results))
-                .where(*filters)
-                .order_by(ExecutionHistory.started_at.desc())
-            )
+            if all_workflows:
+                query = (
+                    select(ExecutionHistory, Workflow.name)
+                    .join(Workflow, Workflow.id == ExecutionHistory.workflow_id)
+                    .options(defer(ExecutionHistory.node_results))
+                    .where(*filters)
+                    .order_by(ExecutionHistory.started_at.desc())
+                )
+            else:
+                query = (
+                    select(ExecutionHistory)
+                    .options(defer(ExecutionHistory.node_results))
+                    .where(*filters)
+                    .order_by(ExecutionHistory.started_at.desc())
+                )
             if limit > NO_LIST_LIMIT:
                 query = query.limit(limit)
-            selected = db.execute(query).scalars().all()
+
+            if all_workflows:
+                executions = [
+                    {
+                        **_execution_summary(entry),
+                        "workflow_id": str(entry.workflow_id),
+                        "workflow_name": workflow_name,
+                    }
+                    for entry, workflow_name in db.execute(query).all()
+                ]
+            else:
+                executions = [_execution_summary(row) for row in db.execute(query).scalars().all()]
 
             return {
-                "workflow_id": str(workflow.id),
-                "workflow_name": workflow.name,
-                "executions": [_execution_summary(row) for row in selected],
+                "workflow_id": None if workflow is None else str(workflow.id),
+                "workflow_name": None if workflow is None else workflow.name,
+                "executions": executions,
                 "total": total,
                 "by_status": by_status,
                 "since": since.isoformat() if since else None,

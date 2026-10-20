@@ -18,7 +18,7 @@ A widget is a single chart on the grid. Supported chart types:
 - **Line**
 - **Area** (filled trend, supports multiple series)
 - **Pie**
-- **Table** (scrollable; click a column heading to sort ascending, and click it again for descending. One column can render as [status chips](../nodes/chart-output-node.md#status-chips), and rows can open a [detail page](#detail-pages))
+- **Table** (scrollable; click a column heading to sort ascending, and click it again for descending. One column can render as [status chips](../nodes/chart-output-node.md#status-chips), one column can hold [link buttons](../nodes/chart-output-node.md#link-buttons) that open a URL in a new tab, and rows can open a [detail page](#detail-pages))
 - **Numeric** (a single KPI value with an optional unit)
 - **Gauge** (a single value against a min–max range, e.g. a percentage)
 - **Scatter** (X/Y points for correlation plots)

@@ -125,6 +125,10 @@ class CronScheduler:
                                 slot_at=slot,
                                 worker_id=lock_service.worker_id,
                             )
+                            if claimed is None:
+                                # Database error: no worker has run this slot, so
+                                # leave it due for the next pass.
+                                continue
                             # Settle the slot either way: a lost claim means another
                             # worker owns this run, and retrying next pass would only
                             # risk a duplicate.

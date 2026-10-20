@@ -2432,14 +2432,17 @@ async def _record_chat_workflow_edit_version(
     user_id: uuid.UUID,
     old_nodes: list[dict[str, Any]],
     old_edges: list[dict[str, Any]],
-) -> None:
-    """Store the pre-edit workflow snapshot so Chat edits appear in Edit History."""
+) -> int:
+    """Store the pre-edit workflow snapshot so Chat edits appear in Edit History.
+
+    Returns the snapshot's version number.
+    """
     before = replace(
         WorkflowSnapshot.capture(workflow),
         nodes=copy.deepcopy(old_nodes),
         edges=copy.deepcopy(old_edges),
     )
-    await add_workflow_version(db, workflow, before, user_id)
+    return await add_workflow_version(db, workflow, before, user_id)
 
 
 async def run_execute_workflow_tool(

@@ -181,6 +181,32 @@ class TestQdrantUpsertAndDeleteByField(unittest.TestCase):
         self.assertEqual(payload["lang"], "en")
         self.assertEqual(payload["text"], "text")
 
+    def test_upsert_keeps_existing_points_when_embedding_fails(self) -> None:
+        svc, client = self._service()
+        client.count.return_value.count = 1
+        svc.embedding_service.embed_text.side_effect = RuntimeError("429 rate limited")
+
+        with self.assertRaises(RuntimeError):
+            svc.upsert_by_field("col1", "sku", "a-1", "text")
+
+        client.delete.assert_not_called()
+        client.upsert.assert_not_called()
+
+    def test_upsert_deletes_only_stale_points_after_the_new_one_is_written(self) -> None:
+        svc, client = self._service()
+        client.count.return_value.count = 2
+        calls = MagicMock()
+        calls.attach_mock(client.upsert, "upsert")
+        calls.attach_mock(client.delete, "delete")
+
+        point_id, _ = svc.upsert_by_field("col1", "sku", "a-1", "text")
+
+        self.assertEqual([c[0] for c in calls.mock_calls], ["upsert", "delete"])
+        stale = client.delete.call_args.kwargs["points_selector"].filter
+        self.assertEqual(stale.must[0].key, "sku")
+        self.assertEqual(stale.must[0].match.value, "a-1")
+        self.assertEqual(stale.must_not[0].has_id, [point_id])
+
     def test_upsert_is_stable_so_repeated_calls_reuse_one_point(self) -> None:
         svc, client = self._service()
         client.count.return_value.count = 0

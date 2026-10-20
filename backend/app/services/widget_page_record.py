@@ -52,6 +52,25 @@ def example_record(payload: Any, record_field: str) -> str | None:
     return None
 
 
+def listing_page_context() -> str:
+    """What a model editing a widget on a listing page is told: there is no record here."""
+    return (
+        "This dashboard is a listing page, not a detail page: it is opened without a record, so "
+        "$page.record is null here. Do not read $page.record, and do not filter or look up "
+        "rows by a record. Show the data the request asks for across all rows."
+    )
+
+
+def open_detail_page_context() -> str:
+    """What a model is told about a detail page no table's rows are known to open yet."""
+    return (
+        "This dashboard is a detail page: it opens with one record as $page.record, one plain "
+        "text value such as V-1002, not an object. Show that one record's data by keeping only "
+        "the rows whose record column equals $page.record itself. Never write "
+        "$page.record.id or $page.record.<field>."
+    )
+
+
 def detail_page_context(record_fields: list[str], example: str | None) -> str:
     """What a model building a widget on a detail page is told about ``$page.record``."""
     if not record_fields:

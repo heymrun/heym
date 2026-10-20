@@ -4,6 +4,7 @@ import ExpressionInput from "@/components/ui/ExpressionInput.vue";
 import Label from "@/components/ui/Label.vue";
 import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 import Select from "@/components/ui/Select.vue";
+import { heymWorkflowIdForOperation, heymWorkflowPickerOptions } from "../heymWorkflowPicker";
 import { heymOperationOptions } from "../operationOptions";
 import { usePropertiesPanelContext } from "../usePropertiesPanelController";
 
@@ -25,6 +26,16 @@ const needsWorkflow = computed((): boolean => operation.value !== "listWorkflows
 const isHistory = computed((): boolean => operation.value === "getExecutionHistory");
 /** Only `getWorkflow` returns a single record, so it is the one operation without a limit. */
 const hasLimit = computed((): boolean => operation.value !== "getWorkflow");
+const workflowPickerOptions = computed(() =>
+  heymWorkflowPickerOptions(operation.value, heymWorkflowOptions.value),
+);
+
+function onOperationChange(value: string | undefined): void {
+  updateNodeData("heymOperation", value);
+  const current = selectedNode.value?.data.heymWorkflowId || "";
+  const next = heymWorkflowIdForOperation(value ?? "", current);
+  if (next !== current) updateNodeData("heymWorkflowId", next);
+}
 </script>
 
 <template>
@@ -34,7 +45,7 @@ const hasLimit = computed((): boolean => operation.value !== "getWorkflow");
       <Select
         :model-value="operation"
         :options="heymOperationOptions"
-        @update:model-value="updateNodeData('heymOperation', $event)"
+        @update:model-value="onOperationChange"
       />
       <p class="text-xs text-muted-foreground">
         Reads are scoped to this workflow's owner: their own workflows plus anything shared
@@ -49,7 +60,7 @@ const hasLimit = computed((): boolean => operation.value !== "getWorkflow");
       <Label>Workflow</Label>
       <SearchableSelect
         :model-value="selectedNode.data.heymWorkflowId || ''"
-        :options="[{ value: '', label: 'Select a workflow...' }, ...heymWorkflowOptions]"
+        :options="workflowPickerOptions"
         placeholder="Select a workflow..."
         search-placeholder="Search workflows..."
         @update:model-value="updateNodeData('heymWorkflowId', $event)"

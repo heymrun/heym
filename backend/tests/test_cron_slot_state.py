@@ -53,7 +53,7 @@ class ClaimCronSlotTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(claimed)
 
-    async def test_claim_fails_closed_on_database_error(self) -> None:
+    async def test_claim_returns_none_on_database_error(self) -> None:
         session = AsyncMock()
         session.__aenter__.return_value = session
         session.__aexit__.return_value = False
@@ -64,7 +64,7 @@ class ClaimCronSlotTests(unittest.IsolatedAsyncioTestCase):
                 workflow_id=uuid.uuid4(), node_id="n1", slot_at=self.SLOT
             )
 
-        self.assertFalse(claimed)
+        self.assertIsNone(claimed)
 
 
 class CleanupCronSlotClaimsTests(unittest.IsolatedAsyncioTestCase):

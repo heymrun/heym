@@ -27,12 +27,15 @@ async def claim_cron_slot(
     node_id: str,
     slot_at: datetime,
     worker_id: str | None = None,
-) -> bool:
+) -> bool | None:
     """Claim one cron slot for this worker.
 
     Returns True only for the worker that inserted the row; everyone else - a
     concurrent worker, or the same worker after a restart - gets False and must
-    skip the run. Fails closed: on a database error nothing is executed.
+    skip the run. Returns None on a database error: nothing is executed, and a
+    claim row usually does not exist, so the caller may retry the slot on its
+    next pass. If the failure hit the commit itself, the row may exist and the
+    retry then gets False, which skips the run.
     """
     stmt = (
         pg_insert(CronSlotClaim)
@@ -60,7 +63,7 @@ async def claim_cron_slot(
             slot_at,
             e,
         )
-        return False
+        return None
 
 
 async def cleanup_cron_slot_claims(

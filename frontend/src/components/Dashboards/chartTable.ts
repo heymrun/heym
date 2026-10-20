@@ -32,6 +32,22 @@ export function statusTone(cell: unknown, tones: Record<string, StatusTone> | un
   return tones?.[cellText(cell)] ?? "neutral";
 }
 
+/**
+ * Where a link cell opens: an http(s) URL, or a path inside this app. Cells can come from
+ * upstream data, so anything else (javascript:, data:, //host) is not a link.
+ */
+export function tableLinkHref(cell: unknown): string | null {
+  const raw = cellText(cell).trim();
+  if (!raw) return null;
+  if (/^\/(?![/\\])\S*$/.test(raw)) return raw;
+  try {
+    const parsed = new URL(raw);
+    return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.href : null;
+  } catch {
+    return null;
+  }
+}
+
 export type TableSortDirection = "asc" | "desc";
 
 /** Which column a table widget is sorted by, and which way. */

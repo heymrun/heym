@@ -149,6 +149,8 @@ const apexOptions = computed(() =>
         :rows="chartPayload.rows ?? []"
         :status-column="chartPayload.statusColumn"
         :status-tones="chartPayload.statusTones"
+        :link-column="chartPayload.linkColumn"
+        :link-label="chartPayload.linkLabel"
         :row-link="rowLink"
         @row-open="(record) => emit('row-open', record)"
       />

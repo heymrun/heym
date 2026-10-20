@@ -9,6 +9,7 @@ from qdrant_client.http.models import (
     FieldCondition,
     Filter,
     FilterSelector,
+    HasIdCondition,
     IsEmptyCondition,
     MatchValue,
     PayloadField,
@@ -387,12 +388,9 @@ class QdrantVectorStoreService:
         replaced = 0
         if self.collection_exists(collection_name):
             replaced = self._count_by_field(collection_name, id_field, id_value)
-            if replaced:
-                self.client.delete(
-                    collection_name=collection_name,
-                    points_selector=FilterSelector(filter=self._field_filter(id_field, id_value)),
-                )
 
+        # Embed and write the new point first, then drop the stale ones, so a
+        # failed embed cannot leave the collection without the document.
         point_id = upsert_point_id(collection_name, id_field, id_value)
         self.insert(
             collection_name,
@@ -400,6 +398,15 @@ class QdrantVectorStoreService:
             upsert_payload_metadata(metadata, id_field, id_value),
             point_id=point_id,
         )
+        if replaced:
+            stale = Filter(
+                must=[FieldCondition(key=id_field, match=MatchValue(value=id_value))],
+                must_not=[HasIdCondition(has_id=[point_id])],
+            )
+            self.client.delete(
+                collection_name=collection_name,
+                points_selector=FilterSelector(filter=stale),
+            )
         return point_id, replaced
 
     def delete_by_field(self, collection_name: str, id_field: str, id_value: str) -> int:
