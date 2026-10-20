@@ -1646,6 +1646,41 @@ class TestExpressionEvaluatorServiceEvaluate(unittest.TestCase):
         )
         self.assertEqual(response.result, "Bearer abc")
 
+    def test_bracket_access_matches_executor_for_non_identifier_names(self) -> None:
+        """`-` is subtraction, so these names are only reachable as `$root["name"]`.
+
+        The Credentials panel, the Variable node hint and expression autocomplete emit this form
+        for `$credentials`, `$vars` and `$global`; the dialog and a run must resolve it the same
+        way, alone and inside a template.
+        """
+        names = ["heym-codex-support", "my api key", "2fa", "token.v2", "Müşteri", "global"]
+        values = {name: f"value<{name}>" for name in names}
+        for root in ("credentials", "vars", "global"):
+            kwargs = {
+                "credentials": {"credentials_context": values},
+                "vars": {},
+                "global": {"global_variables_context": values},
+            }[root]
+            executor = WorkflowExecutor(nodes=[], edges=[], **kwargs)
+            if root == "vars":
+                executor.vars = dict(values)
+            service = self._service(
+                **kwargs, **({"vars_context": values} if root == "vars" else {})
+            )
+            for name in names:
+                reference = f"${root}[{json.dumps(name, ensure_ascii=False)}]"
+                for template, expected in (
+                    (reference, f"value<{name}>"),
+                    (f"Bearer {reference} end", f"Bearer value<{name}> end"),
+                ):
+                    with self.subTest(template=template):
+                        self.assertEqual(
+                            executor.evaluate_message_template(template, {}, None), expected
+                        )
+                        response = service.evaluate(template, {})
+                        self.assertEqual(response.result, expected)
+                        self.assertIsNone(response.error)
+
     def test_invalid_expression_returns_error_field(self) -> None:
         response = self._service().evaluate("$@@invalid@@", {})
         self.assertIsNone(response.result)

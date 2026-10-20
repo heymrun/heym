@@ -16,6 +16,7 @@ import Label from "@/components/ui/Label.vue";
 import Select from "@/components/ui/Select.vue";
 import UserAvatar from "@/components/ui/UserAvatar.vue";
 import { refreshCredentialsCache } from "@/composables/useExpressionCompletion";
+import { contextReference } from "@/lib/contextReference";
 import { cn, formatDate } from "@/lib/utils";
 import { credentialsApi, teamsApi } from "@/services/api";
 import { CREDENTIAL_TYPE_LABELS } from "@/types/credential";
@@ -586,7 +587,7 @@ async function removeCredentialTeamShare(teamId: string): Promise<void> {
 
         <div class="mt-3 pt-3 border-t border-border/30">
           <p class="text-xs text-muted-foreground font-mono">
-            $credentials.{{ credential.name }}
+            {{ contextReference("credentials", credential.name) }}
           </p>
         </div>
       </Card>

@@ -362,6 +362,84 @@ class GetExecutionHistoryTest(HeymNodeTestBase):
 
         self.assertIsNotNone(result["since"])
 
+    # `heymWorkflowId` of `all` reads the history of every workflow the owner can reach.
+
+    def _queue_all(self, rows: list[tuple[MagicMock, str]], counts: dict[str, int]) -> None:
+        """Queue the three statements the handler issues: owner, breakdown, slice."""
+        sliced = MagicMock()
+        sliced.all.return_value = rows
+        self.db.execute.side_effect = [
+            self._scalar_one(_workflow("Owning", self.owner_id)),
+            self._counts(counts),
+            sliced,
+        ]
+
+    def _run_all(self, **extra: str) -> dict:
+        data = {"heymOperation": "getExecutionHistory", "heymWorkflowId": "all", **extra}
+        return heym_node.execute(_ctx(data))
+
+    def test_all_workflows_returns_entries_labelled_with_their_workflow(self) -> None:
+        first, second = self._entry("success", 2), self._entry("error", 1)
+        self._queue_all([(first, "Alpha"), (second, "Beta")], {"success": 4, "error": 3})
+
+        result = self._run_all()
+
+        self.assertEqual(result["total"], 7)
+        self.assertEqual(result["by_status"], {"success": 4, "error": 3})
+        self.assertEqual([e["workflow_name"] for e in result["executions"]], ["Alpha", "Beta"])
+        self.assertTrue(all("workflow_id" in e for e in result["executions"]))
+        self.assertIsNone(result["workflow_id"])
+        self.assertIsNone(result["workflow_name"])
+
+    def test_all_workflows_does_not_look_up_a_single_workflow(self) -> None:
+        self._queue_all([], {})
+
+        self._run_all()
+
+        self.assertEqual(self.db.execute.call_count, 3)
+
+    def test_all_workflows_value_is_case_insensitive(self) -> None:
+        self._queue_all([(self._entry("success"), "Alpha")], {"success": 1})
+
+        self.assertEqual(len(self._run_all(heymWorkflowId="ALL")["executions"]), 1)
+
+    def test_all_workflows_is_scoped_to_the_owners_workflows_and_skips_node_results(self) -> None:
+        self._queue_all([(self._entry("success"), "Alpha")], {"success": 1})
+
+        self._run_all(heymLimit="1", heymStatus="success", heymSinceDays="3")
+
+        counts_sql, slice_sql = [
+            str(call.args[0].compile(dialect=postgresql.dialect()))
+            for call in self.db.execute.call_args_list[1:]
+        ]
+        for sql in (counts_sql, slice_sql):
+            self.assertIn("workflows.owner_id", sql)
+            self.assertIn("workflows.kind", sql)
+            self.assertNotIn("node_results", sql)
+        self.assertIn("GROUP BY", counts_sql)
+        self.assertIn("LIMIT", slice_sql)
+
+    def test_all_workflows_empty_limit_applies_no_sql_limit(self) -> None:
+        self._queue_all([(self._entry("success"), "Alpha")], {"success": 1})
+
+        self._run_all()
+
+        self.assertNotIn("LIMIT", self._history_sql_from(1))
+
+    def test_get_workflow_does_not_accept_all(self) -> None:
+        self.db.execute.side_effect = [self._scalar_one(_workflow("Owning", self.owner_id))]
+
+        with self.assertRaises(ValueError) as caught:
+            heym_node.execute(_ctx({"heymOperation": "getWorkflow", "heymWorkflowId": "all"}))
+
+        self.assertIn("not found", str(caught.exception).lower())
+
+    def _history_sql_from(self, start: int) -> str:
+        return " ".join(
+            str(call.args[0].compile(dialect=postgresql.dialect()))
+            for call in self.db.execute.call_args_list[start:]
+        )
+
 
 class OperationValidationTest(HeymNodeTestBase):
     def test_missing_operation_raises(self) -> None:

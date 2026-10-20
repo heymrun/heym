@@ -43,6 +43,9 @@ export interface ChartPayload {
   // Table column rendered as status chips, and the tone of each value in it.
   statusColumn?: string;
   statusTones?: Record<string, StatusTone>;
+  // Table column whose cells are URLs shown as a button that opens them in a new tab.
+  linkColumn?: string;
+  linkLabel?: string;
   value?: number | string | null;
   // Markdown content for the `text` chart type.
   text?: string;

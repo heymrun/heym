@@ -28,6 +28,7 @@ import {
   resolveDatePropertyPathType,
   type ResolvedSuggestionType,
 } from "@/composables/expressionCompletionTypeResolver";
+import { contextAccessor } from "@/lib/contextReference";
 
 const credentialsCache = ref<CredentialForIntellisense[]>([]);
 const globalVariablesCache = ref<{ name: string; value_type: string }[]>([]);
@@ -941,7 +942,7 @@ export function useExpressionCompletion(
       const credentialSuggestions: CompletionSuggestion[] =
         credentialsCache.value.map((cred) => ({
           label: cred.name,
-          insertText: cred.name,
+          insertText: contextAccessor(cred.name),
           type: "property" as const,
           detail: cred.type,
           description: `Access ${cred.name} credential`,
@@ -972,7 +973,7 @@ export function useExpressionCompletion(
             const varType = varNode?.data.variableType || "auto";
             return {
               label: varName,
-              insertText: varName,
+              insertText: contextAccessor(varName),
               type: "property" as const,
               detail: varType === "auto" ? "variable" : varType,
               description: `Access ${varName} variable`,
@@ -1035,7 +1036,7 @@ export function useExpressionCompletion(
         const globalSuggestions: CompletionSuggestion[] =
           globalVariablesCache.value.map((v) => ({
             label: v.name,
-            insertText: v.name,
+            insertText: contextAccessor(v.name),
             type: "property" as const,
             detail: v.value_type,
             description: `Access ${v.name} global variable`,

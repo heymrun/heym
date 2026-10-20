@@ -2,6 +2,7 @@
 import ExpressionInput from "@/components/ui/ExpressionInput.vue";
 import Label from "@/components/ui/Label.vue";
 import Select from "@/components/ui/Select.vue";
+import ChartOutputLinkFields from "./ChartOutputLinkFields.vue";
 import ChartOutputStatusFields from "./ChartOutputStatusFields.vue";
 import { usePropertiesPanelContext } from "../usePropertiesPanelController";
 
@@ -150,7 +151,10 @@ const {
       </p>
     </div>
 
-    <ChartOutputStatusFields v-if="selectedNode.data.chartType === 'table'" />
+    <template v-if="selectedNode.data.chartType === 'table'">
+      <ChartOutputStatusFields />
+      <ChartOutputLinkFields />
+    </template>
 
     <template
       v-if="['bar', 'line', 'area', 'pie', 'numeric', 'gauge', 'proportion', 'barGauge'].includes(selectedNode.data.chartType || 'bar')"

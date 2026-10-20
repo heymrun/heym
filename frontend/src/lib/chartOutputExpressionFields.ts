@@ -5,6 +5,8 @@ export type ChartOutputExpressionFieldKey =
   | "valueField"
   | "dataPath"
   | "statusColumn"
+  | "linkColumn"
+  | "linkLabel"
   | "labelField"
   | "xField"
   | "yField"
@@ -33,7 +35,11 @@ export function getChartOutputExpressionFields(
   fields.push({ key: "dataPath", label: "Data path" });
 
   if (type === "table") {
-    fields.push({ key: "statusColumn", label: "Status column" });
+    fields.push(
+      { key: "statusColumn", label: "Status column" },
+      { key: "linkColumn", label: "Link column" },
+      { key: "linkLabel", label: "Link button text" },
+    );
   }
 
   if (["bar", "line", "area", "pie", "proportion", "barGauge"].includes(type)) {

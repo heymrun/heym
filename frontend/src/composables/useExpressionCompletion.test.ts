@@ -467,3 +467,104 @@ describe("module-level credentials/global-variables cache", () => {
     expect(credentialsApi.getAvailable).toHaveBeenCalled();
   });
 });
+
+describe("name completion under $credentials, $vars and $global", () => {
+  async function loadCredentials(names: string[]): Promise<void> {
+    vi.mocked(credentialsApi.getAvailable).mockResolvedValue(
+      names.map((name) => ({ name, type: "bearer" }) as never),
+    );
+    refreshCredentialsCache();
+    const { getPropertySuggestions } = useExpressionCompletion(buildOptions());
+    await vi.waitFor(() =>
+      expect(getPropertySuggestions("credentials", [], "").map((s) => s.label)).toEqual(
+        expect.arrayContaining(names),
+      ),
+    );
+  }
+
+  async function loadGlobals(names: string[]): Promise<void> {
+    vi.mocked(globalVariablesApi.list).mockResolvedValue(
+      names.map((name) => ({ id: name, name, value_type: "string" }) as never),
+    );
+    refreshGlobalVariablesCache();
+    const { getPropertySuggestions } = useExpressionCompletion(buildOptions());
+    await vi.waitFor(() =>
+      expect(getPropertySuggestions("global", [], "").map((s) => s.label)).toEqual(
+        expect.arrayContaining(names),
+      ),
+    );
+  }
+
+  function variableNodes(names: string[]): WorkflowNode[] {
+    return names.map((name, index) =>
+      buildNode({
+        id: `var-${index}`,
+        type: "variable" as WorkflowNode["type"],
+        data: { label: `Var ${index}`, variableName: name },
+      }),
+    );
+  }
+
+  const SOURCES = [
+    {
+      root: "credentials",
+      options: async (names: string[]) => {
+        await loadCredentials(names);
+        return buildOptions();
+      },
+    },
+    {
+      root: "global",
+      options: async (names: string[]) => {
+        await loadGlobals(names);
+        return buildOptions();
+      },
+    },
+    {
+      root: "vars",
+      options: async (names: string[]) => buildOptions({ nodes: variableNodes(names) }),
+    },
+  ];
+
+  describe.each(SOURCES)("$root", ({ root, options }) => {
+    it("inserts a plain name after the dot", async () => {
+      const { getSuggestions, applyCompletion } = useExpressionCompletion(
+        await options(["MyToken"]),
+      );
+      const text = `$${root}.My`;
+
+      const [suggestion] = getSuggestions(text, text.length);
+
+      expect(applyCompletion(text, text.length, suggestion).newText).toBe(`$${root}.MyToken`);
+    });
+
+    it("switches to bracket access for a name that is not a plain identifier", async () => {
+      const { getSuggestions, applyCompletion } = useExpressionCompletion(
+        await options(["heym-codex-support"]),
+      );
+      const text = `Bearer $${root}.heym`;
+
+      const suggestions = getSuggestions(text, text.length);
+
+      expect(suggestions.map((s) => s.label)).toEqual(["heym-codex-support"]);
+      expect(applyCompletion(text, text.length, suggestions[0]).newText).toBe(
+        `Bearer $${root}["heym-codex-support"]`,
+      );
+    });
+
+    it("offers the bracket form as soon as the dot is typed", async () => {
+      const { getSuggestions, applyCompletion } = useExpressionCompletion(
+        await options(["heym-codex-support", "MyToken"]),
+      );
+      const text = `$${root}.`;
+
+      const suggestions = getSuggestions(text, text.length);
+      const hyphenated = suggestions.find((s) => s.label === "heym-codex-support");
+
+      expect(hyphenated).toBeDefined();
+      expect(applyCompletion(text, text.length, hyphenated!).newText).toBe(
+        `$${root}["heym-codex-support"]`,
+      );
+    });
+  });
+});

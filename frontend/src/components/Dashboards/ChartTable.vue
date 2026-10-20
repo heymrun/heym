@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-vue-next";
+import { ArrowDown, ArrowUp, ArrowUpDown, ExternalLink } from "lucide-vue-next";
 
 import type { StatusTone } from "@/types/dashboard";
 import {
@@ -8,6 +8,7 @@ import {
   cellText,
   sortTableRows,
   statusTone,
+  tableLinkHref,
   tableRowRecord,
   type TableRecord,
   type TableRowLink,
@@ -20,6 +21,9 @@ const props = defineProps<{
   rows: unknown[][];
   statusColumn?: string;
   statusTones?: Record<string, StatusTone>;
+  /** Column whose cells hold a URL, shown as a button that opens it in a new tab. */
+  linkColumn?: string;
+  linkLabel?: string;
   /** Set when the widget links rows to a detail page the viewer can open. */
   rowLink?: TableRowLink | null;
 }>();
@@ -51,6 +55,14 @@ function open(row: unknown[]): void {
   if (record) emit("row-open", record);
 }
 
+function isLinkColumn(cellIndex: number): boolean {
+  return Boolean(props.linkColumn) && props.columns[cellIndex] === props.linkColumn;
+}
+
+function linkHref(cell: unknown, cellIndex: number): string | null {
+  return isLinkColumn(cellIndex) ? tableLinkHref(cell) : null;
+}
+
 function chipClass(cell: unknown): string {
   return STATUS_TONE_CLASSES[statusTone(cell, props.statusTones)];
 }
@@ -75,9 +87,16 @@ function ariaSort(column: number): "ascending" | "descending" | "none" {
           v-for="(col, index) in columns"
           :key="`${index}-${col}`"
           class="p-0 text-left font-medium"
-          :aria-sort="ariaSort(index)"
+          :aria-sort="isLinkColumn(index) ? undefined : ariaSort(index)"
         >
+          <span
+            v-if="isLinkColumn(index)"
+            class="block truncate px-2 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground"
+          >
+            {{ col }}
+          </span>
           <button
+            v-else
             type="button"
             class="flex w-full items-center gap-1 px-2 py-2 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground hover:text-foreground"
             :aria-label="`Sort by ${col}`"
@@ -128,6 +147,27 @@ function ariaSort(column: number): "ascending" | "descending" | "none" {
           >
             {{ cellText(cell) }}
           </span>
+          <a
+            v-else-if="linkHref(cell, cellIndex)"
+            :href="linkHref(cell, cellIndex) ?? undefined"
+            :title="linkHref(cell, cellIndex) ?? undefined"
+            :aria-label="linkLabel ? undefined : 'Open link'"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="inline-flex items-center gap-1 rounded-md border border-border px-2 py-0.5 text-xs font-medium text-foreground hover:bg-accent focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            data-testid="table-link"
+            @click.stop
+            @keydown.enter.stop
+          >
+            <template v-if="linkLabel">
+              {{ linkLabel }}
+            </template>
+            <ExternalLink
+              class="shrink-0"
+              :class="linkLabel ? 'h-3 w-3' : 'h-3.5 w-3.5'"
+              aria-hidden="true"
+            />
+          </a>
           <template v-else>
             {{ cell }}
           </template>

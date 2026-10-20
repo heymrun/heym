@@ -150,6 +150,12 @@ def build_chart_payload(config: dict, data: Any) -> dict:
             payload["statusTones"] = resolve_status_tones(
                 (row[index] for row in payload["rows"]), config.get("statusTones")
             )
+        link_column = config.get("linkColumn")
+        if isinstance(link_column, str) and link_column.strip() in columns:
+            payload["linkColumn"] = link_column.strip()
+            link_label = config.get("linkLabel")
+            if isinstance(link_label, str) and link_label.strip():
+                payload["linkLabel"] = link_label.strip()
         return payload
 
     if chart_type in ("numeric", "gauge"):

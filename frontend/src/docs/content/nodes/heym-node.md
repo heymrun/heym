@@ -16,12 +16,12 @@ The **Heym** node reads Heym's own data: the workflows you can reach, one workfl
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `heymOperation` | Select | Which read to perform |
-| `heymWorkflowId` | UUID | Target workflow. Required for `getWorkflow` and `getExecutionHistory`. Expression-capable. |
+| `heymWorkflowId` | UUID | Target workflow. Required for `getWorkflow` and `getExecutionHistory`. Set it to `all` on `getExecutionHistory` to read every workflow you can reach. Expression-capable. |
 | `heymLimit` | String | Maximum rows to return. **Leave it empty or enter `0` to return everything** — that is the default. Expression-capable. |
 | `heymStatus` | String | Optional status filter for `getExecutionHistory`. Expression-capable. |
 | `heymSinceDays` | String | Optional lookback in days for `getExecutionHistory`. Expression-capable. |
 
-The workflow picker is a searchable dropdown listing every workflow you can reach.
+The workflow picker is a searchable dropdown listing every workflow you can reach. For Get Execution History, its first item is **All workflows**.
 
 ## Access Scope
 
@@ -81,7 +81,7 @@ Give the agent `$detail.nodes` and ask it to flag any `data` value that looks li
 
 ### Get Execution History
 
-Returns execution-history entries for one workflow, newest first.
+Returns execution-history entries for one workflow, or for every workflow you can reach when you pick **All workflows**, newest first.
 
 | Expression | Description |
 |------------|-------------|
@@ -94,7 +94,8 @@ Returns execution-history entries for one workflow, newest first.
 | `$nodeLabel.executions[0].recovered` | Whether the run was recovered after a crash |
 | `$nodeLabel.executions[0].inputs` | What the run received - the trigger payload or the caller's input |
 | `$nodeLabel.executions[0].outputs` | The workflow's output for that run |
-| `$nodeLabel.workflow_id`, `$nodeLabel.workflow_name` | The workflow the history belongs to |
+| `$nodeLabel.workflow_id`, `$nodeLabel.workflow_name` | The workflow the history belongs to, or `null` with **All workflows** |
+| `$nodeLabel.executions[0].workflow_id`, `$nodeLabel.executions[0].workflow_name` | With **All workflows**, the workflow each run belongs to |
 | `$nodeLabel.total` | Total matching executions **before** the limit |
 | `$nodeLabel.by_status` | Counts keyed by status, for example `{ "success": 41, "error": 3 }` |
 | `$nodeLabel.since` | Start of the window, or `null` for the full history |
@@ -104,6 +105,8 @@ Entries carry both `inputs` and `outputs` - what the run received and what it an
 `total` and `by_status` always describe the **whole** matching history, even when **Limit** caps the returned entries — so you can pull the five most recent runs and still report an accurate failure count.
 
 Leave **Since (days)** empty to cover everything, **Status filter** empty to include every status, and **Limit** empty or `0` to return every entry.
+
+**All workflows** covers the same set as [List Workflows](#list-workflows), and `total` and `by_status` then count runs across all of it. It answers instance-wide questions in a single node, such as how many runs failed in the last day, without looping over the workflow list first.
 
 ## Example Workflow
 

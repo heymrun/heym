@@ -4,6 +4,7 @@ import ExpressionInput from "@/components/ui/ExpressionInput.vue";
 import Input from "@/components/ui/Input.vue";
 import Label from "@/components/ui/Label.vue";
 import Select from "@/components/ui/Select.vue";
+import { contextReference } from "@/lib/contextReference";
 import { usePropertiesPanelContext } from "../usePropertiesPanelController";
 
 const {
@@ -40,8 +41,7 @@ const {
         v-else
         class="text-xs text-muted-foreground"
       >
-        Access via: {{ selectedNode.data.isGlobal ? '$global' : '$vars' }}.{{ selectedNode.data.variableName ||
-          'variableName' }}
+        Access via: {{ contextReference(selectedNode.data.isGlobal ? 'global' : 'vars', selectedNode.data.variableName || 'variableName') }}
       </p>
     </div>
     <div class="space-y-2">

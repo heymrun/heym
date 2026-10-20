@@ -35,6 +35,8 @@ When you only have example/sample data (no real source), produce these rows with
 | `columns` | array | Optional column list for `table` (defaults to the keys of the first row) |
 | `statusColumn` | string | Optional `table` column rendered as colored [status chips](#status-chips). It must be one of the shown columns. |
 | `statusTones` | object | Optional map from a status value to a tone (`success`, `attention`, `failure`, `waiting`, `neutral`) for values the defaults do not cover |
+| `linkColumn` | string | Optional `table` column whose cells hold a URL, shown as a [link button](#link-buttons) that opens it in a new tab. It must be one of the shown columns. |
+| `linkLabel` | string | Optional text of the link button. Left empty, the button shows only a link icon. |
 | `xField` / `yField` | string | Row keys for the X and Y numeric axes (scatter) |
 | `min` / `max` | number | Numeric range for `gauge` (default `0` / `100`) |
 | `unit` | string | Optional unit shown next to a `numeric` or `gauge` value |
@@ -136,6 +138,33 @@ Matching ignores case, `_` and `-`, so `IN_PROGRESS` and `in-progress` are both 
 
 The server resolves each value to its tone, so Heym and Heym Work show the same colors.
 
+## Link buttons
+
+A `table` can turn one column into buttons that open a link. Set **Link column** in the node's properties (or `linkColumn` in the DSL) to a column whose cells hold a URL, and optionally **Link button text** (`linkLabel`). Each cell becomes a button that opens its URL in a new tab. Without button text, the button shows only a link icon:
+
+| Cell value | Opens |
+|------------|-------|
+| `https://jira.example.com/browse/T-1` | Another site, in a new tab |
+| `/dashboards` | A page inside Heym, in a new tab |
+
+Only `http://` and `https://` addresses and paths that start with a single `/` become buttons. Any other value, such as `javascript:` or `//host`, stays plain text, and an empty cell shows nothing.
+
+```json
+{
+  "type": "chartOutput",
+  "data": {
+    "label": "tickets",
+    "chartType": "table",
+    "dataPath": "rows",
+    "columns": ["ticket", "owner", "url"],
+    "linkColumn": "url",
+    "linkLabel": "Open ticket"
+  }
+}
+```
+
+The button works next to a [row link](../tabs/dashboard-tab.md#detail-pages): clicking the button opens its link in a new tab, and clicking anywhere else on the row still opens the detail page.
+
 ## Detail pages: `$page.record`
 
 A dashboard opened with `?record=<value>` runs every widget workflow with that value as `$page.record`. A table row link opens such a page; see [Detail pages](../tabs/dashboard-tab.md#detail-pages). On the dashboard opened without a record, and in the expression dialog, `$page.record` is null. A node labelled `page` takes precedence over it.
@@ -155,7 +184,7 @@ The value comes from a URL that anyone can edit. The dashboard only accepts valu
 1. If `dataPath` is set, the node follows that dot path into the upstream output.
 2. Otherwise it looks for an array: a top-level list, a `data` array, or the first list-valued field.
 3. Rows straight from a [Data Table](./datatable-node.md) node (`{id, data, created_at}`) are read with their columns at the top level next to `id`, so `labelField`, `valueField` and `columns` name the table's own columns.
-4. For `table`, each row becomes a table row using `columns` (or the first row's keys). With `statusColumn`, the payload also carries the tone of each value in that column.
+4. For `table`, each row becomes a table row using `columns` (or the first row's keys). With `statusColumn`, the payload also carries the tone of each value in that column, and with `linkColumn` it carries the link column and button text.
 5. For `numeric` and `gauge`, the value comes from `valueField` on the first row (or the first numeric field).
 6. For `scatter`, each row becomes an `[xField, yField]` point.
 7. For `text`, the message is taken from `valueField` on the first row when set, otherwise from the static `text` config (otherwise the first string field of the first row).
