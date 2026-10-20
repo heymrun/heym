@@ -1,5 +1,5 @@
 from dataclasses import asdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -57,7 +57,9 @@ async def fetch_schedule_events_for_user(
     end = normalize_datetime_to_timezone(end, tz)
     if end <= start:
         raise ValueError("end must be after start")
-    if end - start > timedelta(days=_MAX_RANGE_DAYS):
+    if end.astimezone(timezone.utc) - start.astimezone(timezone.utc) > timedelta(
+        days=_MAX_RANGE_DAYS
+    ):
         raise ValueError(f"Date range must not exceed {_MAX_RANGE_DAYS} days")
     where_clause = _workflows_where_clause(current_user, include_shared)
     result = await db.execute(select(Workflow).where(where_clause))

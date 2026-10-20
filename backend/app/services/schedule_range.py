@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, time, timedelta, tzinfo
+from datetime import date, datetime, time, timedelta, timezone, tzinfo
 from typing import Literal
 
 from app.services.timezone_utils import normalize_datetime_to_timezone
@@ -31,7 +31,7 @@ def parse_iso_range(
         end = normalize_datetime_to_timezone(end, tz)
     if end <= start:
         raise ValueError("end must be after start")
-    if end - start > timedelta(days=max_days):
+    if end.astimezone(timezone.utc) - start.astimezone(timezone.utc) > timedelta(days=max_days):
         raise ValueError(f"Date range must not exceed {max_days} days")
     return start, end
 
