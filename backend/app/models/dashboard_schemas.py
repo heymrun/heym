@@ -42,6 +42,9 @@ class DashboardWidgetResponse(BaseModel):
     link_label_field: str | None = None
     # Whether the caller can open the linked dashboard; rows are clickable only then.
     link_accessible: bool = False
+    # Set only on the answer to an AI fine-tune: the Edit History snapshot of the workflow as it
+    # was before, which the revert endpoint takes.
+    previous_version_number: int | None = None
     updated_at: datetime
 
 
@@ -255,3 +258,12 @@ class AiRefineRequest(BaseModel):
     model: str = Field(min_length=1, max_length=200)
     # Data tables the widget reads, so a fix sees their real columns and values.
     data_table_ids: list[uuid.UUID] = Field(default_factory=list, max_length=8)
+    # What the caller knows about the page: "detail" (opened with a record) or "listing".
+    # Left out, a page that no table's rows open counts as a listing page.
+    page_kind: Literal["listing", "detail"] | None = None
+
+
+class WidgetRevertRequest(BaseModel):
+    """Put a widget's workflow back to the snapshot an AI fine-tune stored before it ran."""
+
+    version_number: int = Field(ge=1)
