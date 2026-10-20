@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import and_, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.analytics import upsert_workflow_analytics_snapshot
@@ -92,7 +92,15 @@ async def _create_session(
 
 async def _validate_session(db: AsyncSession, token: str, workflow_id: uuid.UUID) -> bool:
     result = await db.execute(
-        select(PortalSession).where(
+        select(PortalSession)
+        .join(
+            WorkflowPortalUser,
+            and_(
+                WorkflowPortalUser.workflow_id == PortalSession.workflow_id,
+                WorkflowPortalUser.username == PortalSession.username,
+            ),
+        )
+        .where(
             PortalSession.token == hash_secret(token),
             PortalSession.workflow_id == workflow_id,
         )
@@ -1023,4 +1031,12 @@ async def delete_portal_user(
             detail="User not found",
         )
 
+    # PortalSession.username has no foreign key to cascade from, so revoke the
+    # user's live bearer sessions explicitly at the same moment the row goes.
+    await db.execute(
+        delete(PortalSession).where(
+            PortalSession.workflow_id == workflow_id,
+            PortalSession.username == portal_user.username,
+        )
+    )
     await db.delete(portal_user)
