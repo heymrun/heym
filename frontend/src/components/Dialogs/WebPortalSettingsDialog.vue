@@ -6,6 +6,7 @@ import Button from "@/components/ui/Button.vue";
 import Input from "@/components/ui/Input.vue";
 import Label from "@/components/ui/Label.vue";
 import { joinOriginAndPath } from "@/lib/appUrl";
+import { portalDeleteWarning } from "@/lib/portalDeleteWarning";
 import { portalApi } from "@/services/api";
 import { useWorkflowStore } from "@/stores/workflow";
 
@@ -39,6 +40,8 @@ const settings = ref<PortalSettings>({
   portal_file_config: {},
   input_fields: [],
 });
+
+const serverPortalEnabled = ref<boolean | null>(null);
 
 const users = ref<PortalUser[]>([]);
 const isLoadingUsers = ref(false);
@@ -87,6 +90,7 @@ async function loadSettings(): Promise<void> {
   try {
     const data = await portalApi.getSettings(workflowStore.currentWorkflow.id);
     settings.value = data;
+    serverPortalEnabled.value = data.portal_enabled;
   } catch {
     error.value = "Failed to load portal settings";
   } finally {
@@ -121,6 +125,7 @@ async function saveSettings(): Promise<void> {
       portal_file_config: settings.value.portal_file_config,
     });
     settings.value = data;
+    serverPortalEnabled.value = data.portal_enabled;
   } catch (e: unknown) {
     const err = e as { response?: { data?: { detail?: string } } };
     error.value = err.response?.data?.detail || "Failed to save settings";
@@ -155,6 +160,12 @@ async function addUser(): Promise<void> {
 async function deleteUser(userId: string): Promise<void> {
   if (!workflowStore.currentWorkflow) return;
 
+  const warning = portalDeleteWarning({
+    isLastUser: users.value.length === 1,
+    portalEnabled: serverPortalEnabled.value,
+  });
+  if (warning && !window.confirm(warning)) return;
+
   deletingUserId.value = userId;
   error.value = "";
   try {
@@ -186,6 +197,7 @@ function openDialog(): void {
   activeTab.value = "general";
   error.value = "";
   users.value = [];
+  serverPortalEnabled.value = null;
 }
 
 function closeDialog(): void {

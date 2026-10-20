@@ -51,6 +51,7 @@ Input fields come from [Input](../nodes/input-node.md) nodes. The API extracts s
 ## Auth and Sessions
 
 - **WorkflowPortalUser**: Username/password per workflow (when auth is enabled)
+- **Removing the last user**: With the portal enabled, deleting the final portal user makes the portal public again; the settings dialog asks for confirmation first
 - **PortalSession**: Session tokens with 168-hour TTL
 - **Rate limiting**: 3 failed login attempts → 24h ban per workflow+IP
 - Expired sessions are cleaned by a cron job
