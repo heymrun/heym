@@ -8,6 +8,7 @@ from app.services.node_execution.base import NodeExecutionContext
 # Issue objects are about 6 KB each, so ~1,000 items keeps one node output near 6 MB.
 RETURN_ALL_MAX_ITEMS = 1000
 RETURN_ALL_MAX_PAGES = 100
+RETURN_ALL_PER_PAGE = 100
 
 
 def execute(ctx: NodeExecutionContext) -> object:
@@ -150,10 +151,13 @@ def execute(ctx: NodeExecutionContext) -> object:
     def _list_pages(method: Callable[..., list], *args: object, **kwargs: object) -> list:
         """Call a paged list method once, or keep following ``next`` when Return All is on.
 
+        Return All asks for ``RETURN_ALL_PER_PAGE`` items per request whatever Per Page says.
         Stops at ``RETURN_ALL_MAX_ITEMS`` items or ``RETURN_ALL_MAX_PAGES`` requests and leaves
         ``service.last_next_cursor`` set, so the caller reports ``has_more`` / ``next_cursor``
         instead of failing and the rest can be fetched with the Cursor field.
         """
+        if return_all:
+            kwargs = {**kwargs, "per_page": RETURN_ALL_PER_PAGE}
         items = list(method(*args, **kwargs))
         if not return_all:
             return items

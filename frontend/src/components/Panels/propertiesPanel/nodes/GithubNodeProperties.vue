@@ -6,6 +6,7 @@ import Input from "@/components/ui/Input.vue";
 import Label from "@/components/ui/Label.vue";
 import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 import Select from "@/components/ui/Select.vue";
+import { isFlagOn } from "@/lib/booleanFlag";
 import { usePropertiesPanelContext } from "../usePropertiesPanelController";
 
 const {
@@ -463,7 +464,7 @@ const {
             <input
               id="github-return-all"
               type="checkbox"
-              :checked="selectedNode.data.githubReturnAll === true"
+              :checked="isFlagOn(selectedNode.data.githubReturnAll)"
               class="rounded border-border"
               @change="updateNodeData('githubReturnAll', ($event.target as HTMLInputElement).checked)"
             >
@@ -475,7 +476,8 @@ const {
           />
         </div>
         <p class="text-xs text-muted-foreground">
-          Follows every page, starting at Cursor, and stops at about 1,000 items. If more
+          Follows every page, starting at Cursor, with 100 items per request, and stops at about
+          1,000 items. If more
           remain, <code>has_more</code> is true and <code>next_cursor</code> picks up from there.
         </p>
       </div>

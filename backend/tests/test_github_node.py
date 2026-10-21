@@ -2075,6 +2075,24 @@ class GitHubReturnAllTests(_GitHubExecutorHarness, unittest.TestCase):
         self.assertEqual(output["next_cursor"], "page=2")
         self.assertEqual(client.request.call_count, 1)
 
+    def test_return_all_requests_100_per_page_whatever_per_page_says(self) -> None:
+        client = self._paged_client([[{"id": 1}], [{"id": 2}]])
+
+        self._run(
+            {"githubOperation": "listReleases", "githubReturnAll": True, "githubPerPage": "30"},
+            client,
+        )
+
+        per_page = [call.kwargs["params"]["per_page"] for call in client.request.call_args_list]
+        self.assertEqual(per_page, [100, 100])
+
+    def test_per_page_is_kept_when_return_all_is_off(self) -> None:
+        client = self._paged_client([[{"id": 1}], [{"id": 2}]])
+
+        self._run({"githubOperation": "listReleases", "githubPerPage": "30"}, client)
+
+        self.assertEqual(client.request.call_args.kwargs["params"]["per_page"], 30)
+
     def test_return_all_stops_at_the_cap_and_reports_the_rest(self) -> None:
         client = self._paged_client([[{"id": n}] * 2 for n in range(10)])
 

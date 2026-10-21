@@ -235,11 +235,11 @@ that point.
 ### Return all pages
 
 Turn on **Return all pages** to have one run follow every page, starting at **Cursor** when one is
-set. **Per Page** still sets the size of each request. The node stops after about 1,000 items (or
-100 requests): issue objects are around 6 KB each, so a larger cap would produce very large node
-outputs. When it stops early it returns what it has with `has_more: true` and a `next_cursor`
-instead of raising an error, and you can continue by passing that cursor to the next run. Stopping
-the workflow, or hitting the workflow timeout, ends the fetch between pages.
+set. Each request asks for 100 items, whatever **Per Page** says. The node stops after about 1,000
+items (or 100 requests): issue objects are around 6 KB each, so a larger cap would produce very
+large node outputs. When it stops early it returns what it has with `has_more: true` and a
+`next_cursor` instead of raising an error, and you can continue by passing that cursor to the next
+run. Stopping the workflow, or hitting the workflow timeout, ends the fetch between pages.
 
 ## Output
 

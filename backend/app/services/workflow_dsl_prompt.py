@@ -4697,8 +4697,9 @@ Use ONLY: `str()`, `int()`, `float()`, `bool()`, `list()`, `dict(key=value)`, `l
     empty for the first page; pass the previous run's `next_cursor` to fetch the next one.
     List operations also return `has_more` and `next_cursor`
   - `githubReturnAll`: Optional boolean for list operations. When true the node follows every
-    page (starting at `githubCursor`) and stops at about 1,000 items; if more remain it returns
-    `has_more: true` and a `next_cursor` instead of failing
+    page (starting at `githubCursor`) with 100 items per request, ignoring `githubPerPage`, and
+    stops at about 1,000 items; if more remain it returns `has_more: true` and a `next_cursor`
+    instead of failing
 - **Operation-specific fields**:
   - Issues: `githubIssueNumber`, `githubTitle`, `githubBody`, `githubState`,
     `githubStateReason`, `githubLabels`, `githubAssignees`, `githubAssignee`,
