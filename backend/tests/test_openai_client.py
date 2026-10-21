@@ -1,5 +1,6 @@
 """Tests for the shared OpenAI SDK client factory."""
 
+import json
 import unittest
 import uuid
 from unittest.mock import patch
@@ -7,7 +8,9 @@ from unittest.mock import patch
 import httpx
 
 from app.http_identity import HEYM_USER_AGENT
+from app.services.llm_chat_bridge import completion_caller
 from app.services.openai_client import create_guarded_openai_client, create_openai_client
+from app.services.opencode_catalog import OPENCODE_MODEL_FALLBACK
 
 
 class OpenAIClientIdentityTests(unittest.TestCase):
@@ -91,6 +94,64 @@ class OpenCodeSessionTests(unittest.TestCase):
             self.assertEqual(headers["User-Agent"], HEYM_USER_AGENT)
             self.assertEqual(headers["Authorization"], "Bearer test-key")
             self.assertEqual(headers["X-Custom"], "kept")
+
+    def test_m31_flash_uses_real_sdk_chat_http_boundary(self) -> None:
+        requests: list[httpx.Request] = []
+
+        def respond(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(
+                200,
+                request=request,
+                json={
+                    "id": "chatcmpl-test",
+                    "object": "chat.completion",
+                    "created": 0,
+                    "model": "minimax-m3.1-flash-free",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {"role": "assistant", "content": "ok"},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                },
+            )
+
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "ping"},
+                    {"type": "image_url", "image_url": {"url": "https://example.test/image.png"}},
+                ],
+            }
+        ]
+        models = [
+            m["id"].split("/", 1)[1] for m in OPENCODE_MODEL_FALLBACK if "/minimax-" in m["id"]
+        ]
+        self.assertEqual(models, ["minimax-m3.1-flash-free", "minimax-m3"])
+        # Chat/assistant use this application bridge to choose the protocol before
+        # the real SDK serializes a request. Explicit custom models remain accepted.
+        for model in [*models, "my-custom-model"]:
+            with create_openai_client(
+                api_key="test-key",
+                base_url="https://opencode.ai/zen/go/v1",
+                session_id="m31-flash-boundary",
+                http_client=httpx.Client(transport=httpx.MockTransport(respond)),
+            ) as client:
+                completion = completion_caller(client, model)(model=model, messages=messages)
+            self.assertEqual(completion.choices[0].message.content, "ok")
+            request = requests[-1]
+            self.assertEqual(request.url.path, "/zen/go/v1/chat/completions")
+            self.assertEqual(request.headers["x-opencode-session"], "m31-flash-boundary")
+            self.assertEqual(request.headers["authorization"], "Bearer test-key")
+            payload = json.loads(request.content)
+            self.assertEqual(payload["model"], model)
+            self.assertEqual(payload["messages"], messages)
+            for field in ("thinking", "reasoning_effort", "service_tier", "reasoning_split"):
+                self.assertNotIn(field, payload)
+        self.assertEqual(len(requests), 3)
 
     def test_missing_or_blank_session_gets_a_distinct_nonempty_id(self) -> None:
         sessions = []

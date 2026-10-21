@@ -48,6 +48,40 @@ class TestOpenCodeCatalog(unittest.TestCase):
         self.assertEqual(normalize_opencode_models({"data": "nope"}), [])
         self.assertEqual(normalize_opencode_models(None), [])
 
+    def test_minimax_live_models_are_flash_first_and_old_ids_are_filtered(self):
+        payload = {
+            "data": [
+                {"id": "minimax-m3"},
+                {"id": "kimi-k3", "name": "Kimi K3"},
+                {"id": "minimax-m2.7"},
+                {"id": "minimax-m2.5"},
+                {"id": "minimax-m1"},
+                {"id": "minimax-m3.1-flash-free"},
+                {"id": "some-custom-model"},
+            ]
+        }
+        models = normalize_opencode_models(payload)
+        self.assertEqual(
+            [model["id"] for model in models],
+            [
+                "opencode-go/minimax-m3.1-flash-free",
+                "opencode-go/kimi-k3",
+                "opencode-go/minimax-m3",
+                "opencode-go/some-custom-model",
+            ],
+        )
+
+    def test_fallback_minimax_choices_match_live_policy(self):
+        self.assertEqual(
+            [m["id"] for m in OPENCODE_MODEL_FALLBACK if "/minimax-" in m["id"]],
+            ["opencode-go/minimax-m3.1-flash-free", "opencode-go/minimax-m3"],
+        )
+
+    def test_saved_custom_model_qualification_is_preserved(self):
+        for model in ("my-saved-model", "minimax-m2.7", "minimax-m2.5"):
+            self.assertEqual(qualify_model_id(model), f"opencode-go/{model}")
+            self.assertEqual(qualify_model_id(f"opencode/{model}"), f"opencode-go/{model}")
+
 
 class TestOpenCodeModelProtocol(unittest.TestCase):
     def test_gpt_and_grok_are_served_over_responses_only(self):

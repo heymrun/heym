@@ -4,6 +4,7 @@ export const OPENCODE_MODEL_FALLBACK = [
   { id: "opencode-go/kimi-k3", name: "Kimi K3" },
   { id: "opencode-go/deepseek-v4-pro", name: "DeepSeek V4 Pro" },
   { id: "opencode-go/qwen3.7-max", name: "Qwen3.7 Max" },
+  { id: "opencode-go/minimax-m3.1-flash-free", name: "MiniMax M3.1 Flash" },
   { id: "opencode-go/minimax-m3", name: "MiniMax M3" },
 ] as const;
 

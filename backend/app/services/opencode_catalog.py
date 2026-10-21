@@ -20,6 +20,7 @@ OPENCODE_MODEL_FALLBACK: tuple[dict[str, str], ...] = (
     {"id": "opencode-go/kimi-k3", "name": "Kimi K3"},
     {"id": "opencode-go/deepseek-v4-pro", "name": "DeepSeek V4 Pro"},
     {"id": "opencode-go/qwen3.7-max", "name": "Qwen3.7 Max"},
+    {"id": "opencode-go/minimax-m3.1-flash-free", "name": "MiniMax M3.1 Flash"},
     {"id": "opencode-go/minimax-m3", "name": "MiniMax M3"},
 )
 
@@ -65,6 +66,10 @@ def qualify_model_id(model: str) -> str:
     return f"{OPENCODE_PROVIDER_ID}/{bare}"
 
 
+# Suggestions only: qualification and protocol routing still accept saved/custom IDs.
+_MINIMAX_TEXT_MODELS = ("minimax-m3.1-flash-free", "minimax-m3")
+
+
 def normalize_opencode_models(payload: object) -> list[dict[str, str]]:
     """Normalize an OpenAI-style {"data":[{"id": ...}]} payload to opencode-go/<id> entries."""
     if not isinstance(payload, dict):
@@ -86,8 +91,18 @@ def normalize_opencode_models(payload: object) -> list[dict[str, str]]:
             continue
         seen.add(model_id)
         label = model_id.split("/", 1)[1]
+        if label.lower().startswith("minimax-m") and label not in _MINIMAX_TEXT_MODELS:
+            continue
         name = entry.get("name")
         models.append(
             {"id": model_id, "name": name if isinstance(name, str) and name.strip() else label}
         )
-    return models
+    # Order MiniMax suggestions Flash-first without moving other providers' slots.
+    minimax_ids = [f"{OPENCODE_PROVIDER_ID}/{model}" for model in _MINIMAX_TEXT_MODELS]
+    preferred = iter(
+        sorted(
+            (model for model in models if model["id"] in minimax_ids),
+            key=lambda model: minimax_ids.index(model["id"]),
+        )
+    )
+    return [next(preferred) if model["id"] in minimax_ids else model for model in models]
