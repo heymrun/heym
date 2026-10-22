@@ -35,7 +35,7 @@ async function run(): Promise<void> {
 
 <template>
   <div
-    class="canvas-node-run nodrag nopan absolute top-full left-1/2 -translate-x-1/2 pt-1"
+    class="canvas-node-run nodrag nopan absolute top-full left-1/2 -translate-x-1/2 flex pt-1.5"
     @pointerdown.stop
     @mousedown.stop
     @click.stop

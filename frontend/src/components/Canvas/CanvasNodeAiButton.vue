@@ -4,7 +4,7 @@ import { Sparkles } from "lucide-vue-next";
 
 import { useWorkflowStore } from "@/stores/workflow";
 
-const props = defineProps<{ nodeId: string; label: string; raised?: boolean }>();
+const props = defineProps<{ nodeId: string; label: string }>();
 const workflowStore = useWorkflowStore();
 const isFocused = computed<boolean>(() => workflowStore.aiFocusNodeId === props.nodeId);
 
@@ -15,8 +15,8 @@ function openAssistant(): void {
 
 <template>
   <div
-    class="canvas-node-ai nodrag nopan absolute bottom-full left-1/2 -translate-x-1/2"
-    :class="[raised ? 'pb-6' : 'pb-4', isFocused && 'canvas-node-ai-focused']"
+    class="canvas-node-ai nodrag nopan absolute bottom-full left-1/2 -translate-x-1/2 flex pb-1.5"
+    :class="isFocused && 'canvas-node-ai-focused'"
     @pointerdown.stop
     @mousedown.stop
     @click.stop
@@ -25,16 +25,14 @@ function openAssistant(): void {
   >
     <button
       type="button"
-      class="inline-flex h-6 items-center gap-1 rounded-md border px-2 text-[11px] font-medium leading-none shadow-[0_0_12px_hsl(var(--primary)/0.35)] transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/40"
-      :class="isFocused
-        ? 'border-primary bg-primary/15 text-primary dark:text-brand-primary-soft'
-        : 'border-primary/50 bg-background text-primary hover:bg-primary/10 dark:text-brand-primary-soft'"
+      class="canvas-node-ai-button inline-flex h-5 items-center gap-1 rounded-md border px-1.5 text-[10px] font-medium leading-none text-primary shadow-[0_0_12px_hsl(var(--primary)/0.35)] transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/40 dark:text-brand-primary-soft"
+      :class="isFocused ? 'border-primary' : 'border-primary/50'"
       :aria-label="`Edit ${label} with AI`"
       title="Change or fix this node with the AI Assistant"
       data-testid="canvas-node-ai-button"
       @click="openAssistant"
     >
-      <Sparkles class="h-3 w-3" />
+      <Sparkles class="h-2.5 w-2.5" />
       AI
     </button>
   </div>
@@ -51,5 +49,16 @@ function openAssistant(): void {
 .canvas-node-ai.canvas-node-ai-focused {
   opacity: 1;
   pointer-events: auto;
+}
+/* Opaque like the Run button, so an edge behind it never shows through; the
+   primary tint is a layer on top of the background colour, not a see-through fill. */
+.canvas-node-ai-button {
+  background-color: hsl(var(--background));
+}
+.canvas-node-ai-button:hover {
+  background-image: linear-gradient(hsl(var(--primary) / 0.1), hsl(var(--primary) / 0.1));
+}
+.canvas-node-ai-focused .canvas-node-ai-button {
+  background-image: linear-gradient(hsl(var(--primary) / 0.15), hsl(var(--primary) / 0.15));
 }
 </style>

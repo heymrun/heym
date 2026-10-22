@@ -1945,7 +1945,6 @@ watch(
           v-if="data.nodeType !== 'sticky' && !isRunbookPlaying && !workflowStore.isReadOnly"
           :node-id="id"
           :label="data.label"
-          :raised="data.nodeType === 'agent' && !data.isSubAgent"
         />
       </template>
 

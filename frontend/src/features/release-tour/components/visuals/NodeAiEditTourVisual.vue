@@ -23,7 +23,7 @@ const caption = computed<string>(() => {
 <template>
   <div class="flex h-full w-full flex-col gap-2 overflow-hidden rounded-lg bg-card p-3">
     <div class="flex min-h-0 flex-1 gap-2.5">
-      <div class="flex w-[38%] shrink-0 items-center justify-center rounded-md bg-background/60">
+      <div class="flex w-[34%] shrink-0 items-center justify-center rounded-md bg-background/60">
         <div class="relative pt-6">
           <span
             class="absolute left-1/2 top-0 flex -translate-x-1/2 items-center gap-0.5 rounded-md border px-1.5 py-0.5 text-[9px] leading-none transition-all duration-500"
@@ -45,14 +45,14 @@ const caption = computed<string>(() => {
         class="flex min-w-0 flex-1 flex-col gap-1 rounded-md border border-border bg-background p-1.5 transition-opacity duration-500"
         :class="panelOpen ? 'opacity-100' : 'opacity-30'"
       >
-        <div class="flex items-center gap-1 text-[9px] leading-none text-muted-foreground">
-          <Sparkles class="h-2.5 w-2.5 shrink-0 text-primary" />AI Assistant
+        <div class="flex items-center gap-1 text-[10px] leading-none text-muted-foreground">
+          <Sparkles class="h-3 w-3 shrink-0 text-primary" />AI Assistant
         </div>
-        <div class="flex min-w-0 items-center gap-1 rounded border border-border/70 bg-muted/40 px-1 py-0.5">
-          <span class="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded bg-node-condition/15">
-            <GitBranch class="h-2 w-2 text-node-condition" />
+        <div class="flex min-w-0 items-center gap-1.5 rounded border border-border/70 bg-muted/40 px-1.5 py-1">
+          <span class="flex h-4 w-4 shrink-0 items-center justify-center rounded bg-node-condition/15">
+            <GitBranch class="h-2.5 w-2.5 text-node-condition" />
           </span>
-          <span class="truncate text-[8px] leading-none">Modifying: checkLinkedIn</span>
+          <span class="truncate text-[10px] font-medium leading-snug">Modifying: checkLinkedIn</span>
         </div>
         <div class="flex min-h-0 flex-1 flex-col justify-end gap-1">
           <template v-if="!typing && !updated">
