@@ -77,6 +77,8 @@ import {
   maskImageDataForDisplay,
 } from "@/lib/executionImages";
 import { looksLikeMarkdown } from "@/lib/markdown";
+import { convertMarkdownTables } from "@/lib/markdownTables";
+import { NODE_DOC_SLUGS } from "@/lib/nodeDocSlugs";
 import { cn, formatFileSize } from "@/lib/utils";
 import { buildMeasuredNodeSizeMap, getWorkflowNodeLayoutSize } from "@/lib/workflowLayout";
 import { normalizeWorkflowEdges } from "@/lib/workflowEdges";
@@ -2120,6 +2122,7 @@ function streamAssistantReply(requestText: string, options: StreamAssistantReply
       executionLog: getExecutionLogForAssistantRequest(),
       yoloMode: options.useYolo,
       targetNodeId: focusNodeId,
+      targetNodeDoc: workflowStore.aiFocusNode ? NODE_DOC_SLUGS[workflowStore.aiFocusNode.type] : undefined,
     },
     (text) => {
       aiLoading.value = false;
@@ -2900,6 +2903,7 @@ function renderContent(content: string): string {
   result = result.replace(/^## (.+)$/gm, '<h3 class="md-h3">$1</h3>');
   result = result.replace(/^# (.+)$/gm, '<h2 class="md-h2">$1</h2>');
   result = result.replace(/^- (.+)$/gm, '<li class="md-li">$1</li>');
+  result = convertMarkdownTables(result);
 
   // Kept on their own line so list and heading rules stop before them; the block's margin is the gap.
   result = result.replace(/\n?(\x00CODEBLOCK\d+\x00)\n?/g, "$1");
@@ -4788,6 +4792,42 @@ function renderContent(content: string): string {
   font-size: 16px;
   font-weight: 600;
   margin: 12px 0 8px 0;
+}
+
+.message-content :deep(.md-table-wrap) {
+  margin: 12px 0;
+  overflow-x: auto;
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+  background: hsl(var(--background));
+}
+
+.message-content :deep(.md-table) {
+  width: 100%;
+  border-collapse: collapse;
+  /* The bubble breaks words anywhere; in a table that would cut every narrow column mid-word. */
+  word-break: normal;
+  overflow-wrap: normal;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.message-content :deep(.md-table th),
+.message-content :deep(.md-table td) {
+  padding: 6px 10px;
+  border-bottom: 1px solid hsl(var(--border));
+  text-align: left;
+  vertical-align: top;
+}
+
+.message-content :deep(.md-table th) {
+  background: hsl(var(--muted) / 0.6);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.message-content :deep(.md-table tbody tr:last-child td) {
+  border-bottom: none;
 }
 
 .message-content :deep(.md-h3) {

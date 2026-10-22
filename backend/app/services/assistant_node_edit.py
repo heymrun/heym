@@ -9,6 +9,7 @@ the question is about.
 from typing import Any
 
 NODE_EDIT_TRACE_NODE_LABEL = "AI Builder (Node)"
+MAX_NODE_DOC_CHARS = 30_000
 
 
 def find_workflow_node(current_workflow: dict | None, node_id: str | None) -> dict | None:
@@ -30,27 +31,52 @@ def _node_identity(node: dict[str, Any]) -> tuple[str, str, str]:
     return str(node.get("id") or ""), str(node.get("type") or ""), label
 
 
+def _node_doc_section(node_type: str, node_doc: str | None, *, ask_mode: bool) -> str:
+    """The node's documentation page as prompt context; empty when there is none."""
+    doc = (node_doc or "").strip()
+    if not doc:
+        return ""
+    if len(doc) > MAX_NODE_DOC_CHARS:
+        doc = doc[:MAX_NODE_DOC_CHARS].rstrip() + "\n\n[Documentation truncated]"
+    if ask_mode:
+        usage = "Answer from it when the question is about this node."
+    else:
+        usage = (
+            "Use it to understand what the node does and how its options behave. "
+            "Field names in the JSON you return still follow the workflow DSL above."
+        )
+    return (
+        "\n\n## Node Documentation\n"
+        f"The documentation page of the `{node_type}` node, the page the user reaches from the "
+        f"node's header. {usage}\n\n"
+        f"<node_documentation>\n{doc}\n</node_documentation>\n"
+    )
+
+
 def build_node_edit_prompt(
     current_workflow: dict | None,
     target_node_id: str | None,
     *,
     ask_mode: bool,
+    node_doc: str | None = None,
 ) -> str:
     """Prompt section for a turn focused on one node; empty when the node is not in the workflow."""
     node = find_workflow_node(current_workflow, target_node_id)
     if node is None:
         return ""
     node_id, node_type, label = _node_identity(node)
+    doc_section = _node_doc_section(node_type, node_doc, ask_mode=ask_mode)
 
     if ask_mode:
         return (
             "\n\n## Node in Focus\n"
             f"The user opened the assistant from the node `{label}` (type `{node_type}`, "
             f"id `{node_id}`). Answer about that node unless the question is clearly about "
-            "something else.\n"
+            "something else.\n" + doc_section
         )
 
-    return f"""
+    return (
+        f"""
 
 ## Node Edit Mode
 
@@ -72,3 +98,5 @@ complete workflow, in YOLO mode too.
   to change, and that closing the node focus lets the assistant edit the whole workflow.
 - `heym-clarify` questions work as usual.
 """
+        + doc_section
+    )

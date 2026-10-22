@@ -2235,6 +2235,8 @@ export interface AIAssistantRequest {
   yoloMode?: boolean;
   /** Canvas node the turn is focused on; in Agent mode only this node changes. */
   targetNodeId?: string;
+  /** Docs page slug of the focused node; the backend adds that page to the prompt. */
+  targetNodeDoc?: string;
   executionLog?: {
     execution_status: string;
     execution_time_ms: number | null;
@@ -2862,6 +2864,9 @@ export const aiApi = {
         execution_log: request.executionLog ?? null,
         ...(request.yoloMode ? { yolo_mode: true } : {}),
         ...(request.targetNodeId ? { target_node_id: request.targetNodeId } : {}),
+        ...(request.targetNodeId && request.targetNodeDoc
+          ? { target_node_doc: request.targetNodeDoc }
+          : {}),
       }),
       signal,
     })

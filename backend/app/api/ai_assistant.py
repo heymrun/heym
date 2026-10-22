@@ -88,6 +88,7 @@ from app.services.data_table_catalog import (
     load_data_table_catalog,
     table_summary,
 )
+from app.services.doc_index import read_node_doc
 from app.services.encryption import decrypt_config
 from app.services.generated_credentials import (
     CredentialChoice,
@@ -198,6 +199,7 @@ class AIAssistantRequest(BaseModel):
     execution_log: dict | None = None
     yolo_mode: bool = False
     target_node_id: str | None = None
+    target_node_doc: str | None = None
 
 
 class AnalyzeWorkflowRequest(BaseModel):
@@ -5746,7 +5748,10 @@ async def workflow_assistant_stream(
         system_prompt += YOLO_PROTOCOL_PROMPT
 
     node_edit_prompt = build_node_edit_prompt(
-        request.current_workflow, request.target_node_id, ask_mode=request.ask_mode
+        request.current_workflow,
+        request.target_node_id,
+        ask_mode=request.ask_mode,
+        node_doc=read_node_doc(request.target_node_doc) if request.target_node_id else None,
     )
     system_prompt += node_edit_prompt
     is_node_edit = bool(node_edit_prompt) and not request.ask_mode

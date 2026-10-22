@@ -17,12 +17,36 @@ _DEFAULT_DOCS_DIR = _PROJECT_ROOT / "frontend" / "src" / "docs" / "content"
 
 TOP_K = 5
 
+_NODE_DOC_SLUG = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+
 
 def _get_docs_dir(docs_dir_override: str | None) -> Path:
     """Resolve docs directory path."""
     if docs_dir_override and docs_dir_override.strip():
         return Path(docs_dir_override.strip()).resolve()
     return _DEFAULT_DOCS_DIR
+
+
+def read_node_doc(slug: str | None, docs_dir_override: str | None = None) -> str | None:
+    """Return the markdown of ``nodes/<slug>.md`` from the docs, or None when it is not there.
+
+    The slug comes from the client, so only plain lowercase slugs are accepted and the file
+    must sit directly under the docs ``nodes`` folder.
+    """
+    if not slug or not _NODE_DOC_SLUG.fullmatch(slug):
+        return None
+    if docs_dir_override is None:
+        from app.config import settings
+
+        docs_dir_override = getattr(settings, "docs_dir", "")
+    nodes_dir = (_get_docs_dir(docs_dir_override) / "nodes").resolve()
+    path = (nodes_dir / f"{slug}.md").resolve()
+    if path.parent != nodes_dir:
+        return None
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return None
 
 
 def _extract_title(content: str) -> str:

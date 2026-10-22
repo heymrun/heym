@@ -1,40 +1,56 @@
 import type { NodeResult } from "@/types/workflow";
 
-/** All image srcs from a node output: image gen (output.image) or Playwright screenshots. */
-export function getOutputImageSrcs(output: unknown): string[] {
-  const out = output as Record<string, unknown> | undefined;
-  if (!out) return [];
-  const srcs: string[] = [];
-  const img = out.image;
-  if (typeof img === "string" && (img.startsWith("data:image/") || img.startsWith("http"))) {
-    srcs.push(img);
+const BASE64 = /^[A-Za-z0-9+/=]+$/;
+const IMAGE_MIME = /^image\/[a-z0-9.+-]+$/i;
+const MAX_DEPTH = 8;
+
+/** The image type raw base64 holds, read from its first bytes. */
+function sniffImageType(base64: string): string | null {
+  let head: string;
+  try {
+    head = atob(base64.slice(0, 16));
+  } catch {
+    return null;
   }
-  const base64 = out.file_base64;
-  const mimeType = out.mime_type;
-  if (
-    typeof base64 === "string" &&
-    base64.length > 0 &&
-    typeof mimeType === "string" &&
-    mimeType.startsWith("image/")
-  ) {
-    const dataUrl = `data:${mimeType};base64,${base64}`;
-    if (!srcs.includes(dataUrl)) srcs.push(dataUrl);
-  }
-  const results = out.results as Record<string, unknown> | undefined;
-  if (results && typeof results === "object") {
-    for (const v of Object.values(results)) {
-      if (typeof v === "string" && v.length > 100 && /^[A-Za-z0-9+/=]+$/.test(v)) {
-        const dataUrl = `data:image/png;base64,${v}`;
-        if (!srcs.includes(dataUrl)) srcs.push(dataUrl);
-      }
+  if (head.startsWith("\x89PNG")) return "image/png";
+  if (head.startsWith("\xff\xd8\xff")) return "image/jpeg";
+  if (head.startsWith("GIF8")) return "image/gif";
+  if (head.startsWith("RIFF") && head.slice(8, 12) === "WEBP") return "image/webp";
+  return null;
+}
+
+function imageSrc(key: string, value: string, siblingMime: string | null): string | null {
+  if (value.startsWith("data:image/")) return value;
+  if (key === "image" && /^https?:\/\//.test(value)) return value;
+  if (value.length <= 100 || !BASE64.test(value)) return null;
+  const type = sniffImageType(value) ?? siblingMime;
+  return type ? `data:${type};base64,${value}` : null;
+}
+
+function collectImageSrcs(value: unknown, srcs: string[], depth: number): void {
+  if (depth > MAX_DEPTH || typeof value !== "object" || value === null) return;
+  const entries: [string, unknown][] = Array.isArray(value)
+    ? value.map((item, index) => [String(index), item])
+    : Object.entries(value);
+  // `{ "type": "image/svg+xml", "data": "<base64>" }`: a format the bytes alone do not reveal.
+  const mimeEntry = entries.find(
+    (entry): entry is [string, string] => typeof entry[1] === "string" && IMAGE_MIME.test(entry[1]),
+  );
+  const siblingMime = mimeEntry ? mimeEntry[1] : null;
+  for (const [key, item] of entries) {
+    if (typeof item !== "string") {
+      collectImageSrcs(item, srcs, depth + 1);
+      continue;
     }
+    const src = imageSrc(key, item, siblingMime);
+    if (src && !srcs.includes(src)) srcs.push(src);
   }
-  // Playwright repeats its last step screenshot here; after `results` it dedupes in step order.
-  const shot = out.screenshot;
-  if (typeof shot === "string" && shot.length > 100) {
-    const dataUrl = `data:image/png;base64,${shot}`;
-    if (!srcs.includes(dataUrl)) srcs.push(dataUrl);
-  }
+}
+
+/** Every image in a node output, wherever it sits: data URLs, base64 images, `image` URLs. */
+export function getOutputImageSrcs(output: unknown): string[] {
+  const srcs: string[] = [];
+  collectImageSrcs(output, srcs, 0);
   return srcs;
 }
 

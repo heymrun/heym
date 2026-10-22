@@ -74,6 +74,8 @@ Hover a node on the canvas and click **AI** above it. The panel opens in Agent m
 
 Hover the label to see which state the panel is in.
 
+Whichever state the panel is in, the assistant also reads the node's documentation page, the one behind the book icon in the node's header. It uses the page to understand the node's options and to answer questions about them.
+
 Under the messages, three options start the request:
 
 | Option | What it does |

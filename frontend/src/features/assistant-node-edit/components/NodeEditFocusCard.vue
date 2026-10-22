@@ -27,8 +27,8 @@ const durationLabel = computed<string>(() => {
 });
 const stateHint = computed<string>(() =>
   props.result
-    ? "This node ran. The AI sees its last output and error when it edits the node."
-    : "This node has no output in the current run. Run it first if the AI should see its output.",
+    ? "This node ran. The AI sees its last output and error, and reads the node's documentation."
+    : "This node has no output in the current run. Run it first if the AI should see its output. The AI reads the node's documentation either way.",
 );
 const statusDotClass = computed<string>(() => {
   if (props.result?.status === "error") return "bg-destructive";
