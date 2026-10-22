@@ -196,11 +196,15 @@ class AnthropicMessagesTransport:
 
     @staticmethod
     def _send(client: Any, body: dict[str, Any]) -> Any:
+        # OpenCode Go reads the key from x-api-key here, as Anthropic does, and answers 401
+        # "Go requires a credential" to the Bearer header alone.
         return client.post(
             "/messages",
             cast_to=httpx.Response,
             body=body,
-            options={"headers": {"anthropic-version": ANTHROPIC_VERSION}},
+            options={
+                "headers": {"anthropic-version": ANTHROPIC_VERSION, "x-api-key": client.api_key}
+            },
         )
 
     @staticmethod

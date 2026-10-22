@@ -24,10 +24,12 @@ from app.services.agent_tool_observability import (
 )
 from app.services.image_input import load_image_bytes
 from app.services.json_output import MAX_OUTPUT_REPAIRS, check_json_output, repair_instruction
+from app.services.llm_chat_bridge import BridgedChatTransport
 from app.services.llm_provider import is_reasoning_model
 from app.services.llm_trace import LLMTraceContext, record_llm_trace
 from app.services.llm_transport import (
     ChatCompletionsTransport,
+    LLMTransport,
     RequestOpts,
     ResponsesTransport,
     ToolResult,
@@ -527,6 +529,9 @@ class TurnBinding:
     option_label: str | None = None
     fallback: bool = False
     routing_error: str | None = None
+    # The credential serving this request: a routed turn's is the option's, not the service's.
+    credential_type: CredentialType | None = None
+    base_url: str | None = None
 
 
 def _latest_tool_output_for_routing(tool_entries: list[dict[str, Any]]) -> str:
@@ -711,6 +716,8 @@ class LLMService:
                 provider=provider,
                 model=model,
                 credential_id=self.trace_context.credential_id if self.trace_context else None,
+                credential_type=self.credential_type,
+                base_url=self.base_url,
             )
 
         # Most callers build their trace context after the router, so the router is
@@ -744,6 +751,8 @@ class LLMService:
             option_label=decision.option.label,
             fallback=decision.fallback,
             routing_error=decision.error,
+            credential_type=CredentialType(bound.credential_type),
+            base_url=bound.base_url,
         )
         self._routed_calls.append(
             {
@@ -844,7 +853,10 @@ class LLMService:
     ) -> (
         ChatCompletionsTransport | ResponsesTransport | AnthropicMessagesTransport | GeminiTransport
     ):
-        protocol = self._gateway_protocol(model)
+        if self.router is not None:
+            # The next routed turn can land on any model, so the history stays a plain message list.
+            return ChatCompletionsTransport()
+        protocol = self._gateway_protocol(model, self.credential_type, self.base_url)
         if protocol == "messages":
             return AnthropicMessagesTransport()
         if protocol == "google":
@@ -853,16 +865,30 @@ class LLMService:
             return ResponsesTransport()
         return ChatCompletionsTransport()
 
-    def _defers_format_while_tools_run(self) -> bool:
-        """Open-weight gateways stop calling tools when a JSON format rides on the same request."""
-        if self.credential_type == CredentialType.custom:
-            return True
-        return self.credential_type == CredentialType.openai and bool(self.base_url)
+    def _transport_for(self, binding: TurnBinding, default: LLMTransport) -> LLMTransport:
+        """The transport for one turn: `default`, or the bridge for a routed model on another API."""
+        if self.router is None:
+            return default
+        protocol = self._gateway_protocol(binding.model, binding.credential_type, binding.base_url)
+        return BridgedChatTransport(protocol) if protocol else default
 
-    def _gateway_protocol(self, model: str) -> str | None:
-        """The endpoint OpenCode serves ``model`` on; None for any other gateway."""
-        if self.credential_type == CredentialType.custom and is_opencode_base_url(self.base_url):
-            return opencode_model_protocol(model)
+    @staticmethod
+    def _defers_format_while_tools_run(
+        credential_type: CredentialType | None, base_url: str | None
+    ) -> bool:
+        """Open-weight gateways stop calling tools when a JSON format rides on the same request."""
+        if credential_type == CredentialType.custom:
+            return True
+        return credential_type == CredentialType.openai and bool(base_url)
+
+    @staticmethod
+    def _gateway_protocol(
+        model: str, credential_type: CredentialType | None, base_url: str | None
+    ) -> str | None:
+        """The endpoint OpenCode serves ``model`` on; None for any other gateway or for Chat."""
+        if credential_type == CredentialType.custom and is_opencode_base_url(base_url):
+            protocol = opencode_model_protocol(model)
+            return protocol if protocol != "chat" else None
         return None
 
     def _record_trace(
@@ -932,7 +958,7 @@ class LLMService:
             tool_names=None,
         )
         client, provider, model = binding.client, binding.provider, binding.model
-        transport = self._get_transport(model)
+        transport = self._transport_for(binding, self._get_transport(model))
 
         history = transport.start(
             system_instruction=system_instruction,
@@ -1432,14 +1458,8 @@ class LLMService:
         last_assistant_turn_had_tool_calls = False
         output_repairs = 0
         repair_errors: list[str] = []
-        # The format goes on the repair turn only, when a node's tools could not be called otherwise.
-        format_on_repair_only = (
-            repair_json_output
-            and response_format is not None
-            and bool(tools)
-            and transport.carries_response_format
-            and self._defers_format_while_tools_run()
-        )
+        # With a router this is the Chat Completions transport a turn falls back to.
+        run_transport = transport
         repair_turn = False
 
         from app.services.context_compressor import get_context_limit
@@ -1551,6 +1571,15 @@ class LLMService:
                 tool_names=tool_names,
             )
             client, provider, model = binding.client, binding.provider, binding.model
+            transport = self._transport_for(binding, run_transport)
+            # The format goes on the repair turn only, decided from the credential serving this turn.
+            format_on_repair_only = (
+                repair_json_output
+                and response_format is not None
+                and bool(tools)
+                and transport.carries_response_format
+                and self._defers_format_while_tools_run(binding.credential_type, binding.base_url)
+            )
             _context_limit = get_context_limit(model, client)
 
             if routed_view is not None:

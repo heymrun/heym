@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.services.llm_transport import (
+    ChatCompletionsTransport,
     LLMTransport,
     ModelProtocolError,
     RequestOpts,
@@ -355,29 +356,96 @@ def _single_chunk_stream(completion: _Completion) -> Iterator[_Chunk]:
     yield _Chunk(choices=[], usage=completion.usage)
 
 
-def _complete(client: Any, protocol: str, **kwargs: Any) -> Any:
-    """Run one Chat Completions style request on ``protocol``'s transport.
-
-    Request fields with no equivalent there (``stream_options``, ``extra_body``) are dropped.
-    """
-    model = str(kwargs["model"])
+def _create_turn(
+    protocol: str,
+    *,
+    client: Any,
+    model: str,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]] | None,
+    opts: RequestOpts,
+) -> TurnResult:
+    """Send an OpenAI message list to ``model`` on ``protocol``'s own API."""
     transport = _TRANSPORTS[protocol]()
-    history = build_history(transport, protocol, kwargs.get("messages") or [])
+    history = build_history(transport, protocol, messages)
     try:
-        turn = transport.create(
-            client=client,
-            model=model,
-            history=history,
-            tools=kwargs.get("tools") or None,
-            opts=_request_opts(kwargs),
-        )
+        turn = transport.create(client=client, model=model, history=history, tools=tools, opts=opts)
     except ResponsesTransportError as exc:
         raise ModelProtocolError(
             f"The gateway did not accept {model} on the Responses API: "
             f"{provider_detail(exc.__cause__ or exc)}"
         ) from exc
     _remember(protocol, turn)
+    return turn
+
+
+def _complete(client: Any, protocol: str, **kwargs: Any) -> Any:
+    """Run one Chat Completions style request on ``protocol``'s transport.
+
+    Request fields with no equivalent there (``stream_options``, ``extra_body``) are dropped.
+    """
+    model = str(kwargs["model"])
+    turn = _create_turn(
+        protocol,
+        client=client,
+        model=model,
+        messages=kwargs.get("messages") or [],
+        tools=kwargs.get("tools") or None,
+        opts=_request_opts(kwargs),
+    )
     completion = _to_completion(model, turn)
     if kwargs.get("stream"):
         return _single_chunk_stream(completion)
     return completion
+
+
+class BridgedChatTransport(ChatCompletionsTransport):
+    """A Chat shaped history sent to a model on another API, for Model Router turns.
+
+    A routed run can change model every turn, so its history stays a plain message list and
+    each request is translated onto the chosen model's API. The trace stays Chat shaped for the
+    Steps view; `gateway_protocol` names the API that answered.
+    """
+
+    def __init__(self, protocol: str) -> None:
+        super().__init__()
+        self.protocol = protocol
+        # Whether the JSON contract rides in a request field is the native API's property.
+        self.carries_response_format = _TRANSPORTS[protocol]().carries_response_format
+
+    def create(
+        self,
+        *,
+        client: Any,
+        model: str,
+        history: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        opts: RequestOpts,
+    ) -> TurnResult:
+        return _create_turn(
+            self.protocol,
+            client=client,
+            model=model,
+            messages=history,
+            tools=tools,
+            opts=opts,
+        )
+
+    def final_text(self, turn: TurnResult) -> str:
+        return turn.text
+
+    async def compress(
+        self,
+        history: list[dict[str, Any]],
+        *,
+        model: str,
+        client: Any,
+        context_limit_tokens: int,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+        """The shared compressor summarises over Chat Completions, which these models refuse."""
+        return history, None
+
+    def trace_request(
+        self, history: list[dict[str, Any]], tools: list[dict[str, Any]] | None
+    ) -> dict[str, Any]:
+        return {**super().trace_request(history, tools), "gateway_protocol": self.protocol}

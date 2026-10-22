@@ -438,6 +438,34 @@ class TestOpenCodeSessionHeader(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(version == "2023-06-01" for _, _, version in seen))
 
 
+class TestApiKeyHeader(unittest.IsolatedAsyncioTestCase):
+    """OpenCode Go's /messages reads the key from x-api-key and answers 401 to Bearer alone."""
+
+    async def test_the_key_rides_in_x_api_key_as_well_as_the_bearer(self) -> None:
+        seen: list[httpx.Request] = []
+
+        def respond(request: httpx.Request) -> httpx.Response:
+            seen.append(request)
+            return httpx.Response(200, json=_payload([{"type": "text", "text": "done"}]))
+
+        def transport(**_kwargs: Any) -> httpx.Client:
+            client = httpx.Client(transport=httpx.MockTransport(respond))
+            self.addCleanup(client.close)
+            return client
+
+        with (
+            patch("app.services.openai_client.guard_http_url"),
+            patch("app.services.openai_client.build_guarded_http_client", side_effect=transport),
+            patch("app.services.llm_service.record_llm_trace"),
+        ):
+            service = LLMService(CredentialType.custom, "go-key", "https://opencode.ai/zen/go/v1")
+            await service.execute("claude-haiku-5-5", None, "hi")
+
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(seen[0].headers["x-api-key"], "go-key")
+        self.assertEqual(seen[0].headers["authorization"], "Bearer go-key")
+
+
 _BINDING_ERROR = (
     "Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': "
     "'Upstream request failed: [invalid_request_error] messages.1.content.2: Invalid `signature` "
