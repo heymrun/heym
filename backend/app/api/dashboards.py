@@ -65,6 +65,7 @@ from app.models.dashboard_schemas import (
 )
 from app.services import file_intake_service
 from app.services.audit_log import audit
+from app.services.count_card_widget import count_card_nodes, countable_value
 from app.services.dashboard_access import (
     PERMISSION_OWNER,
     PERMISSION_READ,
@@ -107,6 +108,7 @@ from app.services.widget_page_record import (
     open_detail_page_context,
     repair_page_record_paths,
 )
+from app.services.widget_title import widget_title
 from app.services.workflow_access import revoke_execution_tokens_without_access
 from app.services.workflow_dsl_prompt import build_assistant_prompt
 from app.services.workflow_inputs import start_input_fields
@@ -142,6 +144,9 @@ _AI_WIDGET_SUFFIX = (
     "A chartOutput reading those rows directly sees each row's columns at the top level next "
     "to its id: for a table of the rows, connect the dataTable node to a table chartOutput "
     "with dataPath rows and columns set to the table's column names. "
+    "Set the workflow's name to the widget's title: one or two words in the language of the "
+    "request that say what it shows (for example Open cases), never a sentence, a table or "
+    "column name with underscores, or an id. "
     "Answer with the workflow JSON object only, from its opening { to its closing }: no "
     "explanation, no plan, no questions and no markdown fences before or after it."
 )
@@ -423,6 +428,29 @@ def _data_table_widget_nodes(
     return nodes, edges
 
 
+def _count_card_graph(
+    table_id: uuid.UUID, body: WidgetCreateRequest, known: set[str]
+) -> tuple[list, list]:
+    """A count card's graph, once its column and value check out."""
+    column, value = body.count_column or "", body.count_value or ""
+    if not column or not value:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="A count card needs a column and a value",
+        )
+    if column not in known:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"The data table has no column named {column}",
+        )
+    if not countable_value(value):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="A value with $ before a name cannot be counted",
+        )
+    return count_card_nodes(table_id, column, value)
+
+
 async def _table_widget_graph(
     db: AsyncSession,
     table_id: uuid.UUID,
@@ -430,11 +458,15 @@ async def _table_widget_graph(
     dashboard: Dashboard,
     user: User,
 ) -> tuple[list, list]:
-    """The graph of a table on a data table's rows, once the table and its columns check out."""
-    if body.chart_type != "table":
+    """The graph of a table on a data table's rows, or of a count card, once the table and its
+    columns check out."""
+    counting = body.count_column is not None or body.count_value is not None
+    if body.chart_type != ("text" if counting else "table"):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="Only a table widget can show a data table's rows directly",
+            detail="A count card is a text widget"
+            if counting
+            else "Only a table widget can show a data table's rows directly",
         )
     found = await get_data_table_with_permission(db, table_id, user.id)
     if found is None:
@@ -451,6 +483,8 @@ async def _table_widget_graph(
     known = {"id"} | {
         str(column.get("name")) for column in table.columns or [] if isinstance(column, dict)
     }
+    if counting:
+        return _count_card_graph(table.id, body, known)
     columns = list(dict.fromkeys(name for name in body.columns if name))
     if not columns:
         raise HTTPException(
@@ -1337,7 +1371,7 @@ async def ai_generate_widget(
             detail="AI did not produce a chartOutput node",
         )
     chart_type = chart_nodes[-1].get("data", {}).get("chartType", "bar")
-    title = (dsl.get("name") or body.prompt[:60]).strip()[:255]
+    title = widget_title(dsl.get("name"), body.prompt)
     description = dsl.get("description") or None
     workflow = Workflow(
         name=title,

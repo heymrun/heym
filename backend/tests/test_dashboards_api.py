@@ -393,6 +393,37 @@ class TestCreateTableWidgetOnDataTable(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ctx.exception.status_code, 400)
         self.db.add.assert_not_called()
 
+    async def test_a_count_card_counts_one_value_of_a_column(self):
+        resp, _ = await self._create(
+            [(self.table, "owner")], chart_type="text", count_column="country", count_value="TR"
+        )
+
+        self.assertEqual(resp.chart_type, "text")
+        workflow = self.db.add.call_args_list[0].args[0]
+        count, _card, chart = workflow.nodes
+        self.assertEqual(count["data"]["dataTableOperation"], "count")
+        self.assertEqual(count["data"]["dataTableFilter"], '{"country": "TR"}')
+        self.assertEqual(chart["data"]["chartType"], "text")
+
+    async def test_a_count_card_is_a_text_widget(self):
+        with self.assertRaises(HTTPException) as ctx:
+            await self._create([(self.table, "owner")], count_column="country", count_value="TR")
+        self.assertEqual(ctx.exception.status_code, 422)
+        self.db.add.assert_not_called()
+
+    async def test_a_count_card_needs_a_known_column_and_a_value(self):
+        for fields in (
+            {"count_column": "missing", "count_value": "TR"},
+            {"count_column": "country", "count_value": " "},
+            {"count_column": "country"},
+            {"count_column": "country", "count_value": "$vip"},
+        ):
+            with self.subTest(fields=fields):
+                with self.assertRaises(HTTPException) as ctx:
+                    await self._create([(self.table, "owner")], chart_type="text", **fields)
+                self.assertEqual(ctx.exception.status_code, 422)
+        self.db.add.assert_not_called()
+
     async def test_a_shared_editor_builds_it_when_the_owner_reads_the_table(self):
         self.dashboard.owner_id = uuid.uuid4()
         _, permission = await self._create(
@@ -687,6 +718,54 @@ class TestAiGenerateWidget(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(workflows)
         self.assertEqual(workflows[0].name, "Signups by month")
         self.assertEqual(workflows[0].description, "Monthly signups bar chart")
+
+    async def _generate_titled(self, name: str | None, prompt: str):
+        user = _User()
+        db = MagicMock()
+        dashboard = _dashboard(user.id)
+        db.execute = AsyncMock(
+            return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=dashboard))
+        )
+        db.add = MagicMock()
+        db.commit = AsyncMock()
+        _wire_db_inserts(db)
+        fake_dsl = {
+            "name": name,
+            "nodes": [{"id": "b", "type": "chartOutput", "data": {"chartType": "numeric"}}],
+            "edges": [],
+        }
+
+        from app.db.models import CredentialType
+        from app.models.dashboard_schemas import AiWidgetRequest
+
+        credential = MagicMock(type=CredentialType.openai)
+        with (
+            patch.object(dash_api, "generate_widget_dsl", AsyncMock(return_value=fake_dsl)),
+            patch.object(dash_api, "get_credential_for_user", AsyncMock(return_value=credential)),
+        ):
+            return await dash_api.ai_generate_widget(
+                dashboard_id=dashboard.id,
+                body=AiWidgetRequest(prompt=prompt, credential_id=uuid.uuid4(), model="m"),
+                current_user=user,
+                db=db,
+            )
+
+    async def test_ai_generate_title_never_carries_a_data_table_id(self):
+        table_id = "b7357f77-9087-467b-a5f2-ac9eaba3a423"
+        resp = await self._generate_titled(
+            f"discovery_candidates tablosunu (dataTableId: {table_id})", "anything"
+        )
+
+        self.assertEqual(resp.title, "Discovery candidates tablosunu")
+
+    async def test_ai_generate_title_falls_back_to_the_first_words_of_the_request(self):
+        resp = await self._generate_titled(None, "aktif adayları say")
+
+        self.assertEqual(resp.title, "Aktif adayları say")
+
+    def test_the_builder_is_told_to_name_the_widget_in_a_word_or_two(self):
+        self.assertIn("one or two words", dash_api._AI_WIDGET_SUFFIX)
+        self.assertIn("never a sentence", dash_api._AI_WIDGET_SUFFIX)
 
 
 class TestUpdateWidgetSync(unittest.IsolatedAsyncioTestCase):

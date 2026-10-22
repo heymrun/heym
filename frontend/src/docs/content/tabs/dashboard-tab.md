@@ -78,6 +78,10 @@ The result's **Wrap** button wraps long output lines inside the box; turn it off
 
 Click **AI**, describe the metric you want (for example, "workflow success rate over the last 30 days as a bar chart"), and pick an LLM credential and model. Heym generates a complete widget workflow ending in a Chart Output node and adds it to the grid. See [Chart Output](../nodes/chart-output-node.md#example-ai-prompts) for example prompts per chart type.
 
+The widget gets a short title of one or two words in the language of your request, such as "Open cases". A title never carries a data table's id; when the model names the widget with a sentence, Heym keeps its first few words.
+
+The widget API can also make a **count card** without AI: a `text` widget on a data table (`data_table_id`) with `count_column` and `count_value` shows how many rows have that value; the widget's title names the value. Heym Work leads pages made from a data table with one count card per status.
+
 Use a widget's **Fine-tune with AI** button to revise an existing widget with a new instruction. Each AI fine-tune snapshots the previous workflow into the widget's **Edit History**, so you can review or roll back changes from the workflow editor.
 
 ## Editing the layout

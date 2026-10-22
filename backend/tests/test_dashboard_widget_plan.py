@@ -110,6 +110,13 @@ def _linked_table(**detail: object) -> dict:
 
 
 class DetailPagePlanTests(unittest.TestCase):
+    def test_the_prompt_asks_for_titles_of_a_word_or_two_in_the_descriptions_language(
+        self,
+    ) -> None:
+        self.assertIn("title: one or two words", PLAN_SYSTEM_PROMPT)
+        self.assertIn("never an id", PLAN_SYSTEM_PROMPT)
+        self.assertIn("titles and prompts in the language of the description", PLAN_SYSTEM_PROMPT)
+
     def test_the_prompt_asks_for_one_table_that_opens_a_detail_page(self) -> None:
         self.assertIn("Always propose exactly one table", PLAN_SYSTEM_PROMPT)
         self.assertIn("$page.record", PLAN_SYSTEM_PROMPT)

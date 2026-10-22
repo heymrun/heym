@@ -54,7 +54,8 @@ Answer with JSON only, no prose:
     "recordField": "...", "labelField": "...", "widgets": [{{"title": "...",
     "chartType": "...", "prompt": "...", "example": {{...}}}}]}}}}]}}
 
-- title: at most six words, sentence case.
+- title: one or two words, sentence case, that say what the widget shows (such as Open cases),
+  never a table or column name with underscores and never an id.
 - chartType: one of {", ".join(WIDGET_CHART_TYPES)}. Use numeric for one headline number,
   table for a list of records, text for notes or checklists, hitl for pending human reviews.
 - prompt: one or two sentences for the builder: what the widget shows, which data it uses,

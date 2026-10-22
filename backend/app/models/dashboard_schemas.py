@@ -129,6 +129,18 @@ class WidgetCreateRequest(BaseModel):
             "$page.record."
         ),
     )
+    count_column: (
+        Annotated[str, StringConstraints(strip_whitespace=True, max_length=255)] | None
+    ) = Field(
+        default=None,
+        description=(
+            "With data_table_id and chart_type text: a count card, the number of rows whose "
+            "column equals count_value, under the value's name."
+        ),
+    )
+    count_value: Annotated[str, StringConstraints(strip_whitespace=True, max_length=255)] | None = (
+        Field(default=None, description="With count_column: the value whose rows are counted.")
+    )
 
 
 class WidgetUpdateRequest(BaseModel):
