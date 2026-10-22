@@ -3,6 +3,7 @@ import { defineStore } from "pinia";
 
 import type { Conversation, ConversationDetail, ContextUsage, Message, QueuedMessage, ToolCall, WorkflowPreview } from "@/types/chat";
 import type { FileAttachmentPayload } from "@/services/api";
+import { CHAT_CONTEXT_HEADER } from "@/lib/chatContext";
 import { chatApi } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
 
@@ -668,8 +669,11 @@ export const useChatStore = defineStore("chat", () => {
   }
 
   function _titleFromContent(content: string): string {
-    const attachmentIdx = content.indexOf("\n\n[ATTACHED FILE:");
-    const cleaned = (attachmentIdx !== -1 ? content.slice(0, attachmentIdx) : content).trim().replace(/^["'`“‘”’]+|["'`“‘”’]+$/g, "");
+    const cutIndexes = ["\n\n[ATTACHED FILE:", `\n\n${CHAT_CONTEXT_HEADER}`]
+      .map((marker) => content.indexOf(marker))
+      .filter((index) => index !== -1);
+    const cutIdx = cutIndexes.length > 0 ? Math.min(...cutIndexes) : -1;
+    const cleaned = (cutIdx !== -1 ? content.slice(0, cutIdx) : content).trim().replace(/^["'`“‘”’]+|["'`“‘”’]+$/g, "");
     if (!cleaned) return DEFAULT_CONVERSATION_TITLE;
     if (cleaned.length > 50) {
       const boundary = cleaned.indexOf(" ", 50);

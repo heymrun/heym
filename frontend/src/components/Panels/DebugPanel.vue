@@ -62,8 +62,15 @@ import {
   type YoloInputState,
 } from "@/features/assistant-yolo/yoloProtocol";
 import type { TimelineEntry, TimelineSelectPayload } from "@/components/Panels/executionTimeline";
-import { buildExecutionLogForAssistant, formatExecutionLogToolCallTitle, getLatestNodeResultForNode, isHitlWaitNodeResult, isRetryAttemptNodeResult } from "@/lib/executionLog";
-import { formatModelRoutingLabel, readSpanModelRouting } from "@/components/Panels/executionTimeline";
+import { buildExecutionLogForAssistant, formatExecutionLogToolCallTitle, getLatestNodeResultForNode, isHitlWaitNodeResult } from "@/lib/executionLog";
+import {
+  buildDelegatedSubAgentLabelSet,
+  buildSubAgentLabelToParentId,
+  buildTimelineEntries,
+  formatModelRoutingLabel,
+  isDelegatedSubAgentRow,
+  readSpanModelRouting,
+} from "@/components/Panels/executionTimeline";
 import {
   collectRunImageSrcs,
   getOutputImageSrcs,
@@ -331,28 +338,12 @@ watch(
   },
 );
 
-const delegatedSubAgentLabelSet = computed(() => {
-  const s = new Set<string>();
-  for (const n of workflowStore.nodes) {
-    if (n.type !== "agent") continue;
-    const labels = n.data?.subAgentLabels;
-    if (!Array.isArray(labels)) continue;
-    for (const l of labels) {
-      if (typeof l === "string") s.add(l);
-    }
-  }
-  return s;
-});
+const delegatedSubAgentLabelSet = computed(() =>
+  buildDelegatedSubAgentLabelSet(workflowStore.nodes),
+);
 
 function isHiddenFromDefaultExecutionLog(r: NodeResult): boolean {
-  if (r.metadata?.invocation === "sub_agent_tool") return true;
-  if (r.node_type !== "agent" || !delegatedSubAgentLabelSet.value.has(r.node_label)) {
-    return false;
-  }
-  if (r.status === "skipped") return true;
-  // Older history without metadata: any row for an orchestrator-listed sub-agent label
-  // is a delegated run (graph-scheduled sub-agents are skipped, not success).
-  return r.status === "success" || r.status === "error" || r.status === "pending";
+  return isDelegatedSubAgentRow(r, delegatedSubAgentLabelSet.value);
 }
 
 const extendedExecutionRows = computed((): NodeResult[] => {
@@ -419,76 +410,12 @@ const displayResults = computed(() => {
 });
 
 // Sub-agent label → parent orchestrator node_id (for timeline hierarchy)
-const subAgentLabelToParentId = computed((): Map<string, string> => {
-  const map = new Map<string, string>();
-  for (const n of workflowStore.nodes) {
-    if (n.type !== "agent") continue;
-    const labels = n.data?.subAgentLabels;
-    if (!Array.isArray(labels)) continue;
-    for (const l of labels) {
-      if (typeof l === "string") map.set(l, n.id);
-    }
-  }
-  return map;
-});
+const subAgentLabelToParentId = computed((): Map<string, string> =>
+  buildSubAgentLabelToParentId(workflowStore.nodes),
+);
 
 const timelineResults = computed((): TimelineEntry[] =>
-  extendedExecutionRows.value
-    .map((r, rowIndex, allRows) => ({ r, rowIndex, allRows }))
-    .filter(
-      ({ r }) =>
-        r.node_type !== "condition" &&
-        r.node_type !== "sticky" &&
-        !isRetryAttemptNodeResult(r) &&
-        r.status !== "skipped",
-    )
-    .map(({ r, rowIndex, allRows }) => {
-      let retryFailedAttempts = 0;
-      let retryFinalAttempt: number | null = null;
-      let retryMaxAttempts: number | null = null;
-      let retryLastError: string | null = null;
-      let highestRetryAttempt = 0;
-
-      for (let previousIndex = rowIndex - 1; previousIndex >= 0; previousIndex -= 1) {
-        const previousRow = allRows[previousIndex];
-        if (previousRow.node_id !== r.node_id) {
-          continue;
-        }
-        if (!isRetryAttemptNodeResult(previousRow)) {
-          break;
-        }
-
-        retryFailedAttempts += 1;
-        if (retryLastError === null && typeof previousRow.error === "string") {
-          retryLastError = previousRow.error;
-        }
-        const attempt = previousRow.metadata?.retry_attempt;
-        if (typeof attempt === "number" && Number.isInteger(attempt)) {
-          highestRetryAttempt = Math.max(highestRetryAttempt, attempt);
-        }
-        const maxAttempts = previousRow.metadata?.retry_max_attempts;
-        if (typeof maxAttempts === "number" && Number.isInteger(maxAttempts)) {
-          retryMaxAttempts = maxAttempts;
-        }
-      }
-
-      if (retryFailedAttempts > 0) {
-        retryFinalAttempt = highestRetryAttempt > 0 ? highestRetryAttempt + 1 : retryFailedAttempts + 1;
-        if (retryMaxAttempts === null) {
-          retryMaxAttempts = retryFinalAttempt;
-        }
-      }
-
-      return {
-        ...r,
-        isSubAgent: isHiddenFromDefaultExecutionLog(r),
-        sourceNodeResultsIndex: rowIndex,
-        retryFailedAttempts,
-        retryFinalAttempt,
-        retryMaxAttempts,
-        retryLastError,
-      };
-    }),
+  buildTimelineEntries(extendedExecutionRows.value, isHiddenFromDefaultExecutionLog),
 );
 
 function toggleTimeline(): void {

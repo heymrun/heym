@@ -1,4 +1,5 @@
-import type { NodeResult, NodeType } from "@/types/workflow";
+import type { NodeResult, NodeType, WorkflowNode } from "@/types/workflow";
+import { isRetryAttemptNodeResult } from "@/lib/executionLog";
 import { NODE_DEFINITIONS } from "@/types/node";
 
 export interface TimelineEntry extends NodeResult {
@@ -742,4 +743,105 @@ export function summarizeTimelineModel(
     failedSpanCount: spans.filter((span) => span.status === "error").length,
     retryCount: spans.reduce((total, span) => total + span.retryFailedAttempts, 0),
   };
+}
+
+/** Labels of agents that an orchestrator agent on the canvas delegates to. */
+export function buildDelegatedSubAgentLabelSet(nodes: readonly WorkflowNode[]): Set<string> {
+  return new Set(buildSubAgentLabelToParentId(nodes).keys());
+}
+
+/** Sub-agent label → parent orchestrator node id (for the timeline hierarchy). */
+export function buildSubAgentLabelToParentId(nodes: readonly WorkflowNode[]): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const n of nodes) {
+    if (n.type !== "agent") continue;
+    const labels = n.data?.subAgentLabels;
+    if (!Array.isArray(labels)) continue;
+    for (const l of labels) {
+      if (typeof l === "string") map.set(l, n.id);
+    }
+  }
+  return map;
+}
+
+/** True for a row an orchestrator ran as a sub-agent tool rather than the graph scheduling it. */
+export function isDelegatedSubAgentRow(
+  r: NodeResult,
+  delegatedLabels: ReadonlySet<string>,
+): boolean {
+  if (r.metadata?.invocation === "sub_agent_tool") return true;
+  if (r.node_type !== "agent" || !delegatedLabels.has(r.node_label)) {
+    return false;
+  }
+  if (r.status === "skipped") return true;
+  // Older history without metadata: any row for an orchestrator-listed sub-agent label
+  // is a delegated run (graph-scheduled sub-agents are skipped, not success).
+  return r.status === "success" || r.status === "error" || r.status === "pending";
+}
+
+/**
+ * Timeline rows for a run's `node_results`: drops rows the timeline does not draw and
+ * folds failed retry attempts into the attempt that finished. Shared by the Debug panel
+ * and the Execution History dialog so both draw the same spans.
+ */
+export function buildTimelineEntries(
+  rows: readonly NodeResult[],
+  isSubAgentRow: (row: NodeResult) => boolean,
+): TimelineEntry[] {
+  return rows
+    .map((r, rowIndex) => ({ r, rowIndex }))
+    .filter(
+      ({ r }) =>
+        r.node_type !== "condition" &&
+        r.node_type !== "sticky" &&
+        !isRetryAttemptNodeResult(r) &&
+        r.status !== "skipped",
+    )
+    .map(({ r, rowIndex }) => {
+      let retryFailedAttempts = 0;
+      let retryFinalAttempt: number | null = null;
+      let retryMaxAttempts: number | null = null;
+      let retryLastError: string | null = null;
+      let highestRetryAttempt = 0;
+
+      for (let previousIndex = rowIndex - 1; previousIndex >= 0; previousIndex -= 1) {
+        const previousRow = rows[previousIndex];
+        if (previousRow.node_id !== r.node_id) {
+          continue;
+        }
+        if (!isRetryAttemptNodeResult(previousRow)) {
+          break;
+        }
+
+        retryFailedAttempts += 1;
+        if (retryLastError === null && typeof previousRow.error === "string") {
+          retryLastError = previousRow.error;
+        }
+        const attempt = previousRow.metadata?.retry_attempt;
+        if (typeof attempt === "number" && Number.isInteger(attempt)) {
+          highestRetryAttempt = Math.max(highestRetryAttempt, attempt);
+        }
+        const maxAttempts = previousRow.metadata?.retry_max_attempts;
+        if (typeof maxAttempts === "number" && Number.isInteger(maxAttempts)) {
+          retryMaxAttempts = maxAttempts;
+        }
+      }
+
+      if (retryFailedAttempts > 0) {
+        retryFinalAttempt = highestRetryAttempt > 0 ? highestRetryAttempt + 1 : retryFailedAttempts + 1;
+        if (retryMaxAttempts === null) {
+          retryMaxAttempts = retryFinalAttempt;
+        }
+      }
+
+      return {
+        ...r,
+        isSubAgent: isSubAgentRow(r),
+        sourceNodeResultsIndex: rowIndex,
+        retryFailedAttempts,
+        retryFinalAttempt,
+        retryMaxAttempts,
+        retryLastError,
+      };
+    });
 }

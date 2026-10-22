@@ -1,12 +1,17 @@
 import { describe, expect, it } from "vitest";
 
+import type { NodeResult, WorkflowNode } from "@/types/workflow";
 import type { TimelineEntry } from "@/components/Panels/executionTimeline";
 import * as executionTimeline from "@/components/Panels/executionTimeline";
 import {
+  buildDelegatedSubAgentLabelSet,
+  buildSubAgentLabelToParentId,
+  buildTimelineEntries,
   buildTimelineModel,
   formatSpanCost,
   isSameSpan,
   formatToolCallArguments,
+  isDelegatedSubAgentRow,
   isSpanSettled,
   LIVE_TIMELINE_REFRESH_INTERVAL_MS,
   orderSpansByStart,
@@ -575,5 +580,132 @@ describe("span json repairs", () => {
     ];
     const { rows } = buildTimelineModel(results, 1000, new Map());
     expect(rows[0].spans[0].jsonRepairs).toEqual(["not valid JSON"]);
+  });
+});
+
+describe("timeline entries from node results", () => {
+  function row(
+    partial: Partial<NodeResult> & Pick<NodeResult, "node_id" | "node_label" | "node_type" | "status">,
+  ): NodeResult {
+    return { output: {}, execution_time_ms: 0, error: null, ...partial };
+  }
+
+  function agentNode(id: string, label: string, subAgentLabels?: string[]): WorkflowNode {
+    return {
+      id,
+      type: "agent",
+      position: { x: 0, y: 0 },
+      data: { label, ...(subAgentLabels ? { subAgentLabels } : {}) },
+    } as WorkflowNode;
+  }
+
+  it("drops condition, sticky, skipped and retry attempt rows and keeps the source index", () => {
+    const rows = [
+      row({ node_id: "in", node_label: "input", node_type: "textInput", status: "success" }),
+      row({ node_id: "c", node_label: "check", node_type: "condition", status: "success" }),
+      row({ node_id: "s", node_label: "note", node_type: "sticky", status: "success" }),
+      row({ node_id: "x", node_label: "skipped", node_type: "llm", status: "skipped" }),
+      row({ node_id: "out", node_label: "output", node_type: "output", status: "success" }),
+    ];
+
+    const entries = buildTimelineEntries(rows, () => false);
+
+    expect(entries.map((e) => [e.node_id, e.sourceNodeResultsIndex])).toEqual([
+      ["in", 0],
+      ["out", 4],
+    ]);
+    expect(entries[0]).toMatchObject({
+      isSubAgent: false,
+      retryFailedAttempts: 0,
+      retryFinalAttempt: null,
+      retryMaxAttempts: null,
+      retryLastError: null,
+    });
+  });
+
+  it("folds failed retry attempts into the final row", () => {
+    const rows = [
+      row({
+        node_id: "http",
+        node_label: "fetch",
+        node_type: "http",
+        status: "error",
+        error: "timeout 1",
+        metadata: { retry_stage: "attempt_failed", retry_attempt: 1, retry_max_attempts: 3 },
+      }),
+      row({
+        node_id: "http",
+        node_label: "fetch",
+        node_type: "http",
+        status: "error",
+        error: "timeout 2",
+        metadata: { retry_stage: "attempt_failed", retry_attempt: 2, retry_max_attempts: 3 },
+      }),
+      row({ node_id: "http", node_label: "fetch", node_type: "http", status: "success" }),
+    ];
+
+    const entries = buildTimelineEntries(rows, () => false);
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      sourceNodeResultsIndex: 2,
+      retryFailedAttempts: 2,
+      retryFinalAttempt: 3,
+      retryMaxAttempts: 3,
+      retryLastError: "timeout 2",
+    });
+  });
+
+  it("marks rows the predicate calls sub-agent runs", () => {
+    const rows = [
+      row({ node_id: "a", node_label: "orchestrator", node_type: "agent", status: "success" }),
+      row({ node_id: "b", node_label: "researcher", node_type: "agent", status: "success" }),
+    ];
+
+    const entries = buildTimelineEntries(rows, (r) => r.node_label === "researcher");
+
+    expect(entries.map((e) => e.isSubAgent)).toEqual([false, true]);
+  });
+
+  it("derives delegated sub-agent labels and their parents from canvas nodes", () => {
+    const nodes = [
+      agentNode("orch", "orchestrator", ["researcher", 7 as unknown as string]),
+      agentNode("res", "researcher"),
+      { id: "llm", type: "llm", position: { x: 0, y: 0 }, data: { label: "llm", subAgentLabels: ["x"] } } as WorkflowNode,
+    ];
+
+    expect([...buildDelegatedSubAgentLabelSet(nodes)]).toEqual(["researcher"]);
+    expect([...buildSubAgentLabelToParentId(nodes)]).toEqual([["researcher", "orch"]]);
+  });
+
+  it("treats delegated rows as sub-agent runs, including old history without metadata", () => {
+    const labels = new Set(["researcher"]);
+    const tool = row({
+      node_id: "t",
+      node_label: "any",
+      node_type: "agent",
+      status: "success",
+      metadata: { invocation: "sub_agent_tool" },
+    });
+
+    expect(isDelegatedSubAgentRow(tool, new Set())).toBe(true);
+    expect(
+      isDelegatedSubAgentRow(
+        row({ node_id: "r", node_label: "researcher", node_type: "agent", status: "success" }),
+        labels,
+      ),
+    ).toBe(true);
+    expect(
+      isDelegatedSubAgentRow(
+        row({ node_id: "r", node_label: "researcher", node_type: "llm", status: "success" }),
+        labels,
+      ),
+    ).toBe(false);
+    expect(
+      isDelegatedSubAgentRow(
+        row({ node_id: "o", node_label: "orchestrator", node_type: "agent", status: "success" }),
+        labels,
+      ),
+    ).toBe(false);
   });
 });

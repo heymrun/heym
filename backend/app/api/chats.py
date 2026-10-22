@@ -1083,7 +1083,9 @@ async def delete_conversation(
 
 def _fallback_title_from_content(content: str) -> str:
     cleaned = " ".join(content.replace("\n", " ").split())
-    cleaned = cleaned.split("[ATTACHED", maxsplit=1)[0].strip()
+    cleaned = cleaned.split("[ATTACHED", maxsplit=1)[0]
+    # Context chips (workflow / run ids) from the Chat UI are not part of the question.
+    cleaned = cleaned.split("[HEYM CONTEXT]", maxsplit=1)[0].strip()
     if not cleaned:
         return DEFAULT_CONVERSATION_TITLE
     title_source = cleaned.strip("\"'`“”‘’")

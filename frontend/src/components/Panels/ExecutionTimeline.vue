@@ -392,7 +392,7 @@ function showAllRows(): void {
       class="flex h-5 border-b border-border/30 overflow-hidden"
     >
       <div class="w-[176px] shrink-0 border-r border-border/20" />
-      <div class="flex-1 relative overflow-hidden">
+      <div class="flex-1 relative overflow-hidden mr-3">
         <template
           v-for="marker in timeMarkers"
           :key="marker.pct"
@@ -495,7 +495,7 @@ function showAllRows(): void {
           </button>
         </div>
 
-        <div class="flex-1 relative h-full flex items-center overflow-hidden">
+        <div class="flex-1 relative h-full flex items-center overflow-hidden mr-3">
           <div
             v-for="marker in timeMarkers"
             :key="`tl-${row.key}-${marker.pct}`"
@@ -526,7 +526,7 @@ function showAllRows(): void {
                     : 'opacity-70 group-hover:opacity-95',
               ]"
               :style="{
-                left: `${span.leftPct}%`,
+                left: `min(${span.leftPct}%, calc(100% - 3px))`,
                 width: `${span.widthPct}%`,
                 minWidth: '3px',
                 height: `${row.depth === 1 ? childBarHeightPx : topLevelBarHeightPx}px`,

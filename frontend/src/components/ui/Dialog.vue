@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onUnmounted, ref, useId, useSlots, watch } from "vue";
+import { computed, nextTick, onUnmounted, ref, useId, watch } from "vue";
 import { Maximize2, Minimize2, X } from "lucide-vue-next";
 
 import { useDialogBackHistory } from "@/composables/useDialogBackHistory";
@@ -10,9 +10,6 @@ import {
   overlayZIndex,
   removeFromDialogStack,
 } from "@/composables/useDialogStack";
-
-const slots = useSlots();
-const hasHeaderActions = computed(() => typeof slots["header-actions"] === "function");
 
 interface Props {
   open: boolean;
@@ -171,7 +168,7 @@ function toggleFullscreen(): void {
           <div
             :class="[
               'dialog-header shrink-0 pb-3 sm:pb-4 mb-3 sm:mb-5 gap-x-1.5 sm:gap-x-2 gap-y-2',
-              hasHeaderActions
+              $slots['header-actions']
                 ? 'grid grid-cols-[minmax(0,1fr)_auto] sm:grid-cols-[auto_minmax(0,1fr)_auto] items-center'
                 : 'flex items-center justify-between',
             ]"
@@ -201,7 +198,7 @@ function toggleFullscreen(): void {
               </div>
             </div>
             <div
-              v-if="hasHeaderActions"
+              v-if="$slots['header-actions']"
               class="col-span-2 sm:col-span-1 min-w-0 flex items-center justify-center sm:justify-start gap-1.5 sm:gap-2"
             >
               <div class="h-5 w-px bg-border/60 shrink-0 hidden sm:block" />
@@ -212,7 +209,7 @@ function toggleFullscreen(): void {
             <div
               :class="[
                 'flex items-center gap-1 sm:gap-1.5 flex-shrink-0',
-                hasHeaderActions ? 'row-start-1 col-start-2 sm:col-start-3' : '',
+                $slots['header-actions'] ? 'row-start-1 col-start-2 sm:col-start-3' : '',
               ]"
             >
               <div

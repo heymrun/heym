@@ -34,6 +34,7 @@ You can also start a conversation from the chat box on the [Workflows tab](./wor
 - **Scheduled workflows** – Ask when cron workflows run (today, this week, this month, or a custom date range). The assistant uses the same schedule data as the [Scheduled](./scheduled-tab.md) tab and can limit results to workflows you own or include those shared with you
 - **Workflow run history** – Ask about one workflow ("how many times did the daily report run?", "did it fail?", "when did it last run?"). Chat looks the workflow up by its ID and answers from its run count, status breakdown, first and last run time, and average duration. Ask why a run failed or what it returned and Chat then opens that single run to read its inputs, outputs, and per-node errors
 - **Live run status** – Ask what is running right now and Chat answers with the count, the workflow names, how long each run has been going, which node it is on, and a link straight to the live run
+- **Run context chips** – **Ask AI** in [Execution History](../reference/execution-history.md#ask-ai) opens a new conversation with the selected workflow run attached as chips. See [Asking About a Run](#asking-about-a-run)
 
 ## Using Chat from an MCP Client
 
@@ -95,6 +96,17 @@ Runs paused for a [Human-in-the-Loop](../reference/human-in-the-loop.md) or Code
 waiting for you, not as running. This is the same data as the active-runs badge in the header,
 so Chat and the badge never disagree. For runs that already finished, ask for recent executions
 instead — that reads [Execution History](../reference/execution-history.md).
+
+## Asking About a Run
+
+Select a workflow run in [Execution History](../reference/execution-history.md#ask-ai), from the editor or from All History, and click **Ask AI** next to the dialog title. Chat opens a new conversation with two chips above the message box:
+
+- **Workflow:** the workflow's name
+- **Execution:** the first characters of the selected run's id
+
+Remove a chip with its **×** to leave it out. Then ask your question, for example "why did this run take so long?", "what failed here?" or "can you fix it?". The remaining chips are attached to that message with the full ids, so Chat reads the run's inputs, outputs and per-node trace directly instead of searching for the workflow. To fix the workflow, Chat saves, test-runs and verifies the change as described in [Creating Workflows](#creating-workflows).
+
+The sent message shows the chips under your question. They belong to that message only; follow-up questions in the same conversation keep the context from the history.
 
 ## Asking About Alerts
 

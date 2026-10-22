@@ -57,6 +57,18 @@ Opening a workflow at `/workflows/{workflowId}/{executionId}` automatically brin
 - Debug a failed run by inspecting inputs and node outputs
 - Compare outputs across runs
 
+## Ask AI
+
+Both history dialogs have an **Ask AI** button (sparkle icon) next to their title. It opens the [Chat tab](../tabs/chat-tab.md#asking-about-a-run) in a new conversation with the workflow and the selected run attached as removable chips. Ask why the run was slow, what failed, or have Chat fix the workflow. Chat reads that exact run, including its per-node trace and errors.
+
+In the All History dialog, **Ask AI** appears only while a workflow run is selected; chat and assistant runs do not show it.
+
+## Run timeline
+
+In the run detail, the **Timeline** button (timer icon) next to **Expand All** swaps the node list (**Node Execution Logs** in the editor, **Steps** in All History) for a span timeline. While the timeline shows, the same button reads **Logs**; click it to return to the list. In All History the button appears for workflow runs only. The timeline draws one bar per node at the time it started, so you can see which node took how long and which ones ran in parallel. Hover a bar for its duration; click it to open the same details inspector as the editor's [execution timeline](#execution-timeline-details). The view you pick stays while the dialog is open.
+
+Runs recorded before node start times were stored are laid out one after another by duration.
+
 ## Execution Highlights
 
 After a live run — or after **Bring to Canvas** — a dismissible **Execution Highlights** popup appears in the **top-right of the Canvas**. It's a quick way to see *what each node produced*, listed top-to-bottom in execution order. Close it with the **✕**; it reopens on the next run.

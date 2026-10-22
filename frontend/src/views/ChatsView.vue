@@ -18,6 +18,7 @@ import ReleaseTourHost from "@/features/release-tour/components/ReleaseTourHost.
 import type { ShowcaseContext } from "@/features/showcase/showcase.types";
 import { hasShowcaseChatDraftPending } from "@/features/showcase/showcaseChatDraft";
 import { joinOriginAndPath } from "@/lib/appUrl";
+import { hasChatContextDraftPending } from "@/lib/chatContext";
 import { isPaletteOpenInNewTab } from "@/lib/paletteNavigate";
 import { useRecentWorkflows } from "@/composables/useRecentWorkflows";
 import { workflowApi } from "@/services/api";
@@ -137,7 +138,7 @@ onMounted(() => {
     historyOpen.value = false;
   });
   onUnmounted(() => unsub());
-  if (!conversationId.value && hasShowcaseChatDraftPending()) {
+  if (!conversationId.value && (hasShowcaseChatDraftPending() || hasChatContextDraftPending())) {
     void createNew();
   }
 });

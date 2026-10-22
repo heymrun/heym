@@ -573,6 +573,17 @@ class TestGenerateConversationTitle(unittest.IsolatedAsyncioTestCase):
             "Summarize this...",
         )
 
+    async def test_fallback_ignores_context_block(self) -> None:
+        from app.api.chats import _fallback_title_from_content
+
+        self.assertEqual(
+            _fallback_title_from_content(
+                "Why is it slow?\n\n[HEYM CONTEXT]\n"
+                "- Workflow: Lead details (workflow_id: 9f1c2b7e-0d4a-4c1e-9b7a-1a2b3c4d5e6f)"
+            ),
+            "Why is it slow...",
+        )
+
     async def test_endpoint_stores_fallback_title_for_new_chat(self) -> None:
         from app.api.chats import generate_conversation_title
         from app.models.chat_schemas import ConversationTitleGenerate

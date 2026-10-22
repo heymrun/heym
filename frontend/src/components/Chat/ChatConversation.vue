@@ -24,6 +24,7 @@ import {
 import type { Message, QueuedMessage, WorkflowPreview } from "@/types/chat";
 import ChatToolCall from "@/components/Chat/ChatToolCall.vue";
 import ChatContextBadge from "@/components/Chat/ChatContextBadge.vue";
+import ChatContextChips from "@/components/Chat/ChatContextChips.vue";
 import ReadonlyCanvasPreview from "@/components/Canvas/ReadonlyCanvasPreview.vue";
 import Button from "@/components/ui/Button.vue";
 import ClarifyCard from "@/components/ui/ClarifyCard.vue";
@@ -37,6 +38,14 @@ import {
   serializeAnswers,
   stripClarifyBlock,
 } from "@/utils/parseClarify";
+import {
+  appendChatContext,
+  CHAT_CONTEXT_DRAFT_EVENT,
+  consumeChatContextDraft,
+  extractChatContext,
+  type ChatContextItem,
+  type ExtractedChatContext,
+} from "@/lib/chatContext";
 import { estimateTokens } from "@/lib/contextEstimator";
 import { markdownToPlainText, renderMarkdown } from "@/lib/markdown";
 import { aiApi } from "@/services/api";
@@ -71,6 +80,8 @@ const authStore = useAuthStore();
 const router = useRouter();
 
 const input = ref("");
+/** Context chips handed over by another screen; appended to the next message on send. */
+const contextItems = ref<ChatContextItem[]>([]);
 const chatRootRef = ref<HTMLDivElement | null>(null);
 const chatInputRef = ref<HTMLTextAreaElement | null>(null);
 const messagesScrollRef = ref<HTMLDivElement | null>(null);
@@ -192,6 +203,23 @@ const isConversationTransitioning = computed(
 const messages = computed(() => chatStore.activeConversation?.messages ?? []);
 const queuedMessages = computed(() => chatStore.activeConversation?.queued_messages ?? []);
 
+// User messages may end in a context block; show its text and render the block as chips.
+const userMessageParts = computed(() => {
+  const parts = new Map<string, ExtractedChatContext>();
+  for (const msg of messages.value) {
+    if (msg.role === "user") parts.set(msg.id, extractChatContext(msg.content));
+  }
+  return parts;
+});
+
+function messageText(msg: Message): string {
+  return userMessageParts.value.get(msg.id)?.text ?? msg.content;
+}
+
+function messageContextItems(msg: Message): ChatContextItem[] {
+  return userMessageParts.value.get(msg.id)?.items ?? [];
+}
+
 const answeredClarify = reactive<Set<string>>(new Set());
 
 function clarifyFor(msg: Message): ClarifyQuestion[] | null {
@@ -262,7 +290,9 @@ watch(
   () => props.conversationId,
   (id) => {
     void loadConversationForRoute(id);
+    contextItems.value = [];
     applyShowcaseDraft();
+    applyContextDraft();
     focusInputWhenReady();
   },
 );
@@ -461,6 +491,18 @@ function applyShowcaseDraft(): void {
   focusInputWhenReady();
 }
 
+function applyContextDraft(): void {
+  const items = consumeChatContextDraft();
+  if (items.length === 0) return;
+  contextItems.value = items;
+  focusInputWhenReady();
+}
+
+function removeContextItem(index: number): void {
+  contextItems.value = contextItems.value.filter((_, itemIndex) => itemIndex !== index);
+  focusInputWhenReady();
+}
+
 let _credentialsReady = false;
 
 async function loadConversationForRoute(id: string): Promise<void> {
@@ -484,12 +526,14 @@ onMounted(() => {
   void loadCredentials();
   void chatStore.loadQuickPrompts();
   window.addEventListener(SHOWCASE_CHAT_DRAFT_EVENT, applyShowcaseDraft);
+  window.addEventListener(CHAT_CONTEXT_DRAFT_EVENT, applyContextDraft);
   window.addEventListener("resize", updateMessageScrollbar);
   if (typeof ResizeObserver !== "undefined" && messagesScrollRef.value) {
     messagesResizeObserver = new ResizeObserver(updateMessageScrollbar);
     messagesResizeObserver.observe(messagesScrollRef.value);
   }
   applyShowcaseDraft();
+  applyContextDraft();
   focusInputWhenReady();
   nextTick(updateMessageScrollbar);
 });
@@ -540,7 +584,7 @@ function handleChatKeydown(event: KeyboardEvent): void {
 async function copyMessage(msg: Message): Promise<void> {
   if (!msg.content) return;
   try {
-    await navigator.clipboard.writeText(msg.content);
+    await navigator.clipboard.writeText(messageText(msg));
     copiedMessageId.value = msg.id;
     if (copiedMessageIdTimeout) clearTimeout(copiedMessageIdTimeout);
     copiedMessageIdTimeout = setTimeout(() => {
@@ -599,7 +643,7 @@ async function readMessageAloud(msg: Message): Promise<void> {
     return;
   }
   try {
-    await tts.speak(msg.id, markdownToPlainText(msg.content));
+    await tts.speak(msg.id, markdownToPlainText(messageText(msg)));
   } catch {
     // playback/synthesis failure is non-fatal; reset playback state
     tts.stop();
@@ -722,11 +766,13 @@ async function send(): Promise<void> {
   }
   input.value = "";
   resetChatInputHeight();
+  const content = appendChatContext(text, contextItems.value);
+  contextItems.value = [];
   const payloadAttachment: AttachedFile | null = attachedFile.value;
   clearAttachment();
   await chatStore.sendMessage(
     props.conversationId,
-    text,
+    content,
     selectedCredentialId.value,
     selectedModel.value,
     payloadAttachment
@@ -756,6 +802,7 @@ function stopStreaming(): void {
 
 onUnmounted(() => {
   window.removeEventListener(SHOWCASE_CHAT_DRAFT_EVENT, applyShowcaseDraft);
+  window.removeEventListener(CHAT_CONTEXT_DRAFT_EVENT, applyContextDraft);
   window.removeEventListener("resize", updateMessageScrollbar);
   window.removeEventListener("pointermove", handleChatScrollbarPointerMove);
   window.removeEventListener("pointerup", handleChatScrollbarPointerUp);
@@ -987,9 +1034,15 @@ onUnmounted(() => {
             <div
               class="chat-markdown"
               @click="handleMarkdownImageClick"
-              v-html="renderMarkdown(clarifyFor(msg) ? stripClarifyBlock(msg.content) : msg.content)"
+              v-html="renderMarkdown(clarifyFor(msg) ? stripClarifyBlock(msg.content) : messageText(msg))"
             />
             <!-- eslint-enable vue/no-v-html -->
+            <ChatContextChips
+              v-if="messageContextItems(msg).length > 0"
+              class="mt-2"
+              :items="messageContextItems(msg)"
+              variant="message"
+            />
             <ClarifyCard
               v-if="clarifyFor(msg)"
               :questions="clarifyFor(msg)!"
@@ -1262,7 +1315,7 @@ onUnmounted(() => {
         @change="handleFileInputChange"
       >
       <div
-        v-if="queuedMessages.length > 0 || attachedFile || attachmentError"
+        v-if="queuedMessages.length > 0 || attachedFile || attachmentError || contextItems.length > 0"
         class="mb-1.5 flex flex-col gap-1.5 px-1"
       >
         <div
@@ -1327,7 +1380,7 @@ onUnmounted(() => {
                   </span>
                   <div class="min-w-0 flex-1">
                     <p class="min-w-0 truncate leading-5">
-                      {{ queued.content }}
+                      {{ extractChatContext(queued.content).text }}
                     </p>
                     <div
                       v-if="queued.attachment_name"
@@ -1360,6 +1413,13 @@ onUnmounted(() => {
             </li>
           </ul>
         </div>
+
+        <ChatContextChips
+          v-if="contextItems.length > 0"
+          :items="contextItems"
+          removable
+          @remove="removeContextItem"
+        />
 
         <div
           v-if="attachedFile || attachmentError"
