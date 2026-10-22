@@ -195,6 +195,20 @@ export const useWorkflowStore = defineStore("workflow", () => {
     if (!node) runUntilNodeId.value = null;
   });
 
+  /** Node the AI Assistant edits; the canvas AI button sets it and bumps the request. */
+  const aiFocusNodeId = ref<string | null>(null);
+  const aiFocusRequest = ref(0);
+  const aiFocusNode = computed(() => nodes.value.find((node) => node.id === aiFocusNodeId.value) ?? null);
+
+  watch(aiFocusNode, (node) => {
+    if (!node) aiFocusNodeId.value = null;
+  });
+
+  function focusAssistantOnNode(nodeId: string | null): void {
+    aiFocusNodeId.value = nodeId;
+    if (nodeId) aiFocusRequest.value += 1;
+  }
+
   function getRunInputFields(targetNodeId?: string): typeof allInputFields.value {
     if (!targetNodeId) return allInputFields.value;
     const scope = workflowRunNodeIds(nodes.value, edges.value, targetNodeId);
@@ -3770,6 +3784,10 @@ export const useWorkflowStore = defineStore("workflow", () => {
     runInputFocusRequest,
     runInputFields,
     prepareNodeRun,
+    aiFocusNodeId,
+    aiFocusRequest,
+    aiFocusNode,
+    focusAssistantOnNode,
     runInputText,
     runInputValues,
     runInputJson,

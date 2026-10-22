@@ -1,6 +1,6 @@
 # Canvas Features
 
-The workflow editor provides several features for debugging, testing, and organizing nodes: **Run to Node**, **Data Pin**, **Execution Logs**, **Enable/Disable**, and **Extract to Sub-Workflow**.
+The workflow editor provides several features for debugging, testing, and organizing nodes: **Run to Node**, **AI on a Node**, **Data Pin**, **Execution Logs**, **Enable/Disable**, and **Extract to Sub-Workflow**.
 
 <video src="/features/showcase/editor.webm" controls playsinline muted preload="metadata" style="width:100%;border-radius:12px;margin:16px 0"></video>
 <p class="github-video-link"><a href="../../../../public/features/showcase/editor.webm">▶ Watch Editor demo</a></p>
@@ -12,6 +12,12 @@ Hover any node except a sticky note and click **Run** below it. Heym executes th
 If the selected path has input fields, the right-hand **Run** panel opens and focuses the first field. Enter the values, then click **Run to _node label_** or press **Ctrl+Enter** (Cmd+Enter on macOS). Generic body mode focuses the JSON body editor. Paths without input fields run immediately without opening the panel. Pinned Input nodes reuse their pinned output without asking for input.
 
 The panel keeps the selected target for subsequent runs. Choose **Run full workflow** to clear the target. Run buttons are disabled while an execution is active. A target inside a loop stops the run when that node is first reached; selecting a node after the loop runs the complete upstream loop.
+
+## AI on a Node
+
+Hover any node except a sticky note and click **AI** above it. The [AI Assistant](./ai-assistant.md) opens on that node and offers **Change this node as ...**, **Fix error in this node ...** and **Other**. In Agent mode the assistant changes only that node; other nodes, connections and the layout stay as they are. See [AI Assistant › Changing One Node](./ai-assistant.md#changing-one-node).
+
+The button is hidden on workflows you can only view.
 
 ## Data Pin
 

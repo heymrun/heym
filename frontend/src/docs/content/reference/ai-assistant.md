@@ -13,6 +13,8 @@ For documentation questions outside the editor, use [Chat with Heym](./chat-with
 
 Press `Ctrl + I` / `Cmd + I` anywhere in the editor to open or close the panel — the shortcut works even while a text input is focused. See [Keyboard Shortcuts](./keyboard-shortcuts.md).
 
+To work on a single node, hover it on the canvas and click **AI** above it. The panel opens focused on that node. See [Changing One Node](#changing-one-node).
+
 ## Closing the Panel
 
 Click the **X** button, press `Ctrl + I` / `Cmd + I`, or toggle the **AI** button in the Debug panel toolbar. The header drags the panel; it does not close it.
@@ -60,6 +62,31 @@ When the AI response contains a valid workflow JSON block (with `nodes` and opti
 4. Marks the workflow as unsaved
 
 If parsing fails, a **Retry** button appears to regenerate the response.
+
+## Changing One Node
+
+Hover a node on the canvas and click **AI** above it. The panel opens in Agent mode, focused on that node, and shows which node it is changing:
+
+| The node has... | The panel shows |
+|---|---|
+| No result in the current run | **Modifying Node:** in a compact row with the node's icon and name. The assistant edits from the node's configuration alone; run the node first if it should see the output |
+| A result in the current run | **Modifying Node: (Has Node Output)** above the node itself: icon, name and type, the last status and duration, and the error if it failed. The assistant sees that output and error when it edits the node |
+
+Hover the label to see which state the panel is in.
+
+Under the messages, three options start the request:
+
+| Option | What it does |
+|---|---|
+| **Change this node as ...** | Fills the message box with *Change this node to* so you finish the sentence |
+| **Fix error in this node ...** | Fills *Fix the error in this node.* The assistant reads this node's error from the last run |
+| **Other** | Focuses an empty message box |
+
+Edit the text and press **Send**. The assistant returns only this node and Heym updates it in place: the node keeps its id, type and name, so expressions such as `$checkLinkedIn.result` in other nodes keep working. Other nodes, connections and the layout do not change, and **Undo** restores the previous configuration.
+
+If the request does not fit inside the node, for example it needs another node type or a new node, the assistant says what would have to change instead of editing. Close the node focus with the **X** on the node card to edit the whole workflow again. Closing the panel also clears the focus.
+
+[YOLO mode](#yolo-mode) works with a focused node: the assistant changes the node, runs the workflow and fixes the node until the run passes. In **Ask** mode the focus tells the assistant which node your question is about, and the canvas is not changed.
 
 ## YOLO Mode
 

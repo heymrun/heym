@@ -45,6 +45,7 @@ import { useDictation } from "@/composables/useDictation";
 import { useFileAttachment } from "@/composables/useFileAttachment";
 import type { AttachedFile } from "@/composables/useFileAttachment";
 import { useQuickPrompts } from "@/composables/useQuickPrompts";
+import { useThinkingWord } from "@/composables/useThinkingWord";
 import {
   consumeShowcaseChatDraft,
   SHOWCASE_CHAT_DRAFT_EVENT,
@@ -220,6 +221,7 @@ const conversationTitle = computed(() =>
 const canSendMessage = computed(() => isShowingConversation.value && !isConversationTransitioning.value);
 const streamState = computed(() => chatStore.getStreamState(props.conversationId));
 const isThisConvStreaming = computed(() => streamState.value.isStreaming);
+const thinkingWord = useThinkingWord(computed(() => isThisConvStreaming.value && !streamState.value.content));
 const draftTokens = computed(() => estimateTokens(input.value));
 const contextUsageForBadge = computed(() => {
   const live = streamState.value.contextUsage;
@@ -1117,7 +1119,21 @@ onUnmounted(() => {
               v-if="!streamState.content && streamState.images.length === 0"
               class="flex items-center gap-2 text-muted-foreground"
             >
-              <span>{{ streamState.toolCalls.length > 0 ? "Preparing response..." : "Heyming..." }}</span>
+              <span v-if="streamState.toolCalls.length > 0">Preparing response...</span>
+              <Transition
+                v-else
+                mode="out-in"
+                enter-active-class="transition duration-200 ease-out"
+                enter-from-class="opacity-0 translate-y-0.5"
+                leave-active-class="transition duration-150 ease-in"
+                leave-to-class="opacity-0 -translate-y-0.5"
+              >
+                <span
+                  :key="thinkingWord"
+                  class="inline-block"
+                  data-testid="chat-thinking-word"
+                >{{ thinkingWord }}...</span>
+              </Transition>
             </div>
             <div
               v-if="streamState.images.length > 0"

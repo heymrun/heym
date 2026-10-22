@@ -497,6 +497,8 @@ The AI Assistant is a chat panel opened from the Debug panel that lets you creat
 
 Turn on **YOLO mode** (Agent mode, off by default) and the assistant tests what it builds. After each change it runs the workflow on the canvas, reads the result and fixes the workflow until it does what you asked, for up to 5 runs per message. It asks for test inputs before the first run, can run your other workflows when it needs their result, and shows each step as it works. See [AI Assistant › YOLO Mode](./ai-assistant.md#yolo-mode).
 
+Click **AI** above any node on the canvas to change or fix just that node. The panel shows the node it is changing (with its last result once it has run) and offers **Change this node as ...**, **Fix error in this node ...** and **Other**. Only that node is updated; the rest of the workflow and the layout stay as they are. See [AI Assistant › Changing One Node](./ai-assistant.md#changing-one-node).
+
 When a workflow stores records, the assistant asks which [data table](../tabs/datatable-tab.md) to use, or creates one with the columns the workflow needs. See [AI Assistant › Data tables](./ai-assistant.md#data-tables).
 
 When the current workflow contains [Agent Node](../nodes/agent-node.md) skills, the assistant sends only each skill's `SKILL.md` into the workflow context. Attached `.py` files and binary skill assets are excluded before the request so large skill bundles do not overflow the model context window.

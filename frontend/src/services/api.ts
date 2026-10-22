@@ -2233,6 +2233,8 @@ export interface AIAssistantRequest {
   }>;
   askMode?: boolean;
   yoloMode?: boolean;
+  /** Canvas node the turn is focused on; in Agent mode only this node changes. */
+  targetNodeId?: string;
   executionLog?: {
     execution_status: string;
     execution_time_ms: number | null;
@@ -2859,6 +2861,7 @@ export const aiApi = {
         ask_mode: request.askMode ?? false,
         execution_log: request.executionLog ?? null,
         ...(request.yoloMode ? { yolo_mode: true } : {}),
+        ...(request.targetNodeId ? { target_node_id: request.targetNodeId } : {}),
       }),
       signal,
     })

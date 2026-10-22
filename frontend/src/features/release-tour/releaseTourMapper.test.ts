@@ -352,10 +352,11 @@ describe("shipped release registry", () => {
     const catalog = buildReleaseTourCatalog(RELEASE_REGISTRY);
 
     expect(catalog?.slides.map((slide) => slide.id)).toEqual([
+      "node-ai-edit",
+      "codex-device-sign-in",
       "slack-bot",
       "google-triggers",
       "heym-work",
-      "skill-zip",
     ]);
   });
 

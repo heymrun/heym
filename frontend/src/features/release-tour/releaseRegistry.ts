@@ -18,17 +18,49 @@ import type { ReleaseEntry } from "@/features/release-tour/releaseTour.types";
 export const RELEASE_REGISTRY: ReleaseEntry[] = [
   {
     releaseId: "2026.21",
-    publishedAt: new Date("2026-10-18T12:00:00Z"),
-    headline: "Sign in to ChatGPT for Codex with a short code",
+    publishedAt: new Date("2026-10-22T12:00:00Z"),
+    headline: "Change one node with AI, and sign in to Codex with a short code",
     releaseTour: {
       label: "New in Heym",
       introTitle: "New in this release",
       introDescription:
         "A quick look at what changed since your last update. Takes about a minute.",
-      tourEnabled: false,
-      sectionOrder: ["codex-device-sign-in"],
+      tourEnabled: true,
+      sectionOrder: ["node-ai-edit", "codex-device-sign-in"],
     },
     sections: [
+      {
+        id: "node-ai-edit",
+        title: "Change or fix one node with AI",
+        publishedAt: new Date("2026-10-22T12:00:00Z"),
+        blocks: [
+          {
+            type: "prose",
+            markdown:
+              "Hover a node on the canvas and click **AI** above it. The AI Assistant opens on that node and offers **Change this node as ...**, **Fix error in this node ...** and **Other**. The assistant changes only that node: the other nodes, the connections and the layout stay as they are.",
+          },
+          {
+            type: "prose",
+            markdown:
+              "The panel shows which node it is changing. Once the node has run, it reads **Modifying Node: (Has Node Output)** and shows the last status and error, and the assistant uses that output, so a fix starts from what went wrong. Close the node focus to edit the whole workflow again.",
+          },
+        ],
+        tour: {
+          description:
+            "Click AI above a node to change or fix that node only. The rest of the workflow stays as it is.",
+          useCases: [
+            "Fix the node that failed in the last run without touching the others",
+            "Change what a condition or an HTTP request checks in one sentence",
+            "Ask about one node in Ask mode",
+          ],
+          tourVisual: "node-ai-edit",
+          docTarget: {
+            categoryId: "reference",
+            slug: "ai-assistant",
+            title: "AI Assistant",
+          },
+        },
+      },
       {
         id: "codex-device-sign-in",
         title: "Sign in to ChatGPT for Codex with a short code",
@@ -157,7 +189,7 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
       introDescription:
         "A quick look at what changed since your last update. Takes about a minute.",
       tourEnabled: true,
-      sectionOrder: ["heym-work", "skill-zip"],
+      sectionOrder: ["heym-work"],
     },
     sections: [
       {
@@ -194,32 +226,6 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
             url: "/enterprise",
             title: "Learn more on heym.run",
           },
-        },
-      },
-      {
-        id: "skill-zip",
-        title: "Drop a skill zip in Chat",
-        publishedAt: new Date("2026-10-10T18:00:00Z"),
-        blocks: [
-          {
-            type: "prose",
-            markdown:
-              "Chat accepts a **zip**. When the archive contains a **SKILL.md**, and any Python files beside it, Chat can put that skill on an agent. A zip without a skill file stays in the conversation as context.",
-          },
-          {
-            type: "prose",
-            markdown:
-              "Ask Chat to change a skill it already saved. It updates the named files and leaves the rest, including Python it did not rewrite, where it is. With a workflow selected, the skill lands there. Otherwise Chat starts a workflow with one agent that carries the skill.",
-          },
-        ],
-        tour: {
-          description: "Attach a skill zip in Chat and Heym puts it on an agent.",
-          useCases: [
-            "Drop a skill folder zipped with SKILL.md and a Python file",
-            "Ask Chat to rewrite the skill text without losing the Python",
-            "Start a new workflow whose agent carries the skill",
-          ],
-          tourVisual: "skill-zip",
         },
       },
     ],

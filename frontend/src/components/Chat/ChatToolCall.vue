@@ -78,7 +78,7 @@ function prettyArgs(args: Record<string, unknown>): string {
         v-else
         class="w-3.5 h-3.5 shrink-0 text-primary"
       />
-      <span class="flex-1 truncate">{{ toolCall.label }}</span>
+      <span class="chat-tool-call-label flex-1 truncate">{{ toolCall.label }}</span>
       <span
         v-if="toolCall.elapsed_ms != null"
         class="text-[10px] opacity-70 tabular-nums shrink-0"

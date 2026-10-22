@@ -61,6 +61,7 @@ from app.models.schemas import DataTableColumnDef, DataTableCreate
 from app.services import template_service
 from app.services.active_execution_overview import build_active_execution_overview
 from app.services.agent_tool_observability import summarize_tool_calls
+from app.services.assistant_node_edit import NODE_EDIT_TRACE_NODE_LABEL, build_node_edit_prompt
 from app.services.assistant_yolo import (
     YOLO_TRACE_NODE_LABEL,
     YOLO_TRIGGER_SOURCE,
@@ -196,6 +197,7 @@ class AIAssistantRequest(BaseModel):
     ask_mode: bool = False
     execution_log: dict | None = None
     yolo_mode: bool = False
+    target_node_id: str | None = None
 
 
 class AnalyzeWorkflowRequest(BaseModel):
@@ -5743,6 +5745,12 @@ async def workflow_assistant_stream(
     if use_yolo:
         system_prompt += YOLO_PROTOCOL_PROMPT
 
+    node_edit_prompt = build_node_edit_prompt(
+        request.current_workflow, request.target_node_id, ask_mode=request.ask_mode
+    )
+    system_prompt += node_edit_prompt
+    is_node_edit = bool(node_edit_prompt) and not request.ask_mode
+
     system_prompt = _append_execution_log_to_prompt(system_prompt, request.execution_log)
 
     logger.debug(
@@ -5772,7 +5780,11 @@ async def workflow_assistant_stream(
         credential_id=credential.id,
         workflow_id=workflow_id,
         node_label=(
-            YOLO_TRACE_NODE_LABEL if use_yolo else ("AI Ask" if request.ask_mode else "AI Builder")
+            YOLO_TRACE_NODE_LABEL
+            if use_yolo
+            else NODE_EDIT_TRACE_NODE_LABEL
+            if is_node_edit
+            else ("AI Ask" if request.ask_mode else "AI Builder")
         ),
         source="assistant",
     )
