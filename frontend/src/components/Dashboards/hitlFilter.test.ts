@@ -7,6 +7,7 @@ import {
   UNKNOWN_WORKFLOW_LABEL,
   chooseStep,
   chooseWorkflow,
+  openableWorkflowId,
   sameFilter,
   stepChoices,
   stepValue,
@@ -110,6 +111,14 @@ describe("choosing", () => {
     expect(workflowValue(null)).toBe(ALL_CHOICE);
     expect(stepValue({ workflow_id: "wf-invoices", node_id: null })).toBe(ALL_CHOICE);
     expect(stepValue({ workflow_id: "wf-invoices", node_id: "finance" })).toBe("finance");
+  });
+});
+
+describe("openableWorkflowId", () => {
+  it("links only a chosen workflow the editor can open", () => {
+    expect(openableWorkflowId(sources, null)).toBeNull();
+    expect(openableWorkflowId(sources, { workflow_id: "wf-hiring", node_id: null })).toBe("wf-hiring");
+    expect(openableWorkflowId(sources, { workflow_id: "wf-other", node_id: null })).toBeNull();
   });
 });
 

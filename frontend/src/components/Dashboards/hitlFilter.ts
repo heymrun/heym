@@ -4,6 +4,7 @@ import type { HitlFilter, HitlSource, HitlSourceStep } from "@/types/dashboard";
  * Choosing which reviews a HITL widget shows: all of them, one workflow's, or one step's of it.
  * Heym's widget Settings, the canvas properties panel and Heym Work's widget Settings all build
  * their two selects from these functions, so they agree on what is offered and what a pick means.
+ * The sources are the workflows the editor can open, owned or shared with them.
  * No API, store or router imports: Heym Work imports this file.
  */
 
@@ -56,6 +57,11 @@ export function stepChoices(sources: HitlSource[], current: HitlFilter | null): 
     choices.push({ value: current.node_id, label: MISSING_STEP_LABEL });
   }
   return choices;
+}
+
+/** The chosen workflow's id when the editor can open it, for the "open in a new tab" link. */
+export function openableWorkflowId(sources: HitlSource[], current: HitlFilter | null): string | null {
+  return current && findSource(sources, current.workflow_id) ? current.workflow_id : null;
 }
 
 export function workflowValue(current: HitlFilter | null): string {

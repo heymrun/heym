@@ -133,6 +133,9 @@ test("narrows a HITL widget to one workflow's reviews from Settings", async ({ p
     await expect(page.getByTestId("hitl-filter-step").locator("select")).toHaveValue(
       `agent-${stamp}`,
     );
+    const openWorkflow = page.getByRole("link", { name: "Open workflow in a new tab" });
+    await expect(openWorkflow).toHaveAttribute("href", `/workflows/${invoices.id}`);
+    await expect(openWorkflow).toHaveAttribute("target", "_blank");
 
     const saved = page.waitForResponse(
       (response) =>

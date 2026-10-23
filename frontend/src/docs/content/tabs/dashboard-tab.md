@@ -25,7 +25,7 @@ A widget is a single chart on the grid. Supported chart types:
 - **Proportion** (one bar split into shares with a percentage legend, e.g. a language breakdown)
 - **Bar gauge** (one horizontal gauge per row with a red→green gradient and a value, e.g. free disk space)
 - **Text** (a markdown message, e.g. a status note like "Last execution at 19:47"; supports [interactive checkboxes](../nodes/chart-output-node.md#interactive-task-lists) when the markdown is static, and [explicit numbered lists](../nodes/chart-output-node.md#numbered-lists) for custom or descending numbering)
-- **HITL** (your pending human reviews. The header shows `1/n pending`. The workflow name opens that run on the canvas. **Approve**, **Request changes**, and **Reject** resolve it. The history icon beside the widget title opens that run in the history dialog on this page. The widget does not use upstream rows, and each person sees their own queue. It can show one workflow's reviews instead of all of them; see [HITL widgets](#hitl-widgets))
+- **HITL** (your pending human reviews. The header shows `1/n pending`. The workflow name opens that run on the canvas. **Approve**, **Request changes**, and **Reject** resolve it. The history icon beside the widget title opens that run in the history dialog on this page. The widget does not use upstream rows, and each person sees their own queue. It can show one workflow's reviews instead, for everyone who can open that workflow; see [HITL widgets](#hitl-widgets))
 
 Besides charts, a **Run a workflow** widget runs one of your workflows from the dashboard: on a dropped file, with its input fields, or with a Run button; see [Run widgets](#run-widgets).
 
@@ -46,16 +46,17 @@ placed below the original and labeled with **(Copy)** so you can edit it indepen
 
 ## HITL widgets
 
-A new HITL widget shows every review waiting for you. To show only one workflow's, open the widget's **Settings**:
+A new HITL widget shows every review waiting in your own queue. To show only one workflow's, open the widget's **Settings**:
 
-1. Under **Workflow**, pick the workflow. The list holds your workflows with a step that waits for a person: an Agent with human review, or a Slack approval, buttons or form step.
+1. Under **Workflow**, pick the workflow. The list holds the workflows you can open, yours or shared with you or your team, that have a step waiting for a person: an Agent with human review, or a Slack approval, buttons or form step. The icon beside it opens that workflow in a new tab.
 2. If the workflow has one such step, it is picked with it. If it has several, **Select agent** lists them by node name, with **All agents** first; Slack steps are marked **(Slack)**.
-3. Save. The header's `1/n pending` counts only those reviews. Pick **All workflows** to show every review again.
+3. Save. The header's `1/n pending` counts only those reviews. Pick **All workflows** to show your own queue again.
 
-The same choice is on the canvas, in the Chart Output node's properties, and **Fine-tune with AI** can make it ("show only the invoice approvals"). Every change is a workflow edit, so it appears in Edit History.
+The same choice is on the canvas, in the Chart Output node's properties. **Fine-tune with AI** can make it ("show only the invoice approvals"), and so can describing a new widget that names the workflow. Every change is a workflow edit, so it appears in Edit History.
 
-- **Only your workflows.** The list holds only workflows whose reviews you can see, which today are the workflows you own. A choice outside it is refused when it is saved.
-- **Access is checked on every load.** When the chosen workflow is deleted or no longer yours, the widget shows "You no longer have access to the workflow this widget shows" instead of reviews. On a shared dashboard, someone who does not own that workflow sees the same message; editors can pick another one in **Settings**.
+- **Who sees the reviews.** A widget filtered on a workflow shows that workflow's reviews to everyone who can open the workflow, and they can approve, request changes or reject from it, as they could run the workflow. An unfiltered widget shows each person their own queue.
+- **Who sees the widget.** Someone who cannot open the chosen workflow does not see the widget at all, even on a dashboard shared with them. When the dashboard's owner loses access to it, or it is deleted, the owner sees "You no longer have access to the workflow this widget shows" and can pick another one in **Settings**.
+- **Only reachable choices.** A workflow you cannot open is refused when the widget is saved, whether from Settings, the canvas or the AI.
 
 ## Detail pages
 

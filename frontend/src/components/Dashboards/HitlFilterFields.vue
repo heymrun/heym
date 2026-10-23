@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
+import { ExternalLink } from "lucide-vue-next";
 
 import type { HitlFilter, HitlSource } from "@/types/dashboard";
 import {
   STEP_FIELD_LABEL,
   chooseStep,
   chooseWorkflow,
+  openableWorkflowId,
   stepChoices,
   stepValue,
   workflowChoices,
@@ -21,12 +24,17 @@ const emit = defineEmits<{
   (e: "update:modelValue", value: HitlFilter | null): void;
 }>();
 
+const router = useRouter();
 const sources = ref<HitlSource[]>([]);
 const loading = ref(true);
 const loadError = ref<string | null>(null);
 
 const workflowOptions = computed(() => workflowChoices(sources.value, props.modelValue));
 const stepOptions = computed(() => stepChoices(sources.value, props.modelValue));
+const workflowHref = computed((): string | null => {
+  const id = openableWorkflowId(sources.value, props.modelValue);
+  return id ? router.resolve({ name: "editor", params: { id } }).href : null;
+});
 
 function onWorkflow(value: string | undefined): void {
   emit("update:modelValue", chooseWorkflow(sources.value, props.modelValue, value));
@@ -53,14 +61,28 @@ onMounted(async () => {
     data-testid="hitl-filter-fields"
   >
     <label class="text-sm font-medium">Workflow</label>
-    <Select
-      data-testid="hitl-filter-workflow"
-      :model-value="workflowValue(modelValue)"
-      :options="workflowOptions"
-      placeholder=""
-      :disabled="loading"
-      @update:model-value="onWorkflow"
-    />
+    <div class="flex items-center gap-2">
+      <Select
+        data-testid="hitl-filter-workflow"
+        class="flex-1"
+        :model-value="workflowValue(modelValue)"
+        :options="workflowOptions"
+        placeholder=""
+        :disabled="loading"
+        @update:model-value="onWorkflow"
+      />
+      <a
+        v-if="workflowHref"
+        :href="workflowHref"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border text-muted-foreground hover:bg-accent hover:text-foreground md:h-10 md:w-10"
+        title="Open workflow in a new tab"
+        aria-label="Open workflow in a new tab"
+      >
+        <ExternalLink class="h-4 w-4" />
+      </a>
+    </div>
     <template v-if="stepOptions.length > 0">
       <label class="text-sm font-medium">{{ STEP_FIELD_LABEL }}</label>
       <Select
@@ -78,8 +100,8 @@ onMounted(async () => {
       {{ loadError }}
     </p>
     <p class="text-xs text-muted-foreground">
-      Show reviews from every workflow, or only one. Only workflows whose reviews you can see are
-      listed.
+      Show reviews from every workflow, or only one. Lists the workflows you can open, yours or
+      shared with you, that have a step waiting for a person.
     </p>
   </div>
 </template>

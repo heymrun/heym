@@ -17,7 +17,9 @@ it.
 - The choice is made in widget Settings, in Heym and in Heym Work. In Work, the card's Rename
   action becomes Settings and keeps the title field.
 - AI fine-tune can change the choice ("show only the invoice approvals").
-- A widget created by AI always starts unfiltered.
+- A widget created by AI starts unfiltered unless its description names a workflow.
+- The Workflow field has an icon that opens the chosen workflow in a new tab (Heym's editor,
+  Work's Home with the workflow highlighted).
 
 ## Non-goals
 
@@ -44,7 +46,7 @@ from a widget workflow's nodes. Every reader below uses it.
 
 ## Review sources
 
-A review source is a workflow in the caller's review scope (see Security), not
+A review source is a workflow the caller can open (see Security), not
 `kind == "dashboard_widget"`, with at least one step that can wait for a person:
 
 - `agent` with `data.hitlEnabled` true (`kind: "agent"`)
@@ -57,30 +59,32 @@ by workflow and node needs no new column.
 
 ## Security
 
-The stored filter only narrows what the viewer may already see; it never grants anything.
+The stored filter never grants anything; every read re-checks the viewer.
 
-- **Review scope.** One helper in `hitl_service`, `review_scope_clause(user_id)`, says whose
-  workflows' reviews a user may see and decide. Today that is the workflows they own, which
-  is what the inbox and `get_owned_hitl_request` already enforce. This work does not widen it.
-  The inbox, the source list, the dashboard counts and the filter access check all use this
-  helper, so widening it later (for example to write shares) is one change, made on purpose.
-- **Only reachable choices.** The picker lists only workflows in the caller's review scope.
-  Settings, AI fine-tune and canvas saves reject a *changed* filter that points outside the
-  saver's scope (422). An unchanged filter is not revalidated, so a shared editor can still
-  save other settings.
+- **Two scopes.** `hitl_service.own_reviews_clause` is the user's own queue (workflows they
+  own): the unfiltered inbox, an unfiltered widget and the review link use it.
+  `review_access_clause` is every workflow the user can open (owner, direct share, team share,
+  instance admin), the reach that lets them run it: review sources, a filtered inbox, filtered
+  widgets, page counts and deciding a review from the inbox use it. Deciding resumes the run,
+  which a read share may already do.
+- **Scenario.** A owns a workflow with a HITL agent and shares it with B. B points a HITL widget
+  at it and shares the dashboard with C, who cannot open A's workflow. B sees and decides A's
+  workflow's reviews in the widget; C does not see the widget at all.
+- **Only reachable choices.** The picker lists workflows the user can open. Settings, AI create
+  and fine-tune, and canvas saves reject a *changed* filter on a workflow the saver cannot open
+  (422). An unchanged filter is not revalidated, so a shared editor can still save other settings.
 - **Read time is the boundary.** Writes reach a widget workflow through more paths than these
-  three (imports, clones, templates, chat build), so save-time checks are a convenience. Every
-  read re-checks the viewer: a filter whose workflow is outside the viewer's review scope,
-  because it was deleted, it changed hands, or the viewer never had it, returns an error,
-  never data and never an empty list that hides the problem:
-  - widget data: `error` = "You no longer have access to the workflow this widget shows.
-    Pick another one in widget Settings." for editors, "You do not have access to the
-    workflow this widget shows." for read-only viewers
-  - `GET /hitl/inbox?workflow_id=…`: 403 with the same editor text
+  (imports, clones, templates, chat build), so save-time checks are a convenience. Every read
+  re-checks the viewer:
+  - dashboard listing: a widget filtered on a workflow the viewer cannot open is left out,
+    except for the dashboard's owner
+  - widget data: the owner gets `error` = "You no longer have access to the workflow this
+    widget shows. Pick another one in widget Settings."; anyone else gets 404 "Widget not found"
+  - `GET /hitl/inbox?workflow_id=…`: 403 with the same text
   - dashboard counts: such a widget adds nothing
-- **No existence leak.** A deleted workflow and a workflow someone else owns give the same
-  message, and the message never names the workflow.
-- Decisions keep using `get_owned_hitl_request`, unchanged.
+- **No existence leak.** A deleted workflow and one the viewer cannot open give the same answer,
+  which never names the workflow.
+- The inbox review link (public token) stays owner-only.
 
 ## Backend (heymrun)
 
@@ -138,8 +142,9 @@ widget. `n` counts the caller's pending reviews that match any HITL widget on th
 
 ### AI
 
-- **Create** (`ai_generate_widget`): `hitlWorkflowId` and `hitlNodeId` are removed from the
-  generated nodes, so a new widget shows every review.
+- **Create** (`ai_generate_widget`): the prompt gets the caller's review sources, so a
+  description that names a workflow ("pending reviews of Discount approval") points the new
+  widget at it; otherwise it shows every review. An invented id is a 422, as in fine-tune.
 - **Fine-tune** (`ai_refine_widget`) of a HITL widget: the prompt gets the caller's review
   sources (workflow names, ids, step labels, node ids, kinds). After generation, if the filter
   differs from the current one, it is validated like a Settings save. An invalid choice is a
@@ -186,11 +191,11 @@ widget. `n` counts the caller's pending reviews that match any HITL widget on th
 
 ## Edge cases
 
-- Filtered workflow deleted or out of the viewer's scope: the access error above. Step removed
-  while the workflow is still reachable: "No pending reviews". Settings shows the placeholder
-  either way so it can be changed.
-- Shared dashboard: each viewer still sees only their own reviews. A widget filtered on a
-  workflow the viewer does not own shows them the access error.
+- Filtered workflow deleted or no longer reachable: the owner sees the access error, others do
+  not see the widget. Step removed while the workflow is still reachable: "No pending reviews".
+  Settings shows the placeholder either way so it can be changed.
+- Shared dashboard: an unfiltered widget shows each viewer their own queue; a filtered widget
+  shows its workflow's reviews to viewers who can open it and is hidden from the rest.
 - A cloned widget copies its workflow, filter included.
 - A paused sub-workflow step is recorded on the top-level run's workflow, so it is not offered
   as a step of the sub-workflow. Unchanged by this work.
