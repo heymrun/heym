@@ -1111,14 +1111,14 @@ function bringToCanvas(): void {
             </div>
           </div>
 
-          <!-- Node Execution Logs -->
+          <!-- Steps -->
           <div
             v-if="nodeResults.length > 0"
             class="space-y-2"
           >
             <div class="flex items-center justify-between gap-2">
               <div class="text-sm font-semibold">
-                Node Execution Logs
+                Steps
               </div>
               <div class="flex items-center gap-1">
                 <ExecutionHistoryViewToggle v-model="nodeView" />
