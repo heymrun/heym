@@ -58,13 +58,34 @@ REASONING_MODELS = {
 }
 
 
+_LEGACY_OPENAI_CHAT_MARKERS = ("gpt-4", "gpt-3.5", "o1", "o3", "chatgpt")
+_O_SERIES = re.compile(r"(?:^|[/:])o\d")
+
+
+def is_openai_chat_model(model_id: str) -> bool:
+    """Whether an id from OpenAI's /v1/models belongs in the model pickers.
+
+    Every id the old marker list kept still passes; any GPT generation and the whole o-series
+    are added, so GPT-5, GPT-6 and o4 are no longer hidden.
+    """
+    model_lower = model_id.lower()
+    if any(marker in model_lower for marker in _LEGACY_OPENAI_CHAT_MARKERS):
+        return True
+    if _GPT_GENERATION.search(model_lower) is not None:
+        return True
+    return _O_SERIES.search(model_lower) is not None
+
+
 def is_reasoning_model(model_id: str) -> bool:
     model_lower = model_id.lower()
     for reasoning in REASONING_MODELS:
         if reasoning in model_lower:
             return True
     generation = _GPT_GENERATION.search(model_lower)
-    return generation is not None and int(generation.group(1)) >= 5
+    if generation is not None and int(generation.group(1)) >= 5:
+        return True
+    # o4-mini rejects `temperature` like o1 and o3.
+    return _O_SERIES.search(model_lower) is not None
 
 
 def opencode_responses_support(model_id: str) -> tuple[bool, str]:
@@ -105,7 +126,7 @@ async def fetch_openai_models(api_key: str) -> list[LLMModel]:
             models = []
             for model in data.get("data", []):
                 model_id = model.get("id", "")
-                if any(x in model_id for x in ["gpt-4", "gpt-3.5", "o1", "o3", "chatgpt"]):
+                if is_openai_chat_model(model_id):
                     models.append(
                         LLMModel(
                             id=model_id,

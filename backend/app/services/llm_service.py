@@ -24,7 +24,7 @@ from app.services.agent_tool_observability import (
 )
 from app.services.image_input import load_image_bytes
 from app.services.json_output import MAX_OUTPUT_REPAIRS, check_json_output, repair_instruction
-from app.services.llm_chat_bridge import BridgedChatTransport
+from app.services.llm_chat_bridge import BridgedChatTransport, OpenAIChatTransport
 from app.services.llm_provider import is_reasoning_model
 from app.services.llm_trace import LLMTraceContext, record_llm_trace
 from app.services.llm_transport import (
@@ -855,7 +855,7 @@ class LLMService:
     ):
         if self.router is not None:
             # The next routed turn can land on any model, so the history stays a plain message list.
-            return ChatCompletionsTransport()
+            return OpenAIChatTransport()
         protocol = self._gateway_protocol(model, self.credential_type, self.base_url)
         if protocol == "messages":
             return AnthropicMessagesTransport()
@@ -863,7 +863,7 @@ class LLMService:
             return GeminiTransport()
         if self.use_responses_api or protocol == "responses":
             return ResponsesTransport()
-        return ChatCompletionsTransport()
+        return OpenAIChatTransport()
 
     def _transport_for(self, binding: TurnBinding, default: LLMTransport) -> LLMTransport:
         """The transport for one turn: `default`, or the bridge for a routed model on another API."""
