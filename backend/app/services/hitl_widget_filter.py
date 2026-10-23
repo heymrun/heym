@@ -100,7 +100,8 @@ def _hitl_chart(nodes: object) -> dict | None:
     return None
 
 
-def _filter_from_data(data: dict) -> HitlWidgetFilter | None:
+def filter_from_chart_data(data: dict) -> HitlWidgetFilter | None:
+    """The filter set on one HITL chart node's data, or None."""
     raw_workflow = str(data.get(WORKFLOW_FIELD) or "").strip()
     if not raw_workflow:
         return None
@@ -112,10 +113,32 @@ def _filter_from_data(data: dict) -> HitlWidgetFilter | None:
     return HitlWidgetFilter(workflow_id=workflow_id, node_id=node_id)
 
 
+def has_hitl_chart(nodes: object) -> bool:
+    """True when the graph ends in the pending-review inbox chart."""
+    return _hitl_chart(nodes) is not None
+
+
 def hitl_widget_filter(nodes: object) -> HitlWidgetFilter | None:
     """The filter on a widget workflow's HITL chart, or None when it shows every review."""
     chart = _hitl_chart(nodes)
-    return _filter_from_data(_node_data(chart)) if chart is not None else None
+    return filter_from_chart_data(_node_data(chart)) if chart is not None else None
+
+
+def filter_payload(value: HitlWidgetFilter) -> dict[str, str | None]:
+    """The filter as a HITL chart payload carries it to the carousel."""
+    return {"workflow_id": str(value.workflow_id), "node_id": value.node_id}
+
+
+def filter_from_payload(payload: object) -> HitlWidgetFilter | None:
+    """The filter a HITL chart payload carries, or None for any other payload."""
+    if not isinstance(payload, dict) or payload.get("type") != "hitl":
+        return None
+    raw = payload.get("filter")
+    if not isinstance(raw, dict):
+        return None
+    return filter_from_chart_data(
+        {WORKFLOW_FIELD: raw.get("workflow_id"), NODE_FIELD: raw.get("node_id")}
+    )
 
 
 def with_hitl_widget_filter(nodes: list, value: HitlWidgetFilter | None) -> list:
@@ -135,8 +158,10 @@ def with_hitl_widget_filter(nodes: list, value: HitlWidgetFilter | None) -> list
     return updated
 
 
-def strip_hitl_widget_filter(nodes: list) -> list:
+def strip_hitl_widget_filter(nodes: object) -> object:
     """A copy of ``nodes`` with the filter fields removed from every chart node."""
+    if not isinstance(nodes, list):
+        return nodes
     updated = copy.deepcopy(nodes)
     for node in updated:
         if isinstance(node, dict) and node.get("type") == "chartOutput":

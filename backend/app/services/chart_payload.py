@@ -6,6 +6,7 @@ Keep this side-effect free so it stays trivially unit-testable.
 
 from typing import Any
 
+from app.services.hitl_widget_filter import filter_from_chart_data, filter_payload
 from app.services.markdown_task_list import has_task_items
 from app.services.status_tones import resolve_status_tones
 
@@ -117,6 +118,9 @@ def build_chart_payload(config: dict, data: Any) -> dict:
         payload: dict = {"type": "hitl"}
         if title:
             payload["title"] = title
+        review_filter = filter_from_chart_data(config)
+        if review_filter is not None:
+            payload["filter"] = filter_payload(review_filter)
         return payload
 
     rows = _resolve_rows(data, config.get("dataPath"))

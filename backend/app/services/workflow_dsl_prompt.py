@@ -3892,6 +3892,9 @@ Access the saved file downstream: `$saveAudio.id`, `$saveAudio.download_url`
   - `text`: markdown string for the `text` chart type (a static message; supports markdown). For a
     dynamic message, leave `text` empty and set `valueField` to a row key holding the string.
   - `title`: optional chart title
+  - `hitlWorkflowId` / `hitlNodeId`: `hitl` only. The workflow, and optionally the step, whose
+    reviews the widget shows. Use only ids from the review sources you are given; leave both out
+    to show every review.
 - **Output**: a standardized chart payload (consumed by the dashboard renderer).
 
 #### ⚠️ HOW TO PRODUCE THE UPSTREAM ROWS (CRITICAL — read this)
@@ -4018,6 +4021,13 @@ name opens that run on the canvas. Each card has approve, request changes, and r
 icon beside the widget title opens that run in the history dialog on the same page.
 ```json
 {"type": "chartOutput", "data": {"label": "reviews", "chartType": "hitl"}}
+```
+A new HITL widget shows every review. To show only one workflow's reviews (agents with human
+review, Slack approvals, buttons and forms), set `hitlWorkflowId` to that workflow's id, and
+`hitlNodeId` to narrow it to one step. Take both ids from the review sources listed with the
+request; never invent them. Remove both to show every review again.
+```json
+{"type": "chartOutput", "data": {"label": "reviews", "chartType": "hitl", "hitlWorkflowId": "<workflow id>", "hitlNodeId": "<step id>"}}
 ```
 
 **Numbered text lists (including descending):** prefix each line with the explicit number to

@@ -17,6 +17,7 @@ from app.models.dashboard_schemas import WidgetDataResponse
 from app.services.cluster.dispatch import dispatch_workflow
 from app.services.dashboard_widget_policy import dashboard_widget_blocked_nodes_error
 from app.services.highlight.highlight_builder import build_highlight_payload
+from app.services.hitl_widget_filter import filter_payload, hitl_widget_filter
 from app.services.page_params import page_inputs
 from app.services.workflow_executor import (
     WorkflowCancelledError,
@@ -366,9 +367,13 @@ async def compute_widget_data(
     # with every dashboard viewer. Return only the chart marker. The inbox is loaded
     # separately and never written into cached_payload.
     if _is_hitl_chart_workflow(workflow.nodes):
+        hitl_payload: dict[str, Any] = {"type": "hitl"}
+        review_filter = hitl_widget_filter(workflow.nodes)
+        if review_filter is not None:
+            hitl_payload["filter"] = filter_payload(review_filter)
         return WidgetDataResponse(
             widget_id=widget.id,
-            payload={"type": "hitl"},
+            payload=hitl_payload,
             cached=False,
             computed_at=datetime.now(timezone.utc),
         )

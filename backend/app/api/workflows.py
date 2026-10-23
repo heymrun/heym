@@ -116,6 +116,7 @@ from app.services.hitl_service import (
     persist_pending_hitl_execution,
     seed_pending_workflow_review,
 )
+from app.services.hitl_widget_service import ensure_saved_filter_allowed
 from app.services.html_response import build_html_response, find_sole_html_terminal
 from app.services.instance_admin import is_instance_admin
 from app.services.pending_execution import needs_local_pending_persist
@@ -1695,6 +1696,9 @@ async def update_workflow(
         blocked_error = dashboard_widget_blocked_nodes_error(candidate_nodes)
         if blocked_error is not None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=blocked_error)
+        # A HITL widget pointed at another workflow on the canvas: only one whose reviews the
+        # saver may see. Reads re-check the viewer either way.
+        await ensure_saved_filter_allowed(db, current_user.id, workflow.nodes, candidate_nodes)
 
     if workflow_data.name is not None:
         workflow.name = workflow_data.name

@@ -27,6 +27,13 @@ class WidgetLayout(BaseModel):
     h: int = 4
 
 
+class HitlWidgetFilterModel(BaseModel):
+    """Which reviews a HITL widget shows: one workflow's, or one step's of it."""
+
+    workflow_id: uuid.UUID
+    node_id: str | None = Field(default=None, max_length=64)
+
+
 class DashboardWidgetResponse(BaseModel):
     id: uuid.UUID
     workflow_id: uuid.UUID
@@ -42,6 +49,8 @@ class DashboardWidgetResponse(BaseModel):
     link_label_field: str | None = None
     # Whether the caller can open the linked dashboard; rows are clickable only then.
     link_accessible: bool = False
+    # HITL widgets: the workflow (and step) whose reviews it shows; null shows every review.
+    hitl_filter: HitlWidgetFilterModel | None = None
     # Set only on the answer to an AI fine-tune: the Edit History snapshot of the workflow as it
     # was before, which the revert endpoint takes.
     previous_version_number: int | None = None
@@ -158,6 +167,13 @@ class WidgetUpdateRequest(BaseModel):
     )
     link_record_field: str | None = Field(default=None, max_length=255)
     link_label_field: str | None = Field(default=None, max_length=255)
+    hitl_filter: HitlWidgetFilterModel | None = Field(
+        default=None,
+        description=(
+            "HITL widgets only: the workflow, and optionally the step, whose reviews it shows. "
+            "Send null to show every review; leave it out to keep the current choice."
+        ),
+    )
 
 
 class FileRunSlotResponse(BaseModel):
