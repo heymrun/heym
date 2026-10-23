@@ -7,9 +7,10 @@ from concurrent.futures import CancelledError
 from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, Request, status
-from sqlalchemy import func, select, update
+from sqlalchemy import Text, cast, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.api.analytics import (
     resolve_execution_analytics_bucket,
@@ -18,6 +19,7 @@ from app.api.analytics import (
 from app.config import settings
 from app.db.models import ExecutionHistory, HITLRequest, Workflow
 from app.db.session import async_session_maker
+from app.services.hitl_widget_filter import HitlWidgetFilter, ReviewSource, review_steps
 from app.services.workflow_executor import (
     ExecutionResult,
     WorkflowCancelledError,
@@ -391,23 +393,46 @@ async def persist_pending_hitl_execution(
     return history_entry, hitl_request
 
 
+REVIEW_SOURCE_ERROR = "Pick one of your workflows that waits for a review"
+
+
+def review_scope_clause(user_id: uuid.UUID) -> ColumnElement[bool]:
+    """Whose workflows' reviews ``user_id`` may see and decide: today, the workflows they own.
+
+    The inbox, the review sources, a HITL widget's filter check and the dashboard counts all
+    use it, and so does deciding a review from the inbox. Widening it (to write shares, say)
+    widens every one of them at once, so it is a deliberate change made here.
+    """
+    return Workflow.owner_id == user_id
+
+
 def _owned_pending_filters(owner_id: uuid.UUID, now: datetime) -> tuple:
     return (
-        Workflow.owner_id == owner_id,
+        review_scope_clause(owner_id),
         HITLRequest.status == "pending",
         HITLRequest.expires_at > now,
     )
 
 
 async def list_pending_hitl_for_owner(
-    db: AsyncSession, owner_id: uuid.UUID, *, limit: int = 100
+    db: AsyncSession,
+    owner_id: uuid.UUID,
+    *,
+    limit: int = 100,
+    workflow_id: uuid.UUID | None = None,
+    node_id: str | None = None,
 ) -> tuple[int, list[HITLRequest]]:
     """Return the pending-review count and the oldest reviews owned by this user.
 
     The count is the full queue. ``limit`` only caps the rows returned for the carousel.
+    ``workflow_id`` and ``node_id`` narrow both to one workflow, or one step of it.
     """
     now = datetime.now(timezone.utc)
     filters = _owned_pending_filters(owner_id, now)
+    if workflow_id is not None:
+        filters = (*filters, HITLRequest.workflow_id == workflow_id)
+        if node_id is not None:
+            filters = (*filters, HITLRequest.agent_node_id == node_id)
     count_result = await db.execute(
         select(func.count())
         .select_from(HITLRequest)
@@ -425,6 +450,81 @@ async def list_pending_hitl_for_owner(
     return total, list(rows_result.scalars().all())
 
 
+async def count_pending_by_step(
+    db: AsyncSession, owner_id: uuid.UUID
+) -> dict[tuple[uuid.UUID, str], int]:
+    """The user's pending reviews counted by ``(workflow_id, node_id)``."""
+    now = datetime.now(timezone.utc)
+    result = await db.execute(
+        select(HITLRequest.workflow_id, HITLRequest.agent_node_id, func.count())
+        .join(Workflow, Workflow.id == HITLRequest.workflow_id)
+        .where(*_owned_pending_filters(owner_id, now))
+        .group_by(HITLRequest.workflow_id, HITLRequest.agent_node_id)
+    )
+    return {(row[0], row[1]): int(row[2]) for row in result.all()}
+
+
+def _review_source_candidates(user_id: uuid.UUID) -> tuple:
+    # Only the node fields that make a step wait can make a workflow a source, so the text
+    # match keeps workflows without them out of Python. review_steps has the final say.
+    return (
+        review_scope_clause(user_id),
+        Workflow.kind != "dashboard_widget",
+        or_(
+            cast(Workflow.nodes, Text).like('%"hitlEnabled"%'),
+            cast(Workflow.nodes, Text).like('%"slackOperation"%'),
+        ),
+    )
+
+
+async def list_review_sources_for_owner(db: AsyncSession, user_id: uuid.UUID) -> list[ReviewSource]:
+    """The workflows a HITL widget of ``user_id`` can show reviews from, by name."""
+    result = await db.execute(
+        select(Workflow.id, Workflow.name, Workflow.nodes)
+        .where(*_review_source_candidates(user_id))
+        .order_by(Workflow.name, Workflow.id)
+    )
+    sources: list[ReviewSource] = []
+    for row in result.all():
+        steps = review_steps(row.nodes)
+        if steps:
+            sources.append(
+                ReviewSource(workflow_id=row.id, workflow_name=row.name, steps=tuple(steps))
+            )
+    return sources
+
+
+async def filter_in_review_scope(
+    db: AsyncSession, user_id: uuid.UUID, value: HitlWidgetFilter
+) -> bool:
+    """Whether the filter's workflow is one whose reviews ``user_id`` may see.
+
+    Every read of a filtered HITL widget asks this. The filter is stored data anyone with
+    write access to the widget can set, so it never stands in for access.
+    """
+    result = await db.execute(
+        select(Workflow.id).where(Workflow.id == value.workflow_id, review_scope_clause(user_id))
+    )
+    return result.scalar_one_or_none() is not None
+
+
+async def ensure_review_source(
+    db: AsyncSession, user_id: uuid.UUID, value: HitlWidgetFilter
+) -> None:
+    """Refuse a new filter unless it names one of the user's review sources and its step."""
+    result = await db.execute(
+        select(Workflow.nodes).where(
+            Workflow.id == value.workflow_id, *_review_source_candidates(user_id)
+        )
+    )
+    row = result.one_or_none()
+    step_ids = {step.node_id for step in review_steps(row.nodes)} if row is not None else set()
+    if not step_ids or (value.node_id is not None and value.node_id not in step_ids):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=REVIEW_SOURCE_ERROR
+        )
+
+
 async def get_owned_hitl_request(
     db: AsyncSession, request_id: uuid.UUID, owner_id: uuid.UUID
 ) -> HITLRequest:
@@ -436,7 +536,7 @@ async def get_owned_hitl_request(
     result = await db.execute(
         select(HITLRequest)
         .join(Workflow, Workflow.id == HITLRequest.workflow_id)
-        .where(HITLRequest.id == request_id, Workflow.owner_id == owner_id)
+        .where(HITLRequest.id == request_id, review_scope_clause(owner_id))
     )
     hitl_request = result.scalar_one_or_none()
     if hitl_request is None:

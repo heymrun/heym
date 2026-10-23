@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import copy
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 # The Slack node's operations that pause the run as a review. Kept here rather than imported
@@ -37,6 +38,24 @@ class HitlWidgetFilter:
     node_id: str | None = None
 
 
+@dataclass(frozen=True)
+class ReviewStep:
+    """A step that can leave a review waiting: an agent or a Slack approval, button or form."""
+
+    node_id: str
+    label: str
+    kind: str
+
+
+@dataclass(frozen=True)
+class ReviewSource:
+    """A workflow a HITL widget can show reviews from, with its waiting steps."""
+
+    workflow_id: uuid.UUID
+    workflow_name: str
+    steps: tuple[ReviewStep, ...]
+
+
 def _node_data(node: object) -> dict:
     if not isinstance(node, dict):
         return {}
@@ -57,17 +76,17 @@ def review_step_kind(node: object) -> str | None:
     return None
 
 
-def review_steps(nodes: object) -> list[tuple[str, str, str]]:
-    """``(node_id, label, kind)`` of every step in ``nodes`` that can wait, in graph order."""
+def review_steps(nodes: object) -> list[ReviewStep]:
+    """Every step in ``nodes`` that can leave a review waiting, in graph order."""
     if not isinstance(nodes, list):
         return []
-    steps: list[tuple[str, str, str]] = []
+    steps: list[ReviewStep] = []
     for node in nodes:
         kind = review_step_kind(node)
         node_id = str(node.get("id") or "").strip() if kind else ""
         if kind and node_id:
             label = str(_node_data(node).get("label") or "").strip() or node_id
-            steps.append((node_id, label, kind))
+            steps.append(ReviewStep(node_id=node_id, label=label, kind=kind))
     return steps
 
 
@@ -130,3 +149,25 @@ def strip_hitl_widget_filter(nodes: list) -> list:
 def hitl_filter_changed(old_nodes: object, new_nodes: object) -> bool:
     """True when a save points the widget at different reviews than before."""
     return hitl_widget_filter(old_nodes) != hitl_widget_filter(new_nodes)
+
+
+def pending_for_widgets(
+    counts: dict[tuple[uuid.UUID, str], int], filters: Sequence[HitlWidgetFilter | None]
+) -> int:
+    """Pending reviews a page's HITL widgets show together, each review counted once.
+
+    ``counts`` are the viewer's pending reviews by ``(workflow_id, node_id)``, already limited
+    to their review scope, so a filter outside it matches nothing. An unfiltered widget shows
+    every review.
+    """
+    if any(value is None for value in filters):
+        return sum(counts.values())
+    chosen = [value for value in filters if value is not None]
+    return sum(
+        count
+        for (workflow_id, node_id), count in counts.items()
+        if any(
+            value.workflow_id == workflow_id and value.node_id in (None, node_id)
+            for value in chosen
+        )
+    )

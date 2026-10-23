@@ -7,8 +7,10 @@ from app.services import slack_operations
 from app.services.hitl_widget_filter import (
     WAITING_SLACK_OPERATIONS,
     HitlWidgetFilter,
+    ReviewStep,
     hitl_filter_changed,
     hitl_widget_filter,
+    pending_for_widgets,
     review_step_kind,
     review_steps,
     strip_hitl_widget_filter,
@@ -59,12 +61,15 @@ class ReviewStepTest(TestCase):
         ]
         self.assertEqual(
             review_steps(nodes),
-            [("a1", "Approver", "agent"), ("s1", "Ask finance", "slack")],
+            [
+                ReviewStep("a1", "Approver", "agent"),
+                ReviewStep("s1", "Ask finance", "slack"),
+            ],
         )
 
     def test_a_step_without_a_label_is_named_by_its_id(self) -> None:
         node = {"id": "a9", "type": "agent", "data": {"hitlEnabled": True}}
-        self.assertEqual(review_steps([node]), [("a9", "a9", "agent")])
+        self.assertEqual(review_steps([node]), [ReviewStep("a9", "a9", "agent")])
 
     def test_review_steps_tolerates_a_graph_that_is_not_a_list(self) -> None:
         self.assertEqual(review_steps(None), [])
@@ -139,3 +144,37 @@ class WidgetFilterTest(TestCase):
         self.assertFalse(hitl_filter_changed(before, moved))
         self.assertTrue(hitl_filter_changed(before, retargeted))
         self.assertTrue(hitl_filter_changed(before, [_chart(chartType="hitl")]))
+
+
+class PendingForWidgetsTest(TestCase):
+    def setUp(self) -> None:
+        self.invoices = uuid.uuid4()
+        self.hiring = uuid.uuid4()
+        self.counts = {
+            (self.invoices, "approver"): 3,
+            (self.invoices, "finance"): 2,
+            (self.hiring, "screen"): 4,
+        }
+
+    def test_an_unfiltered_widget_counts_every_review(self) -> None:
+        filters = [HitlWidgetFilter(self.invoices, "approver"), None]
+        self.assertEqual(pending_for_widgets(self.counts, filters), 9)
+
+    def test_a_workflow_filter_counts_all_its_steps(self) -> None:
+        filters = [HitlWidgetFilter(self.invoices)]
+        self.assertEqual(pending_for_widgets(self.counts, filters), 5)
+
+    def test_a_step_filter_counts_that_step(self) -> None:
+        filters = [HitlWidgetFilter(self.invoices, "finance")]
+        self.assertEqual(pending_for_widgets(self.counts, filters), 2)
+
+    def test_overlapping_widgets_count_a_review_once(self) -> None:
+        filters = [HitlWidgetFilter(self.invoices), HitlWidgetFilter(self.invoices, "approver")]
+        self.assertEqual(pending_for_widgets(self.counts, filters), 5)
+
+    def test_a_workflow_outside_the_counts_adds_nothing(self) -> None:
+        filters = [HitlWidgetFilter(uuid.uuid4()), HitlWidgetFilter(self.hiring, "screen")]
+        self.assertEqual(pending_for_widgets(self.counts, filters), 4)
+
+    def test_no_widgets_count_nothing(self) -> None:
+        self.assertEqual(pending_for_widgets(self.counts, []), 0)

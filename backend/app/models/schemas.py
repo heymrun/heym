@@ -1421,6 +1421,32 @@ class HITLInboxLinkResponse(BaseModel):
     url: str
 
 
+class HITLReviewSourceStep(BaseModel):
+    """A step that can leave a review waiting."""
+
+    node_id: str
+    label: str
+    kind: Literal["agent", "slack"]
+
+
+class HITLReviewSource(BaseModel):
+    """A workflow a HITL widget can show reviews from."""
+
+    workflow_id: uuid.UUID
+    workflow_name: str
+    steps: list[HITLReviewSourceStep]
+
+
+class HITLReviewSourcesResponse(BaseModel):
+    sources: list[HITLReviewSource]
+
+
+class HITLDashboardCountsResponse(BaseModel):
+    """Pending reviews each dashboard's HITL widgets show the caller, by dashboard id."""
+
+    counts: dict[str, int]
+
+
 class PendingReviewSeedRequest(BaseModel):
     """A review planted on a workflow without running it."""
 
