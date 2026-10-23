@@ -2,6 +2,7 @@
 import ExpressionInput from "@/components/ui/ExpressionInput.vue";
 import Label from "@/components/ui/Label.vue";
 import Select from "@/components/ui/Select.vue";
+import ChartOutputHitlFields from "./ChartOutputHitlFields.vue";
 import ChartOutputLinkFields from "./ChartOutputLinkFields.vue";
 import ChartOutputStatusFields from "./ChartOutputStatusFields.vue";
 import { usePropertiesPanelContext } from "../usePropertiesPanelController";
@@ -121,6 +122,7 @@ const {
       Shows your pending human reviews. The header reads 1/n pending. The name opens that run on the canvas.
       Approve, request changes, or reject from the card. The history icon beside the title opens that run.
     </p>
+    <ChartOutputHitlFields v-if="selectedNode.data.chartType === 'hitl'" />
 
     <div
       v-if="selectedNode.data.chartType !== 'hitl'"

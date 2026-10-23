@@ -110,6 +110,7 @@ const apexOptions = computed(() =>
       v-else-if="chartPayload && chartPayload.type === 'hitl'"
       :seed-items="chartPayload.items"
       :seed-total="chartPayload.pending_total"
+      :filter="chartPayload.filter ?? null"
     />
 
     <div

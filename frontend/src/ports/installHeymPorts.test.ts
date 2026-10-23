@@ -29,10 +29,10 @@ describe("installHeymPorts", () => {
     const { app } = heymApp();
     const hitl = app.runWithContext(() => usePort(hitlPortKey));
 
-    await hitl.inbox();
+    await hitl.inbox({ workflow_id: "wf-1", node_id: "agent-1" });
     await hitl.inboxDecide("r-1", { action: "edit", edited_text: "Ship it" });
 
-    expect(hitlApi.inbox).toHaveBeenCalledOnce();
+    expect(hitlApi.inbox).toHaveBeenCalledWith({ workflow_id: "wf-1", node_id: "agent-1" });
     expect(hitlApi.inboxDecide).toHaveBeenCalledWith("r-1", {
       action: "edit",
       edited_text: "Ship it",

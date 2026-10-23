@@ -12,6 +12,7 @@ import type {
   ModelRouterConfigResponse,
   UpdateCredentialRequest,
 } from "@/types/credential";
+import type { HitlFilter } from "@/types/dashboard";
 import type { HITLDecisionPayload, HITLInbox } from "@/types/workflow";
 import type { ClarifyDataTables } from "@/composables/clarifyDataTables";
 import type { InteractiveVoice } from "@/composables/interactiveVoice";
@@ -36,9 +37,12 @@ export interface HitlRunTarget {
   executionId?: string;
 }
 
-/** The HITL carousel's pending reviews: Heym's `hitlApi` calls, and opening the run in the editor. */
+/**
+ * The HITL carousel's pending reviews: Heym's `hitlApi` calls, and opening the run in the editor.
+ * `inbox` narrows to one workflow (and step) when the widget has a filter.
+ */
 export interface HitlPort {
-  inbox: () => Promise<HITLInbox>;
+  inbox: (filter?: HitlFilter | null) => Promise<HITLInbox>;
   inboxDecide: (requestId: string, payload: HITLDecisionPayload) => Promise<unknown>;
   openRun: (target: HitlRunTarget) => void;
 }

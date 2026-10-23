@@ -146,6 +146,8 @@ import type {
   DashboardTeamShare,
   DashboardWidget,
   FileRunSlot,
+  HitlFilter,
+  HitlSource,
   RecordFormat,
   WidgetRunResult,
   WidgetCreateRequest,
@@ -3118,9 +3120,16 @@ export const hitlApi = {
     return response.data;
   },
 
-  inbox: async (): Promise<HITLInbox> => {
-    const response = await api.get<HITLInbox>("/hitl/inbox");
+  inbox: async (filter?: HitlFilter | null): Promise<HITLInbox> => {
+    // axios leaves out undefined params, so an unfiltered inbox sends none.
+    const params = { workflow_id: filter?.workflow_id, node_id: filter?.node_id ?? undefined };
+    const response = await api.get<HITLInbox>("/hitl/inbox", { params });
     return response.data;
+  },
+
+  sources: async (): Promise<HitlSource[]> => {
+    const response = await api.get<{ sources: HitlSource[] }>("/hitl/sources");
+    return response.data.sources;
   },
 
   inboxLink: async (requestId: string): Promise<{ url: string }> => {

@@ -10,7 +10,7 @@ import { credentialsApi, hitlApi } from "@/services/api";
 /** Provides Heym's implementation of every port to the components of `app`. */
 export function installHeymPorts(app: App, router: Router): void {
   app.provide(hitlPortKey, {
-    inbox: () => hitlApi.inbox(),
+    inbox: (filter) => hitlApi.inbox(filter),
     inboxDecide: (requestId, payload) => hitlApi.inboxDecide(requestId, payload),
     openRun: ({ workflowId, executionId }) => {
       const params: { id: string; executionId?: string } = { id: workflowId };

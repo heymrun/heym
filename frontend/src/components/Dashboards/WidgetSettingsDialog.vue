@@ -2,10 +2,19 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { X } from "lucide-vue-next";
 
+import type {
+  DashboardSummary,
+  DashboardWidget,
+  HitlFilter,
+  WidgetUpdateRequest,
+} from "@/types/dashboard";
+import HitlFilterFields from "@/components/Dashboards/HitlFilterFields.vue";
+import { sameFilter } from "@/components/Dashboards/hitlFilter";
 import Button from "@/components/ui/Button.vue";
 import Input from "@/components/ui/Input.vue";
 import Select from "@/components/ui/Select.vue";
-import type { DashboardSummary, DashboardWidget, WidgetUpdateRequest } from "@/types/dashboard";
+import { responseDetail } from "@/lib/responseDetail";
+import { dashboardApi } from "@/services/api";
 
 const props = defineProps<{
   widget: DashboardWidget;
@@ -15,7 +24,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: "close"): void;
-  (e: "save", payload: WidgetUpdateRequest): void;
+  (e: "saved", widget: DashboardWidget): void;
 }>();
 
 function onKeydown(event: KeyboardEvent): void {
@@ -35,6 +44,10 @@ const description = ref(props.widget.description ?? "");
 const cacheTtlSeconds = ref(props.widget.cache_ttl_seconds);
 
 const isTable = computed<boolean>(() => props.widget.chart_type === "table");
+const isHitl = computed<boolean>(() => props.widget.chart_type === "hitl");
+const hitlFilter = ref<HitlFilter | null>(props.widget.hitl_filter ?? null);
+const saving = ref(false);
+const saveError = ref<string | null>(null);
 const linkDashboardId = ref<string | undefined>(props.widget.link_dashboard_id ?? undefined);
 const linkRecordField = ref(props.widget.link_record_field ?? "");
 const linkLabelField = ref(props.widget.link_label_field ?? "");
@@ -63,14 +76,30 @@ function linkUpdate(): WidgetUpdateRequest {
   };
 }
 
-function save(): void {
-  if (!canSave.value) return;
-  emit("save", {
-    title: title.value.trim() || "Untitled",
-    description: description.value.trim() ? description.value.trim() : null,
-    cache_ttl_seconds: Number(cacheTtlSeconds.value) || 0,
-    ...linkUpdate(),
-  });
+// Sent only when it changed, so an editor who cannot see the chosen workflow can save the rest.
+function hitlUpdate(): WidgetUpdateRequest {
+  if (!isHitl.value || sameFilter(hitlFilter.value, props.widget.hitl_filter ?? null)) return {};
+  return { hitl_filter: hitlFilter.value };
+}
+
+async function save(): Promise<void> {
+  if (!canSave.value || saving.value) return;
+  saving.value = true;
+  saveError.value = null;
+  try {
+    const saved = await dashboardApi.updateWidget(props.widget.id, {
+      title: title.value.trim() || "Untitled",
+      description: description.value.trim() ? description.value.trim() : null,
+      cache_ttl_seconds: Number(cacheTtlSeconds.value) || 0,
+      ...linkUpdate(),
+      ...hitlUpdate(),
+    });
+    emit("saved", saved);
+  } catch (error: unknown) {
+    saveError.value = responseDetail(error) ?? "The widget settings could not be saved.";
+  } finally {
+    saving.value = false;
+  }
 }
 </script>
 
@@ -149,7 +178,20 @@ function save(): void {
               as $page.record.
             </p>
           </div>
+          <HitlFilterFields
+            v-if="isHitl"
+            v-model="hitlFilter"
+            class="border-t pt-3"
+          />
         </div>
+
+        <p
+          v-if="saveError"
+          role="alert"
+          class="mt-3 text-xs text-destructive"
+        >
+          {{ saveError }}
+        </p>
 
         <div class="mt-5 flex justify-end gap-2">
           <Button
@@ -159,7 +201,7 @@ function save(): void {
             Cancel
           </Button>
           <Button
-            :disabled="!canSave"
+            :disabled="!canSave || saving"
             @click="save"
           >
             Save

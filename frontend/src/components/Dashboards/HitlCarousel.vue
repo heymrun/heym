@@ -2,7 +2,8 @@
 import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { ChevronLeft, ChevronRight, ExternalLink } from "lucide-vue-next";
 
-import type { HitlWidgetItem } from "@/types/dashboard";
+import type { HitlFilter, HitlWidgetItem } from "@/types/dashboard";
+import { sameFilter } from "@/components/Dashboards/hitlFilter";
 import { setHitlHistoryTargetKey } from "@/components/Dashboards/hitlHistory";
 import HitlReviewActions from "@/components/Dashboards/HitlReviewActions.vue";
 import Button from "@/components/ui/Button.vue";
@@ -14,6 +15,8 @@ import { hitlPortKey, usePort } from "@/ports";
 const props = defineProps<{
   seedItems?: HitlWidgetItem[];
   seedTotal?: number;
+  /** Only reviews from this workflow (and step); null shows every review. */
+  filter?: HitlFilter | null;
 }>();
 
 const hitl = usePort(hitlPortKey);
@@ -93,7 +96,7 @@ async function loadInbox(): Promise<void> {
   loading.value = true;
   loadError.value = "";
   try {
-    const inbox = await hitl.inbox();
+    const inbox = await hitl.inbox(props.filter ?? null);
     items.value = inbox.items;
     pendingTotal.value = inbox.pending_total;
     if (index.value >= items.value.length) index.value = 0;
@@ -162,6 +165,15 @@ async function decide(action: "accept" | "edit" | "refuse"): Promise<void> {
     submitting.value = false;
   }
 }
+watch(
+  () => props.filter ?? null,
+  (next, previous) => {
+    if (sameFilter(next, previous)) return;
+    index.value = 0;
+    editing.value = false;
+    void loadInbox();
+  },
+);
 onMounted(() => {
   void loadInbox();
 });

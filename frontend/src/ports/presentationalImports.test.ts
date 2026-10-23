@@ -18,6 +18,7 @@ const PRESENTATIONAL = [
   "components/Dashboards/FileRunWidgetView.vue",
   "components/Dashboards/HitlCarousel.vue",
   "components/Dashboards/HitlReviewActions.vue",
+  "components/Dashboards/hitlFilter.ts",
   "components/Layout/QuickWorkflowRunView.vue",
   "components/ui/ClarifyCard.vue",
   "composables/clarifyDataTables.ts",

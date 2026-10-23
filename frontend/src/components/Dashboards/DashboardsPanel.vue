@@ -22,7 +22,6 @@ import type {
   DashboardWidget,
   WidgetCreateRequest,
   WidgetLayout,
-  WidgetUpdateRequest,
 } from "@/types/dashboard";
 import { playSuccessSound } from "@/utils/audio";
 
@@ -134,10 +133,8 @@ async function handleRefine(payload: {
   }
 }
 
-async function handleSettingsSave(payload: WidgetUpdateRequest): Promise<void> {
-  const target = settingsWidget.value;
-  if (!target) return;
-  dashboardStore.replaceWidget(await dashboardApi.updateWidget(target.id, payload));
+function handleSettingsSaved(widget: DashboardWidget): void {
+  dashboardStore.replaceWidget(widget);
   settingsWidget.value = null;
 }
 
@@ -279,7 +276,7 @@ onMounted(() => {
       :widget="settingsWidget"
       :dashboards="dashboardStore.dashboards"
       @close="settingsWidget = null"
-      @save="handleSettingsSave"
+      @saved="handleSettingsSaved"
     />
     <DashboardCreateDialog
       :open="showCreate"
