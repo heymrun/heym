@@ -42,6 +42,8 @@ When you only have example/sample data (no real source), produce these rows with
 | `unit` | string | Optional unit shown next to a `numeric` or `gauge` value |
 | `text` | string | Markdown message for the `text` chart type. Leave empty and set `valueField` to render a dynamic message pulled from upstream data. |
 | `title` | string | Optional chart title |
+| `hitlWorkflowId` | string | `hitl` only. Show only the reviews of this workflow. Left empty, the widget shows every review. |
+| `hitlNodeId` | string | `hitl` only. Narrow `hitlWorkflowId` to one step: an Agent with human review, or a Slack approval, buttons or form step. |
 
 ## Chart types
 
@@ -53,7 +55,7 @@ When you only have example/sample data (no real source), produce these rows with
 - **proportion** — a single horizontal bar split into shares with a percentage legend (e.g. a language breakdown). Uses `labelField` + `valueField`.
 - **barGauge** — one horizontal gauge per row with a red→green gradient and a value (e.g. free disk space). Uses `labelField` + `valueField`, optional `unit` and `max` (defaults to the largest row value).
 - **text** — a markdown message (e.g. a status note like "Last execution at 19:47"). Put the markdown in `text` for a static message, or leave `text` empty and set `valueField` to render a string produced upstream. Supports headings, bold/italic, [lists](../nodes/chart-output-node.md#interactive-task-lists), links, and inline code.
-- **hitl** — a carousel of your pending human reviews. The header shows `1/n pending`; the left arrow is disabled on the first card and the right arrow on the last. The workflow name opens that run on the canvas. **Approve**, **Request changes**, and **Reject** resolve it, and the history icon beside the widget title opens that run in the history dialog on the same page. This chart type ignores upstream rows, so the widget workflow is only the Chart Output node. Each signed-in person sees the reviews on workflows they own.
+- **hitl** — a carousel of your pending human reviews. The header shows `1/n pending`; the left arrow is disabled on the first card and the right arrow on the last. The workflow name opens that run on the canvas. **Approve**, **Request changes**, and **Reject** resolve it, and the history icon beside the widget title opens that run in the history dialog on the same page. This chart type ignores upstream rows, so the widget workflow is only the Chart Output node. Each signed-in person sees the reviews on workflows they own. Pick a **Workflow** (and **Select agent** when it has several review steps) in the node's properties or the widget's Settings to show only those reviews; see [HITL widgets](../tabs/dashboard-tab.md#hitl-widgets).
 
 ### Interactive task lists
 

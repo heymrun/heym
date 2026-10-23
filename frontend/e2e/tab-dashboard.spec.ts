@@ -3,8 +3,10 @@ import { expect, test } from "@playwright/test";
 import {
   clearDashboardWidgets,
   createDashboardWidget,
+  createWorkflow,
   deleteDashboardWidget,
   deleteWorkflow,
+  expectOk,
   prepareAuthenticatedPage,
 } from "./support";
 
@@ -86,4 +88,74 @@ test("keeps the dashboard header within a mobile viewport", async ({ page }) => 
     (element) => element.scrollWidth > element.clientWidth,
   );
   expect(hasHorizontalOverflow).toBe(false);
+});
+
+test("narrows a HITL widget to one workflow's reviews from Settings", async ({ page }) => {
+  await clearDashboardWidgets(page);
+  const stamp = Date.now();
+  const reviewAgent = (label: string): Record<string, unknown> => ({
+    id: `agent-${stamp}`,
+    type: "agent",
+    position: { x: 0, y: 0 },
+    data: { label, hitlEnabled: true },
+  });
+  const invoices = await createWorkflow(page, `E2E Invoices ${stamp}`, [reviewAgent("Approver")]);
+  const hiring = await createWorkflow(page, `E2E Hiring ${stamp}`, [reviewAgent("Screener")]);
+  const widget = await createDashboardWidget(page, `E2E Reviews ${stamp}`, "hitl");
+  // A waiting review keeps its workflow from being deleted, so cleanup cancels these runs first.
+  const waitingRuns: { workflowId: string; executionId: string }[] = [];
+
+  try {
+    for (const [workflow, draft] of [
+      [invoices, "Pay invoice 42"],
+      [hiring, "Invite candidate 7"],
+    ] as const) {
+      const seeded = await page.request.post(`/api/workflows/${workflow.id}/pending-review`, {
+        data: { summary: draft, draft_text: draft },
+      });
+      await expectOk(seeded);
+      const { execution_history_id: executionId } = (await seeded.json()) as {
+        execution_history_id: string;
+      };
+      waitingRuns.push({ workflowId: workflow.id, executionId });
+    }
+
+    await page.goto("/?tab=dashboard");
+    await expect(page.getByText(`E2E Reviews ${stamp}`)).toBeVisible();
+
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Widget settings" })).toBeVisible();
+    await page
+      .getByTestId("hitl-filter-workflow")
+      .locator("select")
+      .selectOption({ label: invoices.name });
+    // The workflow has one review step, so it is picked with it.
+    await expect(page.getByTestId("hitl-filter-step").locator("select")).toHaveValue(
+      `agent-${stamp}`,
+    );
+
+    const saved = page.waitForResponse(
+      (response) =>
+        response.request().method() === "PATCH" &&
+        new URL(response.url()).pathname === `/api/dashboards/widgets/${widget.id}`,
+    );
+    await page.getByRole("button", { name: "Save" }).click();
+    expect((await saved).ok()).toBeTruthy();
+
+    // The card names the review's workflow as "<name> · <step>"; the quick workflow list on
+    // the page names both workflows too, so match the card's button only.
+    const reviewOf = (name: string): RegExp => new RegExp(`^${name} ·`);
+    await expect(page.getByText("1/1 pending")).toBeVisible();
+    await expect(page.getByRole("button", { name: reviewOf(invoices.name) })).toBeVisible();
+    await expect(page.getByRole("button", { name: reviewOf(hiring.name) })).toHaveCount(0);
+  } finally {
+    await deleteDashboardWidget(page, widget.id);
+    for (const run of waitingRuns) {
+      await page.request.post(
+        `/api/workflows/${run.workflowId}/executions/${run.executionId}/cancel`,
+      );
+    }
+    await deleteWorkflow(page, invoices.id);
+    await deleteWorkflow(page, hiring.id);
+  }
 });
