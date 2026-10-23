@@ -23,6 +23,8 @@ interface Props {
   hideFullscreenToggleOnMobile?: boolean;
   closeOnEscape?: boolean;
   closeOnBack?: boolean;
+  /** Keeps `header-actions` in the title row on phones; by default they get a row of their own. */
+  inlineHeaderActions?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -35,7 +37,28 @@ const props = withDefaults(defineProps<Props>(), {
   hideFullscreenToggleOnMobile: false,
   closeOnEscape: true,
   closeOnBack: false,
+  inlineHeaderActions: false,
 });
+
+const STACKED_HEADER_ACTIONS = {
+  grid: "grid grid-cols-[minmax(0,1fr)_auto] sm:grid-cols-[auto_minmax(0,1fr)_auto] items-center",
+  row: "col-span-2 sm:col-span-1 min-w-0 flex items-center justify-center sm:justify-start gap-1.5 sm:gap-2",
+  divider: "h-5 w-px bg-border/60 shrink-0 hidden sm:block",
+  slot: "min-w-0 overflow-hidden flex justify-center sm:justify-start sm:flex-1",
+  controls: "row-start-1 col-start-2 sm:col-start-3",
+};
+
+const INLINE_HEADER_ACTIONS = {
+  grid: "grid grid-cols-[auto_minmax(0,1fr)_auto] items-center",
+  row: "min-w-0 flex items-center justify-start gap-1.5 sm:gap-2",
+  divider: "h-5 w-px bg-border/60 shrink-0",
+  slot: "min-w-0 overflow-hidden flex justify-start flex-1",
+  controls: "col-start-3",
+};
+
+const headerActionsLayout = computed(() =>
+  props.inlineHeaderActions ? INLINE_HEADER_ACTIONS : STACKED_HEADER_ACTIONS,
+);
 
 const isFullscreen = ref(props.defaultFullscreen);
 // Screen readers announce the panel as a dialog named by its title.
@@ -168,9 +191,7 @@ function toggleFullscreen(): void {
           <div
             :class="[
               'dialog-header shrink-0 pb-3 sm:pb-4 mb-3 sm:mb-5 gap-x-1.5 sm:gap-x-2 gap-y-2',
-              $slots['header-actions']
-                ? 'grid grid-cols-[minmax(0,1fr)_auto] sm:grid-cols-[auto_minmax(0,1fr)_auto] items-center'
-                : 'flex items-center justify-between',
+              $slots['header-actions'] ? headerActionsLayout.grid : 'flex items-center justify-between',
             ]"
           >
             <div class="min-w-0 flex items-center gap-1.5 sm:gap-2 md:gap-4 overflow-hidden">
@@ -199,17 +220,17 @@ function toggleFullscreen(): void {
             </div>
             <div
               v-if="$slots['header-actions']"
-              class="col-span-2 sm:col-span-1 min-w-0 flex items-center justify-center sm:justify-start gap-1.5 sm:gap-2"
+              :class="headerActionsLayout.row"
             >
-              <div class="h-5 w-px bg-border/60 shrink-0 hidden sm:block" />
-              <div class="min-w-0 overflow-hidden flex justify-center sm:justify-start sm:flex-1">
+              <div :class="headerActionsLayout.divider" />
+              <div :class="headerActionsLayout.slot">
                 <slot name="header-actions" />
               </div>
             </div>
             <div
               :class="[
                 'flex items-center gap-1 sm:gap-1.5 flex-shrink-0',
-                $slots['header-actions'] ? 'row-start-1 col-start-2 sm:col-start-3' : '',
+                $slots['header-actions'] ? headerActionsLayout.controls : '',
               ]"
             >
               <div

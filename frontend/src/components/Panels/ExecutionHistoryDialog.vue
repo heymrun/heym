@@ -727,6 +727,7 @@ function bringToCanvas(): void {
     :open="open"
     title="Execution History"
     size="5xl"
+    inline-header-actions
     :close-on-escape="!searchActive || !searchQuery"
     @close="emit('close')"
     @escape="handleDialogEscape"
