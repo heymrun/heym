@@ -4022,10 +4022,11 @@ icon beside the widget title opens that run in the history dialog on the same pa
 ```json
 {"type": "chartOutput", "data": {"label": "reviews", "chartType": "hitl"}}
 ```
-A new HITL widget shows every review. To show only one workflow's reviews (agents with human
-review, Slack approvals, buttons and forms), set `hitlWorkflowId` to that workflow's id, and
-`hitlNodeId` to narrow it to one step. Take both ids from the review sources listed with the
-request; never invent them. Remove both to show every review again.
+A HITL widget shows every review unless the request names a workflow. To show only one
+workflow's reviews (agents with human review, Slack approvals, buttons and forms), set
+`hitlWorkflowId` to that workflow's id, and `hitlNodeId` to narrow it to one step. Take both ids
+from the review sources listed with the request; never invent them. Remove both to show every
+review again.
 ```json
 {"type": "chartOutput", "data": {"label": "reviews", "chartType": "hitl", "hitlWorkflowId": "<workflow id>", "hitlNodeId": "<step id>"}}
 ```

@@ -3,6 +3,7 @@ import copy
 import logging
 import secrets
 import uuid
+from collections.abc import Iterable
 from concurrent.futures import CancelledError
 from datetime import datetime, timedelta, timezone
 
@@ -20,6 +21,7 @@ from app.config import settings
 from app.db.models import ExecutionHistory, HITLRequest, Workflow
 from app.db.session import async_session_maker
 from app.services.hitl_widget_filter import HitlWidgetFilter, ReviewSource, review_steps
+from app.services.workflow_access import workflow_access_clause
 from app.services.workflow_executor import (
     ExecutionResult,
     WorkflowCancelledError,
@@ -393,25 +395,29 @@ async def persist_pending_hitl_execution(
     return history_entry, hitl_request
 
 
-REVIEW_SOURCE_ERROR = "Pick one of your workflows that waits for a review"
+REVIEW_SOURCE_ERROR = "Pick a workflow you can open that waits for a review"
 
 
-def review_scope_clause(user_id: uuid.UUID) -> ColumnElement[bool]:
-    """Whose workflows' reviews ``user_id`` may see and decide: today, the workflows they own.
+def own_reviews_clause(user_id: uuid.UUID) -> ColumnElement[bool]:
+    """The reviews in a user's own queue: those of the workflows they own.
 
-    The inbox, the review sources, a HITL widget's filter check and the dashboard counts all
-    use it, and so does deciding a review from the inbox. Widening it (to write shares, say)
-    widens every one of them at once, so it is a deliberate change made here.
+    The unfiltered inbox, an unfiltered HITL widget and the inbox's review link use it.
     """
     return Workflow.owner_id == user_id
 
 
-def _owned_pending_filters(owner_id: uuid.UUID, now: datetime) -> tuple:
-    return (
-        review_scope_clause(owner_id),
-        HITLRequest.status == "pending",
-        HITLRequest.expires_at > now,
-    )
+def review_access_clause(user_id: uuid.UUID) -> ColumnElement[bool]:
+    """Workflows whose reviews a user may see and decide when they ask for that workflow.
+
+    Every workflow they can open (owned, shared with them or their team, or any as an instance
+    administrator), the same reach that lets them run it, since deciding resumes the run. A
+    filtered HITL widget, its review sources and a decision from the inbox use it.
+    """
+    return workflow_access_clause(user_id)
+
+
+def _pending_filters(now: datetime) -> tuple:
+    return (HITLRequest.status == "pending", HITLRequest.expires_at > now)
 
 
 async def list_pending_hitl_for_owner(
@@ -422,15 +428,21 @@ async def list_pending_hitl_for_owner(
     workflow_id: uuid.UUID | None = None,
     node_id: str | None = None,
 ) -> tuple[int, list[HITLRequest]]:
-    """Return the pending-review count and the oldest reviews owned by this user.
+    """Return the pending-review count and the oldest reviews of the user's queue.
 
     The count is the full queue. ``limit`` only caps the rows returned for the carousel.
-    ``workflow_id`` and ``node_id`` narrow both to one workflow, or one step of it.
+    Without ``workflow_id`` the queue is the user's own workflows. With it, the queue is that
+    workflow's reviews (or one step's, with ``node_id``) when the user can open it.
     """
     now = datetime.now(timezone.utc)
-    filters = _owned_pending_filters(owner_id, now)
-    if workflow_id is not None:
-        filters = (*filters, HITLRequest.workflow_id == workflow_id)
+    if workflow_id is None:
+        filters: tuple = (own_reviews_clause(owner_id), *_pending_filters(now))
+    else:
+        filters = (
+            review_access_clause(owner_id),
+            HITLRequest.workflow_id == workflow_id,
+            *_pending_filters(now),
+        )
         if node_id is not None:
             filters = (*filters, HITLRequest.agent_node_id == node_id)
     count_result = await db.execute(
@@ -450,25 +462,45 @@ async def list_pending_hitl_for_owner(
     return total, list(rows_result.scalars().all())
 
 
-async def count_pending_by_step(
-    db: AsyncSession, owner_id: uuid.UUID
-) -> dict[tuple[uuid.UUID, str], int]:
-    """The user's pending reviews counted by ``(workflow_id, node_id)``."""
-    now = datetime.now(timezone.utc)
+async def _count_by_step(db: AsyncSession, *filters: object) -> dict[tuple[uuid.UUID, str], int]:
     result = await db.execute(
         select(HITLRequest.workflow_id, HITLRequest.agent_node_id, func.count())
         .join(Workflow, Workflow.id == HITLRequest.workflow_id)
-        .where(*_owned_pending_filters(owner_id, now))
+        .where(*filters)
         .group_by(HITLRequest.workflow_id, HITLRequest.agent_node_id)
     )
     return {(row[0], row[1]): int(row[2]) for row in result.all()}
+
+
+async def count_pending_by_step(
+    db: AsyncSession, owner_id: uuid.UUID
+) -> dict[tuple[uuid.UUID, str], int]:
+    """The user's own pending reviews counted by ``(workflow_id, node_id)``."""
+    now = datetime.now(timezone.utc)
+    return await _count_by_step(db, own_reviews_clause(owner_id), *_pending_filters(now))
+
+
+async def count_pending_in_workflows(
+    db: AsyncSession, user_id: uuid.UUID, workflow_ids: Iterable[uuid.UUID]
+) -> dict[tuple[uuid.UUID, str], int]:
+    """Pending reviews of these workflows by ``(workflow_id, node_id)``, those the user can open."""
+    wanted = list(set(workflow_ids))
+    if not wanted:
+        return {}
+    now = datetime.now(timezone.utc)
+    return await _count_by_step(
+        db,
+        review_access_clause(user_id),
+        HITLRequest.workflow_id.in_(wanted),
+        *_pending_filters(now),
+    )
 
 
 def _review_source_candidates(user_id: uuid.UUID) -> tuple:
     # Only the node fields that make a step wait can make a workflow a source, so the text
     # match keeps workflows without them out of Python. review_steps has the final say.
     return (
-        review_scope_clause(user_id),
+        review_access_clause(user_id),
         Workflow.kind != "dashboard_widget",
         or_(
             cast(Workflow.nodes, Text).like('%"hitlEnabled"%'),
@@ -477,7 +509,7 @@ def _review_source_candidates(user_id: uuid.UUID) -> tuple:
     )
 
 
-async def list_review_sources_for_owner(db: AsyncSession, user_id: uuid.UUID) -> list[ReviewSource]:
+async def list_review_sources(db: AsyncSession, user_id: uuid.UUID) -> list[ReviewSource]:
     """The workflows a HITL widget of ``user_id`` can show reviews from, by name."""
     result = await db.execute(
         select(Workflow.id, Workflow.name, Workflow.nodes)
@@ -494,18 +526,26 @@ async def list_review_sources_for_owner(db: AsyncSession, user_id: uuid.UUID) ->
     return sources
 
 
-async def filter_in_review_scope(
-    db: AsyncSession, user_id: uuid.UUID, value: HitlWidgetFilter
-) -> bool:
-    """Whether the filter's workflow is one whose reviews ``user_id`` may see.
+async def reachable_review_workflows(
+    db: AsyncSession, user_id: uuid.UUID, workflow_ids: Iterable[uuid.UUID]
+) -> set[uuid.UUID]:
+    """The ids among ``workflow_ids`` whose reviews ``user_id`` may see.
 
     Every read of a filtered HITL widget asks this. The filter is stored data anyone with
     write access to the widget can set, so it never stands in for access.
     """
+    wanted = list(set(workflow_ids))
+    if not wanted:
+        return set()
     result = await db.execute(
-        select(Workflow.id).where(Workflow.id == value.workflow_id, review_scope_clause(user_id))
+        select(Workflow.id).where(Workflow.id.in_(wanted), review_access_clause(user_id))
     )
-    return result.scalar_one_or_none() is not None
+    return set(result.scalars().all())
+
+
+async def filter_reachable(db: AsyncSession, user_id: uuid.UUID, value: HitlWidgetFilter) -> bool:
+    """Whether ``user_id`` may see the reviews of the filter's workflow."""
+    return value.workflow_id in await reachable_review_workflows(db, user_id, [value.workflow_id])
 
 
 async def ensure_review_source(
@@ -525,6 +565,22 @@ async def ensure_review_source(
         )
 
 
+async def _hitl_request_where(
+    db: AsyncSession, request_id: uuid.UUID, scope: ColumnElement[bool]
+) -> HITLRequest:
+    result = await db.execute(
+        select(HITLRequest)
+        .join(Workflow, Workflow.id == HITLRequest.workflow_id)
+        .where(HITLRequest.id == request_id, scope)
+    )
+    hitl_request = result.scalar_one_or_none()
+    if hitl_request is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Review request not found"
+        )
+    return hitl_request
+
+
 async def get_owned_hitl_request(
     db: AsyncSession, request_id: uuid.UUID, owner_id: uuid.UUID
 ) -> HITLRequest:
@@ -533,17 +589,17 @@ async def get_owned_hitl_request(
     A missing row and a row owned by someone else both 404, so an inbox id
     cannot be used to probe other people's reviews.
     """
-    result = await db.execute(
-        select(HITLRequest)
-        .join(Workflow, Workflow.id == HITLRequest.workflow_id)
-        .where(HITLRequest.id == request_id, review_scope_clause(owner_id))
-    )
-    hitl_request = result.scalar_one_or_none()
-    if hitl_request is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Review request not found"
-        )
-    return hitl_request
+    return await _hitl_request_where(db, request_id, own_reviews_clause(owner_id))
+
+
+async def get_decidable_hitl_request(
+    db: AsyncSession, request_id: uuid.UUID, user_id: uuid.UUID
+) -> HITLRequest:
+    """Load a review the caller may decide: one of a workflow they can open.
+
+    A missing row and one of a workflow they cannot open both 404.
+    """
+    return await _hitl_request_where(db, request_id, review_access_clause(user_id))
 
 
 async def get_hitl_request_by_token(db: AsyncSession, token: str) -> HITLRequest | None:

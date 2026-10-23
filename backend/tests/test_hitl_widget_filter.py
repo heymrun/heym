@@ -13,7 +13,6 @@ from app.services.hitl_widget_filter import (
     pending_for_widgets,
     review_step_kind,
     review_steps,
-    strip_hitl_widget_filter,
     with_hitl_widget_filter,
 )
 
@@ -129,12 +128,6 @@ class WidgetFilterTest(TestCase):
 
         self.assertEqual(updated[0]["data"], {"label": "reviews", "chartType": "hitl"})
 
-    def test_strip_removes_the_fields_from_every_chart(self) -> None:
-        nodes = [_chart(chartType="hitl", hitlWorkflowId="w", hitlNodeId="n")]
-        self.assertEqual(
-            strip_hitl_widget_filter(nodes)[0]["data"], {"label": "reviews", "chartType": "hitl"}
-        )
-
     def test_changed_compares_the_filters_not_the_graphs(self) -> None:
         workflow_id = str(uuid.uuid4())
         before = [_chart(chartType="hitl", hitlWorkflowId=workflow_id)]
@@ -150,31 +143,46 @@ class PendingForWidgetsTest(TestCase):
     def setUp(self) -> None:
         self.invoices = uuid.uuid4()
         self.hiring = uuid.uuid4()
-        self.counts = {
+        self.shared = uuid.uuid4()
+        # The viewer's own queue, which an unfiltered widget shows.
+        self.own = {
             (self.invoices, "approver"): 3,
             (self.invoices, "finance"): 2,
             (self.hiring, "screen"): 4,
         }
+        # The filtered workflows the viewer can open, owned or shared with them.
+        self.chosen = {
+            (self.invoices, "approver"): 3,
+            (self.invoices, "finance"): 2,
+            (self.shared, "legal"): 6,
+        }
 
-    def test_an_unfiltered_widget_counts_every_review(self) -> None:
-        filters = [HitlWidgetFilter(self.invoices, "approver"), None]
-        self.assertEqual(pending_for_widgets(self.counts, filters), 9)
+    def test_an_unfiltered_widget_counts_the_own_queue(self) -> None:
+        self.assertEqual(pending_for_widgets(self.own, {}, [None]), 9)
 
     def test_a_workflow_filter_counts_all_its_steps(self) -> None:
         filters = [HitlWidgetFilter(self.invoices)]
-        self.assertEqual(pending_for_widgets(self.counts, filters), 5)
+        self.assertEqual(pending_for_widgets(self.own, self.chosen, filters), 5)
 
     def test_a_step_filter_counts_that_step(self) -> None:
         filters = [HitlWidgetFilter(self.invoices, "finance")]
-        self.assertEqual(pending_for_widgets(self.counts, filters), 2)
+        self.assertEqual(pending_for_widgets(self.own, self.chosen, filters), 2)
+
+    def test_a_shared_workflow_counts_its_reviews_next_to_the_own_queue(self) -> None:
+        filters = [None, HitlWidgetFilter(self.shared)]
+        self.assertEqual(pending_for_widgets(self.own, self.chosen, filters), 15)
 
     def test_overlapping_widgets_count_a_review_once(self) -> None:
-        filters = [HitlWidgetFilter(self.invoices), HitlWidgetFilter(self.invoices, "approver")]
-        self.assertEqual(pending_for_widgets(self.counts, filters), 5)
+        filters = [
+            None,
+            HitlWidgetFilter(self.invoices),
+            HitlWidgetFilter(self.invoices, "approver"),
+        ]
+        self.assertEqual(pending_for_widgets(self.own, self.chosen, filters), 9)
 
-    def test_a_workflow_outside_the_counts_adds_nothing(self) -> None:
-        filters = [HitlWidgetFilter(uuid.uuid4()), HitlWidgetFilter(self.hiring, "screen")]
-        self.assertEqual(pending_for_widgets(self.counts, filters), 4)
+    def test_a_workflow_the_viewer_cannot_open_adds_nothing(self) -> None:
+        filters = [HitlWidgetFilter(uuid.uuid4()), HitlWidgetFilter(self.shared, "legal")]
+        self.assertEqual(pending_for_widgets(self.own, self.chosen, filters), 6)
 
     def test_no_widgets_count_nothing(self) -> None:
-        self.assertEqual(pending_for_widgets(self.counts, []), 0)
+        self.assertEqual(pending_for_widgets(self.own, self.chosen, []), 0)

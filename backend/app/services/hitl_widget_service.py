@@ -1,9 +1,10 @@
 """A HITL widget's review filter where it is read and where it is saved.
 
-The filter is stored data that anyone with write access to the widget can set, so it only
-narrows what the viewer may already see. Every read re-checks the viewer's review scope;
-saves from Settings, AI fine-tune and the canvas refuse a changed filter outside the saver's.
-Other writers (imports, clones, chat build) are covered by the read check alone.
+The filter is stored data that anyone with write access to the widget can set, so it never
+stands in for access. Every read re-checks that the viewer can open the chosen workflow: a
+viewer who cannot does not see the widget, and the dashboard's owner sees why. Saves from
+Settings, AI create and fine-tune, and the canvas refuse a changed filter on a workflow the
+saver cannot open. Other writers (imports, clones, chat build) are covered by the read check.
 """
 
 import uuid
@@ -16,10 +17,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import DashboardWidget, Workflow
 from app.models.dashboard_schemas import HitlWidgetFilterModel, WidgetDataResponse
-from app.services.hitl_service import ensure_review_source, filter_in_review_scope
+from app.services.hitl_service import ensure_review_source, reachable_review_workflows
 from app.services.hitl_widget_filter import (
     HITL_FILTER_ACCESS_ERROR,
-    HITL_FILTER_READ_ONLY_ACCESS_ERROR,
     HitlWidgetFilter,
     ReviewSource,
     filter_from_payload,
@@ -32,6 +32,10 @@ from app.services.workflow_save import WorkflowSnapshot, add_workflow_version
 
 HITL_WIDGET_TYPE = "hitl"
 AI_FILTER_ERROR = "The model chose a workflow or step with no reviews to show. Try again."
+# The widget a viewer may not see answers as a widget that does not exist.
+HIDDEN_WIDGET_DETAIL = "Widget not found"
+# The AI is told about at most this many workflows with review steps.
+MAX_SOURCES_IN_PROMPT = 40
 
 
 def hitl_filter_model(widget: DashboardWidget, nodes: object) -> HitlWidgetFilterModel | None:
@@ -66,18 +70,46 @@ async def hitl_filters_for_widgets(
     return filters
 
 
-async def check_hitl_filter_access(
-    db: AsyncSession, response: WidgetDataResponse, viewer_id: uuid.UUID, *, read_only: bool
-) -> WidgetDataResponse:
-    """Replace a filtered HITL chart with an error when the viewer may not see its workflow.
+async def hidden_hitl_widgets(
+    db: AsyncSession,
+    filters: dict[uuid.UUID, HitlWidgetFilterModel],
+    viewer_id: uuid.UUID,
+    dashboard_owner_id: uuid.UUID,
+) -> set[uuid.UUID]:
+    """The filtered HITL widgets the viewer may not see, by widget id.
 
-    A deleted workflow and someone else's give the same message, which never names it.
+    A widget filtered on a workflow the viewer cannot open is left off their dashboard. The
+    dashboard's owner keeps it, with an access error, so they can point it elsewhere.
+    """
+    if viewer_id == dashboard_owner_id or not filters:
+        return set()
+    reachable = await reachable_review_workflows(
+        db, viewer_id, {value.workflow_id for value in filters.values()}
+    )
+    return {widget_id for widget_id, value in filters.items() if value.workflow_id not in reachable}
+
+
+async def check_hitl_filter_access(
+    db: AsyncSession,
+    response: WidgetDataResponse,
+    viewer_id: uuid.UUID,
+    *,
+    dashboard_owner: bool,
+) -> WidgetDataResponse:
+    """A filtered HITL chart for a viewer who can open its workflow; otherwise none.
+
+    The dashboard's owner gets an access error in place of the reviews; anyone else gets the
+    404 of a widget that does not exist. Neither names the workflow, so a deleted workflow and
+    someone else's look the same.
     """
     value = filter_from_payload(response.payload)
-    if value is None or await filter_in_review_scope(db, viewer_id, value):
+    if value is None or value.workflow_id in await reachable_review_workflows(
+        db, viewer_id, [value.workflow_id]
+    ):
         return response
-    error = HITL_FILTER_READ_ONLY_ACCESS_ERROR if read_only else HITL_FILTER_ACCESS_ERROR
-    return response.model_copy(update={"payload": None, "error": error})
+    if not dashboard_owner:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=HIDDEN_WIDGET_DETAIL)
+    return response.model_copy(update={"payload": None, "error": HITL_FILTER_ACCESS_ERROR})
 
 
 async def ensure_saved_filter_allowed(
@@ -148,18 +180,19 @@ def _one_line(text: str) -> str:
 
 
 def hitl_sources_context(sources: Sequence[ReviewSource]) -> str:
-    """What a HITL widget's fine-tune is told about the workflows it can show reviews from."""
+    """What the AI is told about the workflows a HITL widget can show reviews from."""
     if not sources:
         return (
-            "This HITL widget can only show every review: the user has no workflow with a "
+            "A HITL widget can only show every review: the user has no workflow with a "
             "step that waits for a person. Leave hitlWorkflowId and hitlNodeId out."
         )
     lines = [
-        "Review sources this HITL widget can show. To show one workflow's reviews, set "
-        "hitlWorkflowId on the hitl chartOutput to its id; to show one step of it, also set "
-        "hitlNodeId to that step's id. Leave both out to show every review. Use only these ids:"
+        "Review sources a HITL widget can show. When the request names one of these workflows "
+        "(or one of its steps), set hitlWorkflowId on the hitl chartOutput to its id, and "
+        "hitlNodeId to the step's id for one step. Otherwise leave both out to show every "
+        "review. Use only these ids:"
     ]
-    for source in sources:
+    for source in sources[:MAX_SOURCES_IN_PROMPT]:
         steps = "; ".join(
             f"{_one_line(step.label)} (hitlNodeId {step.node_id}, "
             f"{'Slack' if step.kind == 'slack' else 'agent'})"

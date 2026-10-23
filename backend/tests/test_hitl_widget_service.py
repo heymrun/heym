@@ -28,15 +28,16 @@ from app.services.dashboard_data import compute_widget_data
 from app.services.hitl_service import REVIEW_SOURCE_ERROR
 from app.services.hitl_widget_filter import (
     HITL_FILTER_ACCESS_ERROR,
-    HITL_FILTER_READ_ONLY_ACCESS_ERROR,
     ReviewSource,
     ReviewStep,
 )
 from app.services.hitl_widget_service import (
     AI_FILTER_ERROR,
+    HIDDEN_WIDGET_DETAIL,
     apply_hitl_filter,
     check_hitl_filter_access,
     ensure_saved_filter_allowed,
+    hidden_hitl_widgets,
     hitl_filters_for_widgets,
     hitl_sources_context,
 )
@@ -113,6 +114,8 @@ class HitlPayloadTest(IsolatedAsyncioTestCase):
 
 
 class ReadAccessTest(IsolatedAsyncioTestCase):
+    """A owns a workflow and shares it with B; B's dashboard is shared with C, who cannot open it."""
+
     def _response(self, source: uuid.UUID) -> WidgetDataResponse:
         return WidgetDataResponse(
             widget_id=uuid.uuid4(),
@@ -121,62 +124,127 @@ class ReadAccessTest(IsolatedAsyncioTestCase):
             computed_at=None,
         )
 
-    async def test_a_viewer_who_may_see_the_workflow_gets_the_chart(self) -> None:
-        response = self._response(uuid.uuid4())
-        with patch(f"{SERVICE}.filter_in_review_scope", new=AsyncMock(return_value=True)):
+    def _reach(self, *workflow_ids: uuid.UUID) -> AsyncMock:
+        return AsyncMock(return_value=set(workflow_ids))
+
+    async def test_a_viewer_who_can_open_the_workflow_gets_the_chart(self) -> None:
+        source = uuid.uuid4()
+        response = self._response(source)
+        with patch(f"{SERVICE}.reachable_review_workflows", new=self._reach(source)):
             checked = await check_hitl_filter_access(
-                AsyncMock(), response, uuid.uuid4(), read_only=False
+                AsyncMock(), response, uuid.uuid4(), dashboard_owner=False
             )
         self.assertIs(checked, response)
 
-    async def test_an_editor_without_access_is_told_to_pick_another(self) -> None:
-        with patch(f"{SERVICE}.filter_in_review_scope", new=AsyncMock(return_value=False)):
+    async def test_the_dashboard_owner_without_access_is_told_to_pick_another(self) -> None:
+        with patch(f"{SERVICE}.reachable_review_workflows", new=self._reach()):
             checked = await check_hitl_filter_access(
-                AsyncMock(), self._response(uuid.uuid4()), uuid.uuid4(), read_only=False
+                AsyncMock(), self._response(uuid.uuid4()), uuid.uuid4(), dashboard_owner=True
             )
         self.assertIsNone(checked.payload)
         self.assertEqual(checked.error, HITL_FILTER_ACCESS_ERROR)
 
-    async def test_a_read_only_viewer_without_access_is_not_sent_to_settings(self) -> None:
-        with patch(f"{SERVICE}.filter_in_review_scope", new=AsyncMock(return_value=False)):
-            checked = await check_hitl_filter_access(
-                AsyncMock(), self._response(uuid.uuid4()), uuid.uuid4(), read_only=True
-            )
-        self.assertEqual(checked.error, HITL_FILTER_READ_ONLY_ACCESS_ERROR)
-        self.assertNotIn("Settings", checked.error)
+    async def test_anyone_else_without_access_does_not_see_the_widget(self) -> None:
+        with patch(f"{SERVICE}.reachable_review_workflows", new=self._reach()):
+            with self.assertRaises(HTTPException) as ctx:
+                await check_hitl_filter_access(
+                    AsyncMock(), self._response(uuid.uuid4()), uuid.uuid4(), dashboard_owner=False
+                )
+        self.assertEqual(ctx.exception.status_code, 404)
+        self.assertEqual(ctx.exception.detail, HIDDEN_WIDGET_DETAIL)
 
     async def test_an_unfiltered_widget_is_not_checked(self) -> None:
         response = WidgetDataResponse(
             widget_id=uuid.uuid4(), payload={"type": "hitl"}, cached=False, computed_at=None
         )
-        with patch(f"{SERVICE}.filter_in_review_scope", new=AsyncMock()) as scope:
+        with patch(f"{SERVICE}.reachable_review_workflows", new=AsyncMock()) as reach:
             checked = await check_hitl_filter_access(
-                AsyncMock(), response, uuid.uuid4(), read_only=False
+                AsyncMock(), response, uuid.uuid4(), dashboard_owner=False
             )
-        scope.assert_not_awaited()
+        reach.assert_not_awaited()
         self.assertIs(checked, response)
 
-    async def test_widget_data_route_checks_the_viewer_not_the_owner(self) -> None:
+    async def _widget_data(self, viewer: MagicMock, owner_id: uuid.UUID) -> WidgetDataResponse:
         widget = _widget()
-        dashboard = MagicMock(owner_id=uuid.uuid4())
-        viewer = _user()
-        response = self._response(uuid.uuid4())
+        dashboard = MagicMock(owner_id=owner_id)
         with (
             patch.object(
                 dash_api,
                 "_load_widget_for_user",
-                AsyncMock(return_value=(widget, dashboard, "write")),
+                AsyncMock(return_value=(widget, dashboard, "read")),
             ),
-            patch.object(dash_api, "compute_widget_data", AsyncMock(return_value=response)),
-            patch(f"{SERVICE}.filter_in_review_scope", new=AsyncMock(return_value=False)) as scope,
+            patch.object(
+                dash_api,
+                "compute_widget_data",
+                AsyncMock(return_value=self._response(uuid.uuid4())),
+            ),
+            patch(f"{SERVICE}.reachable_review_workflows", new=self._reach()) as reach,
         ):
             data = await dash_api.get_widget_data(
                 widget.id, force=False, record=None, current_user=viewer, db=AsyncMock()
             )
+        self.assertEqual(reach.await_args.args[1], viewer.id)
+        return data
 
-        self.assertEqual(scope.await_args.args[1], viewer.id)
+    async def test_widget_data_route_hides_the_widget_from_a_viewer_without_access(self) -> None:
+        with self.assertRaises(HTTPException) as ctx:
+            await self._widget_data(_user(), owner_id=uuid.uuid4())
+        self.assertEqual(ctx.exception.status_code, 404)
+
+    async def test_widget_data_route_shows_the_owner_the_access_error(self) -> None:
+        owner = _user()
+        data = await self._widget_data(owner, owner_id=owner.id)
         self.assertEqual(data.error, HITL_FILTER_ACCESS_ERROR)
         self.assertIsNone(data.payload)
+
+    async def test_hidden_widgets_are_those_filtered_on_workflows_the_viewer_cannot_open(
+        self,
+    ) -> None:
+        shared, foreign = uuid.uuid4(), uuid.uuid4()
+        open_widget, closed_widget = uuid.uuid4(), uuid.uuid4()
+        filters = {
+            open_widget: HitlWidgetFilterModel(workflow_id=shared),
+            closed_widget: HitlWidgetFilterModel(workflow_id=foreign, node_id="a1"),
+        }
+        with patch(f"{SERVICE}.reachable_review_workflows", new=self._reach(shared)):
+            hidden = await hidden_hitl_widgets(AsyncMock(), filters, uuid.uuid4(), uuid.uuid4())
+        self.assertEqual(hidden, {closed_widget})
+
+    async def test_the_dashboard_owner_keeps_every_widget(self) -> None:
+        owner = uuid.uuid4()
+        filters = {uuid.uuid4(): HitlWidgetFilterModel(workflow_id=uuid.uuid4())}
+        with patch(f"{SERVICE}.reachable_review_workflows", new=AsyncMock()) as reach:
+            hidden = await hidden_hitl_widgets(AsyncMock(), filters, owner, owner)
+        self.assertEqual(hidden, set())
+        reach.assert_not_awaited()
+
+    async def test_dashboard_route_leaves_hidden_widgets_out(self) -> None:
+        viewer = _user()
+        dashboard = MagicMock(id=uuid.uuid4(), owner_id=uuid.uuid4())
+        dashboard.name = "Approvals"
+        dashboard.record_format = "id"
+        dashboard.updated_at = datetime.datetime.now(datetime.timezone.utc)
+        shown, hidden = _widget("bar"), _widget()
+        widgets = MagicMock()
+        widgets.scalars.return_value.all.return_value = [shown, hidden]
+        owner_row = MagicMock()
+        owner = MagicMock(email="b@x.test")
+        owner.name = "B"
+        owner_row.scalar_one.return_value = owner
+        db = MagicMock()
+        db.execute = AsyncMock(side_effect=[owner_row, widgets])
+        filters = {hidden.id: HitlWidgetFilterModel(workflow_id=uuid.uuid4())}
+        with (
+            patch.object(
+                dash_api, "_get_dashboard_for_user", AsyncMock(return_value=(dashboard, "read"))
+            ),
+            patch.object(dash_api, "hitl_filters_for_widgets", AsyncMock(return_value=filters)),
+            patch.object(dash_api, "_reachable_links", AsyncMock(return_value=set())),
+            patch(f"{SERVICE}.reachable_review_workflows", new=self._reach()),
+        ):
+            response = await dash_api.get_dashboard(dashboard.id, viewer, db)
+
+        self.assertEqual([widget.id for widget in response.widgets], [shown.id])
 
 
 class SettingsSaveTest(IsolatedAsyncioTestCase):
@@ -352,7 +420,9 @@ class AiTest(IsolatedAsyncioTestCase):
     def test_without_sources_the_model_is_told_to_show_every_review(self) -> None:
         self.assertIn("Leave hitlWorkflowId and hitlNodeId out", hitl_sources_context([]))
 
-    async def test_a_new_widget_starts_unfiltered(self) -> None:
+    async def _create(
+        self, generated: list, sources: list[ReviewSource], prompt: str
+    ) -> tuple[AsyncMock, MagicMock]:
         user = _user()
         dashboard = MagicMock(id=uuid.uuid4(), owner_id=user.id, name="Dashboard")
         db = MagicMock()
@@ -371,30 +441,59 @@ class AiTest(IsolatedAsyncioTestCase):
             obj.updated_at = datetime.datetime.now(datetime.timezone.utc)
 
         db.flush = AsyncMock(side_effect=flush)
-
         db.refresh = AsyncMock(side_effect=refresh)
-        dsl = {"nodes": _hitl_nodes(uuid.uuid4(), "a1"), "edges": []}
+        generate = AsyncMock(return_value={"nodes": generated, "edges": []})
         with (
-            patch.object(dash_api, "generate_widget_dsl", AsyncMock(return_value=dsl)),
+            patch.object(dash_api, "generate_widget_dsl", generate),
             patch.object(
                 dash_api,
                 "get_credential_for_user",
                 AsyncMock(return_value=MagicMock(type=CredentialType.openai)),
             ),
+            patch.object(dash_api, "list_review_sources", AsyncMock(return_value=sources)),
         ):
             await dash_api.ai_generate_widget(
                 dashboard_id=dashboard.id,
-                body=AiWidgetRequest(
-                    prompt="pending reviews", credential_id=uuid.uuid4(), model="m"
-                ),
+                body=AiWidgetRequest(prompt=prompt, credential_id=uuid.uuid4(), model="m"),
                 current_user=user,
                 db=db,
             )
-
         workflow = next(
             call.args[0] for call in db.add.call_args_list if isinstance(call.args[0], Workflow)
         )
+        return generate, workflow
+
+    async def test_a_new_widget_may_show_a_workflow_the_request_names(self) -> None:
+        source = ReviewSource(
+            workflow_id=uuid.uuid4(),
+            workflow_name="Discount approval",
+            steps=(ReviewStep("a1", "Approver", "agent"),),
+        )
+        chosen = _hitl_nodes(source.workflow_id, "a1")
+        with patch(f"{SERVICE}.ensure_review_source", new=AsyncMock()) as check:
+            generate, workflow = await self._create(
+                chosen, [source], "pending reviews of Discount approval"
+            )
+
+        self.assertIn(f"hitlWorkflowId {source.workflow_id}", generate.await_args.args[0])
+        self.assertEqual(check.await_args.args[2].workflow_id, source.workflow_id)
+        self.assertEqual(workflow.nodes, chosen)
+
+    async def test_a_new_widget_without_a_named_workflow_shows_every_review(self) -> None:
+        with patch(f"{SERVICE}.ensure_review_source", new=AsyncMock()) as check:
+            generate, workflow = await self._create(_hitl_nodes(), [], "pending reviews")
+
+        check.assert_not_awaited()
+        self.assertNotIn("hitlWorkflowId", generate.await_args.args[0])
         self.assertEqual(workflow.nodes, _hitl_nodes())
+
+    async def test_a_new_widget_on_an_invented_workflow_is_refused(self) -> None:
+        refusal = HTTPException(status_code=422, detail=REVIEW_SOURCE_ERROR)
+        with patch(f"{SERVICE}.ensure_review_source", new=AsyncMock(side_effect=refusal)):
+            with self.assertRaises(HTTPException) as ctx:
+                await self._create(_hitl_nodes(uuid.uuid4()), [], "reviews of Payroll")
+
+        self.assertEqual(ctx.exception.detail, AI_FILTER_ERROR)
 
     async def _refine(
         self, current: list, generated: list, sources: list[ReviewSource]
@@ -424,9 +523,7 @@ class AiTest(IsolatedAsyncioTestCase):
                 AsyncMock(return_value=MagicMock(type=CredentialType.openai)),
             ),
             patch.object(dash_api, "_record_chat_workflow_edit_version", AsyncMock()),
-            patch.object(
-                dash_api, "list_review_sources_for_owner", AsyncMock(return_value=sources)
-            ),
+            patch.object(dash_api, "list_review_sources", AsyncMock(return_value=sources)),
         ):
             await dash_api.ai_refine_widget(
                 widget_id=widget.id,

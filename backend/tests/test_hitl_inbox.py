@@ -20,11 +20,13 @@ from app.services.dashboard_data import compute_widget_data
 from app.services.hitl_service import (
     REVIEW_SOURCE_ERROR,
     count_pending_by_step,
+    count_pending_in_workflows,
     ensure_review_source,
-    filter_in_review_scope,
+    filter_reachable,
+    get_decidable_hitl_request,
     get_owned_hitl_request,
     list_pending_hitl_for_owner,
-    list_review_sources_for_owner,
+    list_review_sources,
 )
 from app.services.hitl_widget_filter import (
     HITL_FILTER_ACCESS_ERROR,
@@ -131,6 +133,9 @@ class HitlInboxFilterQueryTest(IsolatedAsyncioTestCase):
             sql = str(call.args[0])
             self.assertIn("hitl_requests.workflow_id =", sql)
             self.assertIn("hitl_requests.agent_node_id =", sql)
+            # Anyone who can open the workflow sees its queue, not only its owner.
+            self.assertIn("workflow_shares", sql)
+            self.assertIn("workflow_team_shares", sql)
 
     async def test_without_a_filter_the_queue_is_not_narrowed(self) -> None:
         count_result = MagicMock()
@@ -144,6 +149,9 @@ class HitlInboxFilterQueryTest(IsolatedAsyncioTestCase):
 
         sql = str(db.execute.await_args_list[0].args[0])
         self.assertNotIn("hitl_requests.workflow_id =", sql)
+        # The unfiltered queue stays the user's own workflows.
+        self.assertIn("workflows.owner_id =", sql)
+        self.assertNotIn("workflow_shares", sql)
 
     async def test_counts_group_by_workflow_and_step_within_the_owner_scope(self) -> None:
         workflow_id = uuid.uuid4()
@@ -156,19 +164,61 @@ class HitlInboxFilterQueryTest(IsolatedAsyncioTestCase):
         sql = str(db.execute.await_args.args[0])
         self.assertIn("GROUP BY", sql)
         self.assertIn("workflows.owner_id", sql)
+        self.assertNotIn("workflow_shares", sql)
 
-    async def test_scope_check_matches_the_workflow_and_the_owner(self) -> None:
+    async def test_chosen_workflows_count_for_anyone_who_can_open_them(self) -> None:
+        shared = uuid.uuid4()
+        db = AsyncMock()
+        db.execute.return_value = _rows((shared, "legal", 6))
+
+        counts = await count_pending_in_workflows(db, uuid.uuid4(), [shared])
+
+        self.assertEqual(counts, {(shared, "legal"): 6})
+        sql = str(db.execute.await_args.args[0])
+        self.assertIn("hitl_requests.workflow_id IN", sql)
+        self.assertIn("workflow_shares", sql)
+
+    async def test_no_chosen_workflows_cost_no_query(self) -> None:
+        db = AsyncMock()
+        self.assertEqual(await count_pending_in_workflows(db, uuid.uuid4(), []), {})
+        db.execute.assert_not_awaited()
+
+    async def test_reach_check_uses_workflow_access(self) -> None:
+        db = AsyncMock()
+        found = MagicMock()
+        found.scalars.return_value.all.return_value = []
+        db.execute.return_value = found
+
+        allowed = await filter_reachable(db, uuid.uuid4(), HitlWidgetFilter(uuid.uuid4()))
+
+        self.assertFalse(allowed)
+        sql = str(db.execute.await_args.args[0])
+        self.assertIn("workflows.id IN", sql)
+        self.assertIn("workflows.owner_id =", sql)
+        self.assertIn("workflow_shares", sql)
+
+    async def test_deciding_reaches_reviews_of_workflows_the_caller_can_open(self) -> None:
         db = AsyncMock()
         found = MagicMock()
         found.scalar_one_or_none.return_value = None
         db.execute.return_value = found
 
-        allowed = await filter_in_review_scope(db, uuid.uuid4(), HitlWidgetFilter(uuid.uuid4()))
+        with self.assertRaises(HTTPException) as ctx:
+            await get_decidable_hitl_request(db, uuid.uuid4(), uuid.uuid4())
 
-        self.assertFalse(allowed)
-        sql = str(db.execute.await_args.args[0])
-        self.assertIn("workflows.id =", sql)
-        self.assertIn("workflows.owner_id =", sql)
+        self.assertEqual(ctx.exception.status_code, 404)
+        self.assertIn("workflow_shares", str(db.execute.await_args.args[0]))
+
+    async def test_the_review_link_stays_with_the_owner(self) -> None:
+        db = AsyncMock()
+        found = MagicMock()
+        found.scalar_one_or_none.return_value = None
+        db.execute.return_value = found
+
+        with self.assertRaises(HTTPException):
+            await get_owned_hitl_request(db, uuid.uuid4(), uuid.uuid4())
+
+        self.assertNotIn("workflow_shares", str(db.execute.await_args.args[0]))
 
 
 class ReviewSourcesTest(IsolatedAsyncioTestCase):
@@ -178,7 +228,7 @@ class ReviewSourcesTest(IsolatedAsyncioTestCase):
         db = AsyncMock()
         db.execute.return_value = _rows(invoices, notes)
 
-        sources = await list_review_sources_for_owner(db, uuid.uuid4())
+        sources = await list_review_sources(db, uuid.uuid4())
 
         self.assertEqual(
             sources,
@@ -195,6 +245,7 @@ class ReviewSourcesTest(IsolatedAsyncioTestCase):
         )
         sql = str(db.execute.await_args.args[0])
         self.assertIn("workflows.owner_id =", sql)
+        self.assertIn("workflow_shares", sql)
         self.assertIn("workflows.kind !=", sql)
 
     async def test_a_new_filter_must_name_a_source_and_one_of_its_steps(self) -> None:
@@ -228,9 +279,7 @@ class ReviewSourcesTest(IsolatedAsyncioTestCase):
             workflow_name="Invoices",
             steps=(ReviewStep("s1", "Ask finance", "slack"),),
         )
-        with patch(
-            "app.api.hitl.list_review_sources_for_owner", new=AsyncMock(return_value=[source])
-        ):
+        with patch("app.api.hitl.list_review_sources", new=AsyncMock(return_value=[source])):
             response = await list_hitl_review_sources(_user(), AsyncMock())
 
         self.assertEqual(response.sources[0].workflow_name, "Invoices")
@@ -241,7 +290,7 @@ class HitlInboxApiTest(IsolatedAsyncioTestCase):
     async def test_filtered_inbox_passes_workflow_and_step(self) -> None:
         workflow_id = uuid.uuid4()
         with (
-            patch("app.api.hitl.filter_in_review_scope", new=AsyncMock(return_value=True)),
+            patch("app.api.hitl.filter_reachable", new=AsyncMock(return_value=True)),
             patch(
                 "app.api.hitl.list_pending_hitl_for_owner",
                 new=AsyncMock(return_value=(0, [])),
@@ -253,7 +302,7 @@ class HitlInboxApiTest(IsolatedAsyncioTestCase):
 
     async def test_a_workflow_outside_the_scope_is_403_and_lists_nothing(self) -> None:
         with (
-            patch("app.api.hitl.filter_in_review_scope", new=AsyncMock(return_value=False)),
+            patch("app.api.hitl.filter_reachable", new=AsyncMock(return_value=False)),
             patch("app.api.hitl.list_pending_hitl_for_owner", new=AsyncMock()) as listing,
         ):
             with self.assertRaises(HTTPException) as ctx:
@@ -313,15 +362,16 @@ class HitlInboxApiTest(IsolatedAsyncioTestCase):
 
         self.assertEqual(response.url, f"https://heym.example/review/{request.public_token}")
 
-    async def test_owned_decision_uses_the_same_claim_path(self) -> None:
+    async def test_inbox_decision_reaches_any_workflow_the_caller_can_open(self) -> None:
         request = _make_request()
         background = MagicMock()
         db = AsyncMock()
         with (
             patch(
-                "app.api.hitl.get_owned_hitl_request",
+                "app.api.hitl.get_decidable_hitl_request",
                 new=AsyncMock(return_value=request),
-            ),
+            ) as load,
+            patch("app.api.hitl.get_owned_hitl_request", new=AsyncMock()) as owned,
             patch("app.api.hitl.claim_hitl_request_for_decision", new=AsyncMock(return_value=True)),
             patch("app.api.hitl.resume_hitl_request_in_background"),
         ):
@@ -336,6 +386,8 @@ class HitlInboxApiTest(IsolatedAsyncioTestCase):
         self.assertEqual(response.status, "resolved")
         self.assertEqual(request.decision, "accept")
         background.add_task.assert_called_once()
+        load.assert_awaited_once()
+        owned.assert_not_awaited()
 
 
 class HitlWidgetDataTest(IsolatedAsyncioTestCase):
@@ -381,19 +433,25 @@ class HitlDashboardCountsTest(IsolatedAsyncioTestCase):
         )
         db = AsyncMock()
         db.execute.return_value = widgets
-        counts = {(invoices, "a1"): 2, (uuid.uuid4(), "b1"): 5}
+        # invoices is shared with the caller: it is not in their own queue.
+        own = {(uuid.uuid4(), "b1"): 5}
+        chosen = {(invoices, "a1"): 2}
         with (
             patch(
                 "app.api.hitl.reachable_dashboard_ids",
                 new=AsyncMock(return_value={approvals, overview, everything}),
             ),
-            patch("app.api.hitl.count_pending_by_step", new=AsyncMock(return_value=counts)),
+            patch("app.api.hitl.count_pending_by_step", new=AsyncMock(return_value=own)),
+            patch(
+                "app.api.hitl.count_pending_in_workflows", new=AsyncMock(return_value=chosen)
+            ) as counting,
         ):
             response = await count_hitl_dashboard_reviews(
                 _user(), db, dashboard_id=[approvals, overview, everything]
             )
 
-        self.assertEqual(response.counts, {str(approvals): 2, str(everything): 7})
+        self.assertEqual(response.counts, {str(approvals): 2, str(everything): 5})
+        self.assertEqual(counting.await_args.args[2], {invoices})
 
     async def test_unreachable_dashboards_are_not_counted(self) -> None:
         db = AsyncMock()

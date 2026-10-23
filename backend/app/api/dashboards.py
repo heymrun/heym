@@ -87,14 +87,14 @@ from app.services.dashboard_widget_policy import dashboard_widget_blocked_nodes_
 from app.services.data_table_access import get_data_table_with_permission
 from app.services.encryption import decrypt_config
 from app.services.file_run_widget import FILE_RUN_WIDGET_TYPE, run_widget_payload
-from app.services.hitl_service import build_public_base_url, list_review_sources_for_owner
-from app.services.hitl_widget_filter import strip_hitl_widget_filter
+from app.services.hitl_service import build_public_base_url, list_review_sources
 from app.services.hitl_widget_service import (
     AI_FILTER_ERROR,
     HITL_WIDGET_TYPE,
     apply_hitl_filter,
     check_hitl_filter_access,
     ensure_saved_filter_allowed,
+    hidden_hitl_widgets,
     hitl_filter_model,
     hitl_filters_for_widgets,
     hitl_sources_context,
@@ -820,8 +820,10 @@ async def get_dashboard(
     )
     widgets = list(result.scalars().all())
     summary = _dashboard_summary(dashboard, owner, permission)
-    reachable = await _reachable_links(db, widgets, current_user)
     hitl_filters = await hitl_filters_for_widgets(db, widgets)
+    hidden = await hidden_hitl_widgets(db, hitl_filters, current_user.id, dashboard.owner_id)
+    widgets = [w for w in widgets if w.id not in hidden]
+    reachable = await _reachable_links(db, widgets, current_user)
     return DashboardResponse(
         **summary.model_dump(),
         widgets=[_widget_to_response(w, reachable, hitl_filters.get(w.id)) for w in widgets],
@@ -1109,7 +1111,7 @@ async def get_widget_data(
     response = await compute_widget_data(db, widget, dashboard.owner_id, force=force, record=record)
     # The chart is computed as the owner; whose reviews a HITL widget may show is the viewer's.
     response = await check_hitl_filter_access(
-        db, response, current_user.id, read_only=permission == PERMISSION_READ
+        db, response, current_user.id, dashboard_owner=dashboard.owner_id == current_user.id
     )
     return _widget_data_for(response, permission)
 
@@ -1373,16 +1375,18 @@ async def ai_generate_widget(
         await _table_contexts(db, body.data_table_ids, dashboard.owner_id, for_owner=True)
     context = describe_tables(tables, with_data=False)
     detail = await _detail_page_context(db, dashboard, current_user)
+    # A HITL widget shows every review unless the request names a workflow it can show.
+    review_sources = await list_review_sources(db, current_user.id)
+    sources = hitl_sources_context(review_sources) if review_sources else ""
     dsl = await generate_widget_dsl(
-        "\n\n".join(part for part in (body.prompt, detail, context) if part),
+        "\n\n".join(part for part in (body.prompt, detail, context, sources) if part),
         credential=credential,
         model=body.model,
         user=current_user,
         node_label="AI Widget Create",
         session_id=body.session_id,
     )
-    # A new HITL widget shows every review; Settings or a fine-tune narrows it.
-    nodes = strip_hitl_widget_filter(dsl.get("nodes", []))
+    nodes = dsl.get("nodes", [])
     edges = dsl.get("edges", [])
     blocked_error = dashboard_widget_blocked_nodes_error(nodes)
     if blocked_error is not None:
@@ -1396,6 +1400,7 @@ async def ai_generate_widget(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="AI did not produce a chartOutput node",
         )
+    await ensure_saved_filter_allowed(db, current_user.id, [], nodes, detail=AI_FILTER_ERROR)
     chart_type = chart_nodes[-1].get("data", {}).get("chartType", "bar")
     title = widget_title(dsl.get("name"), body.prompt)
     description = dsl.get("description") or None
@@ -1474,7 +1479,7 @@ async def ai_refine_widget(
     context = describe_tables(tables, with_data=True)
     detail = await _refine_page_context(db, dashboard, current_user, body.page_kind, body.prompt)
     sources = (
-        hitl_sources_context(await list_review_sources_for_owner(db, current_user.id))
+        hitl_sources_context(await list_review_sources(db, current_user.id))
         if widget.chart_type == HITL_WIDGET_TYPE
         else ""
     )

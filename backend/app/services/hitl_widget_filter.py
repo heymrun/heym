@@ -2,9 +2,9 @@
 
 The choice lives on the widget workflow's HITL ``chartOutput`` node as ``hitlWorkflowId`` and
 ``hitlNodeId``, so Settings, AI fine-tune and the canvas all edit one place. Neither field
-grants anything: the inbox still returns only reviews in the viewer's review scope
-(``hitl_service.review_scope_clause``), and every read re-checks that the chosen workflow is in
-it. This module has no database or settings imports, so dashboards can read the filter cheaply.
+grants anything: every read re-checks that the viewer can open the chosen workflow
+(``hitl_service.review_access_clause``). This module has no database or settings imports, so
+dashboards can read the filter cheaply.
 """
 
 from __future__ import annotations
@@ -21,13 +21,13 @@ WAITING_SLACK_OPERATIONS = frozenset({"requestApproval", "sendButtons", "sendFor
 WORKFLOW_FIELD = "hitlWorkflowId"
 NODE_FIELD = "hitlNodeId"
 
-# Shown instead of the widget's reviews when its workflow is out of the viewer's scope. The
-# workflow is never named: a deleted workflow and someone else's look the same.
+# Shown to the dashboard's owner instead of the widget's reviews when they can no longer open
+# its workflow; anyone else who cannot open it does not see the widget. The workflow is never
+# named: a deleted workflow and someone else's look the same.
 HITL_FILTER_ACCESS_ERROR = (
     "You no longer have access to the workflow this widget shows. "
     "Pick another one in widget Settings."
 )
-HITL_FILTER_READ_ONLY_ACCESS_ERROR = "You do not have access to the workflow this widget shows."
 
 
 @dataclass(frozen=True)
@@ -158,41 +158,29 @@ def with_hitl_widget_filter(nodes: list, value: HitlWidgetFilter | None) -> list
     return updated
 
 
-def strip_hitl_widget_filter(nodes: object) -> object:
-    """A copy of ``nodes`` with the filter fields removed from every chart node."""
-    if not isinstance(nodes, list):
-        return nodes
-    updated = copy.deepcopy(nodes)
-    for node in updated:
-        if isinstance(node, dict) and node.get("type") == "chartOutput":
-            data = _node_data(node)
-            data.pop(WORKFLOW_FIELD, None)
-            data.pop(NODE_FIELD, None)
-    return updated
-
-
 def hitl_filter_changed(old_nodes: object, new_nodes: object) -> bool:
     """True when a save points the widget at different reviews than before."""
     return hitl_widget_filter(old_nodes) != hitl_widget_filter(new_nodes)
 
 
 def pending_for_widgets(
-    counts: dict[tuple[uuid.UUID, str], int], filters: Sequence[HitlWidgetFilter | None]
+    own: dict[tuple[uuid.UUID, str], int],
+    chosen: dict[tuple[uuid.UUID, str], int],
+    filters: Sequence[HitlWidgetFilter | None],
 ) -> int:
     """Pending reviews a page's HITL widgets show together, each review counted once.
 
-    ``counts`` are the viewer's pending reviews by ``(workflow_id, node_id)``, already limited
-    to their review scope, so a filter outside it matches nothing. An unfiltered widget shows
-    every review.
+    ``own`` counts the viewer's own queue, which an unfiltered widget shows; ``chosen`` counts
+    the filtered workflows the viewer can open, by ``(workflow_id, node_id)``. A filter on a
+    workflow the viewer cannot open matches nothing in ``chosen``.
     """
-    if any(value is None for value in filters):
-        return sum(counts.values())
-    chosen = [value for value in filters if value is not None]
-    return sum(
-        count
-        for (workflow_id, node_id), count in counts.items()
-        if any(
-            value.workflow_id == workflow_id and value.node_id in (None, node_id)
-            for value in chosen
-        )
-    )
+    shown: set[tuple[uuid.UUID, str]] = set(own) if any(f is None for f in filters) else set()
+    for value in filters:
+        if value is not None:
+            shown |= {
+                key
+                for key in chosen
+                if key[0] == value.workflow_id and value.node_id in (None, key[1])
+            }
+    counts = {**own, **chosen}
+    return sum(counts[key] for key in shown)

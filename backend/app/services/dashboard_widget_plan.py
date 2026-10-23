@@ -57,7 +57,8 @@ Answer with JSON only, no prose:
 - title: one or two words, sentence case, that say what the widget shows (such as Open cases),
   never a table or column name with underscores and never an id.
 - chartType: one of {", ".join(WIDGET_CHART_TYPES)}. Use numeric for one headline number,
-  table for a list of records, text for notes or checklists, hitl for pending human reviews.
+  table for a list of records, text for notes or checklists, hitl for pending human reviews
+  (when the description names the workflow whose reviews it shows, keep that name in prompt).
 - prompt: one or two sentences for the builder: what the widget shows, which data it uses,
   how it is grouped or filtered, and the chart type. When the description names no data
   source, say the widget uses sample data.
