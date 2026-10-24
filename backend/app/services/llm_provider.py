@@ -231,6 +231,18 @@ def get_default_openai_models() -> list[LLMModel]:
     ]
 
 
+def supports_generate_content(model: dict) -> bool:
+    """Whether a Gemini /v1beta/models entry can answer chat requests.
+
+    The list also holds Gemini models that only embed (``gemini-embedding-001``)
+    or only stream audio (Live / native-audio models); they report the methods
+    they serve in ``supportedGenerationMethods``. An entry without the field is
+    kept, as before.
+    """
+    methods = model.get("supportedGenerationMethods")
+    return methods is None or "generateContent" in methods
+
+
 async def fetch_google_models(api_key: str) -> list[LLMModel]:
     try:
         async with httpx.AsyncClient(
@@ -247,7 +259,7 @@ async def fetch_google_models(api_key: str) -> list[LLMModel]:
             for model in data.get("models", []):
                 model_name = model.get("name", "").replace("models/", "")
                 display_name = model.get("displayName", model_name)
-                if "gemini" in model_name.lower():
+                if "gemini" in model_name.lower() and supports_generate_content(model):
                     models.append(
                         LLMModel(
                             id=model_name,

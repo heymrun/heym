@@ -5,6 +5,7 @@ from app.services.llm_provider import (
     CUSTOM_RESPONSES_SUPPORT_MESSAGE,
     GOOGLE_RESPONSES_UNSUPPORTED_MESSAGE,
     OPENAI_RESPONSES_SUPPORT_MESSAGE,
+    fetch_google_models,
     fetch_openai_models,
     get_default_google_models,
     get_default_openai_models,
@@ -135,3 +136,36 @@ class TestOpenCodeResponsesSupport(unittest.TestCase):
         supported, reason = opencode_responses_support("claude-haiku-5-5")
         self.assertFalse(supported)
         self.assertIn("Anthropic Messages", reason)
+
+
+class TestGoogleModelDiscovery(unittest.IsolatedAsyncioTestCase):
+    async def test_only_models_that_generate_content_are_listed(self) -> None:
+        response = MagicMock()
+        response.raise_for_status = MagicMock()
+        response.json.return_value = {
+            "models": [
+                {
+                    "name": "models/gemini-2.5-flash",
+                    "supportedGenerationMethods": ["generateContent", "countTokens"],
+                },
+                {
+                    "name": "models/gemini-embedding-001",
+                    "supportedGenerationMethods": ["embedContent"],
+                },
+                {
+                    "name": "models/gemini-2.0-flash-live-001",
+                    "supportedGenerationMethods": ["bidiGenerateContent"],
+                },
+                {"name": "models/gemini-legacy-without-field"},
+                {"name": "models/text-bison-001", "supportedGenerationMethods": ["generateText"]},
+            ]
+        }
+        client = MagicMock()
+        client.get = AsyncMock(return_value=response)
+        client.__aenter__ = AsyncMock(return_value=client)
+        client.__aexit__ = AsyncMock(return_value=None)
+        with patch("app.services.llm_provider.httpx.AsyncClient", return_value=client):
+            models = await fetch_google_models("key")
+        self.assertEqual(
+            sorted(m.id for m in models), ["gemini-2.5-flash", "gemini-legacy-without-field"]
+        )
