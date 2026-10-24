@@ -1,4 +1,5 @@
 import json
+import logging
 import uuid
 from dataclasses import dataclass, field
 from typing import Protocol
@@ -11,9 +12,13 @@ from qdrant_client.http.models import (
     FilterSelector,
     HasIdCondition,
     IsEmptyCondition,
+    MatchText,
     MatchValue,
     PayloadField,
     PointStruct,
+    TextIndexParams,
+    TextIndexType,
+    TokenizerType,
     VectorParams,
 )
 
@@ -22,6 +27,8 @@ from app.services.embedding import (
     EmbeddingService,
     embedding_config_from_credential,
 )
+
+logger = logging.getLogger(__name__)
 
 QDRANT_PAYLOAD_LIMIT_BYTES = 30 * 1024 * 1024
 
@@ -57,6 +64,26 @@ class SearchResult:
     id: str
     text: str
     score: float
+    metadata: dict = field(default_factory=dict)
+
+
+@dataclass
+class HybridSearchResult(SearchResult):
+    """A fused hit: ``score`` is the 0-1 rank fusion, the two source scores stay visible.
+
+    A score is ``None`` when that leg did not return the document.
+    """
+
+    vector_score: float | None = None
+    keyword_score: float | None = None
+
+
+@dataclass
+class LexicalDoc:
+    """A stored document as the keyword leg of hybrid search sees it."""
+
+    id: str
+    text: str
     metadata: dict = field(default_factory=dict)
 
 
@@ -120,6 +147,13 @@ class VectorStoreBackend(Protocol):
         limit: int = 5,
         metadata_filter: dict | None = None,
     ) -> list[SearchResult]: ...
+    def hybrid_search(
+        self,
+        collection_name: str,
+        query: str,
+        limit: int = 5,
+        metadata_filter: dict | None = None,
+    ) -> list[HybridSearchResult]: ...
     def delete_points(self, collection_name: str, point_ids: list[str]) -> bool: ...
     def upsert_by_field(
         self,
@@ -154,6 +188,104 @@ class VectorStoreBackend(Protocol):
         text_truncate_length: int = 200,
     ) -> tuple[list[VectorStoreSourceGroup], int]: ...
     def delete_point(self, collection_name: str, point_id: str) -> bool: ...
+
+
+def _metadata_conditions(metadata_filter: dict | None) -> list[FieldCondition]:
+    """Exact-match conditions for a search metadata filter."""
+    return [
+        FieldCondition(key=key, match=MatchValue(value=value))
+        for key, value in (metadata_filter or {}).items()
+    ]
+
+
+class QdrantLexicalSource:
+    """Keyword leg of hybrid search, answered from Qdrant's full-text index on ``text``."""
+
+    TEXT_FIELD = "text"
+
+    def __init__(self, client: QdrantClient) -> None:
+        self.client = client
+
+    def ensure_text_index(self, collection_name: str) -> None:
+        """Index the ``text`` payload so term lookups use tokens instead of scanning substrings.
+
+        Collections created before hybrid search have none; Qdrant builds it from the
+        points already stored, so no re-indexing is needed.
+        """
+        try:
+            info = self.client.get_collection(collection_name)
+            if self.TEXT_FIELD in (info.payload_schema or {}):
+                return
+            self.client.create_payload_index(
+                collection_name=collection_name,
+                field_name=self.TEXT_FIELD,
+                field_schema=TextIndexParams(
+                    type=TextIndexType.TEXT,
+                    tokenizer=TokenizerType.WORD,
+                    lowercase=True,
+                    min_token_len=1,
+                    max_token_len=64,
+                ),
+                wait=True,
+            )
+        except Exception:
+            # Without the index Qdrant still answers term matches, only slower.
+            logger.warning(
+                "Could not create the full-text index on %s.%s; hybrid search falls back "
+                "to unindexed term matching",
+                collection_name,
+                self.TEXT_FIELD,
+                exc_info=True,
+            )
+
+    def _term_filter(self, term: str, metadata_filter: dict | None) -> Filter:
+        return Filter(
+            must=[
+                FieldCondition(key=self.TEXT_FIELD, match=MatchText(text=term)),
+                *_metadata_conditions(metadata_filter),
+            ]
+        )
+
+    def corpus_size(self, collection_name: str) -> int:
+        return self.client.count(collection_name, exact=True).count
+
+    def document_frequencies(self, collection_name: str, terms: list[str]) -> dict[str, int]:
+        return {
+            term: self.client.count(
+                collection_name=collection_name,
+                count_filter=self._term_filter(term, None),
+                exact=True,
+            ).count
+            for term in terms
+        }
+
+    def candidates(
+        self,
+        collection_name: str,
+        terms: list[str],
+        limit: int,
+        metadata_filter: dict | None,
+    ) -> list[LexicalDoc]:
+        found: dict[str, LexicalDoc] = {}
+        # Qdrant cannot rank a text match, so spend the budget on the rarest terms first:
+        # they carry the most BM25 weight and match the fewest documents.
+        for term in terms:
+            if len(found) >= limit:
+                break
+            points, _ = self.client.scroll(
+                collection_name=collection_name,
+                scroll_filter=self._term_filter(term, metadata_filter),
+                limit=limit,
+                with_payload=True,
+                with_vectors=False,
+            )
+            for point in points:
+                payload = dict(point.payload) if point.payload else {}
+                text = payload.pop(self.TEXT_FIELD, "")
+                found.setdefault(
+                    str(point.id), LexicalDoc(id=str(point.id), text=text, metadata=payload)
+                )
+        return list(found.values())[:limit]
 
 
 class QdrantVectorStoreService:
@@ -324,18 +456,8 @@ class QdrantVectorStoreService:
     ) -> list[SearchResult]:
         query_embedding = self.embedding_service.embed_text(query)
 
-        search_filter = None
-        if metadata_filter:
-            conditions = []
-            for key, value in metadata_filter.items():
-                conditions.append(
-                    FieldCondition(
-                        key=key,
-                        match=MatchValue(value=value),
-                    )
-                )
-            if conditions:
-                search_filter = Filter(must=conditions)
+        conditions = _metadata_conditions(metadata_filter)
+        search_filter = Filter(must=conditions) if conditions else None
 
         # Use query_points for qdrant-client >= 1.7
         response = self.client.query_points(
@@ -358,6 +480,26 @@ class QdrantVectorStoreService:
                 )
             )
         return search_results
+
+    def hybrid_search(
+        self,
+        collection_name: str,
+        query: str,
+        limit: int = 5,
+        metadata_filter: dict | None = None,
+    ) -> list[HybridSearchResult]:
+        """Vector search fused with BM25 keyword matches over the stored text."""
+        from app.services.hybrid_search import hybrid_pool_size, run_hybrid_search
+
+        source = QdrantLexicalSource(self.client)
+        source.ensure_text_index(collection_name)
+        dense = self.search(
+            collection_name,
+            query,
+            limit=hybrid_pool_size(limit),
+            metadata_filter=metadata_filter,
+        )
+        return run_hybrid_search(source, collection_name, query, dense, limit, metadata_filter)
 
     def delete_points(self, collection_name: str, point_ids: list[str]) -> bool:
         self.client.delete(

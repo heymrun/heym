@@ -673,6 +673,7 @@ export interface NodeData {
   queryText?: string;
   searchLimit?: number;
   metadataFilters?: string;
+  hybridSearch?: boolean;
   enableReranker?: boolean;
   rerankerCredentialId?: string;
   rerankerTopN?: number;

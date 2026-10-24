@@ -7,7 +7,7 @@ The node has a **Database** dropdown that selects the backend:
 - **Qdrant** – stores vectors in an external Qdrant server (requires a *RAG: Qdrant + OpenAI* credential).
 - **Postgres (pgvector)** – stores vectors inside Heym's own Postgres database, no external service (requires a *RAG: Psql + OpenAI* credential).
 
-The default is **Qdrant** for backward compatibility. Changing the Database filters the **Vector Store** list to stores backed by that database. Both backends support the same operations, metadata filtering, and Cohere reranking.
+The default is **Qdrant** for backward compatibility. Changing the Database filters the **Vector Store** list to stores backed by that database. Both backends support the same operations, metadata filtering, hybrid (vector + BM25) search, and Cohere reranking.
 
 Either backend can also be reached through a *RAG: Custom Embeddings* credential, which
 replaces OpenAI with any OpenAI-compatible embedding endpoint and names its own vector
@@ -20,7 +20,7 @@ targets. See [Custom Embeddings](../reference/integrations.md#custom-embeddings-
 |----------|-------|
 | Inputs | 1 |
 | Outputs | 1 |
-| Output | `$nodeLabel.results` / `$nodeLabel.reranked` / `$nodeLabel.count` (search), `$nodeLabel.point_id` (insert, upsert), `$nodeLabel.deleted` (delete) |
+| Output | `$nodeLabel.results` / `$nodeLabel.reranked` / `$nodeLabel.hybrid` / `$nodeLabel.count` (search), `$nodeLabel.point_id` (insert, upsert), `$nodeLabel.deleted` (delete) |
 
 ## Parameters
 
@@ -36,6 +36,7 @@ targets. See [Custom Embeddings](../reference/integrations.md#custom-embeddings-
 | `queryText` | expression | Search query (search only) |
 | `searchLimit` | number | Max results (default: 5) |
 | `metadataFilters` | JSON string | Metadata filters for search (values support expressions) |
+| `hybridSearch` | boolean | Combine vector search with BM25 keyword search (search only; default: off) |
 | `enableReranker` | boolean | Use Cohere to rerank search results |
 | `rerankerCredentialId` | UUID | Cohere credential for reranking |
 | `rerankerTopN` | number | Number of top results to keep after reranking |
@@ -126,6 +127,7 @@ Semantic search for similar documents.
 | `queryText` | yes | Search query |
 | `searchLimit` | no | Max results (default: 5) |
 | `metadataFilters` | no | Filter by metadata (exact match JSON object, values support expressions) |
+| `hybridSearch` | no | Fuse vector similarity with BM25 keyword matching (see [Hybrid search](#hybrid-search)) |
 | `enableReranker` | no | Enable Cohere reranking for better relevance |
 | `rerankerCredentialId` | when reranking | Cohere credential |
 | `rerankerTopN` | no | Final number of results after reranking |
@@ -139,13 +141,44 @@ When reranking is enabled:
 - `score` remains the original vector similarity score
 - `relevance_score` is the Cohere reranker score
 
+#### Hybrid search
+
+Vector search finds text that means the same thing as the query. Text that only contains the exact words can rank lower: a product code, a ticket number, a person's name, an error such as `ERR-4021`. Switch on **Hybrid Search** and the node runs a keyword search next to the vector search and merges both lists, so one query finds both kinds of match.
+
+1. The vector search returns its best matches, as it does without hybrid search.
+2. A keyword search scores the stored text against the words of the query with **BM25**, which rewards rare words, repeated words and shorter documents.
+3. The two ranked lists are merged with **reciprocal rank fusion**. A document near the top of both lists ranks first, and a document only one list found still appears.
+
+Metadata filters apply to both searches, and the Cohere reranker, when enabled, runs on the merged list.
+
+Each result carries the score of both searches:
+
+| Field | Meaning |
+|-------|---------|
+| `score` | Fused score from 0 to 1. `1` means the document ranked first in both searches. |
+| `vector_score` | Vector similarity (0 to 1). `null` when only the keyword search found the document. |
+| `keyword_score` | BM25 score. `null` when none of the query words appear in the document. |
+
+`$nodeLabel.hybrid` is `true` when hybrid search ran.
+
+Good to know:
+
+- The fused `score` ranks results against each other. It is not a vector similarity, so a threshold tuned on a plain search does not carry over.
+- Query words are lowercased and split on spaces and punctuation, so `ERR-4021` is searched as `err` and `4021`. The keyword search uses up to the first 16 distinct words of the query.
+- Qdrant: the first hybrid search on a collection builds a full-text index on the `text` payload field, which needs a Qdrant key with write access. Large collections take a moment once, and later searches reuse the index.
+- Postgres (pgvector): the `142_vsi_text_search_index` database migration adds the full-text index. Run `alembic upgrade head` after updating. Hybrid search also runs without the index, only slower on large stores.
+- For every query the keyword search reads up to 200 matching documents, starting with the rarest query words, since those carry the most weight.
+
 ## Accessing Results
 
 - `$ragNode.results.first().text` – top result content
-- `$ragNode.results.first().score` – similarity score (0–1)
+- `$ragNode.results.first().score` – similarity score (0–1), or the fused score with hybrid search
+- `$ragNode.results.first().keyword_score` – BM25 score (hybrid search)
+- `$ragNode.results.first().vector_score` – vector similarity (hybrid search)
 - `$ragNode.results.first().metadata.source` – top result metadata
 - `$ragNode.results.map("item.text").join("\n\n")` – concatenate for LLM context
 - `$ragNode.reranked` – whether reranking was applied
+- `$ragNode.hybrid` – whether hybrid search was applied
 - `$ragNode.count` – number of returned results
 - `$ragNode.replaced` – whether an upsert replaced an existing document
 - `$ragNode.deleted` – whether a delete removed anything
@@ -165,6 +198,22 @@ When reranking is enabled:
     "enableReranker": true,
     "rerankerCredentialId": "cohere-credential-uuid",
     "rerankerTopN": 5
+  }
+}
+```
+
+## Example – Hybrid search
+
+```json
+{
+  "type": "rag",
+  "data": {
+    "label": "findTicket",
+    "vectorStoreId": "vector-store-uuid",
+    "ragOperation": "search",
+    "queryText": "$userInput.body.text",
+    "searchLimit": 5,
+    "hybridSearch": true
   }
 }
 ```
