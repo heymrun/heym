@@ -924,6 +924,7 @@ onMounted(async () => {
       title-class="text-lg sm:text-lg md:text-xl"
       size="3xl"
       default-fullscreen
+      inline-header-actions
       @close="closeDetail"
     >
       <template #header-actions>
@@ -938,7 +939,7 @@ onMounted(async () => {
             >
               <ChevronLeft class="w-4 h-4" />
             </button>
-            <span class="h-8 min-w-[4.25rem] px-2 inline-flex items-center justify-center text-xs font-medium tabular-nums text-foreground border-x border-border bg-background/60">
+            <span class="h-8 min-w-[3.25rem] sm:min-w-[4.25rem] px-2 inline-flex items-center justify-center text-xs font-medium tabular-nums text-foreground border-x border-border bg-background/60">
               {{ tracePositionLabel }}
             </span>
             <button
@@ -968,11 +969,12 @@ onMounted(async () => {
           v-if="selectedTrace?.workflow_id"
           variant="outline"
           size="sm"
-          class="!h-8 !min-h-8 !px-2.5 text-xs shrink-0 sm:hidden"
+          class="!h-8 !min-h-8 !w-8 !px-0 shrink-0 sm:hidden"
+          aria-label="Go to Workflow"
+          title="Go to Workflow"
           @click="goToWorkflow"
         >
-          <ExternalLink class="w-3 h-3 mr-1" />
-          Workflow
+          <ExternalLink class="w-3.5 h-3.5" />
         </Button>
       </template>
       <div
