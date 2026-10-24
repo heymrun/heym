@@ -82,6 +82,7 @@ def execute(ctx: NodeExecutionContext) -> object:
     node_data = ctx.node_data
 
     from app.db.session import SessionLocal
+    from app.services.embedding import as_bool
     from app.services.encryption import decrypt_config
     from app.services.vector_store import (
         create_vector_store_service_for_credential,
@@ -197,11 +198,22 @@ def execute(ctx: NodeExecutionContext) -> object:
         if enable_reranker and reranker_credential_id:
             initial_limit = max(search_limit * 3, 20)
 
-        results = service.search(
+        hybrid_search = as_bool(node_data.get("hybridSearch", False))
+        run_search = service.hybrid_search if hybrid_search else service.search
+        results = run_search(
             collection_name,
             query_text,
             limit=initial_limit,
             metadata_filter=metadata_filter,
+        )
+        # Reranking replaces the hit objects, so keep each leg's score by id.
+        leg_scores = (
+            {
+                r.id: {"vector_score": r.vector_score, "keyword_score": r.keyword_score}
+                for r in results
+            }
+            if hybrid_search
+            else {}
         )
 
         reranked = False
@@ -242,6 +254,7 @@ def execute(ctx: NodeExecutionContext) -> object:
                 "operation": "search",
                 "query": query_text,
                 "reranked": True,
+                "hybrid": hybrid_search,
                 "results": [
                     {
                         "id": r.id,
@@ -249,6 +262,7 @@ def execute(ctx: NodeExecutionContext) -> object:
                         "score": r.original_score,
                         "relevance_score": r.relevance_score,
                         "metadata": r.metadata,
+                        **leg_scores.get(r.id, {}),
                     }
                     for r in results
                 ],
@@ -260,12 +274,14 @@ def execute(ctx: NodeExecutionContext) -> object:
                 "operation": "search",
                 "query": query_text,
                 "reranked": False,
+                "hybrid": hybrid_search,
                 "results": [
                     {
                         "id": r.id,
                         "text": r.text,
                         "score": r.score,
                         "metadata": r.metadata,
+                        **leg_scores.get(r.id, {}),
                     }
                     for r in results
                 ],

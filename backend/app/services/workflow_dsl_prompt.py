@@ -2347,6 +2347,7 @@ The last node in the iteration body MUST connect BACK to the loop node's `loop` 
   - `queryText`: Search query text (only for "search" operation, supports expressions)
   - `searchLimit`: Maximum number of results to return (only for "search" operation, default: 3)
   - `metadataFilters`: JSON object with metadata filters for search (only for "search" operation). String values support expressions and are resolved after the JSON is parsed, so `{"url": "$start.url"}` filters on the resolved value, and a whole-string expression keeps its type (`{"count": "$start.count"}` matches a stored number)
+  - `hybridSearch`: Boolean (only for "search" operation, default false). When true, the vector search is fused with a BM25 keyword search over the stored text (reciprocal rank fusion), so exact terms such as ids, names and error codes are found next to semantic matches. Combines with `metadataFilters` and the reranker. Results then also carry `vector_score` and `keyword_score`, and `score` is the fused 0-1 score instead of a vector similarity
 
 **SETUP**: Requires a Vector Store created in the Vector Stores tab with a "RAG: Qdrant + OpenAI" credential (external Qdrant server), a "RAG: Psql + OpenAI" credential (vectors stored in Heym's own Postgres database via pgvector — no external service), or a "RAG: Custom Embeddings" credential (any OpenAI-compatible embedding endpoint by URL, targeting either backend). The same RAG operations, metadata filters, and reranking work identically with every backend.
 
@@ -2357,7 +2358,7 @@ The last node in the iteration body MUST connect BACK to the loop node's `loop` 
 | `insert` | documentContent, documentMetadata (optional) | Insert a document into the vector store |
 | `upsert` | documentId, documentContent, documentIdField (optional), documentMetadata (optional) | Replace every point whose id field matches, then insert the new version |
 | `delete` | documentId, documentIdField (optional) | Delete every point whose id field matches |
-| `search` | queryText, searchLimit (optional), metadataFilters (optional) | Search for similar documents |
+| `search` | queryText, searchLimit (optional), metadataFilters (optional), hybridSearch (optional) | Search for similar documents; with hybridSearch, vector and BM25 keyword matches are fused |
 
 **Document source**: a document stored without a `source` key in `documentMetadata` is stamped with `source: "workflow:<workflow name>"`, so the Vectorstores tab can show which workflow stored it. Set `source` yourself to override it.
 
@@ -2450,12 +2451,29 @@ The last node in the iteration body MUST connect BACK to the loop node's `loop` 
 }
 ```
 
+**Example - Hybrid Search (vector + BM25)**:
+```json
+{
+  "type": "rag",
+  "data": {
+    "label": "findTicket",
+    "operation": "search",
+    "vectorStoreId": "vector-store-uuid",
+    "queryText": "$userInput.body.query",
+    "searchLimit": 5,
+    "hybridSearch": true
+  }
+}
+```
+
 **Accessing RAG Output**:
 - `$ragNodeLabel.status` - Operation status ("success")
 - `$ragNodeLabel.inserted_ids` - Array of inserted document IDs (for insert operation)
 - `$ragNodeLabel.results` - Array of search results (for search operation)
 - `$ragNodeLabel.results.first().payload.content` - Content of the top result
-- `$ragNodeLabel.results.first().score` - Similarity score of the top result (0-1)
+- `$ragNodeLabel.results.first().score` - Similarity score of the top result (0-1); with `hybridSearch` the fused score (0-1)
+- `$ragNodeLabel.results.first().vector_score` / `.keyword_score` - Per-search scores with `hybridSearch` (null when that search did not return the document)
+- `$ragNodeLabel.hybrid` - Boolean, whether hybrid search ran
 - `$ragNodeLabel.point_id` - Stored point id (for insert and upsert operations)
 - `$ragNodeLabel.replaced` - Boolean, whether upsert replaced an existing document
 - `$ragNodeLabel.deleted` - Boolean, whether delete removed anything

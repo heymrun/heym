@@ -7,6 +7,8 @@ from app.services.embedding import EMBEDDING_DIMENSIONS, EmbeddingConfig, Embedd
 from app.services.vector_store import (
     CollectionStats,
     ExistingFile,
+    HybridSearchResult,
+    LexicalDoc,
     SearchResult,
     VectorStoreItem,
     VectorStoreSourceGroup,
@@ -15,6 +17,13 @@ from app.services.vector_store import (
 )
 
 TABLE = "vector_store_items"
+
+# The keyword leg of hybrid search reads this expression, and migration
+# 142_vsi_text_search_index indexes it: change one and the index stops being used.
+# Punctuation becomes a space first, so "ERR-4021" yields the words `err` and `4021` that
+# hybrid_search.tokenize() produces; Postgres' own parser would keep `-4021` as a number.
+# `left` keeps a pathological document under tsvector's 1 MB limit.
+TEXT_SEARCH_SQL = r"to_tsvector('simple', regexp_replace(left(text, 200000), '(\W|_)+', ' ', 'g'))"
 
 BACKEND_UNAVAILABLE_MSG = (
     "Postgres vector backend is unavailable: the pgvector extension and the "
@@ -40,6 +49,67 @@ class VectorStoreBackendUnavailableError(ValueError):
 
 def _vec_literal(embedding: list[float]) -> str:
     return "[" + ",".join(repr(float(x)) for x in embedding) + "]"
+
+
+class PgLexicalSource:
+    """Keyword leg of hybrid search, answered from Postgres full-text search on ``text``."""
+
+    def __init__(self, engine) -> None:
+        self.engine = engine
+
+    def corpus_size(self, collection_name: str) -> int:
+        with self.engine.connect() as conn:
+            return (
+                conn.execute(
+                    text(f"SELECT COUNT(*) FROM {TABLE} WHERE collection_name = :c"),
+                    {"c": collection_name},
+                ).scalar()
+                or 0
+            )
+
+    def document_frequencies(self, collection_name: str, terms: list[str]) -> dict[str, int]:
+        sql = text(
+            "SELECT t.term AS term, "
+            f"(SELECT COUNT(*) FROM {TABLE} WHERE collection_name = :c "
+            f"AND {TEXT_SEARCH_SQL} @@ plainto_tsquery('simple', t.term)) AS df "
+            "FROM unnest(CAST(:terms AS text[])) AS t(term)"
+        )
+        with self.engine.connect() as conn:
+            rows = conn.execute(sql, {"c": collection_name, "terms": terms}).fetchall()
+        return {row.term: int(row.df) for row in rows}
+
+    def candidates(
+        self,
+        collection_name: str,
+        terms: list[str],
+        limit: int,
+        metadata_filter: dict | None,
+    ) -> list[LexicalDoc]:
+        params: dict = {"c": collection_name, "k": limit}
+        tsquery_parts = []
+        for i, term in enumerate(terms):
+            params[f"t{i}"] = term
+            tsquery_parts.append(f"plainto_tsquery('simple', :t{i})")
+        tsquery = " || ".join(tsquery_parts)
+        filter_sql = ""
+        if metadata_filter:
+            filter_sql = " AND metadata @> (:mf)::jsonb"
+            params["mf"] = json.dumps(metadata_filter)
+        sql = text(
+            f"SELECT id, text, metadata FROM {TABLE} "
+            f"WHERE collection_name = :c AND {TEXT_SEARCH_SQL} @@ ({tsquery}){filter_sql} "
+            f"ORDER BY ts_rank_cd({TEXT_SEARCH_SQL}, ({tsquery})) DESC LIMIT :k"
+        )
+        with self.engine.connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [
+            LexicalDoc(
+                id=str(row.id),
+                text=row.text or "",
+                metadata=dict(row.metadata) if row.metadata else {},
+            )
+            for row in rows
+        ]
 
 
 class PgVectorStoreService:
@@ -222,6 +292,26 @@ class PgVectorStoreService:
                 )
             )
         return results
+
+    def hybrid_search(
+        self,
+        collection_name: str,
+        query: str,
+        limit: int = 5,
+        metadata_filter: dict | None = None,
+    ) -> list[HybridSearchResult]:
+        """Vector search fused with BM25 keyword matches over the stored text."""
+        from app.services.hybrid_search import hybrid_pool_size, run_hybrid_search
+
+        dense = self.search(
+            collection_name,
+            query,
+            limit=hybrid_pool_size(limit),
+            metadata_filter=metadata_filter,
+        )
+        return run_hybrid_search(
+            PgLexicalSource(self.engine), collection_name, query, dense, limit, metadata_filter
+        )
 
     def upsert_by_field(
         self,
