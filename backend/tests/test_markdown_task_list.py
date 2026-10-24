@@ -70,3 +70,32 @@ class MarkdownTaskListTests(unittest.TestCase):
     def test_remove_invalid_index_raises(self):
         with self.assertRaises(ValueError):
             remove_task_item("- [ ] ok", 5)
+
+
+class TaskItemsInCodeBlocksTests(unittest.TestCase):
+    CODE_ONLY = "Example:\n```markdown\n- [ ] not a checkbox\n```"
+    MIXED = "- [ ] real\n```\n- [ ] in code\n```\n~~~\n* [x] also code\n~~~\n- [x] real too"
+
+    def test_task_lines_in_fenced_code_are_not_task_items(self):
+        self.assertFalse(has_task_items(self.CODE_ONLY))
+        self.assertTrue(has_task_items(self.MIXED))
+
+    def test_code_lines_cannot_be_toggled_or_edited(self):
+        for line_index in (2, 5):
+            with self.assertRaises(ValueError):
+                toggle_task_item(self.MIXED, line_index)
+            with self.assertRaises(ValueError):
+                update_task_item(self.MIXED, line_index, "x")
+            with self.assertRaises(ValueError):
+                remove_task_item(self.MIXED, line_index)
+
+    def test_items_around_code_still_toggle(self):
+        self.assertTrue(toggle_task_item(self.MIXED, 0).startswith("- [x] real\n"))
+        self.assertTrue(toggle_task_item(self.MIXED, 7).endswith("- [ ] real too"))
+
+    def test_shorter_fence_inside_a_longer_one_stays_code(self):
+        md = "````\n```\n- [ ] quoted\n```\n````\n- [ ] after"
+        self.assertFalse(has_task_items("\n".join(md.split("\n")[:5])))
+        self.assertEqual(toggle_task_item(md, 5).split("\n")[-1], "- [x] after")
+        with self.assertRaises(ValueError):
+            toggle_task_item(md, 2)
