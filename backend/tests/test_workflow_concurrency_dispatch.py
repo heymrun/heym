@@ -19,6 +19,9 @@ def _result(status: str = "success", futures: tuple = ()) -> SimpleNamespace:
         node_results=[],
         allow_downstream_pending=bool(futures),
         allow_downstream_futures=lambda: futures,
+        # What wait_for_result's OffloadedRun carries for a run that executed.
+        reported=True,
+        error=None,
     )
 
 
@@ -151,3 +154,36 @@ class DispatchGateTests(unittest.IsolatedAsyncioTestCase):
         )
         held = admit.await_args.args[0]
         self.assertEqual(held.run_options["run_error_workflow"], False)
+
+
+class QueuedRunRetiredUnreportedTests(unittest.IsolatedAsyncioTestCase):
+    async def test_a_queued_run_retired_before_running_is_recorded(self) -> None:
+        """Same as the cluster offload path: nothing else will ever write its history."""
+        from app.services.cluster.run_history import offloaded_error
+
+        execution_id = uuid.uuid4()
+        admission = Admission(kind="queued", execution_id=execution_id, queue=QueueInfo(1, 1, 1, 1))
+        record = AsyncMock(return_value=True)
+        with (
+            patch.object(dispatch.settings, "cluster_enabled", False),
+            patch(
+                "app.services.cluster.dispatch.workflow_concurrency.admit",
+                AsyncMock(return_value=admission),
+            ),
+            patch(
+                "app.services.cluster.dispatch.wait_for_result",
+                AsyncMock(return_value=offloaded_error("Skipped: not claimed")),
+            ),
+            patch("app.services.cluster.dispatch.record_failed_dispatch", record),
+        ):
+            result = await dispatch.dispatch_workflow(
+                workflow_id=uuid.uuid4(),
+                nodes=NODES,
+                edges=[],
+                inputs={},
+                execution_id=execution_id,
+                concurrency_limit=1,
+            )
+        self.assertEqual(result.status, "error")
+        record.assert_awaited_once()
+        self.assertEqual(record.await_args.kwargs["execution_id"], execution_id)

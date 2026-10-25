@@ -317,3 +317,25 @@ class TestNodeLabelIndex(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestQueuedRunsInOverview(unittest.IsolatedAsyncioTestCase):
+    async def test_queued_runs_are_counted_apart_with_their_place_in_line(self):
+        workflow_id = uuid.uuid4()
+        item = ActiveExecutionItem(
+            execution_id=str(uuid.uuid4()),
+            workflow_id=str(workflow_id),
+            workflow_name="Invoice sync",
+            started_at=datetime.now(timezone.utc) - timedelta(seconds=30),
+            status="queued",
+            queue_position=2,
+            queue_size=3,
+        )
+        db = AsyncMock()
+        db.execute = AsyncMock(return_value=_rows([SimpleNamespace(id=workflow_id, nodes=[])]))
+        with patch(f"{MODULE}.collect_active_executions_for_user", AsyncMock(return_value=[item])):
+            result = await build_active_execution_overview(db, uuid.uuid4(), None)
+
+        self.assertEqual((result["running_count"], result["queued_count"]), (0, 1))
+        (entry,) = result["executions"]
+        self.assertEqual((entry["queue_position"], entry["queue_size"]), (2, 3))

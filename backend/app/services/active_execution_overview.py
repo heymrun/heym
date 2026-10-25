@@ -259,7 +259,13 @@ async def build_active_execution_overview(
     """Summarize what is running right now for the dashboard chat / MCP assistant."""
     items = await collect_active_executions_for_user(db, user_id)
     if not items:
-        return {"count": 0, "running_count": 0, "pending_count": 0, "executions": []}
+        return {
+            "count": 0,
+            "running_count": 0,
+            "pending_count": 0,
+            "queued_count": 0,
+            "executions": [],
+        }
 
     workflow_ids = {uuid.UUID(item.workflow_id) for item in items}
     labels_by_workflow: dict[str, dict[str, dict[str, str]]] = {}
@@ -289,6 +295,9 @@ async def build_active_execution_overview(
                 "workflow_name": item.workflow_name,
                 "status": item.status,
                 "pending_kind": item.pending_kind,
+                # Set for a run waiting for a concurrency slot: its place in line.
+                "queue_position": item.queue_position,
+                "queue_size": item.queue_size,
                 "started_at": started_at.isoformat(),
                 "running_for_seconds": round(running_seconds, 1),
                 "running_for": format_duration(running_seconds),
@@ -306,5 +315,6 @@ async def build_active_execution_overview(
         "count": len(executions),
         "running_count": sum(1 for e in executions if e["status"] == "running"),
         "pending_count": sum(1 for e in executions if e["status"] == "pending"),
+        "queued_count": sum(1 for e in executions if e["status"] == "queued"),
         "executions": executions,
     }

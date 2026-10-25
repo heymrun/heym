@@ -305,7 +305,17 @@ async def dispatch_workflow(
             if not wait_for_completion:
                 return None
             # The worker writes history and fires the error workflow for queued runs.
-            return await wait_for_result(run_id, timeout_seconds=timeout_seconds)
+            waited = await wait_for_result(run_id, timeout_seconds=timeout_seconds)
+            if not waited.reported:
+                # Retired before any instance ran it, so nothing else will record it.
+                await record_failed_dispatch(
+                    execution_id=run_id,
+                    workflow_id=workflow_id,
+                    inputs=inputs,
+                    trigger_source=trigger_source,
+                    message=waited.error or "The run was retired before any instance executed it",
+                )
+            return waited
     holds_slot = admission is not None and admission.holds_slot
 
     if should_run_in_process(
