@@ -342,14 +342,11 @@ warning.
 Editor test runs, sub-workflow calls (Execute node, agent workflow tools),
 Evals, chat build-mode test runs, and HITL / Codex resumes.
 
-Found during implementation: four production paths call `execute_workflow`
-directly instead of going through `dispatch_workflow`, so this change does not
-gate them. They are Board card runs (`board_run_service.py`), File Upload trigger
-runs (`api/file_intake.py`), the AI assistant's run-workflow tool
+Also not gated, by decision: Board card runs (`board_run_service.py`), File
+Upload trigger runs (`api/file_intake.py`), the AI assistant's run-workflow tool
 (`api/ai_assistant.py::run_execute_workflow_tool`), and alert notify workflows
-(`alerts/evaluator.py`). Gating them means moving each to `dispatch_workflow` and
-handling `history_written` the way the trigger call sites do, which also changes
-their cluster placement. That is left as an open decision.
+(`alerts/evaluator.py`). They call `execute_workflow` directly rather than
+`dispatch_workflow`, and they are meant to start without waiting for a slot.
 
 ## History and UI
 

@@ -25,9 +25,7 @@
   Docker on this machine is OrbStack (`orb start`). Export `SECRET_KEY=test-secret-key-for-tests-only-32-bytes` when it is not set.
 - After every backend task: `uv run ruff check . && uv run ruff format --check .`
 - After every frontend task: `bun run lint && bun run typecheck`.
-- Commit after every task. Commit messages end with
-  `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`. Recent public-repo
-  PRs went out without attribution, so confirm with the user before pushing.
+- Commit after every task.
 - No Turkish text in code, comments or docs.
 
 ## File map
@@ -4906,7 +4904,7 @@ Expected: everything passes. Commit any `ruff format` diff.
 
 - [ ] **Step 3: Hand off**
 
-Do not push. Report to the user with the test output and the smoke results. Ask before opening the PR whether it should carry no attribution, like the recent public-repo PRs (#794, #800).
+Do not push. Report to the user with the test output and the smoke results, and let them decide how the branch is integrated.
 
 ---
 
