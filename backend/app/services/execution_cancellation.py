@@ -1164,7 +1164,12 @@ async def request_persisted_execution_cancel(
     from sqlalchemy import select, update
     from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-    from app.db.models import ActiveWorkflowExecution, ExecutionHistory, WorkflowRunQueue
+    from app.db.models import (
+        ActiveWorkflowExecution,
+        ExecutionHistory,
+        WorkflowRunQueue,
+        execution_started_at,
+    )
     from app.services.cluster import identity, run_queue
     from app.services.cluster.attribution import attribution_fields
     from app.services.cluster.run_queue import (
@@ -1229,6 +1234,7 @@ async def request_persisted_execution_cancel(
                             status="cancelled",
                             execution_time_ms=0.0,
                             trigger_source=queue_row.trigger_source,
+                            started_at=execution_started_at(execution_id, [], 0.0),
                             **attribution_fields(),
                         )
                         .on_conflict_do_nothing(index_elements=["id"])

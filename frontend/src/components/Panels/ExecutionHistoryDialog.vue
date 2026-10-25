@@ -1172,6 +1172,7 @@ function bringToCanvas(): void {
               :total-time-ms="selectedEntry?.result?.execution_time_ms ?? 0"
               :nodes="workflowStore.nodes"
               :edges="workflowStore.edges"
+              :started-at="selectedEntry?.started_at ?? null"
             />
 
             <div

@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from enum import Enum as PyEnum
 
@@ -18,9 +18,13 @@ from sqlalchemy import (
     UniqueConstraint,
     event,
     func,
+    literal,
+    select,
 )
 from sqlalchemy.dialects.postgresql import JSON, JSONB, UUID
+from sqlalchemy.engine import Connection
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.sql.elements import ColumnElement
 
 
 class Base(DeclarativeBase):
@@ -709,6 +713,70 @@ def stamp_execution_history_attribution(
         target.executed_by_instance_id = fields["executed_by_instance_id"]
     if target.executed_by_instance_name is None:
         target.executed_by_instance_name = fields["executed_by_instance_name"]
+
+
+# Recorded span times are epoch milliseconds; anything smaller is not a wall-clock time.
+_EPOCH_MS_FLOOR = 1_000_000_000_000
+
+
+def _requested_or_registered_start(execution_id: uuid.UUID) -> ColumnElement[datetime]:
+    """When a queued run was requested, else when the run registered as active.
+
+    The queue keeps its request time, and a recovery rerun after a restart re-registers the
+    same execution without touching ``started_at``, so both survive a restart.
+    """
+    return func.coalesce(
+        select(WorkflowRunQueue.enqueued_at)
+        .where(WorkflowRunQueue.execution_id == execution_id)
+        .scalar_subquery(),
+        select(ActiveWorkflowExecution.started_at)
+        .where(ActiveWorkflowExecution.execution_id == execution_id)
+        .scalar_subquery(),
+        type_=DateTime(timezone=True),
+    )
+
+
+def recorded_run_start(node_results: list | None, execution_time_ms: float | None) -> datetime:
+    """The first recorded span's start; without spans, the finish minus the duration."""
+    starts = [
+        value
+        for row in node_results or []
+        if isinstance(row, dict) and isinstance(row.get("metadata"), dict)
+        for value in [row["metadata"].get("started_at_ms")]
+        if isinstance(value, int | float) and value >= _EPOCH_MS_FLOOR
+    ]
+    if starts:
+        return datetime.fromtimestamp(min(starts) / 1000, tz=timezone.utc)
+    return datetime.now(timezone.utc) - timedelta(milliseconds=float(execution_time_ms or 0.0))
+
+
+def execution_started_at(
+    execution_id: uuid.UUID, node_results: list | None, execution_time_ms: float | None
+) -> ColumnElement[datetime]:
+    """``started_at`` for a Core INSERT of a history row, which skips the ORM hook below."""
+    return func.coalesce(
+        _requested_or_registered_start(execution_id),
+        literal(recorded_run_start(node_results, execution_time_ms), DateTime(timezone=True)),
+        type_=DateTime(timezone=True),
+    )
+
+
+@event.listens_for(ExecutionHistory, "before_insert")
+def stamp_execution_history_start(
+    _mapper: object, connection: Connection, target: ExecutionHistory
+) -> None:
+    """Record when the run started, not when its history row was written.
+
+    Rows are written as a run ends, so the column default would be the finish time. A queued
+    run (a concurrency limit, the cluster queue) started when it was requested; a run that
+    was recovered after a restart started at its first attempt.
+    """
+    if target.started_at is not None:
+        return
+    found = None
+    if target.id is not None:
+        found = connection.execute(select(_requested_or_registered_start(target.id))).scalar()
+    target.started_at = found or recorded_run_start(target.node_results, target.execution_time_ms)
 
 
 class ActiveWorkflowExecution(Base):

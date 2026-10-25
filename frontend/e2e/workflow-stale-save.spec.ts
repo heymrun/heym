@@ -31,6 +31,9 @@ async function saveFromElsewhere(
 
 test.beforeEach(async ({ page }) => {
   await prepareAuthenticatedPage(page);
+  // With live collaboration a save made elsewhere reaches the canvas at once; these checks
+  // guard a tab that has no collaboration socket.
+  await page.routeWebSocket(/\/collab$/, (socket) => socket.close());
 });
 
 test("clean tab: Run on a workflow changed elsewhere asks to reload", async ({ page }) => {
