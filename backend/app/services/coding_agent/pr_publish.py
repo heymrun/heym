@@ -137,6 +137,16 @@ _NARRATION_PREFIX_RE = re.compile(
 )
 # "Good, …" / "Perfect! …" — an interjection about the agent's own progress, not a change.
 _INTERJECTION_OPENER_RE = re.compile(rf"^(?:{_INTERJECTIONS})\s*[,!.]", re.IGNORECASE)
+# A report never closes on what the agent will do next ("…paths. I'll check for stray files
+# there, then rerun with bash."). Narrower than the opener: "I've …" and "All tests pass." end
+# real reports, and "Let me know …" is a closing offer.
+_NEXT_STEP_CLOSER_RE = re.compile(
+    rf"^(?:(?:{_INTERJECTIONS})[,!.]?\s+)*"
+    r"(?:let(?:'|’)?s\b|let me\b(?!\s+know\b)|i(?:'|’)?ll\b|i will\b|"
+    r"i(?:'|’)?m going to\b|i am going to\b|next[,:]?\s+i\b)",
+    re.IGNORECASE,
+)
+_SENTENCE_BREAK_RE = re.compile(r"(?<=[.!?])\s+")
 _CHANGE_SUMMARY_HEADING = "change summary"
 
 
@@ -150,9 +160,10 @@ def normalize_title_candidate(text: str) -> str:
 def is_agent_narration(text: str) -> bool:
     """True when the text is the agent narrating its own process rather than the change.
 
-    Three signals, all observed on real agent pull requests: a step announcement
-    ("Let me…", "I'll…"), an interjection about its own progress ("Good, …"), and a trailing
-    colon, which introduces the next step and never ends a change description.
+    Four signals, all observed on real agent pull requests: a step announcement opening the
+    text ("Let me…", "I'll…") or closing it, an interjection about its own progress
+    ("Good, …"), and a trailing colon, which introduces the next step and never ends a change
+    description.
     """
     collapsed = _collapse(text)
     if not collapsed:
@@ -161,7 +172,10 @@ def is_agent_narration(text: str) -> bool:
         return True
     if _INTERJECTION_OPENER_RE.match(collapsed) is not None:
         return True
-    return _NARRATION_PREFIX_RE.match(collapsed) is not None
+    if _NARRATION_PREFIX_RE.match(collapsed) is not None:
+        return True
+    last_sentence = _SENTENCE_BREAK_RE.split(collapsed)[-1]
+    return _NEXT_STEP_CLOSER_RE.match(last_sentence) is not None
 
 
 def is_meaningful_commit_title(title: str) -> bool:
