@@ -23,6 +23,8 @@ import {
   X,
 } from "lucide-vue-next";
 
+import ActiveExecutionStatusLabel from "@/components/Panels/ActiveExecutionStatusLabel.vue";
+import { activeExecutionStatus } from "@/components/Panels/activeExecutionStatus";
 import ExecutionHistoryAskAiButton from "@/components/Panels/ExecutionHistoryAskAiButton.vue";
 import ExecutionHistoryTimeline from "@/components/Panels/ExecutionHistoryTimeline.vue";
 import ExecutionHistoryViewToggle from "@/components/Panels/ExecutionHistoryViewToggle.vue";
@@ -878,9 +880,9 @@ function bringToCanvas(): void {
             class="p-2 rounded-md border border-blue-500/30 bg-blue-500/10"
           >
             <div class="flex items-center gap-1.5">
-              <Loader2 class="w-3 h-3 text-blue-400 animate-spin shrink-0" />
-              <span class="text-xs font-medium text-blue-400">Running</span>
+              <ActiveExecutionStatusLabel :item="active" />
               <Button
+                v-if="activeExecutionStatus(active).canOpenLive"
                 variant="outline"
                 size="sm"
                 class="ml-auto !h-7 !min-h-7 !rounded-md !px-2 text-[10px]"

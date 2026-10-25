@@ -105,6 +105,11 @@ function startPolling(): void {
 
 function openLiveWorkflow(workflow: ActiveExecutionItem): void {
   isOpen.value = false;
+  if (workflow.status === "queued") {
+    // Nothing is running yet, so there is no live run to attach to.
+    void router.push({ name: "editor", params: { id: workflow.workflow_id } });
+    return;
+  }
   void router.push({
     name: "editor",
     params: {

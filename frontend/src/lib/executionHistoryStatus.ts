@@ -23,6 +23,8 @@ const BADGE_CLASSES: Readonly<Record<string, string>> = {
   failed: "bg-red-500/20 text-red-400",
   cached: "bg-sky-500/20 text-sky-400",
   cancelled: "bg-gray-500/20 text-gray-400",
+  expired: "bg-amber-500/20 text-amber-500",
+  queue_full: "bg-orange-500/20 text-orange-500",
 };
 
 /** Returns the badge classes for a status, or null when it needs no badge. */

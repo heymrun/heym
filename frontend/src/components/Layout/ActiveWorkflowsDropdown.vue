@@ -8,6 +8,7 @@ import {
 import { Activity, ArrowUpRight, CircleAlert, PauseCircle } from "lucide-vue-next";
 
 import type { ActiveExecutionItem } from "@/types/workflow";
+import { activeExecutionStatus } from "@/components/Panels/activeExecutionStatus";
 
 interface Props {
   workflows: ActiveExecutionItem[];
@@ -32,6 +33,9 @@ function isPendingReview(workflow: ActiveExecutionItem): boolean {
 }
 
 function formatStartedAt(workflow: ActiveExecutionItem): string {
+  if (workflow.status === "queued") {
+    return activeExecutionStatus(workflow).label;
+  }
   if (isPendingReview(workflow)) {
     if (workflow.pending_kind === "codex") {
       return "Pending Codex review";
