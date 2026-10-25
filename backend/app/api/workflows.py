@@ -70,7 +70,7 @@ from app.models.schemas import (
     WorkflowVersionDiffResponse,
     WorkflowVersionResponse,
 )
-from app.services import file_intake_service
+from app.services import file_intake_service, workflow_concurrency
 from app.services.active_execution_overview import collect_active_executions_for_user
 from app.services.audit_log import OUTCOME_DENIED, audit
 from app.services.auth import create_workflow_execution_token, decode_token
@@ -1789,6 +1789,16 @@ async def update_workflow(
             if workflow_data.workflow_timeout_seconds > 0
             else None
         )
+    concurrency_changed = False
+    for field_name in (
+        "concurrency_limit",
+        "concurrency_max_queue",
+        "concurrency_max_wait_seconds",
+    ):
+        value = getattr(workflow_data, field_name)
+        if value is not None:
+            setattr(workflow, field_name, value if value > 0 else None)
+            concurrency_changed = True
 
     # Keep the dashboard widget metadata/cache in sync when its hidden workflow
     # is edited on the canvas (canvas -> dashboard direction).
@@ -1843,6 +1853,12 @@ async def update_workflow(
     await db.commit()
     await db.refresh(workflow)
     await announce_workflow_saved(workflow, current_user.id, publish=publish_event)
+    if concurrency_changed:
+        # A raised or removed limit must not wait for the next sweep to start held runs.
+        try:
+            await workflow_concurrency.promote(workflow.id)
+        except Exception:
+            logger.exception("Could not promote held runs for workflow %s", workflow.id)
     audit(
         action="workflow.update",
         actor=current_user,

@@ -242,6 +242,10 @@ class WorkflowUpdate(BaseModel):
     error_workflow_id: uuid.UUID | None = None
     minutes_saved_per_run: float | None = None
     workflow_timeout_seconds: int | None = None
+    # 0 clears a field; a positive value sets it.
+    concurrency_limit: int | None = Field(None, ge=0)
+    concurrency_max_queue: int | None = Field(None, ge=0)
+    concurrency_max_wait_seconds: int | None = Field(None, ge=0)
     # Optimistic concurrency: the `updated_at` the client's edit is based on. When supplied and the
     # stored row is newer, the update is rejected with 409 instead of overwriting someone else's
     # work. Omitted means "save unconditionally" (the explicit override path).
@@ -303,6 +307,9 @@ class WorkflowResponse(BaseModel):
     error_workflow_id: uuid.UUID | None = None
     minutes_saved_per_run: float | None = None
     workflow_timeout_seconds: int | None = None
+    concurrency_limit: int | None = None
+    concurrency_max_queue: int | None = None
+    concurrency_max_wait_seconds: int | None = None
     owner_name: str | None = None
     # What the requesting user may do: the owner and write shares edit, read shares view and run.
     permission: WorkflowSharePermission = "write"
