@@ -8,11 +8,12 @@ go to the caller's own HTTP response and cannot cross an instance boundary.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import contextlib
 import logging
 import threading
 import uuid
-from typing import Any
+from typing import Any, Literal
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -53,6 +54,38 @@ from app.services.workflow_executor import (
 logger = logging.getLogger("cluster")
 
 _RESULT_POLL_SECONDS = 10.0
+
+# Slot releases that wait for allowDownstream branches; kept so they are not collected.
+_SLOT_RELEASE_TASKS: set[asyncio.Task[None]] = set()
+
+
+def queue_full_result() -> OffloadedRun:
+    """What a waiting caller gets when the queue turned its run away. History is written."""
+    return OffloadedRun(
+        status=workflow_concurrency.HISTORY_STATUS_QUEUE_FULL,
+        outputs={"error": workflow_concurrency.QUEUE_FULL_MESSAGE},
+        history_written=True,
+        reported=True,
+    )
+
+
+async def _release_after_branches(futures: tuple[Any, ...], execution_id: uuid.UUID) -> None:
+    try:
+        await asyncio.to_thread(concurrent.futures.wait, futures)
+    finally:
+        await workflow_concurrency.release(execution_id)
+
+
+async def release_slot_when_done(result: Any, execution_id: uuid.UUID) -> None:
+    """Give the slot back now, or once allowDownstream branches have finished."""
+    futures_of = getattr(result, "allow_downstream_futures", None)
+    futures = tuple(futures_of()) if callable(futures_of) else ()
+    if not futures:
+        await workflow_concurrency.release(execution_id)
+        return
+    task = asyncio.create_task(_release_after_branches(futures, execution_id))
+    _SLOT_RELEASE_TASKS.add(task)
+    task.add_done_callback(_SLOT_RELEASE_TASKS.discard)
 
 
 def should_run_in_process(
@@ -208,12 +241,24 @@ async def dispatch_workflow(
     run_error_workflow: bool = True,
     cancel_event: threading.Event | None = None,
     dispatcher_handle: ExecutionCancellationHandle | None = None,
+    concurrency_limit: int | None = None,
+    concurrency_exempt: bool = False,
+    on_queued: Literal["wait", "return"] = "wait",
+    run_options: dict | None = None,
+    mint_status_token: bool = False,
     **executor_kwargs: Any,
 ) -> Any:
     """Run here, or enqueue and wait for whichever instance takes it.
 
     Returns the run result. With `wait_for_completion=False` an offloaded run
     returns None immediately, for callers that ignore the result.
+
+    `concurrency_limit` is the workflow's limit as the caller loaded it; None skips
+    the gate entirely. `concurrency_exempt` is for editor test runs only. A run that
+    has to wait returns its Admission when `on_queued="return"` (HTTP 202, MCP);
+    otherwise the dispatcher waits for it like an offloaded run. `run_options`
+    travel with a held run, and `mint_status_token` asks for an anonymous caller's
+    poll token.
     """
     run_id = execution_id or uuid.uuid4()
     # Capture dispatcher handle BEFORE any async gap if provided by caller.
@@ -224,6 +269,45 @@ async def dispatch_workflow(
     )
 
     placement = resolve_placement(nodes, workflow_cache)
+    admission: workflow_concurrency.Admission | None = None
+    if concurrency_limit is not None and not concurrency_exempt:
+        held_options = {**(run_options or {}), "run_error_workflow": run_error_workflow}
+        admission = await workflow_concurrency.admit(
+            workflow_concurrency.HeldRun(
+                workflow_id=workflow_id,
+                execution_id=run_id,
+                placement=placement,
+                inputs=inputs,
+                trigger_source=trigger_source,
+                actor_user_id=actor_user_id,
+                credentials_owner_id=credentials_owner_id,
+                timeout_seconds=timeout_seconds,
+                return_on_chart_output=bool(executor_kwargs.get("return_on_chart_output", False)),
+                run_options=held_options,
+                mint_status_token=mint_status_token,
+                trace_context=tracing.capture_queue_context(),
+            )
+        )
+        if admission.kind == "queue_full":
+            await workflow_concurrency.record_queue_full(
+                workflow_id=workflow_id,
+                execution_id=run_id,
+                inputs=inputs,
+                trigger_source=trigger_source,
+            )
+            clear_execution(run_id, handle=handle)
+            return admission if on_queued == "return" else queue_full_result()
+        if admission.kind == "queued":
+            # The worker registers the run when it claims it; until then it is queued, not running.
+            clear_execution(run_id, handle=handle)
+            if on_queued == "return":
+                return admission
+            if not wait_for_completion:
+                return None
+            # The worker writes history and fires the error workflow for queued runs.
+            return await wait_for_result(run_id, timeout_seconds=timeout_seconds)
+    holds_slot = admission is not None and admission.holds_slot
+
     if should_run_in_process(
         cluster_enabled=settings.cluster_enabled,
         placement=placement,
@@ -233,6 +317,17 @@ async def dispatch_workflow(
         # Charge the counter even here: forced main work must spend main's quota.
         if settings.cluster_enabled:
             await run_queue.choose_target(placement)
+        registered_here: Any = None
+        if holds_slot and handle is None and cancel_event is None:
+            # Without a registry row the sweep would take a long, healthy run's slot.
+            cancel_event = register_execution(
+                workflow_id=workflow_id,
+                execution_id=run_id,
+                inputs=inputs,
+                trigger_source=trigger_source,
+                actor_user_id=actor_user_id,
+            )
+            registered_here = getattr(cancel_event, "_execution_handle", None)
         call_kwargs = dict(
             workflow_id=workflow_id,
             nodes=nodes,
@@ -249,10 +344,20 @@ async def dispatch_workflow(
             call_kwargs.setdefault("cancel_event", cancel_event)
         # Each call site keeps the blocking behaviour it already had: cron
         # deliberately runs off the event loop, the webhook triggers do not.
-        if run_in_thread:
-            result = await asyncio.to_thread(execute_workflow, **call_kwargs)
-        else:
-            result = execute_workflow(**call_kwargs)
+        try:
+            if run_in_thread:
+                result = await asyncio.to_thread(execute_workflow, **call_kwargs)
+            else:
+                result = execute_workflow(**call_kwargs)
+        except BaseException:
+            if holds_slot:
+                await workflow_concurrency.release(run_id)
+            raise
+        finally:
+            if registered_here is not None:
+                clear_execution(run_id, handle=registered_here)
+        if holds_slot:
+            await release_slot_when_done(result, run_id)
         await run_error_workflow_for_failed_run(
             result,
             workflow_id=workflow_id,
@@ -293,6 +398,8 @@ async def dispatch_workflow(
         timeout_seconds=timeout_seconds,
         return_on_chart_output=bool(executor_kwargs.get("return_on_chart_output", False)),
         trace_context=tracing.capture_queue_context(),
+        # An admitted run hands its slot to the worker that executes it.
+        run_options={"holds_concurrency_slot": True} if holds_slot else None,
     )
     try:
         target = await run_queue.enqueue(queued)
