@@ -17,6 +17,7 @@ from app.api.workflows import (
 from app.config import settings
 from app.db.models import ExecutionHistory, PortalSession, Workflow, WorkflowVersion
 from app.db.session import async_session_maker
+from app.services import workflow_concurrency
 from app.services.alerts.cleanup import cleanup_old_alert_events
 from app.services.alerts.evaluator import evaluate_due_alerts
 from app.services.cluster import registry, run_queue
@@ -674,15 +675,17 @@ class CronScheduler:
             logger.exception("Error reclaiming execution_history TOAST space: %s", e)
 
     async def _maintain_run_queue(self) -> None:
-        """Retire stale queued runs and hand waiting ones back to a returning main.
+        """Retire stale queued runs, run the concurrency pass, and release waiting_for_main.
 
-        Runs on the leader, which may be a worker while main is down - that is
-        exactly what makes waiting_for_main rows drain when main comes back.
-        Expiring first is what stops a long outage from replaying its whole
+        Runs on the leader. The run queue now carries concurrency-queued runs on a
+        single instance too, so only the hand-back to a returning main stays
+        cluster-only. Expiring first stops a long outage from replaying its whole
         backlog at once.
         """
-        if not settings.cluster_enabled:
-            return
+        try:
+            await workflow_concurrency.maintain()
+        except Exception:
+            logger.exception("Concurrency maintenance failed")
         try:
             expired = await run_queue.expire_late_rows()
             if expired:
@@ -693,6 +696,8 @@ class CronScheduler:
                     execution_id,
                 )
                 await run_queue.notify_done(execution_id)
+            if not settings.cluster_enabled:
+                return
             instances = await registry.list_instances()
             main = registry.find_main(instances)
             if main is not None and registry.is_live(main, now=datetime.now(timezone.utc)):

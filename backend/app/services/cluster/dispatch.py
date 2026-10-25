@@ -21,6 +21,7 @@ from app.api.analytics import upsert_workflow_analytics_snapshot
 from app.config import settings
 from app.db.models import ActiveWorkflowExecution, ExecutionHistory, Workflow, WorkflowRunQueue
 from app.observability import tracing
+from app.services import workflow_concurrency
 from app.services.cluster import identity, run_queue
 from app.services.cluster.attribution import attribution_fields
 from app.services.cluster.node_placement import Placement, workflow_placement
@@ -351,7 +352,8 @@ class RunQueueWorker:
         self._active_finalizers: set[asyncio.Task[Any]] = set()
 
     async def start(self) -> None:
-        if not settings.cluster_enabled or self._task is not None:
+        # Always on: concurrency-queued runs reach this queue without a cluster too.
+        if self._task is not None:
             return
         from app.services.cluster.run_queue_bus import QueueWakeBus
 
@@ -578,6 +580,9 @@ class RunQueueWorker:
                     result={},
                     handle=worker_handle,
                 )
+            if workflow_concurrency.holds_slot(row):
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await workflow_concurrency.release(row.execution_id)
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await run_queue.notify_done(row.execution_id)
 
@@ -585,6 +590,7 @@ class RunQueueWorker:
         """Load the graph here rather than carrying it through the queue."""
         cancel_event = None
         defer_cleanup = False
+        options: dict = {}
         # Imports included: anything raising outside this try strands the row.
         try:
             # Local: app.api.workflows imports dispatch_workflow.
@@ -649,6 +655,12 @@ class RunQueueWorker:
                 owner_id = workflow.owner_id
                 workflow_name = workflow.name
 
+            options = getattr(row, "run_options", None) or {}
+            extra_kwargs = {
+                key: options[key]
+                for key in ("conversation_history", "llm_session_id")
+                if options.get(key) is not None
+            }
             token = tracing.attach_queue_context(getattr(row, "trace_context", None))
             try:
                 result = await asyncio.to_thread(
@@ -668,6 +680,7 @@ class RunQueueWorker:
                     timeout_seconds=row.timeout_seconds,
                     return_on_chart_output=row.return_on_chart_output,
                     execution_id=str(row.execution_id),
+                    **extra_kwargs,
                 )
             finally:
                 tracing.detach_queue_context(token)
@@ -750,6 +763,20 @@ class RunQueueWorker:
             await run_queue.complete(
                 row.execution_id, result=summarize(result, row.execution_id), error=None
             )
+            # The caller may have stopped waiting (202, MCP), so the error workflow is
+            # fired here, once, and never by the dispatcher. run_error_workflow=False is
+            # the error workflow's own recursion guard.
+            if workflow_concurrency.is_concurrency_row(row) and options.get(
+                "run_error_workflow", True
+            ):
+                await run_error_workflow_for_failed_run(
+                    result,
+                    workflow_id=row.workflow_id,
+                    execution_id=row.execution_id,
+                    test_run=False,
+                    enabled=True,
+                    actor_user_id=row.actor_user_id or row.credentials_owner_id,
+                )
         except WorkflowCancelledError:
             logger.info("Claimed run was cancelled: %s", row.execution_id)
             async with async_session_maker() as db:
@@ -800,6 +827,16 @@ class RunQueueWorker:
         except Exception as exc:
             logger.exception("Claimed run failed")
             await run_queue.complete(row.execution_id, result=None, error=str(exc))
+            if workflow_concurrency.is_concurrency_row(row):
+                # Nobody may be waiting to record this failure; the insert is conditional.
+                with contextlib.suppress(Exception):
+                    await record_failed_dispatch(
+                        execution_id=row.execution_id,
+                        workflow_id=row.workflow_id,
+                        inputs=row.inputs,
+                        trigger_source=row.trigger_source,
+                        message=str(exc) or "The run failed before it produced a result",
+                    )
         finally:
             worker_handle = getattr(cancel_event, "_execution_handle", None)
             # Deferred allowDownstream finalization owns the execution handle and
@@ -812,6 +849,9 @@ class RunQueueWorker:
                         result={},
                         handle=worker_handle,
                     )
+                if workflow_concurrency.holds_slot(row):
+                    with contextlib.suppress(Exception):
+                        await workflow_concurrency.release(row.execution_id)
                 await run_queue.notify_done(row.execution_id)
 
 

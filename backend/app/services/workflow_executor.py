@@ -1772,6 +1772,10 @@ class ExecutionResult:
     def allow_downstream_pending(self) -> bool:
         return bool(self._allow_downstream_pending)
 
+    def allow_downstream_futures(self) -> tuple[Future, ...]:
+        """The background branches still running, without taking them from join_allow_downstream()."""
+        return tuple(self._allow_downstream_pending)
+
     def join_allow_downstream(self) -> None:
         """Wait for output allowDownstream background work to populate final results."""
         pending = list(self._allow_downstream_pending)
