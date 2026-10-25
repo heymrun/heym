@@ -6,6 +6,8 @@ import {
   BarChart3,
   BellRing,
   CalendarClock,
+  ChevronLeft,
+  ChevronRight,
   Database,
   FlaskConical,
   HardDrive,
@@ -178,16 +180,28 @@ watch(activeTab, () => {
     <Transition name="tab-fade">
       <div
         v-if="showLeftShadow"
-        class="pointer-events-none absolute left-0 top-0 bottom-0 w-10 z-10 rounded-l-2xl"
-        style="background: linear-gradient(to right, hsl(var(--background)) 0%, transparent 100%)"
-      />
+        data-testid="dashboard-tabs-fade-left"
+        class="pointer-events-none absolute left-0 top-0 bottom-0 z-10 flex w-16 items-center justify-start rounded-l-2xl pl-2"
+        style="background: linear-gradient(to right, hsl(var(--card)) 0%, hsl(var(--card) / 0.9) 35%, transparent 100%)"
+      >
+        <ChevronLeft
+          class="h-5 w-5 text-muted-foreground"
+          aria-hidden="true"
+        />
+      </div>
     </Transition>
     <Transition name="tab-fade">
       <div
         v-if="showRightShadow"
-        class="pointer-events-none absolute right-0 top-0 bottom-0 w-10 z-10 rounded-r-2xl"
-        style="background: linear-gradient(to left, hsl(var(--background)) 0%, transparent 100%)"
-      />
+        data-testid="dashboard-tabs-fade-right"
+        class="pointer-events-none absolute right-0 top-0 bottom-0 z-10 flex w-16 items-center justify-end rounded-r-2xl pr-2"
+        style="background: linear-gradient(to left, hsl(var(--card)) 0%, hsl(var(--card) / 0.9) 35%, transparent 100%)"
+      >
+        <ChevronRight
+          class="h-5 w-5 text-muted-foreground motion-safe:animate-pulse"
+          aria-hidden="true"
+        />
+      </div>
     </Transition>
 
     <div
