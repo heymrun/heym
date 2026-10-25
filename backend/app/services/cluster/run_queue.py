@@ -32,6 +32,10 @@ STATUS_CLAIMED = "claimed"
 STATUS_DONE = "done"
 STATUS_FAILED = "failed"
 STATUS_SKIPPED_LATE = "skipped_late"
+# A run waiting for a concurrency slot. Not claimable until promoted to queued.
+STATUS_HELD = "held"
+STATUS_EXPIRED = "expired"
+STATUS_CANCELLED = "cancelled"
 
 
 @dataclass(frozen=True)
@@ -47,6 +51,7 @@ class QueuedRun:
     timeout_seconds: float | None
     return_on_chart_output: bool
     trace_context: dict[str, str] | None = None
+    run_options: dict | None = None
 
 
 def next_status(*, target_instance_id: str | None) -> str:
@@ -79,6 +84,7 @@ def build_queue_values(
         "return_on_chart_output": run.return_on_chart_output,
         "enqueued_at": now,
         "not_after": now + timedelta(seconds=grace_seconds),
+        "run_options": run.run_options,
     }
 
 
@@ -291,7 +297,13 @@ async def read_terminal_result(execution_id: uuid.UUID) -> tuple[str, dict | Non
 
 
 def is_terminal(status: str) -> bool:
-    return status in {STATUS_DONE, STATUS_FAILED, STATUS_SKIPPED_LATE}
+    return status in {
+        STATUS_DONE,
+        STATUS_FAILED,
+        STATUS_SKIPPED_LATE,
+        STATUS_EXPIRED,
+        STATUS_CANCELLED,
+    }
 
 
 async def notify_done(execution_id: uuid.UUID) -> None:
