@@ -14,7 +14,12 @@ from app.db.models import (
     HITLRequest,
     WorkflowRunQueue,
 )
-from app.services.cluster.run_queue import STATUS_CLAIMED, STATUS_QUEUED, STATUS_WAITING_FOR_MAIN
+from app.services.cluster.run_queue import (
+    STATUS_CLAIMED,
+    STATUS_HELD,
+    STATUS_QUEUED,
+    STATUS_WAITING_FOR_MAIN,
+)
 from app.services.execution_cancellation import list_active_executions
 from app.services.workflow_status import TRIGGER_NODE_TYPES
 
@@ -26,7 +31,10 @@ def _unfinished_execution_query(workflow_id: UUID) -> CompoundSelect:
         ),
         select(WorkflowRunQueue.execution_id).where(
             WorkflowRunQueue.workflow_id == workflow_id,
-            WorkflowRunQueue.status.in_([STATUS_QUEUED, STATUS_WAITING_FOR_MAIN, STATUS_CLAIMED]),
+            # A held run is waiting for a concurrency slot; deleting would cascade it away.
+            WorkflowRunQueue.status.in_(
+                [STATUS_HELD, STATUS_QUEUED, STATUS_WAITING_FOR_MAIN, STATUS_CLAIMED]
+            ),
         ),
         select(HITLRequest.execution_history_id).where(
             HITLRequest.workflow_id == workflow_id,

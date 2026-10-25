@@ -119,6 +119,15 @@ test("a second production run waits in the queue and shows in History", async ({
         { timeout: 30_000 },
       )
       .toBe("success");
+
+    // The run's status is final before its registry row is gone, and deletion waits for that.
+    await expect
+      .poll(async () => {
+        const active = await page.request.get("/api/workflows/executions/active");
+        const items = (await active.json()) as { workflow_id: string }[];
+        return items.filter((item) => item.workflow_id === workflow.id).length;
+      })
+      .toBe(0);
   } finally {
     await deleteWorkflow(page, workflow.id);
   }

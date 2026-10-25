@@ -73,3 +73,18 @@ class CancelHeldEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, {"status": "cancel_requested"})
         cancel_held.assert_awaited_once()
         cancel_local.assert_not_called()
+
+
+class HeldRunsBlockDeletionTests(unittest.TestCase):
+    def test_a_workflow_with_waiting_runs_is_not_deletable(self) -> None:
+        """Deleting it would cascade the held rows away and strand anyone waiting on them."""
+        from sqlalchemy.dialects import postgresql
+
+        from app.services.workflow_lifecycle import _unfinished_execution_query
+
+        sql = str(
+            _unfinished_execution_query(uuid.uuid4()).compile(
+                dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+            )
+        )
+        self.assertIn("'held'", sql)
