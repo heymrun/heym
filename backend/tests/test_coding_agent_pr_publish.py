@@ -233,6 +233,17 @@ class TestAgentNarrationDetection(unittest.TestCase):
         "Perfect! The build is clean.",
         "First, check dependencies and start a preview server:",
         "Applying the remaining changes now:",
+        # PR #811: the announcement sits in the closing sentence, not the opening one.
+        "The `sh` invocation (dash) failed on `${BASH_SOURCE[0]}`, so `PROJECT_ROOT` was empty "
+        "and the script may have written to `/` paths. I'll check for stray files there, then "
+        "rerun with bash.",
+        "The store wiring is in place. Next, I wire the dialog.",
+    )
+    # Closing sentences that end real reports.
+    REPORTS = (
+        "Bumped the version to 0.0.138 in every version file. All tests pass.",
+        "Added the override dialog. I've also updated the docs.",
+        "Added the override dialog. Let me know if the copy needs changes.",
     )
     # Real titles from merged agent pull requests — the guard must leave every one of them alone.
     DESCRIPTIONS = (
@@ -255,7 +266,7 @@ class TestAgentNarrationDetection(unittest.TestCase):
                 self.assertTrue(pr_publish.is_agent_narration(text))
 
     def test_change_descriptions_are_not_narration(self):
-        for text in self.DESCRIPTIONS:
+        for text in self.DESCRIPTIONS + self.REPORTS:
             with self.subTest(text=text):
                 self.assertFalse(pr_publish.is_agent_narration(text))
 

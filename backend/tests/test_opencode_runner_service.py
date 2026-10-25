@@ -84,6 +84,21 @@ class TestOpenCodeRunCommand(unittest.TestCase):
             "opencode-go/kimi-k3", _request(), _WS, prompt="FINISH NOW"
         )
         self.assertEqual(cmd[-1], "FINISH NOW")
+        self.assertNotIn("--session", cmd)
+
+    def test_finishing_pass_continues_the_session(self):
+        cmd = self.svc.build_run_command(
+            "opencode-go/kimi-k3", _request(), _WS, prompt="FINISH NOW", session_id="ses_2a9f"
+        )
+        self.assertEqual(cmd[cmd.index("--session") + 1], "ses_2a9f")
+        self.assertEqual(cmd[-1], "FINISH NOW")
+
+    def test_session_id_that_reads_as_a_flag_is_dropped(self):
+        cmd = self.svc.build_run_command(
+            "opencode-go/kimi-k3", _request(), _WS, session_id="--dangerously-skip-permissions"
+        )
+        self.assertNotIn("--session", cmd)
+        self.assertNotIn("--dangerously-skip-permissions", cmd)
 
     def test_run_command_pins_workspace_dir(self):
         cmd = self.svc.build_run_command("opencode-go/kimi-k3", _request(), _WS)
@@ -454,6 +469,93 @@ class TestOpenCodeNarrationIsNotPublished(unittest.TestCase):
         self.assertIn("…and 5 more file(s)", result.pull_request_body)
 
 
+def _cli_events(*events: tuple[str, str]) -> str:
+    """``opencode run --format json`` lines: ("text", body) or ("tool", name), then step end."""
+    lines = []
+    for kind, value in events:
+        if kind == "text":
+            part = {"type": "text", "text": value}
+            lines.append({"type": "text", "sessionID": "ses_2a9f", "part": part})
+        else:
+            part = {"type": "tool", "tool": value, "state": {"status": "completed"}}
+            lines.append({"type": "tool_use", "sessionID": "ses_2a9f", "part": part})
+    lines.append({"type": "step_finish", "sessionID": "ses_2a9f", "part": {"type": "step-finish"}})
+    return "\n".join(json.dumps(line) for line in lines)
+
+
+class TestOpenCodeMidRunMessageIsNotPublished(unittest.TestCase):
+    """Regression for PR #811: a step announcement became the PR title, body and commit."""
+
+    PR_811_MESSAGE = (
+        "The `sh` invocation (dash) failed on `${BASH_SOURCE[0]}`, so `PROJECT_ROOT` was empty "
+        "and the script may have written to `/` paths. I'll check for stray files there, then "
+        "rerun with bash."
+    )
+
+    def setUp(self):
+        self.svc = OpenCodeRunnerService(workspace_root="/tmp/heym-oc-ws")
+
+    def test_pr_811_announcement_is_not_published(self):
+        stdout = _cli_events(("tool", "bash"), ("text", self.PR_811_MESSAGE), ("tool", "bash"))
+        result = self.svc.parse_events(stdout)
+        result.changed_files = ["VERSION", "backend/pyproject.toml", "frontend/package.json"]
+
+        self.svc._normalize_pr_metadata(result, "set the version to 0.0.138")
+
+        self.assertEqual(result.publish_summary, "")
+        self.assertEqual(result.pull_request_title, "Apply OpenCode changes")
+        self.assertNotIn("BASH_SOURCE", result.pull_request_body)
+        self.assertIn("`backend/pyproject.toml`", result.pull_request_body)
+        self.assertEqual(result.summary, self.PR_811_MESSAGE)  # still debuggable in Heym
+
+    def test_message_followed_by_tools_is_flagged_even_when_it_reads_like_a_report(self):
+        stdout = _cli_events(("text", "The version script needs bash."), ("tool", "bash"))
+        result = self.svc.parse_events(stdout)
+
+        self.assertTrue(result.summary_mid_run)
+        self.assertEqual(self.svc._publishable_summary(result), "")
+
+    def test_text_after_the_last_tool_is_the_report(self):
+        stdout = _cli_events(
+            ("text", "Running the version script."),
+            ("tool", "bash"),
+            ("text", "Set the Heym version to 0.0.138 in every version file."),
+        )
+        result = self.svc.parse_events(stdout)
+        self.svc._normalize_pr_metadata(result, "")
+
+        self.assertFalse(result.summary_mid_run)
+        self.assertEqual(
+            result.pull_request_title, "Set the Heym version to 0.0.138 in every version file."
+        )
+
+    def test_declared_change_summary_survives_later_tool_calls(self):
+        stdout = _cli_events(
+            ("text", "## Change Summary\n\nSet the version to 0.0.138.\n\nPR_TITLE: Set 0.0.138"),
+            ("tool", "bash"),
+        )
+        result = self.svc.parse_events(stdout)
+
+        self.assertFalse(result.summary_mid_run)
+        self.assertEqual(self.svc._publishable_summary(result), "Set the version to 0.0.138.")
+
+    def test_session_id_is_read_from_the_events(self):
+        result = self.svc.parse_events(_cli_events(("text", "Done.")))
+        self.assertEqual(result.session_id, "ses_2a9f")
+
+    def test_pr_title_from_a_long_summary_is_its_first_sentence(self):
+        result = OpenCodeRunResult(
+            summary=(
+                "Set the Heym version to 0.0.138 in every version file. The lockfile only "
+                "changes the root package entry, so no dependency moved."
+            )
+        )
+        self.svc._normalize_pr_metadata(result, "")
+        self.assertEqual(
+            result.pull_request_title, "Set the Heym version to 0.0.138 in every version file."
+        )
+
+
 class TestOpenCodeResolveExistingPrBranch(unittest.TestCase):
     def setUp(self):
         self.svc = OpenCodeRunnerService(workspace_root="/tmp/heym-oc-ws")
@@ -513,6 +615,35 @@ class TestOpenCodeFinishIncompleteRun(unittest.TestCase):
         self.assertEqual(result.pull_request_title, "Add running-workflow count badge")
         # A UI change with no screenshot after the pass gets a visible note.
         self.assertIn("## Screenshots", result.pull_request_body)
+
+    def test_mid_run_announcement_reruns_in_the_same_session(self):
+        # PR #811: the last text announced a step, then the agent ran tools and stopped silently.
+        result = self.svc.parse_events(
+            _cli_events(("text", "The version script needs bash."), ("tool", "bash"))
+        )
+        result.changed_files = ["VERSION"]
+        self.svc._normalize_pr_metadata(result, "")
+        self.svc._changed_files = MagicMock(return_value=["VERSION"])  # type: ignore[method-assign]
+        self.svc._exec_opencode = MagicMock(  # type: ignore[method-assign]
+            return_value=_cli_events(
+                (
+                    "text",
+                    "## Change Summary\n\nSet the version to 0.0.138.\n\nPR_TITLE: Set "
+                    "Heym version to 0.0.138",
+                )
+            )
+        )
+
+        with patch.object(pr_publish, "discover_pr_screenshots", return_value=[]):
+            self.svc._finish_incomplete_run(
+                self.ws, self.home, _request(), "opencode-go/kimi-k3", result
+            )
+
+        self.assertEqual(self.svc._exec_opencode.call_args.kwargs["session_id"], "ses_2a9f")
+        self.assertEqual(result.pull_request_title, "Set Heym version to 0.0.138")
+        self.assertEqual(
+            result.pull_request_body, "## Change Summary\n\nSet the version to 0.0.138."
+        )
 
     def test_no_rerun_when_summary_and_screenshot_present(self):
         result = OpenCodeRunResult(

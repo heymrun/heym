@@ -11,7 +11,8 @@ if [ -z "$VERSION" ]; then
     exit 1
 fi
 
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# POSIX on purpose: it also runs as `sh set-version.sh`, where sh may be dash.
+PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
 
 echo "Setting version to $VERSION..."
 
@@ -36,7 +37,7 @@ fi
 # Sync root package version in uv.lock only (uv has no "metadata-only" lock mode;
 # `uv lock` can reorder or refresh deps and create large diffs)
 LOCK_FILE="$PROJECT_ROOT/backend/uv.lock"
-if [ -f "$LOCK_FILE" ] && command -v python3 &> /dev/null; then
+if [ -f "$LOCK_FILE" ] && command -v python3 > /dev/null 2>&1; then
     SET_VERSION_UV_LOCK="$VERSION" SET_VERSION_LOCK_PATH="$LOCK_FILE" python3 << 'PY'
 import os
 import re

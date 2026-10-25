@@ -101,6 +101,8 @@ _LOG_ERROR_VALUE_RE = re.compile(r'\berror(?:\.error)?="((?:[^"\\]|\\.)*)"')
 # Used when OpenCode produces no final assistant message. It never describes the change, so it
 # must not become a PR/commit subject — and it deliberately does not restate the task prompt.
 _NO_FINAL_MESSAGE_SUMMARY = "OpenCode completed without a final assistant message."
+# Passed back as an argv value, so it must never be readable as a CLI flag.
+_SESSION_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
 
 
 @dataclass(frozen=True)
@@ -147,6 +149,8 @@ class OpenCodeRunResult:
     # ``summary`` narrowed to what may be published to GitHub — see ``_publishable_summary``.
     # Deliberately absent from ``to_output()``: it exists for the commit/PR seam, not the UI.
     publish_summary: str = ""
+    # ``summary`` was written before the agent ran more tools: a step announcement, not a report.
+    summary_mid_run: bool = False
     pull_request_title: str = ""
     pull_request_body: str = ""
     diff: str = ""
@@ -155,6 +159,8 @@ class OpenCodeRunResult:
     branch_name: str = ""
     pull_request_url: str | None = None
     pushed_branch: str = ""
+    # The CLI session, so the finishing pass continues the same conversation.
+    session_id: str = ""
     raw_events: list[dict] = field(default_factory=list)
 
     def to_output(self) -> dict:
@@ -245,11 +251,15 @@ class OpenCodeRunnerService:
         OpenCode streams an assistant message per step, so the *last* one is often mid-run
         narration rather than the final report. Scanning every message for the agreed
         ``## Change Summary`` / ``PR_TITLE:`` markers keeps commentary out of the pull request.
+        A message followed by more tool calls announced a step; when the agent then ends with no
+        text, that announcement is the last message, so it is flagged instead of published.
         """
         events: list[dict] = []
         last_message = ""
         change_summary = ""
         pull_request_title = ""
+        session_id = ""
+        tool_ran_after_message = False
         for raw in (stdout or "").splitlines():
             line = raw.strip()
             if not line:
@@ -261,6 +271,10 @@ class OpenCodeRunnerService:
             if not isinstance(event, dict):
                 continue
             events.append(event)
+            session_id = session_id or self._event_session_id(event)
+            if self._is_tool_event(event):
+                tool_ran_after_message = bool(last_message)
+                continue
             text = self._event_assistant_text(event)
             if not text:
                 continue
@@ -271,10 +285,13 @@ class OpenCodeRunnerService:
             if section:
                 change_summary = section
             last_message = cleaned
+            tool_ran_after_message = False
         return OpenCodeRunResult(
             status="completed",
             summary=change_summary or last_message or _NO_FINAL_MESSAGE_SUMMARY,
+            summary_mid_run=not change_summary and tool_ran_after_message,
             pull_request_title=pull_request_title,
+            session_id=session_id,
             raw_events=events,
         )
 
@@ -294,15 +311,18 @@ class OpenCodeRunnerService:
 
     @staticmethod
     def _publishable_summary(result: OpenCodeRunResult) -> str:
+        if result.summary_mid_run:
+            return ""
         return pr_publish.publishable_summary(result.summary, placeholder=_NO_FINAL_MESSAGE_SUMMARY)
 
     def _ensure_meaningful_pr_title(self, result: OpenCodeRunResult) -> str:
-        """Return a meaningful PR title, derived only from what the agent said it changed."""
-        for candidate in (result.pull_request_title, result.publish_summary):
-            title = pr_publish.normalize_title_candidate(candidate)
-            if pr_publish.is_meaningful_commit_title(title):
-                return title
-        return "Apply OpenCode changes"
+        """Return a meaningful PR title, derived only from what the agent said it changed.
+
+        Same rule as the commit subject: one sentence of the summary, never all of it.
+        """
+        return pr_publish.commit_title(
+            result.pull_request_title, result.publish_summary, fallback="Apply OpenCode changes"
+        )
 
     def _ensure_pr_body(self, result: OpenCodeRunResult) -> str:
         """Return a PR body built only from the agent's description of the change."""
@@ -315,6 +335,18 @@ class OpenCodeRunnerService:
         if summary.lstrip().startswith("#"):
             return summary
         return f"## Change Summary\n\n{summary}"
+
+    @staticmethod
+    def _is_tool_event(event: dict) -> bool:
+        part = event.get("part")
+        return event.get("type") == "tool_use" or (
+            isinstance(part, dict) and part.get("type") == "tool"
+        )
+
+    @staticmethod
+    def _event_session_id(event: dict) -> str:
+        value = str(event.get("sessionID") or "").strip()
+        return value if _SESSION_ID_RE.fullmatch(value) else ""
 
     @staticmethod
     def _event_assistant_text(event: dict) -> str:
@@ -477,10 +509,10 @@ class OpenCodeRunnerService:
     ) -> None:
         """Run one more OpenCode pass when the first ended before finishing the task.
 
-        The follow-up runs in the same workspace, so the in-progress edits are already on disk; it
-        only captures any promised screenshot and returns a real summary. Best-effort: a failure
-        never breaks the primary run. When a UI change still has no screenshot afterwards, a
-        visible note is added so the gap is never silent.
+        The follow-up continues the same session in the same workspace, so the agent reports on the
+        work it actually did; it only captures any promised screenshot and returns a real summary.
+        Best-effort: a failure never breaks the primary run. When a UI change still has no
+        screenshot afterwards, a visible note is added so the gap is never silent.
         """
         try:
             has_screenshots = bool(pr_publish.discover_pr_screenshots(workspace, self._git_output))
@@ -493,11 +525,17 @@ class OpenCodeRunnerService:
             ):
                 prompt = f"{_LOCAL_ONLY_RULES}\n\n{pr_publish.FINISHING_PASS_PREAMBLE}"
                 stdout = self._exec_opencode(
-                    workspace, home, request, model, prompt_override=prompt
+                    workspace,
+                    home,
+                    request,
+                    model,
+                    prompt_override=prompt,
+                    session_id=result.session_id,
                 )
                 finished = self.parse_events(stdout)
                 if finished.summary and finished.summary != _NO_FINAL_MESSAGE_SUMMARY:
                     result.summary = finished.summary
+                    result.summary_mid_run = finished.summary_mid_run
                 if finished.pull_request_title:
                     result.pull_request_title = finished.pull_request_title
                 result.pull_request_body = ""  # rebuilt from the fresh summary below
@@ -520,6 +558,7 @@ class OpenCodeRunnerService:
         workspace: Path,
         *,
         prompt: str | None = None,
+        session_id: str = "",
     ) -> list[str]:
         """The ``<cli_command> run …`` argv (host binary locally, docker wrapper in deployments).
 
@@ -527,7 +566,8 @@ class OpenCodeRunnerService:
         walking up from the process cwd and can edit files in an enclosing repository (e.g. Heym's
         own checkout) instead of the clone — the run then reports success with an empty diff.
 
-        ``prompt`` overrides the default task prompt (used by the finishing pass).
+        ``prompt`` overrides the default task prompt and ``session_id`` continues that session
+        (both used by the finishing pass).
         """
         prompt = (
             prompt if prompt is not None else f"{_LOCAL_ONLY_RULES}\n\nTask:\n{request.task_prompt}"
@@ -549,6 +589,8 @@ class OpenCodeRunnerService:
         ]
         if request.variant.strip():
             cmd.extend(["--variant", request.variant.strip()])
+        if _SESSION_ID_RE.fullmatch(session_id):
+            cmd.extend(["--session", session_id])
         cmd.append(prompt)
         return cmd
 
@@ -559,6 +601,7 @@ class OpenCodeRunnerService:
         request: OpenCodeRunRequest,
         model: str,
         prompt_override: str | None = None,
+        session_id: str = "",
     ) -> str:
         # HOME/XDG point at the per-run OpenCode home on the workspace volume. The docker wrapper
         # forwards these into the sibling container; locally OpenCode reads them directly.
@@ -570,7 +613,9 @@ class OpenCodeRunnerService:
         # ``docker run`` is only a client, so killing it leaves the container running.
         run_id = uuid.uuid4().hex
         env["HEYM_OPENCODE_RUN_ID"] = run_id
-        cmd = self.build_run_command(model, request, workspace, prompt=prompt_override)
+        cmd = self.build_run_command(
+            model, request, workspace, prompt=prompt_override, session_id=session_id
+        )
         try:
             process = subprocess.Popen(  # noqa: S603 - argv is built, never shell-interpolated
                 cmd,
