@@ -68,7 +68,7 @@ A table holds no secret, so `heym_chat` can list your tables, ask which one a wo
 
 ### Credentials
 
-`heym_chat` sees your credentials by name and type, the same way the Chat tab does. When a workflow it builds needs a credential, it asks which one to use, as a question in the result. Answer it with the same `conversation_id`.
+`heym_chat` sees the credentials you own and the ones shared with you, by name and type, the same way the Chat tab does. When a workflow it builds needs a credential, it asks which one to use, as a question in the result. Answer it with the same `conversation_id`.
 
 To add a credential, or to update one you own, the assistant opens Heym's credential form on a Heym page, `/credentials/setup/<id>`. You sign in to Heym there, enter the key or connect the account, and press save. The value goes straight to Heym: the MCP client and its model only learn the credential's name and type. Do not paste keys into the MCP client; ask for the form instead.
 
@@ -91,6 +91,8 @@ The page only opens for the Heym account that started the request, so a forwarde
 | **Model** | Loaded from the selected credential. Prefilled from your preferred model when the credential matches. |
 
 If either is missing, the tool still appears in `tools/list` but each call returns an error telling you to finish the setup in this tab.
+
+LLM and Agent nodes in a workflow `heym_chat` builds run on this credential and model, including a credential someone shared with you, so test runs work without another setup step. When `heym_chat` edits a workflow, LLM and Agent nodes that already have a credential keep it, along with their model.
 
 ### Arguments and history
 

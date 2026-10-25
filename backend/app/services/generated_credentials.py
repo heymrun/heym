@@ -172,9 +172,9 @@ def apply_generated_credentials(
 
     A node that already existed keeps an unchanged value, since that was the user's own
     choice. In OFF mode it keeps its old value whatever the builder wrote, and new nodes
-    get no credential. Otherwise a value must be, or name, an owned credential of an
-    accepted type; the user's choices fill empty fields; and a new node's required field
-    that no choice covers becomes a need.
+    get no credential. Otherwise a value must be, or name, a credential of an accepted type
+    that the user owns or was shared; the user's choices fill empty fields; and a new node's
+    required field that no choice covers becomes a need.
     """
     owned_by_id = {str(credential.id): credential for credential in catalog}
     owned_by_name = {credential.name: credential for credential in catalog}

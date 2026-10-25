@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Credential, CredentialShare, CredentialTeamShare, TeamMember
@@ -19,6 +19,26 @@ def team_shared_credential_clause(user_id: UUID):
             )
         )
     )
+
+
+def accessible_credential_clause(user_id: UUID):
+    """WHERE clause for credentials the user owns or that were shared with them or their teams.
+
+    A credential shared with another user or with a team this user is not in never matches.
+    """
+    return or_(
+        Credential.owner_id == user_id,
+        Credential.id.in_(
+            select(CredentialShare.credential_id).where(CredentialShare.user_id == user_id)
+        ),
+        team_shared_credential_clause(user_id),
+    )
+
+
+async def load_accessible_credential_ids(db: AsyncSession, user_id: UUID) -> set[str]:
+    """Ids of every credential the user may use, by the rules `get_accessible_credential` applies."""
+    result = await db.execute(select(Credential.id).where(accessible_credential_clause(user_id)))
+    return {str(credential_id) for credential_id in result.scalars().all()}
 
 
 async def get_accessible_credential(

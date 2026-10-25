@@ -10,9 +10,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.api import chat_build
 from app.api.ai_assistant import DASHBOARD_CHAT_TOOLS, FileAttachment
-from app.db.models import Workflow, WorkflowVersion
+from app.db.models import CredentialType, Workflow, WorkflowVersion
 from app.services.chat_build_mode import MAX_BUILD_TEST_RUNS, BuildRequest
-from app.services.credential_catalog import CredentialPromptMode
+from app.services.credential_catalog import CatalogCredential, CredentialPromptMode
 
 DSL = {
     "name": "Lead intake",
@@ -32,6 +32,26 @@ DSL = {
         },
     ],
     "edges": [{"id": "e1", "source": "start", "target": "done"}],
+}
+
+AGENT_DSL = {
+    "name": "Reply writer",
+    "description": "Drafts a reply",
+    "nodes": [
+        DSL["nodes"][0],
+        {
+            "id": "writer",
+            "type": "agent",
+            "position": {"x": 300, "y": 0},
+            "data": {
+                "label": "writer",
+                "credentialId": "YOUR_CREDENTIAL_ID",
+                "model": "gpt-4o",
+                "userMessage": "$start.text",
+            },
+        },
+    ],
+    "edges": [{"id": "e1", "source": "start", "target": "writer"}],
 }
 
 
@@ -66,6 +86,7 @@ class ChatBuildSessionTests(unittest.IsolatedAsyncioTestCase):
             "get_workflow_for_user": AsyncMock(side_effect=self._get_workflow),
             "user_can_write_workflow": AsyncMock(side_effect=lambda *_: self.writable),
             "load_credential_catalog": AsyncMock(return_value=[]),
+            "load_accessible_credential_ids": AsyncMock(side_effect=self._accessible_ids),
             "load_data_table_catalog": AsyncMock(return_value=[]),
             "run_execute_workflow_tool": self.runner,
             "audit": self.audit,
@@ -75,6 +96,10 @@ class ChatBuildSessionTests(unittest.IsolatedAsyncioTestCase):
 
     def tearDown(self) -> None:
         self.stack.close()
+
+    async def _accessible_ids(self, _db: Any, _user_id: uuid.UUID) -> set[str]:
+        """The catalog's credentials; the chat credential a test selects is among them."""
+        return {str(c.id) for c in chat_build.load_credential_catalog.return_value}
 
     async def _get_workflow(self, _db: Any, workflow_id: uuid.UUID, _user_id: uuid.UUID) -> Any:
         if self.target is not None and self.target.id == workflow_id:
@@ -87,15 +112,16 @@ class ChatBuildSessionTests(unittest.IsolatedAsyncioTestCase):
         target: uuid.UUID | None = None,
         session_id: str | None = "conv-1",
         attachment: FileAttachment | None = None,
+        selected_credential: Any = None,
+        model: str = "gpt-5.5",
     ) -> chat_build.ChatBuildSession:
         return chat_build.ChatBuildSession(
             db=self.db,
             user=self.user,
             request=BuildRequest(target_workflow_id=target),
-            selected_credential=SimpleNamespace(
-                id=uuid.uuid4(), owner_id=self.user.id, type="openai"
-            ),
-            model="gpt-5.5",
+            selected_credential=selected_credential
+            or SimpleNamespace(id=uuid.uuid4(), owner_id=self.user.id, type="openai"),
+            model=model,
             credential_mode=CredentialPromptMode.ASK_AND_CREATE,
             public_base_url="http://localhost",
             cancel_event=None,
@@ -179,6 +205,51 @@ class ChatBuildSessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("UUID", invalid.result)
         self.db.commit.assert_not_awaited()
         self.assertEqual(session.progress.workflow_id, target)
+
+    def _shared_model_credential(self) -> tuple[SimpleNamespace, CatalogCredential]:
+        """A Google credential another account shared with this user, set on heym_chat."""
+        shared = SimpleNamespace(id=uuid.uuid4(), owner_id=uuid.uuid4(), type=CredentialType.google)
+        listed = CatalogCredential(shared.id, "team-gemini", CredentialType.google, shared=True)
+        return shared, listed
+
+    async def test_save_gives_a_new_agent_the_shared_chat_credential_and_model(self) -> None:
+        shared, listed = self._shared_model_credential()
+        chat_build.load_credential_catalog.return_value = [listed]
+        session = self._session(selected_credential=shared, model="gemini-2.5-flash")
+
+        await session.call("save_workflow", {"workflow": AGENT_DSL})
+
+        created = self.db.add.call_args.args[0]
+        agent = next(n for n in created.nodes if n["type"] == "agent")
+        self.assertEqual(agent["data"]["credentialId"], str(shared.id))
+        self.assertEqual(agent["data"]["model"], "gemini-2.5-flash")
+
+    async def test_save_keeps_the_model_credential_an_edited_agent_already_has(self) -> None:
+        shared, listed = self._shared_model_credential()
+        chat_build.load_credential_catalog.return_value = [listed]
+        own_credential = str(uuid.uuid4())
+        existing_nodes = json.loads(json.dumps(AGENT_DSL["nodes"]))
+        existing_nodes[1]["data"].update({"credentialId": own_credential, "model": "gpt-5"})
+        self.target = Workflow(
+            id=uuid.uuid4(),
+            owner_id=self.user.id,
+            name="Old",
+            description="",
+            nodes=existing_nodes,
+            edges=AGENT_DSL["edges"],
+        )
+        session = self._session(
+            target=self.target.id, selected_credential=shared, model="gemini-2.5-flash"
+        )
+        edited = json.loads(json.dumps(AGENT_DSL))
+        edited["nodes"][1]["data"]["systemInstruction"] = "Reply in French."
+
+        await session.call("save_workflow", {"workflow": edited})
+
+        agent = self.target.nodes[1]
+        self.assertEqual(agent["data"]["credentialId"], own_credential)
+        self.assertEqual(agent["data"]["model"], "gpt-5")
+        self.assertEqual(agent["data"]["systemInstruction"], "Reply in French.")
 
     async def test_a_test_run_needs_a_saved_workflow(self) -> None:
         outcome = await self._session().call("run_workflow_test", {"inputs": {}, "expect": "x"})

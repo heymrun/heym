@@ -24,7 +24,8 @@ from app.services.generated_credentials import (
 
 
 class CatalogNeverCarriesValuesTests(unittest.IsolatedAsyncioTestCase):
-    async def test_catalog_query_selects_only_id_name_and_type(self) -> None:
+    async def test_catalog_query_selects_only_id_name_type_and_owner(self) -> None:
+        """The owner id only tells an owned credential from a shared one."""
         result = MagicMock()
         result.all.return_value = []
         db = MagicMock()
@@ -33,10 +34,14 @@ class CatalogNeverCarriesValuesTests(unittest.IsolatedAsyncioTestCase):
         await load_credential_catalog(db, uuid.uuid4())
 
         statement = db.execute.await_args.args[0]
-        self.assertEqual([c.name for c in statement.selected_columns], ["id", "name", "type"])
+        self.assertEqual(
+            [c.name for c in statement.selected_columns], ["id", "name", "type", "owner_id"]
+        )
 
     def test_catalog_entries_have_no_field_for_a_value(self) -> None:
-        self.assertEqual(set(CatalogCredential.__dataclass_fields__), {"id", "name", "type"})
+        self.assertEqual(
+            set(CatalogCredential.__dataclass_fields__), {"id", "name", "type", "shared"}
+        )
 
     def test_off_mode_names_no_credential(self) -> None:
         credential = CatalogCredential(uuid.uuid4(), "github-work", CredentialType.github)

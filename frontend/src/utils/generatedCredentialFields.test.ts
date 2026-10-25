@@ -4,7 +4,7 @@ import type { CredentialListItem } from "@/types/credential";
 import type { WorkflowNode } from "@/types/workflow";
 
 import {
-  resolveOwnedCredentialId,
+  resolveUsableCredentialId,
   sanitizeGeneratedCredentialFields,
 } from "./generatedCredentialFields";
 
@@ -41,16 +41,24 @@ function sanitize(n: WorkflowNode, existing?: WorkflowNode): WorkflowNode {
   return sanitizeGeneratedCredentialFields(n, CREDENTIALS, existing);
 }
 
-describe("resolveOwnedCredentialId", () => {
-  it("accepts an owned id or an exact owned name", () => {
-    expect(resolveOwnedCredentialId(OWNED.id, [OWNED])).toBe(OWNED.id);
-    expect(resolveOwnedCredentialId(" github-work ", [OWNED])).toBe(OWNED.id);
+describe("resolveUsableCredentialId", () => {
+  it("accepts an id or an exact name, owned or shared", () => {
+    expect(resolveUsableCredentialId(OWNED.id, CREDENTIALS)).toBe(OWNED.id);
+    expect(resolveUsableCredentialId(" github-work ", CREDENTIALS)).toBe(OWNED.id);
+    expect(resolveUsableCredentialId(SHARED.id, CREDENTIALS)).toBe(SHARED.id);
+    expect(resolveUsableCredentialId("team-github", CREDENTIALS)).toBe(SHARED.id);
+  });
+
+  it("picks the owned credential when a shared one has the same name", () => {
+    const sameName = credential("44444444-4444-4444-4444-444444444444", "github-work", true);
+
+    expect(resolveUsableCredentialId("github-work", [sameName, OWNED])).toBe(OWNED.id);
   });
 
   it("rejects anything else", () => {
-    expect(resolveOwnedCredentialId("YOUR_CREDENTIAL_ID", [OWNED])).toBe("");
-    expect(resolveOwnedCredentialId(42, [OWNED])).toBe("");
-    expect(resolveOwnedCredentialId("", [OWNED])).toBe("");
+    expect(resolveUsableCredentialId("YOUR_CREDENTIAL_ID", CREDENTIALS)).toBe("");
+    expect(resolveUsableCredentialId(42, CREDENTIALS)).toBe("");
+    expect(resolveUsableCredentialId("", CREDENTIALS)).toBe("");
   });
 });
 
@@ -60,8 +68,12 @@ describe("sanitizeGeneratedCredentialFields", () => {
     expect(field(sanitize(node("github", { credentialId: "github-work" })), "credentialId")).toBe(OWNED.id);
   });
 
-  it("clears shared, unknown and placeholder values", () => {
-    for (const value of [SHARED.id, "33333333-3333-3333-3333-333333333333", "YOUR_CREDENTIAL_ID"]) {
+  it("keeps a credential shared with the user", () => {
+    expect(field(sanitize(node("github", { credentialId: SHARED.id })), "credentialId")).toBe(SHARED.id);
+  });
+
+  it("clears unknown and placeholder values", () => {
+    for (const value of ["33333333-3333-3333-3333-333333333333", "YOUR_CREDENTIAL_ID"]) {
       expect(field(sanitize(node("github", { credentialId: value })), "credentialId")).toBe("");
     }
   });

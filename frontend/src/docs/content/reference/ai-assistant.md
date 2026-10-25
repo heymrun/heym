@@ -149,7 +149,7 @@ The AI Assistant is powered by a **workflow DSL** (domain-specific language) tha
    - Your User Rules appended as "User Custom Rules"
    - The current workflow JSON when you are editing an existing workflow
    - The list of available workflows if you use the Execute node
-   - The names, types and ids of your own credentials (never their values)
+   - The names, types and ids of the credentials you own or that were shared with you (never their values)
    - The names, ids, descriptions and columns of the data tables you can use (never their rows)
 3. The model returns a single workflow JSON block (with `nodes` and `edges`). The frontend parses it and applies it to the canvas.
 
