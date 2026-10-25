@@ -53,4 +53,6 @@ export interface QuickDrawerRunState {
   errorMessage: string | null;
   nodeResults: NodeResult[];
   startedAt: number | null;
+  /** Set while the run waits for a concurrency slot, e.g. "Waiting in queue (2/5)". */
+  queueMessage?: string | null;
 }

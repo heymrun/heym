@@ -490,7 +490,13 @@ async function executeStream(
       if (line.startsWith("data: ")) {
         const data = JSON.parse(line.slice(6));
 
-        if (data.type === "execution_started" && typeof data.execution_id === "string") {
+        if (data.type === "queued" && typeof data.execution_id === "string") {
+          // The workflow is at its concurrency limit; the run starts when a slot frees up.
+          activeExecutionId.value = data.execution_id;
+          if (showProgress) {
+            currentProgress.value = [`Waiting in queue (${data.position}/${data.size})`];
+          }
+        } else if (data.type === "execution_started" && typeof data.execution_id === "string") {
           activeExecutionId.value = data.execution_id;
         } else if (data.type === "node_start") {
           const node = data.node_label || data.node_id;
@@ -530,7 +536,7 @@ async function executeStream(
           currentProgress.value = [];
           if (!finalOutputDisplayed) {
             const outputContent = formatOutput(data.outputs);
-            const outputImages = extractImages(data.outputs || {}, data.node_results);
+            const outputImages = extractImages(data.outputs || {}, data.node_results || []);
             const duration = (performance.now() - startTime) / 1000;
             messages.value.push({
               id: crypto.randomUUID(),

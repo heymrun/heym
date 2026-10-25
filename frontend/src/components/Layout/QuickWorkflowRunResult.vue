@@ -79,7 +79,14 @@ async function copyFinalOutput(): Promise<void> {
             v-else
             class="h-3.5 w-3.5"
           />
-          <span class="capitalize">{{ runState.status }}</span>
+          <span
+            v-if="runState.status === 'running' && runState.queueMessage"
+            data-testid="quick-run-queue-message"
+          >{{ runState.queueMessage }}</span>
+          <span
+            v-else
+            class="capitalize"
+          >{{ runState.status }}</span>
         </div>
       </div>
 
