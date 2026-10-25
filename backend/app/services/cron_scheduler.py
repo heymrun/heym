@@ -247,6 +247,7 @@ class CronScheduler:
                     actor_user_id=workflow.owner_id,
                     public_base_url=public_base_url,
                     cancel_event=cancel_event,
+                    concurrency_limit=workflow.concurrency_limit,
                 )
             finally:
                 clear_execution(

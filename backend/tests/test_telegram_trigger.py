@@ -94,6 +94,7 @@ class TestTelegramTriggerWebhook(unittest.IsolatedAsyncioTestCase):
             name="Telegram workflow",
             nodes=[],
             edges=[],
+            concurrency_limit=None,
         )
         added_rows: list[object] = []
         db = SimpleNamespace(

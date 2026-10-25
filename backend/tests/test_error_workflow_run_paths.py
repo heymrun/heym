@@ -216,7 +216,9 @@ class SessionOwningEntryPointTests(unittest.IsolatedAsyncioTestCase):
         source = SimpleNamespace(
             id=uuid.uuid4(), name="Orders", nodes=[{"type": "set"}], error_workflow_id=uuid.uuid4()
         )
-        target = SimpleNamespace(id=source.error_workflow_id, nodes=[{"type": "set"}], edges=[])
+        target = SimpleNamespace(
+            id=source.error_workflow_id, nodes=[{"type": "set"}], edges=[], concurrency_limit=None
+        )
         session = AsyncMock()
         session.add = MagicMock()
         executed = AsyncMock(
@@ -278,7 +280,10 @@ class ErrorWorkflowPlacementTests(unittest.IsolatedAsyncioTestCase):
             owner_id=uuid.uuid4(),
         )
         target = SimpleNamespace(
-            id=source.error_workflow_id, nodes=[{"type": "sendEmail"}], edges=[]
+            id=source.error_workflow_id,
+            nodes=[{"type": "sendEmail"}],
+            edges=[],
+            concurrency_limit=None,
         )
         session = AsyncMock()
         session.add = MagicMock()
@@ -426,6 +431,7 @@ class PortalSeamTests(unittest.IsolatedAsyncioTestCase):
             edges=[],
             error_workflow_id=uuid.uuid4(),
             cache_ttl_seconds=None,
+            concurrency_limit=None,
         )
         db = AsyncMock()
         db.add = MagicMock()

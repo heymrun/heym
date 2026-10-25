@@ -201,6 +201,7 @@ class TestDiscordValidSignature(unittest.IsolatedAsyncioTestCase):
             name="Discord workflow",
             nodes=[],
             edges=[],
+            concurrency_limit=None,
         )
         added_rows: list[object] = []
         db = SimpleNamespace(
