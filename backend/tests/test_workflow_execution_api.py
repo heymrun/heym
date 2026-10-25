@@ -70,6 +70,7 @@ class CollectReferencedWorkflowsAccessTests(unittest.IsolatedAsyncioTestCase):
             name="victim",
             nodes=[{"id": "start", "type": "manual", "data": {}}],
             edges=[],
+            concurrency_limit=None,
         )
         db = AsyncMock()
         db.execute.side_effect = [
@@ -103,6 +104,7 @@ class CollectReferencedWorkflowsAccessTests(unittest.IsolatedAsyncioTestCase):
             name="victim",
             nodes=[{"id": "start", "type": "manual", "data": {}}],
             edges=[],
+            concurrency_limit=None,
         )
         db = AsyncMock()
         db.execute.side_effect = [
@@ -136,6 +138,7 @@ class CollectReferencedWorkflowsAccessTests(unittest.IsolatedAsyncioTestCase):
             name="owned child",
             nodes=[{"id": "start", "type": "manual", "data": {}}],
             edges=[],
+            concurrency_limit=None,
         )
         db = AsyncMock()
         db.execute.return_value = self._result(target_workflow)
@@ -271,6 +274,7 @@ class RunExecuteWorkflowToolActorForwardingTests(unittest.IsolatedAsyncioTestCas
             name="Demo",
             nodes=[{"id": "n1", "type": "input"}],
             edges=[],
+            concurrency_limit=None,
         )
         execution_result = ExecutionResult(
             workflow_id=workflow.id,
@@ -334,6 +338,7 @@ class RunExecuteWorkflowToolTriggerSourceTests(unittest.IsolatedAsyncioTestCase)
             name="Demo",
             nodes=[{"id": "n1", "type": "input"}],
             edges=[],
+            concurrency_limit=None,
         )
         execution_result = ExecutionResult(
             workflow_id=workflow.id,
@@ -384,6 +389,14 @@ class RunExecuteWorkflowToolTriggerSourceTests(unittest.IsolatedAsyncioTestCase)
 
 
 class PortalCancelExecutionTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        # No portal run here is waiting for a concurrency slot.
+        held = patch(
+            "app.api.portal.workflow_concurrency.cancel_held", AsyncMock(return_value=False)
+        )
+        held.start()
+        self.addCleanup(held.stop)
+
     async def test_returns_cancel_requested_when_active_execution_exists(self) -> None:
         workflow_id = uuid.uuid4()
         execution_id = uuid.uuid4()
@@ -482,6 +495,7 @@ class PortalExecuteStreamHeartbeatTests(unittest.IsolatedAsyncioTestCase):
             name="Portal Workflow",
             nodes=[{"id": "n1", "type": "textInput", "data": {"label": "Input"}}],
             edges=[],
+            concurrency_limit=None,
         )
         release_executor = Event()
 
@@ -552,6 +566,7 @@ class PortalExecuteStreamCancelPersistenceTests(unittest.IsolatedAsyncioTestCase
             name="Portal Workflow",
             nodes=[{"id": "n1", "type": "textInput", "data": {"label": "Input"}}],
             edges=[],
+            concurrency_limit=None,
         )
 
         def fake_streaming_executor(**_kwargs: object):
@@ -612,6 +627,7 @@ class ExecuteWorkflowStreamHeartbeatTests(unittest.IsolatedAsyncioTestCase):
             cache_ttl_seconds=None,
             sse_node_config={},
             workflow_timeout_seconds=None,
+            concurrency_limit=None,
         )
 
         def fake_streaming_executor(**_kwargs: object):
@@ -684,6 +700,7 @@ class ExecuteWorkflowStreamHeartbeatTests(unittest.IsolatedAsyncioTestCase):
             cache_ttl_seconds=None,
             sse_node_config={},
             workflow_timeout_seconds=None,
+            concurrency_limit=None,
         )
         release_executor = Event()
 
@@ -756,6 +773,7 @@ class ExecuteWorkflowStreamHeartbeatTests(unittest.IsolatedAsyncioTestCase):
             cache_ttl_seconds=None,
             sse_node_config={},
             workflow_timeout_seconds=None,
+            concurrency_limit=None,
         )
         release_executor = Event()
 
@@ -837,6 +855,7 @@ class ExecuteWorkflowStreamAvailabilityTests(unittest.IsolatedAsyncioTestCase):
             rate_limit_requests=None,
             rate_limit_window_seconds=None,
             cache_ttl_seconds=None,
+            concurrency_limit=None,
         )
         db = AsyncMock()
         db.execute = AsyncMock(return_value=_ScalarResult(workflow))
@@ -868,6 +887,7 @@ class ExecuteWorkflowStreamAvailabilityTests(unittest.IsolatedAsyncioTestCase):
             rate_limit_requests=None,
             rate_limit_window_seconds=None,
             cache_ttl_seconds=None,
+            concurrency_limit=None,
         )
         db = AsyncMock()
         db.execute = AsyncMock(return_value=_ScalarResult(workflow))
@@ -2242,6 +2262,7 @@ class SubWorkflowTriggerSourceTests(unittest.IsolatedAsyncioTestCase):
             cache_ttl_seconds=None,
             sse_enabled=False,
             name="Parent Workflow",
+            concurrency_limit=None,
         )
 
     def _make_execution_result(
@@ -2357,6 +2378,7 @@ class ExecuteWorkflowApiDownstreamFailureTests(unittest.IsolatedAsyncioTestCase)
             rate_limit_window_seconds=None,
             cache_ttl_seconds=None,
             sse_enabled=False,
+            concurrency_limit=None,
         )
 
         execution_result = ExecutionResult(
@@ -2473,6 +2495,7 @@ class TestRunExecuteNoHistoryTests(unittest.IsolatedAsyncioTestCase):
             cache_ttl_seconds=None,
             sse_enabled=False,
             name="Preview",
+            concurrency_limit=None,
         )
 
     async def test_test_run_success_does_not_create_execution_history(self) -> None:
