@@ -52,6 +52,8 @@ After starting a run, the drawer shows:
 
 `pending` means the workflow is waiting for a later action such as human review.
 
+Quick Drawer runs are production runs, so a workflow with a [concurrency limit](./webhooks.md#concurrency-limit-and-queued-runs) can make them wait. While the run is in line, the status reads **Waiting in queue (2/5)**; it changes to running when the run starts and shows the result when it ends, without step-by-step progress. A run that expired in the queue, or was cancelled while waiting, ends as `error`.
+
 A file run goes through the trigger's single-use upload link: the drawer asks the workflow for a link, uploads the file to it, and shows the result when the upload returns. File runs show the final status and outputs but no step-by-step progress, and are also tagged `Quick Drawer` in history. The chosen file is cleared after each run, because a link takes one file.
 
 ## Browser Storage

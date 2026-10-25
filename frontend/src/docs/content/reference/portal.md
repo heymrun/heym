@@ -32,6 +32,10 @@ Configure in the editor: **Portal** button in the workflow header opens the port
 3. **Execute**: `POST /api/portal/{slug}/execute` – The portal chat UI calls this (or its streaming variant internally when enabled); end users interact via the chat interface, not by calling the API directly.
 4. **Stop**: `POST /api/portal/{slug}/executions/{execution_id}/cancel` – Requested when the user presses **Stop** during an active portal run
 
+## Concurrency Limit
+
+When the workflow has a [concurrency limit](./webhooks.md#concurrency-limit-and-queued-runs) and every slot is in use, a portal message waits its turn instead of running at once. The chat shows **Waiting in queue (2/5)** in its progress line until the run starts, then the answer as usual. The run still happens if the user closes the page. **Stop** removes a waiting run from the queue. When the queue is full, the message fails with "Concurrency queue is full". A run that waited in the queue does not stream its answer token by token; the whole answer appears when it finishes.
+
 ## HITL in Portal Runs
 
 If a portal workflow reaches an [Agent Node](../nodes/agent-node.md) with [Human-in-the-Loop](./human-in-the-loop.md) enabled, the portal response shows a review link instead of appearing empty.
