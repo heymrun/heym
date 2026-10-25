@@ -50,7 +50,12 @@ from app.models.schemas import (
     MCPToolsListResponse,
     MCPWorkflowItem,
 )
-from app.services import file_intake_service, mcp_chat_service
+from app.services import (
+    file_intake_service,
+    mcp_chat_service,
+    mcp_execution_status,
+    workflow_concurrency,
+)
 from app.services.cluster.dispatch import dispatch_workflow
 from app.services.credential_access import get_accessible_credential
 from app.services.credential_context import credential_context_value
@@ -609,6 +614,8 @@ async def build_tools_with_chat(
 ) -> list[MCPTool]:
     """Workflow tools for an MCP surface, plus `heym_chat` when it is enabled."""
     tools = [workflow_to_mcp_tool(w) for w in workflows]
+    if mcp_execution_status.should_list(workflows):
+        tools.append(mcp_execution_status.build_execution_status_tool())
     if chat_settings.enabled:
         tools.append(mcp_chat_service.build_chat_mcp_tool())
     return tools
@@ -1092,6 +1099,9 @@ async def call_mcp_tool(
         )
 
     workflows = await get_user_mcp_workflows(db, mcp_user.id)
+    if tool_name == mcp_execution_status.MCP_EXECUTION_STATUS_TOOL_NAME:
+        text, is_error = await mcp_execution_status.run_execution_status_tool(workflows, arguments)
+        return MCPToolResult(content=[MCPTextContent(text=text)], isError=is_error)
     target_workflow = None
 
     for w in workflows:
@@ -1160,7 +1170,12 @@ async def call_mcp_tool(
             trace_user_id=mcp_user.id,
             actor_user_id=mcp_user.id,
             cancel_event=cancel_event,
+            concurrency_limit=target_workflow.concurrency_limit,
+            on_queued="return",
         )
+        if isinstance(execution_result, workflow_concurrency.Admission):
+            text, is_error = mcp_execution_status.admission_tool_text(execution_result)
+            return MCPToolResult(content=[MCPTextContent(text=text)], isError=is_error)
 
         if needs_local_pending_persist(execution_result):
             history_entry, _ = await persist_pending_execution(
@@ -1332,6 +1347,11 @@ async def _dispatch_mcp_jsonrpc(
             )
 
         workflows = await get_user_mcp_workflows(db, mcp_user.id)
+        if tool_name == mcp_execution_status.MCP_EXECUTION_STATUS_TOOL_NAME:
+            text, is_error = await mcp_execution_status.run_execution_status_tool(
+                workflows, arguments
+            )
+            return _mcp_tool_result_jsonrpc_response(msg.id, text, is_error=is_error)
         target_workflow = None
 
         for w in workflows:
@@ -1399,7 +1419,12 @@ async def _dispatch_mcp_jsonrpc(
                 trace_user_id=mcp_user.id,
                 actor_user_id=mcp_user.id,
                 cancel_event=cancel_event,
+                concurrency_limit=target_workflow.concurrency_limit,
+                on_queued="return",
             )
+            if isinstance(execution_result, workflow_concurrency.Admission):
+                text, is_error = mcp_execution_status.admission_tool_text(execution_result)
+                return _mcp_tool_result_jsonrpc_response(msg.id, text, is_error=is_error)
 
             if needs_local_pending_persist(execution_result):
                 history_entry, _ = await persist_pending_execution(

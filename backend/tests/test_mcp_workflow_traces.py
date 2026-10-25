@@ -41,6 +41,7 @@ class McpWorkflowTraceTests(unittest.IsolatedAsyncioTestCase):
             description="Build daily report",
             nodes=[{"id": "input1", "type": "manual", "data": {"label": "Input"}}],
             edges=[],
+            concurrency_limit=None,
         )
         execution_result = ExecutionResult(
             workflow_id=workflow.id,
