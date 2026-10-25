@@ -1,9 +1,9 @@
 """What the workflow assistant may know about the user's credentials.
 
-The assistant sees each owned credential's name, type and id, never its value. This
-module holds which credential types each node field accepts, a one-line purpose per
-type, how HTTP-capable types are sent as a header, and the prompt section each
-assistant surface gets. `$credentials.<name>` resolves per type (see
+The assistant sees the name, type and id of each credential the user owns or was shared,
+never its value. This module holds which credential types each node field accepts, a
+one-line purpose per type, how HTTP-capable types are sent as a header, and the prompt
+section each assistant surface gets. `$credentials.<name>` resolves per type (see
 `credential_context.credential_context_value`): bearer credentials to `Bearer <token>`,
 header credentials to a whole `Name: value` line, the other HTTP-capable types to a
 raw token.
@@ -21,6 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Credential, CredentialType
+from app.services.credential_access import accessible_credential_clause
 
 
 class CredentialPromptMode(str, Enum):
@@ -189,11 +190,13 @@ def credential_reference(name: str) -> str:
 
 @dataclass(frozen=True)
 class CatalogCredential:
-    """An owned credential as the assistant sees it: name, type and id, never a value."""
+    """A credential the user can use, as the assistant sees it: name, type and id, never a value."""
 
     id: uuid.UUID
     name: str
     type: CredentialType
+    # Owned by another user and shared with this user or one of their teams.
+    shared: bool = False
 
     @property
     def reference(self) -> str:
@@ -221,16 +224,29 @@ class CatalogCredential:
 
 
 async def load_credential_catalog(db: AsyncSession, user_id: uuid.UUID) -> list[CatalogCredential]:
-    """Return the user's own credentials by id, name and type, never their values."""
+    """Return the credentials the user owns or was shared, by id, name and type, never values.
+
+    Owned credentials come first. A shared credential whose name is already listed is left
+    out, so a name still picks exactly one credential.
+    """
     result = await db.execute(
-        select(Credential.id, Credential.name, Credential.type)
-        .where(Credential.owner_id == user_id)
+        select(Credential.id, Credential.name, Credential.type, Credential.owner_id)
+        .where(accessible_credential_clause(user_id))
         .order_by(Credential.name)
     )
-    return [
-        CatalogCredential(credential_id, name, credential_type)
-        for credential_id, name, credential_type in result.all()
-    ]
+    owned: list[CatalogCredential] = []
+    shared: list[CatalogCredential] = []
+    for credential_id, name, credential_type, owner_id in result.all():
+        is_shared = owner_id != user_id
+        target = shared if is_shared else owned
+        target.append(CatalogCredential(credential_id, name, credential_type, shared=is_shared))
+    names = {credential.name for credential in owned}
+    catalog = list(owned)
+    for credential in shared:
+        if credential.name not in names:
+            names.add(credential.name)
+            catalog.append(credential)
+    return catalog
 
 
 OFF_CREDENTIALS_PROMPT = (
@@ -241,10 +257,10 @@ OFF_CREDENTIALS_PROMPT = (
 )
 
 _INTRO = (
-    "You never see credential values. Below are the user's own credentials by name, type "
-    "and id; Heym resolves each value when the workflow runs. This section overrides the "
-    "placeholder rule for credential fields: when a credential below fits a node field, put "
-    "its id in that field instead of a placeholder."
+    "You never see credential values. Below are the credentials the user owns or that were "
+    "shared with them, by name, type and id; Heym resolves each value when the workflow "
+    "runs. This section overrides the placeholder rule for credential fields: when a "
+    "credential below fits a node field, put its id in that field instead of a placeholder."
 )
 
 _NODE_RULES = (
@@ -252,8 +268,11 @@ _NODE_RULES = (
     "node credential fields below), use it and put the credential's id in its credential "
     "field. Use an `http` node only for operations no node covers, and send the credential "
     "with a header line (rules below).",
-    "Unless the user asks for a specific model credential, leave `credentialId` on `llm` and "
-    "`agent` nodes as a placeholder; Heym fills it with the model this assistant runs on.",
+    "Unless the user asks for a specific model credential, leave `credentialId` on new `llm` "
+    "and `agent` nodes as a placeholder; Heym fills it and `model` with the credential and "
+    "model this assistant runs on, shared credentials included. For another model, put the "
+    "id of a listed LLM credential in `credentialId` and set `model`. When you edit a "
+    "workflow, keep the `credentialId` and `model` an existing node already has.",
 )
 
 _PICK_RULE = (
@@ -310,8 +329,9 @@ _ASK_RULES = (
     "When the user asks to update, edit, rename, rotate, reconnect or re-authorize one of "
     "their credentials, emit a `heym-clarify` block with one `single` question that offers "
     '`{"label": "<short text in the user\'s language>", "edit": {"id": "<credential id>"}}` '
-    "for each listed credential that matches by name or type, and a cancel option. The form "
-    "opens with that credential loaded and its secrets masked. The answer comes back as "
+    "for each listed credential the user owns that matches by name or type, and a cancel "
+    "option; only its owner can update a shared credential. The form opens with that "
+    "credential loaded and its secrets masked. The answer comes back as "
     '`Updated credential "<name>" (<type>)`. When no listed credential matches, say so and '
     "offer a create option instead.",
     _PICK_RULE,
@@ -341,7 +361,8 @@ _LINK_RULES = (
     "with `action` `create`, the `credential_type` and a suggested `name`, plus a one-sentence "
     "`reason`. When they ask to update, edit, rename, rotate, reconnect or re-authorize one "
     "of their credentials, call it with `action` `update` and the `credential_id` of the "
-    "listed credential that matches; when none matches, say so and offer to create one.",
+    "listed credential they own that matches; only its owner can update a shared credential. "
+    "When none matches, say so and offer to create one.",
     "The tool waits while the user fills in the form when their app can open it. `created` "
     "or `updated` gives the credential's name, type and id: use it right away without asking "
     "again. `declined` means the user closed the form: continue without it. "
@@ -404,6 +425,8 @@ def _node_field_lines() -> list[str]:
 
 def _describe(credential: CatalogCredential) -> str:
     summary = f"- `{credential.name}` ({credential.type.value}), id `{credential.id}`"
+    if credential.shared:
+        summary += ", shared with the user"
     if not credential.http_capable:
         return summary
     if credential.header_key is None:

@@ -58,20 +58,32 @@ _MINIMAL_BUILDER_CONTENT = """
 
 
 def _stub_credential_catalog(test: unittest.TestCase) -> tuple[AsyncMock, AsyncMock]:
-    """Stub the credential and data table catalog queries a bare AsyncMock db cannot answer."""
+    """Stub the credential and data table catalog queries a bare AsyncMock db cannot answer.
+
+    The user can use the catalog's credentials plus the ids a test adds to
+    `test.accessible_ids`, like the selected chat credential.
+    """
     prompt_patcher = patch(
         "app.api.ai_assistant.build_credentials_prompt", AsyncMock(return_value="")
     )
-    catalog_patcher = patch(
-        "app.api.ai_assistant.load_credential_catalog", AsyncMock(return_value=[])
-    )
+    catalog = AsyncMock(return_value=[])
+    catalog_patcher = patch("app.api.ai_assistant.load_credential_catalog", catalog)
     tables_patcher = patch(
         "app.api.ai_assistant.load_data_table_catalog", AsyncMock(return_value=[])
     )
-    test.addCleanup(prompt_patcher.stop)
-    test.addCleanup(catalog_patcher.stop)
-    test.addCleanup(tables_patcher.stop)
+    test.accessible_ids = set()  # type: ignore[attr-defined]
+    accessible_patcher = patch(
+        "app.api.ai_assistant.load_accessible_credential_ids",
+        AsyncMock(
+            side_effect=lambda _db, _user_id: (
+                {str(c.id) for c in catalog.return_value} | test.accessible_ids
+            )  # type: ignore[attr-defined]
+        ),
+    )
+    for patcher in (prompt_patcher, catalog_patcher, tables_patcher, accessible_patcher):
+        test.addCleanup(patcher.stop)
     tables_patcher.start()
+    accessible_patcher.start()
     return prompt_patcher.start(), catalog_patcher.start()
 
 
@@ -696,6 +708,7 @@ Here is the workflow:
         credential.id = uuid.uuid4()
         credential.owner_id = user.id
         credential.type = CredentialType.openai
+        self.accessible_ids.add(str(credential.id))
 
         builder_content = """
 ```json

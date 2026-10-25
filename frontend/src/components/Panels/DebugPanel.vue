@@ -2588,7 +2588,7 @@ function isPlaceholderOrInvalidCredential(credentialId: string | undefined): boo
 }
 
 /**
- * Clear AI-generated credentialId when unknown, placeholder, or shared (only owned credentials are kept).
+ * Clear AI-generated credentialId when unknown or a placeholder; owned and shared credentials are kept.
  */
 function shouldClearIntegrationCredentialId(credentialId: string | undefined): boolean {
   if (!credentialId || credentialId.trim() === "") return false;
@@ -2596,7 +2596,6 @@ function shouldClearIntegrationCredentialId(credentialId: string | undefined): b
   if (PLACEHOLDER_CREDENTIAL_PATTERNS.some((p) => lower.includes(p.toLowerCase()))) return true;
   const match = allCredentialsForSanitize.value.find((c) => c.id === credentialId);
   if (!match) return true;
-  if (match.is_shared) return true;
   return false;
 }
 

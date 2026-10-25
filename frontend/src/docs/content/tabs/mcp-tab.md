@@ -59,6 +59,8 @@ Capabilities added to the Chat tab later become available through `heym_chat` au
 
 `heym_chat` always runs the Chat engine in build mode, the same mode the [Chat tab](./chat-tab.md#creating-workflows) uses. In one call the assistant can save a new workflow, run it with realistic sample inputs, read the run report, fix what failed, and run it again, up to five test runs per call. When the latest run of the latest save passes, it finishes with a one-sentence summary, and the reply ends with `Verified: the latest test run of the saved workflow passed.`
 
+When a call creates or edits a workflow, the reply lists each one with its full editor link, such as `https://heym.example.com/workflows/<id>`, and the links inside the assistant's answer are full links too. They use your configured Heym address (`FRONTEND_URL`) and open for people signed in to Heym who can access that workflow.
+
 - Test runs are real runs. Their side effects happen, and they appear in the workflow's run history like any other run.
 - Saves take the editor's path: a change to the graph keeps the previous graph in the workflow's Edit History.
 - To change a workflow it built earlier, continue the thread with the same `conversation_id`. The assistant updates that workflow instead of creating a new one, and it only changes workflows you can edit.
@@ -68,7 +70,7 @@ A table holds no secret, so `heym_chat` can list your tables, ask which one a wo
 
 ### Credentials
 
-`heym_chat` sees your credentials by name and type, the same way the Chat tab does. When a workflow it builds needs a credential, it asks which one to use, as a question in the result. Answer it with the same `conversation_id`.
+`heym_chat` sees the credentials you own and the ones shared with you, by name and type, the same way the Chat tab does. When a workflow it builds needs a credential, it asks which one to use, as a question in the result. Answer it with the same `conversation_id`.
 
 To add a credential, or to update one you own, the assistant opens Heym's credential form on a Heym page, `/credentials/setup/<id>`. You sign in to Heym there, enter the key or connect the account, and press save. The value goes straight to Heym: the MCP client and its model only learn the credential's name and type. Do not paste keys into the MCP client; ask for the form instead.
 
@@ -91,6 +93,8 @@ The page only opens for the Heym account that started the request, so a forwarde
 | **Model** | Loaded from the selected credential. Prefilled from your preferred model when the credential matches. |
 
 If either is missing, the tool still appears in `tools/list` but each call returns an error telling you to finish the setup in this tab.
+
+LLM and Agent nodes in a workflow `heym_chat` builds run on this credential and model, including a credential someone shared with you, so test runs work without another setup step. When `heym_chat` edits a workflow, LLM and Agent nodes that already have a credential keep it, along with their model.
 
 ### Arguments and history
 

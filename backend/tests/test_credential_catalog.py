@@ -241,8 +241,8 @@ class LoadCredentialCatalogTests(unittest.IsolatedAsyncioTestCase):
         slack_id = uuid.uuid4()
         result = MagicMock()
         result.all.return_value = [
-            (google_id, "google", CredentialType.google),
-            (slack_id, "slack-main", CredentialType.slack),
+            (google_id, "google", CredentialType.google, user_id),
+            (slack_id, "slack-main", CredentialType.slack, user_id),
         ]
         db = MagicMock()
         db.execute = AsyncMock(return_value=result)
@@ -261,6 +261,54 @@ class LoadCredentialCatalogTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("credentials.owner_id", sql)
         self.assertNotIn("encrypted_config", sql)
         self.assertIn(user_id, statement.compile().params.values())
+
+    async def test_credentials_shared_with_the_user_or_a_team_are_listed(self) -> None:
+        user_id = uuid.uuid4()
+        owner_id = uuid.uuid4()
+        own_id = uuid.uuid4()
+        shared_id = uuid.uuid4()
+        result = MagicMock()
+        result.all.return_value = [
+            (shared_id, "ai-team", CredentialType.openai, owner_id),
+            (own_id, "sheets", CredentialType.google_sheets, user_id),
+        ]
+        db = MagicMock()
+        db.execute = AsyncMock(return_value=result)
+
+        credentials = await load_credential_catalog(db, user_id)
+
+        self.assertEqual(
+            credentials,
+            [
+                CatalogCredential(own_id, "sheets", CredentialType.google_sheets),
+                CatalogCredential(shared_id, "ai-team", CredentialType.openai, shared=True),
+            ],
+        )
+        sql = str(db.execute.await_args.args[0])
+        self.assertIn("credential_shares.user_id", sql)
+        self.assertIn("credential_team_shares", sql)
+        self.assertIn("team_members.user_id", sql)
+
+    async def test_an_owned_name_wins_over_a_shared_credential_with_that_name(self) -> None:
+        """A name in `$credentials.<name>` or a credential choice must pick one credential."""
+        user_id = uuid.uuid4()
+        own_id = uuid.uuid4()
+        result = MagicMock()
+        result.all.return_value = [
+            (uuid.uuid4(), "openai", CredentialType.openai, uuid.uuid4()),
+            (own_id, "openai", CredentialType.openai, user_id),
+            (uuid.uuid4(), "slack", CredentialType.slack, uuid.uuid4()),
+            (uuid.uuid4(), "slack", CredentialType.slack, uuid.uuid4()),
+        ]
+        db = MagicMock()
+        db.execute = AsyncMock(return_value=result)
+
+        credentials = await load_credential_catalog(db, user_id)
+
+        self.assertEqual([c.name for c in credentials], ["openai", "slack"])
+        self.assertEqual(credentials[0].id, own_id)
+        self.assertFalse(credentials[0].shared)
+        self.assertTrue(credentials[1].shared)
 
     async def test_ask_prompt_is_built_even_without_credentials(self) -> None:
         """Creation matters most when the user owns nothing yet."""
@@ -336,6 +384,25 @@ class CredentialsPromptTests(unittest.TestCase):
 
         self.assertIn('"edit": {"id": "<credential id>"}', prompt)
         self.assertIn('`Updated credential "<name>" (<type>)`', prompt)
+
+    def test_shared_credentials_are_marked_and_only_owned_ones_are_offered_for_edit(
+        self,
+    ) -> None:
+        shared = CatalogCredential(uuid.uuid4(), "ai-team", CredentialType.openai, shared=True)
+        for mode in (ASK, CredentialPromptMode.ASK_AND_LINK):
+            with self.subTest(mode=mode):
+                prompt = format_credentials_prompt([*self.credentials, shared], mode)
+
+                self.assertIn(f"`ai-team` (openai), id `{shared.id}`, shared with the user", prompt)
+                self.assertNotIn(f"id `{self.credentials[0].id}`, shared", prompt)
+                self.assertIn("only its owner can update a shared credential", prompt)
+                self.assertIn("owns or that were shared with them", prompt)
+
+    def test_prompt_leaves_model_credentials_of_new_nodes_to_the_chat_model(self) -> None:
+        prompt = format_credentials_prompt(self.credentials, APPLY)
+
+        self.assertIn("Heym fills it and `model` with the credential and model", prompt)
+        self.assertIn("keep the `credentialId` and `model` an existing node already has", prompt)
 
     def test_apply_prompt_has_no_form_rules(self) -> None:
         prompt = format_credentials_prompt(self.credentials, APPLY)
