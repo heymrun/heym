@@ -109,6 +109,71 @@ Configure per workflow: `rate_limit_requests` and `rate_limit_window_seconds`.
 
 `test_run` requests bypass rate limiting.
 
+## Concurrency Limit and Queued Runs
+
+A workflow can cap how many production runs execute at once. Turn on **Concurrency limit** in the workflow-level **Properties** panel and set **Max concurrent runs**. Owners and collaborators with edit access can change it. The limit is off by default.
+
+While the limit is reached, new runs wait in a first-in, first-out queue. This covers every production entry point: this endpoint, the [streaming endpoint](./sse-streaming.md), the [Portal](./portal.md), the [Quick Drawer](./quick-drawer.md), [MCP](../tabs/mcp-tab.md) and every [trigger](./triggers.md). The editor's own test runs always start right away and do not take a slot. Sending `test_run=true` without a signed-in session that can open the workflow does not skip the queue.
+
+| Setting | Description |
+|---------|-------------|
+| `concurrency_limit` | Production runs allowed at once. `0` turns the limit off |
+| `concurrency_max_queue` | Optional. Runs allowed to wait at once. Empty means no limit |
+| `concurrency_max_wait_seconds` | Optional. A run that waits longer is recorded as `expired`. Empty means it waits as long as it takes |
+
+### 202 Accepted
+
+A call that starts right away behaves exactly as described under Response Format. A call that has to wait gets `202 Accepted` at once, whatever `X-Simple-Response` says, with a `Location` header that points at its status URL:
+
+```json
+{
+  "status": "queued",
+  "execution_id": "6f1c0c2e-...",
+  "status_url": "https://heym.example.com/api/workflows/{workflow_id}/executions/{execution_id}/status",
+  "queue": { "position": 2, "size": 5, "running": 1, "limit": 1 },
+  "status_token": "..."
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `queue.position` | This run's place in line, starting at 1 |
+| `queue.size` | Runs waiting right now |
+| `queue.running` | Runs holding a slot right now |
+| `queue.limit` | The workflow's concurrency limit |
+| `status_token` | Anonymous workflows only. Returned once, in this response |
+
+### Status URL
+
+`GET /api/workflows/{workflow_id}/executions/{execution_id}/status` answers with the run's state. Call it with the same credential that started the run: a session or JWT, an [execution token](./execution-tokens.md), or the workflow's custom header. An anonymous workflow has no credential to check, so send the `status_token` from the 202 in the `X-Heym-Run-Token` header. The token is never read from the query string. A wrong or missing token gets `404`, the same as an unknown execution.
+
+```json
+{
+  "execution_id": "...",
+  "workflow_id": "...",
+  "status": "success",
+  "queue": null,
+  "outputs": { "done": { "result": "ok" } },
+  "error": null,
+  "execution_time_ms": 5120
+}
+```
+
+| `status` | Meaning |
+|----------|---------|
+| `queued` | Waiting for a slot; `queue` shows where it stands |
+| `running` | Has a slot and is executing |
+| `success` / `error` | Finished; `outputs` and `error` are filled |
+| `pending` | Paused for [human review](./human-in-the-loop.md) |
+| `cancelled` | Cancelled from [Execution History](./execution-history.md) |
+| `expired` | Waited longer than `concurrency_max_wait_seconds` and never ran |
+
+Poll every few seconds until the status is not `queued` or `running`. A queued run executes even if nobody polls.
+
+### Queue Full
+
+When `concurrency_max_queue` is set and that many runs are already waiting, the call is turned away with `429 Concurrency queue is full` and a `queue_full` entry in the run history. Nothing is queued.
+
 ## Response Format
 
 The endpoint returns JSON:
@@ -125,7 +190,7 @@ The endpoint returns JSON:
 | Field | Description |
 |-------|-------------|
 | `workflow_id` | Workflow UUID |
-| `status` | `success`, `error`, `cached`, or `rate_limited` |
+| `status` | `success`, `error`, `cached`, or `rate_limited` (a run that has to wait for a concurrency slot gets the [202 response](#202-accepted) instead) |
 | `outputs` | Terminal node outputs. With a single [JSON output mapper](../nodes/json-output-mapper-node.md) as the only terminal, the response body is that mapped object at the top level (default simple JSON responses). Otherwise includes [Output](../nodes/output-node.md) and other terminals keyed by label. |
 | `execution_time_ms` | Execution time in milliseconds (0 for cached/rate_limited) |
 

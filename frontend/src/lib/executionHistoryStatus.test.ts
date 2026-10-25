@@ -25,6 +25,11 @@ describe("getHistoryStatusBadgeClass", () => {
     expect(getHistoryStatusBadgeClass("skipped")).toContain("gray");
   });
 
+  it("badges runs that never executed because of the concurrency limit", () => {
+    expect(getHistoryStatusBadgeClass("expired")).toContain("amber");
+    expect(getHistoryStatusBadgeClass("queue_full")).toContain("orange");
+  });
+
   it("returns null for statuses without a badge", () => {
     expect(getHistoryStatusBadgeClass("success")).toBeNull();
     expect(getHistoryStatusBadgeClass("unknown")).toBeNull();

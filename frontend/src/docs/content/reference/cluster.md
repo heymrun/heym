@@ -112,6 +112,10 @@ The image tag must be the version main runs, and both keys must be copied exactl
 | On | Take a worker out of rotation without stopping it — running executions finish, no new ones are assigned. Locked on for the main instance: file, plugin and coding-agent work runs there whatever the toggle says |
 | Weight | Its share of distributable runs |
 
+## Concurrency limits in a cluster
+
+A workflow's [concurrency limit](./webhooks.md#concurrency-limit-and-queued-runs) is counted in PostgreSQL, so it holds across every instance and every process: two instances never run more of one workflow than the limit allows. A run that waited for a slot is placed by the same rules as any other run when it starts, so a run that has to stay on main still does. The queue worker that executes these runs now starts on every install, including a single instance, where it claims only the runs its own instance queued. That means a single instance also holds the queue wake-up `LISTEN` connection in each process, so budget its connections the same way as a cluster instance's.
+
 ## Run history
 
 Every run in the execution history names the instance that executed it, and both history dialogs can filter down to one instance. The filter matches on the instance's id while showing its name, so renaming an instance does not rewrite what old runs say.

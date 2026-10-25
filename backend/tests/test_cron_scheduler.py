@@ -29,6 +29,7 @@ class CronSchedulerExecutionHistoryTests(unittest.IsolatedAsyncioTestCase):
             name="Main workflow",
             nodes=[],
             edges=[],
+            concurrency_limit=None,
         )
 
         added_rows: list[object] = []
@@ -101,6 +102,7 @@ class CronSchedulerExecutionHistoryTests(unittest.IsolatedAsyncioTestCase):
             name="Cron allow downstream",
             nodes=[],
             edges=[],
+            concurrency_limit=None,
         )
 
         added_rows: list[object] = []
@@ -190,6 +192,7 @@ class CronSchedulerExecutionHistoryTests(unittest.IsolatedAsyncioTestCase):
             name="Cron downstream failure",
             nodes=[],
             edges=[],
+            concurrency_limit=None,
         )
 
         execution_result = SimpleNamespace(
@@ -258,6 +261,7 @@ class CronSchedulerExecutionHistoryTests(unittest.IsolatedAsyncioTestCase):
             name="Cron HITL workflow",
             nodes=[],
             edges=[],
+            concurrency_limit=None,
         )
 
         added_rows: list[object] = []
@@ -411,6 +415,7 @@ class CronSlotClaimTests(unittest.IsolatedAsyncioTestCase):
             # Every minute, so the previous slot is always freshly due.
             nodes=[{"id": "n1", "type": "cron", "data": {"cronExpression": "* * * * *"}}],
             edges=[],
+            concurrency_limit=None,
         )
         scheduler = CronScheduler()
         return scheduler, workflow
@@ -490,6 +495,7 @@ class CronExecutorThreadingTests(unittest.IsolatedAsyncioTestCase):
             name="Cron workflow",
             nodes=[],
             edges=[],
+            concurrency_limit=None,
         )
         db = SimpleNamespace(add=lambda row: None, commit=AsyncMock())
         execution_result = ExecutionResult(
@@ -540,6 +546,7 @@ class CronOffloadedRunTests(unittest.IsolatedAsyncioTestCase):
             name="Cron workflow",
             nodes=[],
             edges=[],
+            concurrency_limit=None,
         )
         db = SimpleNamespace(add=lambda row: None, commit=AsyncMock())
         dispatch = AsyncMock(return_value=result)

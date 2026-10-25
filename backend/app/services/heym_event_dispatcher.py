@@ -259,6 +259,7 @@ class HeymEventDispatcher:
                     trace_user_id=fresh_workflow.owner_id,
                     actor_user_id=fresh_workflow.owner_id,
                     cancel_event=cancel_event,
+                    concurrency_limit=fresh_workflow.concurrency_limit,
                 )
             finally:
                 clear_execution(

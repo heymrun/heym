@@ -121,6 +121,7 @@ class TestSlackValidSignature(unittest.IsolatedAsyncioTestCase):
             name="Slack workflow",
             nodes=[],
             edges=[],
+            concurrency_limit=None,
         )
         added_rows: list[object] = []
         db = SimpleNamespace(
@@ -176,6 +177,7 @@ class TestSlackValidSignature(unittest.IsolatedAsyncioTestCase):
             name="Slack workflow",
             nodes=[],
             edges=[],
+            concurrency_limit=None,
         )
         added_rows: list[object] = []
         db = SimpleNamespace(

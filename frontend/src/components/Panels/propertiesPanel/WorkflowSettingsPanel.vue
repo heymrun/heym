@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import { AlertTriangle, Clock, RotateCcw, Settings, Sparkles } from "lucide-vue-next";
 import SearchableSelect from "@/components/ui/SearchableSelect.vue";
+import WorkflowConcurrencySettings from "./WorkflowConcurrencySettings.vue";
 import { usePropertiesPanelContext } from "./usePropertiesPanelController";
 
 const {
@@ -107,6 +108,8 @@ const errorWorkflowOptions = computed(() =>
           timeout. Applies to manual, API, and triggered runs.
         </p>
       </div>
+
+      <WorkflowConcurrencySettings />
 
       <div class="border-t border-border/40 pt-4">
         <div class="flex items-center justify-between gap-3">

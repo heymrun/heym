@@ -44,7 +44,9 @@ class RunTriggerWorkflowTests(unittest.IsolatedAsyncioTestCase):
     async def _run(self, trigger_source: str, inputs: dict, sub_runs: list) -> list:
         owner_id = uuid.uuid4()
         workflow_id = uuid.uuid4()
-        workflow = SimpleNamespace(id=workflow_id, owner_id=owner_id, name="wf", nodes=[], edges=[])
+        workflow = SimpleNamespace(
+            id=workflow_id, owner_id=owner_id, name="wf", nodes=[], edges=[], concurrency_limit=None
+        )
         result = ExecutionResult(
             workflow_id=workflow_id,
             status="success",

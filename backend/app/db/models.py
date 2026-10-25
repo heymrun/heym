@@ -341,6 +341,10 @@ class Workflow(Base):
     )
     minutes_saved_per_run: Mapped[float | None] = mapped_column(Float, nullable=True)
     workflow_timeout_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Production runs allowed at once; NULL turns the limit off.
+    concurrency_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    concurrency_max_queue: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    concurrency_max_wait_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     scheduled_for_deletion: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True
     )
@@ -2615,6 +2619,29 @@ class WorkflowRunQueue(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Set only for runs that waited for a concurrency slot; the FIFO order.
+    concurrency_seq: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # hash_secret() of the status token an anonymous caller polls with.
+    status_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Executor extras a held run must carry: conversation_history, llm_session_id,
+    # run_error_workflow, holds_concurrency_slot.
+    run_options: Mapped[dict | None] = mapped_column(JSON(none_as_null=True), nullable=True)
+
+
+class WorkflowConcurrencySlot(Base):
+    """One production run holding one of its workflow's concurrency slots."""
+
+    __tablename__ = "workflow_concurrency_slots"
+
+    execution_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    workflow_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workflows.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    acquired_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class ClusterDispatchState(Base):

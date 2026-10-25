@@ -36,6 +36,21 @@ Each workflow can be exposed as an MCP tool:
 
 Workflow cards show the description and a preview of input field names so you can see what each tool expects before enabling it.
 
+### Queued runs and heym_execution_status
+
+A workflow with a [concurrency limit](../reference/webhooks.md#concurrency-limit-and-queued-runs) may be busy when a client calls it. The call then returns at once with a result that is not an error:
+
+```json
+{
+  "status": "queued",
+  "execution_id": "6f1c0c2e-...",
+  "queue": { "position": 2, "size": 5, "running": 1, "limit": 1 },
+  "next_step": "Call heym_execution_status with this execution_id every 5-10 seconds until status is success, error, cancelled or expired."
+}
+```
+
+The client polls the `heym_execution_status` tool with that `execution_id`. It returns the same body as the [status URL](../reference/webhooks.md#status-url): `queued` with the current position, `running`, then `success` or `error` with the outputs. It only finds runs of workflows that the same server exposes. The tool is listed on the default server and on each named server only while at least one of its workflows has a concurrency limit. When the workflow's queue is full, the call returns an error, "Concurrency queue is full".
+
 ## Heym Chat Tool
 
 The **Heym Capabilities** section turns the Chat tab engine into a single MCP tool named `heym_chat`. Enable it on the default server, on any named server, or on both — each surface keeps its own toggle and model selection.

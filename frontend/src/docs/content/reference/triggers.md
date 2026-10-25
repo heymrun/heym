@@ -97,6 +97,20 @@ Discord sends interaction webhooks to `POST /api/discord/webhook/{node_id}`. The
 
 The RabbitMQ consumer starts when the leader worker initializes. Workflows with `rabbitmq` nodes where `rabbitmqOperation === "receive"` get a consumer. Input includes `message_data` (body, headers, routing_key, etc.) and `triggered_by: "rabbitmq"`.
 
+## Concurrency Limit
+
+A workflow with a [concurrency limit](./webhooks.md#concurrency-limit-and-queued-runs) queues production runs from every entry point above when its slots are full, first in, first out, across all instances. How a caller learns the result depends on the entry point:
+
+| Entry point | While the run waits |
+|-------------|---------------------|
+| Webhook / API | `202 Accepted` with an `execution_id` and a status URL |
+| SSE streaming, Quick Drawer, Portal chat | The stream stays open and sends `queued` events |
+| Portal without streaming | The request waits for the result |
+| MCP | A `queued` result to poll with `heym_execution_status` |
+| Cron, IMAP, Google Drive / Sheets, WebSocket, RabbitMQ, Slack, Discord, Telegram, Heym events, error workflows, Dashboard run widgets | The trigger waits for the result, as long as a run on another [instance](./cluster.md) would. The run executes either way and is written to history |
+
+When the queue is full, the run does not start and history records it as `queue_full`. Editor test runs, sub-workflow calls ([Execute](../nodes/execute-node.md) node and agent workflow tools), [Evals](../tabs/evals-tab.md), chat build-mode test runs and review resumes are never queued. [Board](../tabs/board-tab.md) card runs, [File Upload](../nodes/file-upload-trigger-node.md) runs, runs started by the AI assistant's run-workflow tool, and alert notify workflows also start without waiting for a slot.
+
 ## trigger_source
 
 Execution history records `trigger_source` for every entry point:

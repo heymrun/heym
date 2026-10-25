@@ -242,6 +242,10 @@ class WorkflowUpdate(BaseModel):
     error_workflow_id: uuid.UUID | None = None
     minutes_saved_per_run: float | None = None
     workflow_timeout_seconds: int | None = None
+    # 0 clears a field; a positive value sets it.
+    concurrency_limit: int | None = Field(None, ge=0)
+    concurrency_max_queue: int | None = Field(None, ge=0)
+    concurrency_max_wait_seconds: int | None = Field(None, ge=0)
     # Optimistic concurrency: the `updated_at` the client's edit is based on. When supplied and the
     # stored row is newer, the update is rejected with 409 instead of overwriting someone else's
     # work. Omitted means "save unconditionally" (the explicit override path).
@@ -303,6 +307,9 @@ class WorkflowResponse(BaseModel):
     error_workflow_id: uuid.UUID | None = None
     minutes_saved_per_run: float | None = None
     workflow_timeout_seconds: int | None = None
+    concurrency_limit: int | None = None
+    concurrency_max_queue: int | None = None
+    concurrency_max_wait_seconds: int | None = None
     owner_name: str | None = None
     # What the requesting user may do: the owner and write shares edit, read shares view and run.
     permission: WorkflowSharePermission = "write"
@@ -520,6 +527,25 @@ class HistoryListResponse(BaseModel):
     items: list[ExecutionHistoryListResponse]
 
 
+class WorkflowExecutionQueueInfo(BaseModel):
+    position: int
+    size: int
+    running: int
+    limit: int | None
+
+
+class WorkflowExecutionStatusResponse(BaseModel):
+    """One run's state for callers that got a 202, or an MCP client polling."""
+
+    execution_id: str
+    workflow_id: str
+    status: str
+    queue: WorkflowExecutionQueueInfo | None = None
+    outputs: Any | None = None
+    error: str | None = None
+    execution_time_ms: float | None = None
+
+
 class ActiveExecutionItem(BaseModel):
     """Single currently-running or pending-review execution visible to the requesting user."""
 
@@ -530,8 +556,10 @@ class ActiveExecutionItem(BaseModel):
     inputs: dict = Field(default_factory=dict)
     running_node_ids: list[str] = Field(default_factory=list)
     node_results: list[dict] = Field(default_factory=list)
-    status: Literal["running", "pending"] = "running"
+    status: Literal["running", "pending", "queued"] = "running"
     pending_kind: Literal["hitl", "codex"] | None = None
+    queue_position: int | None = None
+    queue_size: int | None = None
 
 
 class LLMTraceListItem(BaseModel):

@@ -245,6 +245,7 @@ class WebSocketTriggerExecutionHistoryTests(unittest.IsolatedAsyncioTestCase):
                 }
             ],
             edges=[],
+            concurrency_limit=None,
         )
 
         added_rows: list[object] = []

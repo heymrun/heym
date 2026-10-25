@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Workflow
 from app.models.schemas import ActiveExecutionItem
+from app.services import workflow_concurrency
 from app.services.execution_cancellation import (
     get_active_execution_progress,
     list_active_executions,
@@ -126,6 +127,23 @@ async def collect_active_executions_for_user(
             node_results=record.node_results,
             status="pending",
             pending_kind=record.pending_kind,
+        )
+
+    held_runs = (
+        await _read("held runs", workflow_concurrency.list_held_runs_for_user(db, user_id)) or []
+    )
+    for record in held_runs:
+        if record.execution_id in items_by_execution_id:
+            continue
+        items_by_execution_id[record.execution_id] = ActiveExecutionItem(
+            execution_id=str(record.execution_id),
+            workflow_id=str(record.workflow_id),
+            workflow_name=record.workflow_name,
+            started_at=record.enqueued_at,
+            inputs=record.inputs,
+            status="queued",
+            queue_position=record.position,
+            queue_size=record.size,
         )
 
     return sorted(
@@ -241,7 +259,13 @@ async def build_active_execution_overview(
     """Summarize what is running right now for the dashboard chat / MCP assistant."""
     items = await collect_active_executions_for_user(db, user_id)
     if not items:
-        return {"count": 0, "running_count": 0, "pending_count": 0, "executions": []}
+        return {
+            "count": 0,
+            "running_count": 0,
+            "pending_count": 0,
+            "queued_count": 0,
+            "executions": [],
+        }
 
     workflow_ids = {uuid.UUID(item.workflow_id) for item in items}
     labels_by_workflow: dict[str, dict[str, dict[str, str]]] = {}
@@ -271,6 +295,9 @@ async def build_active_execution_overview(
                 "workflow_name": item.workflow_name,
                 "status": item.status,
                 "pending_kind": item.pending_kind,
+                # Set for a run waiting for a concurrency slot: its place in line.
+                "queue_position": item.queue_position,
+                "queue_size": item.queue_size,
                 "started_at": started_at.isoformat(),
                 "running_for_seconds": round(running_seconds, 1),
                 "running_for": format_duration(running_seconds),
@@ -288,5 +315,6 @@ async def build_active_execution_overview(
         "count": len(executions),
         "running_count": sum(1 for e in executions if e["status"] == "running"),
         "pending_count": sum(1 for e in executions if e["status"] == "pending"),
+        "queued_count": sum(1 for e in executions if e["status"] == "queued"),
         "executions": executions,
     }

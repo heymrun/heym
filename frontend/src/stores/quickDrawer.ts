@@ -3,6 +3,7 @@ import { defineStore } from "pinia";
 
 import { extractErrorMessage, fileRunState } from "@/components/Layout/quickWorkflowRun";
 import { useToast } from "@/composables/useToast";
+import { normalizeRunStatus, queueLabel } from "@/stores/quickDrawerQueue";
 import {
   fileIntakeApi,
   getErrorDetail,
@@ -554,6 +555,7 @@ export const useQuickDrawerStore = defineStore("quickDrawer", () => {
         runState.value = {
           ...runState.value,
           executionId: data.execution_id,
+          queueMessage: null,
         };
       },
       (_nodeId) => {},
@@ -582,18 +584,20 @@ export const useQuickDrawerStore = defineStore("quickDrawer", () => {
           nodeLabelsById,
         );
 
+        const status = normalizeRunStatus(result.status);
         runState.value = {
-          status: result.status === "awaiting_file_upload" ? "pending" : result.status,
+          status,
           executionId: null,
           outputs: normalizedOutputs,
           executionTimeMs: result.execution_time_ms,
           executionHistoryId: result.execution_history_id ?? null,
           errorMessage:
-            result.status === "error"
+            status === "error"
               ? extractErrorMessage(normalizedOutputs) ?? "Workflow execution failed"
               : null,
           nodeResults: normalizedNodeResults,
           startedAt: runState.value.startedAt,
+          queueMessage: null,
         };
 
         if (result.status === "success") {
@@ -622,7 +626,16 @@ export const useQuickDrawerStore = defineStore("quickDrawer", () => {
       undefined,
       undefined,
       undefined,
-      { triggerSource: "Quick Drawer" },
+      {
+        triggerSource: "Quick Drawer",
+        onQueued: (event) => {
+          runState.value = {
+            ...runState.value,
+            executionId: event.execution_id,
+            queueMessage: queueLabel(event),
+          };
+        },
+      },
     );
   }
 

@@ -1,9 +1,11 @@
 import asyncio
+import contextlib
 import json
 import secrets
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
@@ -33,7 +35,9 @@ from app.models.schemas import (
     PortalUserResponse,
     WorkflowExecuteResponse,
 )
+from app.services import workflow_concurrency
 from app.services.auth import hash_password, verify_password
+from app.services.cluster.dispatch import resolve_placement, wait_for_result
 from app.services.codex_followup_service import (
     is_codex_pending_execution,
     persist_pending_codex_followup_execution,
@@ -52,6 +56,7 @@ from app.services.global_variables_service import get_global_variables_context
 from app.services.hitl_service import build_public_base_url, persist_pending_hitl_execution
 from app.services.portal_progress import PortalProgressTracker
 from app.services.portal_rate_limiter import portal_login_limiter
+from app.services.queued_run_stream import queued_run_events
 from app.services.secret_tokens import hash_secret
 from app.services.workflow_executor import (
     ExecutionResult,
@@ -138,6 +143,67 @@ async def _run_portal_error_workflow(
         node_results=node_results,
         run_id=str(execution_id),
         actor_user_id=workflow.owner_id,
+    )
+
+
+_SLOT_RELEASE_TASKS: set[asyncio.Task[None]] = set()
+
+
+async def _admit_portal_run(
+    *,
+    workflow: Workflow,
+    execution_id: uuid.UUID,
+    enriched_inputs: dict,
+    execute_data: PortalExecuteRequest,
+    workflow_cache: dict,
+) -> workflow_concurrency.Admission | None:
+    """Admit a Portal run. None when the workflow has no limit."""
+    if workflow.concurrency_limit is None:
+        return None
+    history = [{"role": m.role, "content": m.content} for m in execute_data.conversation_history]
+    run_options: dict = {"run_error_workflow": True}
+    if history:
+        run_options["conversation_history"] = history
+    if execute_data.conversation_id:
+        run_options["llm_session_id"] = str(execute_data.conversation_id)
+    return await workflow_concurrency.admit(
+        workflow_concurrency.HeldRun(
+            workflow_id=workflow.id,
+            execution_id=execution_id,
+            placement=resolve_placement(workflow.nodes or [], workflow_cache),
+            inputs=enriched_inputs,
+            trigger_source="portal",
+            actor_user_id=workflow.owner_id,
+            credentials_owner_id=workflow.owner_id,
+            timeout_seconds=workflow.workflow_timeout_seconds,
+            run_options=run_options,
+        )
+    )
+
+
+async def _release_slot_after(future: "asyncio.Future[Any]", execution_id: uuid.UUID) -> None:
+    """Give the concurrency slot back once the executor thread ends, even after a disconnect."""
+    try:
+        await asyncio.shield(future)
+    except BaseException:
+        pass
+    finally:
+        with contextlib.suppress(Exception):
+            await workflow_concurrency.release(execution_id)
+
+
+async def _reject_full_portal_queue(
+    workflow: Workflow, execution_id: uuid.UUID, enriched_inputs: dict
+) -> None:
+    await workflow_concurrency.record_queue_full(
+        workflow_id=workflow.id,
+        execution_id=execution_id,
+        inputs=enriched_inputs,
+        trigger_source="portal",
+    )
+    raise HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail=workflow_concurrency.QUEUE_FULL_MESSAGE,
     )
 
 
@@ -294,6 +360,29 @@ async def portal_execute(
     ]
 
     execution_id = uuid.uuid4()
+    admission = await _admit_portal_run(
+        workflow=workflow,
+        execution_id=execution_id,
+        enriched_inputs=enriched_inputs,
+        execute_data=execute_data,
+        workflow_cache=workflow_cache,
+    )
+    if admission is not None and admission.kind == "queue_full":
+        await _reject_full_portal_queue(workflow, execution_id, enriched_inputs)
+    if admission is not None and admission.kind == "queued":
+        # A Portal browser has no use for a status URL: wait here like a background trigger.
+        waited = await wait_for_result(
+            execution_id, timeout_seconds=workflow.workflow_timeout_seconds
+        )
+        return WorkflowExecuteResponse(
+            workflow_id=workflow.id,
+            status=waited.status,
+            outputs=waited.outputs,
+            node_results=[],
+            execution_time_ms=waited.execution_time_ms,
+            execution_history_id=execution_id if waited.history_written else None,
+        )
+    holds_slot = admission is not None and admission.holds_slot
     cancel_event = register_execution(
         workflow_id=workflow.id,
         execution_id=execution_id,
@@ -325,6 +414,9 @@ async def portal_execute(
         )
     finally:
         clear_active_execution(execution_id)
+        if holds_slot:
+            with contextlib.suppress(Exception):
+                await workflow_concurrency.release(execution_id)
 
     if execution_result.status == "pending":
         if is_codex_pending_execution(execution_result):
@@ -486,6 +578,30 @@ async def portal_execute_stream(
     global_variables_context = await get_global_variables_context(db, workflow.owner_id)
     public_base_url = build_public_base_url(request)
     execution_id = uuid.uuid4()
+    admission = await _admit_portal_run(
+        workflow=workflow,
+        execution_id=execution_id,
+        enriched_inputs=enriched_inputs,
+        execute_data=execute_data,
+        workflow_cache=workflow_cache,
+    )
+    if admission is not None and admission.kind == "queue_full":
+        await _reject_full_portal_queue(workflow, execution_id, enriched_inputs)
+    if admission is not None and admission.kind == "queued":
+        return StreamingResponse(
+            queued_run_events(
+                workflow_id=workflow.id,
+                execution_id=execution_id,
+                is_disconnected=request.is_disconnected,
+            ),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache, no-transform",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+    holds_slot = admission is not None and admission.holds_slot
     cancel_event = register_execution(
         workflow_id=workflow.id,
         execution_id=execution_id,
@@ -555,6 +671,10 @@ async def portal_execute_stream(
         loop = asyncio.get_event_loop()
         with ThreadPoolExecutor(max_workers=1) as pool:
             future = loop.run_in_executor(pool, run_executor)
+            if holds_slot:
+                release_task = asyncio.create_task(_release_slot_after(future, execution_id))
+                _SLOT_RELEASE_TASKS.add(release_task)
+                release_task.add_done_callback(_SLOT_RELEASE_TASKS.discard)
             last_heartbeat_at = loop.time()
             yield (
                 "data: "
@@ -830,6 +950,9 @@ async def portal_cancel_execution(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid or expired session",
             )
+
+    if await workflow_concurrency.cancel_held(workflow.id, execution_id):
+        return {"status": "cancel_requested"}
 
     cancelled_local = cancel_active_execution(workflow_id=workflow.id, execution_id=execution_id)
     cancelled_persisted = await request_persisted_execution_cancel(

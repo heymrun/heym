@@ -25,12 +25,17 @@ Each SSE frame is newline-delimited JSON prefixed with `data: `.
 
 | Event type | When it is emitted | Key fields |
 |------------|--------------------|------------|
-| `execution_started` | Immediately after the request is accepted | `execution_id`, `server_now_ms` |
+| `queued` | The workflow is at its [concurrency limit](./webhooks.md#concurrency-limit-and-queued-runs); sent again whenever the run's place changes | `execution_id`, `position`, `size`, `running`, `limit` |
+| `execution_started` | Immediately after the request is accepted, or when a queued run starts | `execution_id`, `server_now_ms` |
 | `node_start` | Right before a node begins execution | `node_id`, `node_label`, `started_at_ms`, optional `message` |
 | `node_retry` | When a node retries | `node_id`, `attempt`, `max_attempts` |
 | `node_complete` | After a node finishes | `node_id`, `node_label`, `status`, `output`, `execution_time_ms` |
 | `final_output` | When an Output node returns early | `node_label`, `output` |
 | `execution_complete` | After the workflow ends | `status`, `outputs`, `execution_time_ms` |
+
+### Queued Runs
+
+When the workflow is at its concurrency limit, the stream stays open and sends `queued` events while the run waits. A queued run executes in the background worker, possibly in another process, so its stream carries `execution_started` when the run starts and `execution_complete` when it ends, but no `node_start`, `node_complete` or token events in between. Its `execution_complete` has an empty `node_results`; open the run in [Execution History](./execution-history.md) for node detail. Closing the connection does not cancel a queued run. When the queue is full, the request is answered `429` before the stream opens.
 
 ## Per-Node Start Messages
 

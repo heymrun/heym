@@ -55,7 +55,7 @@ from app.models.schemas import (
     MCPServerWorkflowToggleRequest,
     MCPToolsListResponse,
 )
-from app.services import mcp_chat_service
+from app.services import mcp_chat_service, mcp_execution_status, workflow_concurrency
 from app.services.cluster.dispatch import dispatch_workflow
 from app.services.execution_cancellation import clear_execution as clear_active_execution
 from app.services.execution_cancellation import register_execution
@@ -526,6 +526,11 @@ async def _dispatch_named_server_jsonrpc(
             )
 
         workflows = await _get_server_workflows(db, mcp_server.id)
+        if tool_name == mcp_execution_status.MCP_EXECUTION_STATUS_TOOL_NAME:
+            text, is_error = await mcp_execution_status.run_execution_status_tool(
+                workflows, arguments
+            )
+            return _mcp_tool_result_jsonrpc_response(msg.id, text, is_error=is_error)
         target_workflow = None
         for w in workflows:
             if _sanitize_tool_name(w.name) == tool_name:
@@ -588,7 +593,12 @@ async def _dispatch_named_server_jsonrpc(
                 trace_user_id=user.id,
                 actor_user_id=user.id,
                 cancel_event=cancel_event,
+                concurrency_limit=target_workflow.concurrency_limit,
+                on_queued="return",
             )
+            if isinstance(execution_result, workflow_concurrency.Admission):
+                text, is_error = mcp_execution_status.admission_tool_text(execution_result)
+                return _mcp_tool_result_jsonrpc_response(msg.id, text, is_error=is_error)
 
             if needs_local_pending_persist(execution_result):
                 history_entry, _ = await persist_pending_execution(

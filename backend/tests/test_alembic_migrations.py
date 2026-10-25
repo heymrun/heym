@@ -15,7 +15,7 @@ class AlembicMigrationGraphTest(unittest.TestCase):
         self.script = ScriptDirectory.from_config(config)
 
     def test_revision_graph_has_one_head(self) -> None:
-        self.assertEqual(self.script.get_heads(), ["142_vsi_text_search_index"])
+        self.assertEqual(self.script.get_heads(), ["143_workflow_concurrency"])
 
     def test_credential_setup_follows_trigger_poll_state(self) -> None:
         revision = self.script.get_revision("141_add_credential_setup")

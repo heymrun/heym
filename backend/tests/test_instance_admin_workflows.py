@@ -160,6 +160,7 @@ class AdminWorkflowLifecycleTests(unittest.IsolatedAsyncioTestCase):
         execution_id = uuid.uuid4()
         with (
             patch.object(api, "cancel_pending_review_execution", AsyncMock(return_value=False)),
+            patch.object(api.workflow_concurrency, "cancel_held", AsyncMock(return_value=False)),
             patch.object(api, "cancel_active_execution", return_value=False),
             patch.object(
                 api, "request_persisted_execution_cancel", AsyncMock(return_value=True)

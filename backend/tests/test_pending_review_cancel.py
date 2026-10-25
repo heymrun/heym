@@ -100,6 +100,14 @@ class CancelPendingReviewExecutionTests(unittest.IsolatedAsyncioTestCase):
 
 
 class CancelWorkflowExecutionEndpointTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        # No run here is waiting for a concurrency slot.
+        held = patch(
+            "app.api.workflows.workflow_concurrency.cancel_held", AsyncMock(return_value=False)
+        )
+        held.start()
+        self.addCleanup(held.stop)
+
     async def _call(
         self,
         *,

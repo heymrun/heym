@@ -408,7 +408,9 @@ class RunWidgetTests(unittest.IsolatedAsyncioTestCase):
 class RunWidgetWorkflowTests(unittest.IsolatedAsyncioTestCase):
     async def test_it_runs_as_the_owner_from_the_dashboard_and_is_recorded(self) -> None:
         owner = uuid.uuid4()
-        workflow = SimpleNamespace(id=uuid.uuid4(), nodes=[FORM_NODE], edges=[], name="Invoices")
+        workflow = SimpleNamespace(
+            id=uuid.uuid4(), nodes=[FORM_NODE], edges=[], name="Invoices", concurrency_limit=None
+        )
         result = SimpleNamespace(status="success", outputs={"ok": True})
         history = SimpleNamespace(id=uuid.uuid4())
         db = MagicMock(commit=AsyncMock())

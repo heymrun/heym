@@ -575,7 +575,7 @@ See also [Agent Node](../nodes/agent-node.md), [Portal](./portal.md), [Execution
 
 ### [Webhooks](./webhooks.md)
 
-Workflows can be triggered via [HTTP](../nodes/http-node.md) at `POST /api/workflows/{workflow_id}/execute`, or streamed incrementally from `POST /api/workflows/{workflow_id}/execute/stream`. The request body is passed as body to [Input](../nodes/input-node.md) nodes; headers and query params are available in [Expression DSL](./expression-dsl.md) expressions. Configure per-workflow auth: anonymous, JWT, or custom header. Optional response caching, rate limiting, and the editor's Run with cURL dialog all live on the workflow and apply to both modes.
+Workflows can be triggered via [HTTP](../nodes/http-node.md) at `POST /api/workflows/{workflow_id}/execute`, or streamed incrementally from `POST /api/workflows/{workflow_id}/execute/stream`. The request body is passed as body to [Input](../nodes/input-node.md) nodes; headers and query params are available in [Expression DSL](./expression-dsl.md) expressions. Configure per-workflow auth: anonymous, JWT, or custom header. Optional response caching, rate limiting, and the editor's Run with cURL dialog all live on the workflow and apply to both modes. With a [concurrency limit](./webhooks.md#concurrency-limit-and-queued-runs), a call that has to wait gets `202 Accepted` with an execution id and a status URL instead.
 
 See also [Input](../nodes/input-node.md), [Execution Tokens](./execution-tokens.md), [SSE Streaming](./sse-streaming.md), [HTTP](../nodes/http-node.md), and [Workflow Structure](./workflow-structure.md).
 
@@ -622,6 +622,10 @@ It covers every non-test top-level run: both execute endpoints, the [Portal](./p
 ### Workflow Timeout
 
 Each workflow can set a **workflow timeout** in seconds in the workflow-level **Properties** panel. `0` (the default) disables it. When set, a run that exceeds the limit is stopped at the next node boundary and recorded as a failed run with a "timed out" error. The timeout applies to manual, API, and triggered runs. Long [Wait](../nodes/wait-node.md) nodes are interrupted promptly rather than blocking for their full duration.
+
+### Concurrency Limit
+
+Each workflow can cap how many production runs execute at once with **Concurrency limit** in the workflow-level **Properties** panel; the owner and collaborators with edit access can change it, and it is off by default. When the limit is reached, new runs from the [webhook](./webhooks.md#concurrency-limit-and-queued-runs) and [streaming](./sse-streaming.md) endpoints, the [Portal](./portal.md), the [Quick Drawer](./quick-drawer.md), [MCP](../tabs/mcp-tab.md) and every [trigger](./triggers.md) wait in a first-in, first-out queue, counted across all instances of a [cluster](./cluster.md). Editor test runs, sub-workflow calls, [Evals](../tabs/evals-tab.md) and review resumes are never queued, and [Board](../tabs/board-tab.md) card runs, File Upload runs, runs started by the AI assistant's run-workflow tool and alert notify workflows start without waiting for a slot. A webhook call that has to wait gets `202 Accepted` at once with an `execution_id`, a status URL that answers with the same credentials, and its position, the queue size and the running count; an MCP client gets the same and polls the `heym_execution_status` tool. Optional **Max queue size** turns extra calls away with `429`, and optional **Max wait** records a run that waited too long as `expired`. Waiting runs appear in [Execution History](./execution-history.md) as **Queued n/m** and can be cancelled there.
 
 ### Time Saved
 

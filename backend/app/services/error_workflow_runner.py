@@ -113,6 +113,7 @@ async def maybe_run_error_workflow(
             trace_user_id=actor_user_id,
             actor_user_id=actor_user_id,
             run_error_workflow=False,
+            concurrency_limit=target.concurrency_limit,
         )
 
         if not getattr(result, "history_written", False):

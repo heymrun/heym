@@ -55,6 +55,7 @@ def _make_workflow(workflow_id: uuid.UUID | None = None, name: str = "my_tool") 
     wf.name = name
     wf.nodes = [{"id": "n1", "type": "input"}]
     wf.owner_id = uuid.uuid4()
+    wf.concurrency_limit = None
     return wf
 
 

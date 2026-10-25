@@ -112,6 +112,8 @@ Both history dialogs show **currently running executions** at the top of the lis
 - After cancellation, the running entry disappears on the next refresh; press **Refresh** to update the list manually
 - If you cancel a run that has already finished, the request is a no-op
 
+Runs waiting for a [concurrency slot](./webhooks.md#concurrency-limit-and-queued-runs) are listed in the same section with a **Queued 2/5** label, their place in line and the queue size. They have no **Open live** button because nothing is running yet; **Cancel** takes a waiting run out of the queue and records it as `cancelled`. A run that waited longer than the workflow's max wait is recorded as `expired`, and a run turned away by a full queue as `queue_full`; both have their own badge in the run list.
+
 The live URL is `/workflows/{workflowId}/{executionId}`. The observer is read-only: leaving
 the editor only disconnects that browser tab and never stops the workflow. Active snapshots
 are shared through PostgreSQL, so opening a run still works when the trigger and the editor
