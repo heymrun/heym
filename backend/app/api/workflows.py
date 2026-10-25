@@ -76,7 +76,7 @@ from app.services.active_execution_overview import collect_active_executions_for
 from app.services.audit_log import OUTCOME_DENIED, audit
 from app.services.auth import create_workflow_execution_token, decode_token
 from app.services.cache_rate_limit import rate_limiter, response_cache
-from app.services.cluster.dispatch import dispatch_workflow
+from app.services.cluster.dispatch import dispatch_workflow, resolve_placement
 from app.services.codex_followup_service import (
     is_codex_pending_execution,
     persist_pending_codex_followup_execution,
@@ -122,6 +122,7 @@ from app.services.html_response import build_html_response, find_sole_html_termi
 from app.services.instance_admin import is_instance_admin
 from app.services.pending_execution import needs_local_pending_persist
 from app.services.pending_review_cancel import cancel_pending_review_execution
+from app.services.queued_run_stream import queued_run_events
 from app.services.run_history_list import (
     apply_instance_filter,
     history_status_clause,
@@ -3988,6 +3989,7 @@ async def execute_workflow_stream(
                 status_code=403, detail="Workflow access required for partial execution"
             )
 
+    session_user = current_user
     current_user = await validate_workflow_auth(workflow, request, current_user, db)
     enforce_workflow_http_method(workflow, request, test_run)
 
@@ -4161,9 +4163,58 @@ async def execute_workflow_stream(
     global_variables_context = await get_global_variables_context(db, credentials_owner_id)
     public_base_url = build_public_base_url(request)
 
+    execution_id = uuid.uuid4()
+    # Only the editor's own test runs skip the queue; ?test_run=true alone does not.
+    concurrency_exempt = bool(
+        test_run
+        and session_user is not None
+        and await user_has_workflow_access(db, workflow, session_user.id)
+    )
+    holds_slot = False
+    if getattr(workflow, "concurrency_limit", None) is not None and not concurrency_exempt:
+        admission = await workflow_concurrency.admit(
+            workflow_concurrency.HeldRun(
+                workflow_id=workflow.id,
+                execution_id=execution_id,
+                placement=resolve_placement(execution_graph.nodes, workflow_cache),
+                inputs=enriched_inputs,
+                trigger_source=trigger_source,
+                actor_user_id=credentials_owner_id,
+                credentials_owner_id=credentials_owner_id,
+                timeout_seconds=getattr(workflow, "workflow_timeout_seconds", None),
+                run_options={"run_error_workflow": True},
+            )
+        )
+        if admission.kind == "queue_full":
+            await workflow_concurrency.record_queue_full(
+                workflow_id=workflow.id,
+                execution_id=execution_id,
+                inputs=enriched_inputs,
+                trigger_source=trigger_source,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=workflow_concurrency.QUEUE_FULL_MESSAGE,
+            )
+        if admission.kind == "queued":
+            return StreamingResponse(
+                queued_run_events(
+                    workflow_id=workflow.id,
+                    execution_id=execution_id,
+                    is_disconnected=request.is_disconnected,
+                    simple_response=simple_response,
+                ),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache, no-transform",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                },
+            )
+        holds_slot = admission.holds_slot
+
     import queue
 
-    execution_id = uuid.uuid4()
     cancel_event = register_execution(
         workflow_id=workflow.id,
         execution_id=execution_id,
@@ -4344,6 +4395,11 @@ async def execute_workflow_stream(
             await persist_terminal_result()
         except Exception:
             logger.exception("Could not persist execution %s", execution_id)
+        if holds_slot:
+            try:
+                await workflow_concurrency.release(execution_id)
+            except Exception:
+                logger.exception("Could not release the concurrency slot of %s", execution_id)
 
     async def event_generator():
         nonlocal final_result, was_cancelled
