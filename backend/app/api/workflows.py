@@ -1,5 +1,6 @@
 import asyncio
 import copy
+import hmac
 import json
 import logging
 import time
@@ -3058,7 +3059,9 @@ async def validate_workflow_auth(
             )
 
         header_value = request.headers.get(workflow.auth_header_key)
-        if header_value != workflow.auth_header_value:
+        if not header_value or not hmac.compare_digest(
+            header_value.encode(), workflow.auth_header_value.encode()
+        ):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid or missing authentication header",
