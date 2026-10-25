@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Workflow
 from app.models.schemas import ActiveExecutionItem
+from app.services import workflow_concurrency
 from app.services.execution_cancellation import (
     get_active_execution_progress,
     list_active_executions,
@@ -126,6 +127,23 @@ async def collect_active_executions_for_user(
             node_results=record.node_results,
             status="pending",
             pending_kind=record.pending_kind,
+        )
+
+    held_runs = (
+        await _read("held runs", workflow_concurrency.list_held_runs_for_user(db, user_id)) or []
+    )
+    for record in held_runs:
+        if record.execution_id in items_by_execution_id:
+            continue
+        items_by_execution_id[record.execution_id] = ActiveExecutionItem(
+            execution_id=str(record.execution_id),
+            workflow_id=str(record.workflow_id),
+            workflow_name=record.workflow_name,
+            started_at=record.enqueued_at,
+            inputs=record.inputs,
+            status="queued",
+            queue_position=record.position,
+            queue_size=record.size,
         )
 
     return sorted(

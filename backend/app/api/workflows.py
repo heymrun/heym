@@ -4603,6 +4603,19 @@ async def cancel_workflow_execution(
         )
         return {"status": "cancel_requested"}
 
+    if await workflow_concurrency.cancel_held(workflow_id, execution_id):
+        audit(
+            action="workflow.cancel_execution",
+            actor=current_user,
+            target_type="workflow",
+            target_id=workflow.id,
+            target_name=workflow.name,
+            execution_id=str(execution_id),
+            owner_id=str(workflow.owner_id),
+            queued=True,
+        )
+        return {"status": "cancel_requested"}
+
     cancelled_local = cancel_active_execution(workflow_id=workflow_id, execution_id=execution_id)
     cancelled_persisted = await request_persisted_execution_cancel(
         db,

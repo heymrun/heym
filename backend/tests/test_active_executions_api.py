@@ -71,6 +71,15 @@ def _make_record(workflow_id: uuid.UUID, execution_id: uuid.UUID) -> ActiveExecu
 
 
 class ListActiveWorkflowExecutionsTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        # Held runs are read from the same session; these tests mock it for other sections.
+        held = patch(
+            "app.services.active_execution_overview.workflow_concurrency.list_held_runs_for_user",
+            AsyncMock(return_value=[]),
+        )
+        held.start()
+        self.addCleanup(held.stop)
+
     async def test_returns_empty_when_no_active_executions(self) -> None:
         user = MagicMock()
         user.id = uuid.uuid4()

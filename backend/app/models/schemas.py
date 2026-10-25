@@ -556,8 +556,10 @@ class ActiveExecutionItem(BaseModel):
     inputs: dict = Field(default_factory=dict)
     running_node_ids: list[str] = Field(default_factory=list)
     node_results: list[dict] = Field(default_factory=list)
-    status: Literal["running", "pending"] = "running"
+    status: Literal["running", "pending", "queued"] = "running"
     pending_kind: Literal["hitl", "codex"] | None = None
+    queue_position: int | None = None
+    queue_size: int | None = None
 
 
 class LLMTraceListItem(BaseModel):

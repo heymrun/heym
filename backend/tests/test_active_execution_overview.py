@@ -50,6 +50,15 @@ class TestFormatDuration(unittest.TestCase):
 
 
 class TestCollectActiveExecutions(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        # Held runs are read from the same session; these tests mock it for other sections.
+        held = patch(
+            "app.services.active_execution_overview.workflow_concurrency.list_held_runs_for_user",
+            AsyncMock(return_value=[]),
+        )
+        held.start()
+        self.addCleanup(held.stop)
+
     async def test_merges_persisted_and_pending_newest_first(self):
         older = _active_record(
             workflow_name="Older run",

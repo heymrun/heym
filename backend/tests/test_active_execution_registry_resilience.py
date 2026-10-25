@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from sqlalchemy.dialects.postgresql.dml import Insert as PGInsert
 from sqlalchemy.exc import SQLAlchemyError
@@ -499,6 +499,13 @@ class ClaimOrphanedExecutionsIsolationTests(unittest.IsolatedAsyncioTestCase):
 class ActiveExecutionsEndpointDegradationTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         _flush()
+        # Held runs are read from the same session; these tests mock it for other sections.
+        held = patch(
+            "app.services.active_execution_overview.workflow_concurrency.list_held_runs_for_user",
+            AsyncMock(return_value=[]),
+        )
+        held.start()
+        self.addCleanup(held.stop)
 
     def tearDown(self) -> None:
         _flush()
