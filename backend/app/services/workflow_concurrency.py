@@ -32,6 +32,7 @@ from app.db.models import (
     Workflow,
     WorkflowConcurrencySlot,
     WorkflowRunQueue,
+    execution_started_at,
 )
 from app.db.session import async_session_maker
 from app.services.cluster import identity, run_queue
@@ -377,6 +378,7 @@ async def _close_held_locked(
             status=status,
             execution_time_ms=0.0,
             trigger_source=row.trigger_source,
+            started_at=execution_started_at(row.execution_id, [], 0.0),
             **attribution_fields(),
         )
         .on_conflict_do_nothing(index_elements=["id"])

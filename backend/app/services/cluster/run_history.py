@@ -17,7 +17,7 @@ from typing import Any
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.api.analytics import upsert_workflow_analytics_snapshot
-from app.db.models import ExecutionHistory, Workflow
+from app.db.models import ExecutionHistory, Workflow, execution_started_at
 from app.db.session import async_session_maker
 from app.services.cluster import identity
 from app.services.cluster.attribution import attribution_fields
@@ -96,6 +96,9 @@ async def persist_run_history(
             "status": result.status,
             "execution_time_ms": result.execution_time_ms,
             "trigger_source": trigger_source,
+            "started_at": execution_started_at(
+                execution_id, result.node_results, result.execution_time_ms
+            ),
             **attribution_fields(),
         }
         await db.execute(
@@ -276,6 +279,7 @@ async def record_failed_dispatch(
                     status="error",
                     execution_time_ms=0.0,
                     trigger_source=trigger_source,
+                    started_at=execution_started_at(execution_id, [], 0.0),
                     # The dispatcher recorded this, no one executed it.
                     **attribution_fields(),
                 )

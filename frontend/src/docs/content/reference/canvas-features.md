@@ -138,6 +138,10 @@ The **cURL** button in the editor toolbar (top-right) opens a dialog to build an
 
 See [Webhooks](./webhooks.md#run-with-curl-dialog) for full dialog details and [SSE Streaming](./sse-streaming.md) for the event protocol.
 
+## Working Together
+
+Everyone who opens the workflow appears at the top left of the canvas, edits reach every open canvas live, and you can follow someone or talk with them. See [Canvas Collaboration](./canvas-collaboration.md).
+
 ## Related
 
 - [Keyboard Shortcuts](./keyboard-shortcuts.md) – All canvas and editor shortcuts
@@ -146,6 +150,7 @@ See [Webhooks](./webhooks.md#run-with-curl-dialog) for full dialog details and [
 - [Expression DSL](./expression-dsl.md) – References and pinned data
 - [Workflow Structure](./workflow-structure.md) – Node and edge format
 - [Download & Import](./download-import.md) – Export and import workflows as JSON
+- [Canvas Collaboration](./canvas-collaboration.md) – Edit, follow and talk together on one canvas
 - [Node Types](./node-types.md) – All node types
 - [Logs Tab](../tabs/logs-tab.md) – Docker container logs
 - [Execution History](./execution-history.md) – Past runs

@@ -485,6 +485,12 @@ See also [Keyboard Shortcuts](./keyboard-shortcuts.md), [Edit History](./edit-hi
 <video src="/features/showcase/editor.webm" controls playsinline muted preload="metadata" style="width:100%;border-radius:12px;margin:16px 0"></video>
 <p class="github-video-link"><a href="../../../../public/features/showcase/editor.webm">▶ Watch Editor demo</a></p>
 
+### [Canvas Collaboration](./canvas-collaboration.md)
+
+Everyone who opens a workflow appears as an avatar at the top left of the canvas. Edits reach every open canvas live, each person's pointer shows in their color, clicking an avatar follows that person's view, dialogs and runs, and the microphone toggle lets people talk to each other directly from the browser.
+
+See also [Canvas Features](./canvas-features.md) and [Edit History](./edit-history.md).
+
 ### [Keyboard Shortcuts](./keyboard-shortcuts.md)
 
 Heym provides shortcuts across the editor: Command Palette (Ctrl+K), Run (Ctrl+Enter), Save (Ctrl+S), Undo/Redo, and Escape to dismiss. On the canvas: select all, multi-select, copy/cut/paste, delete, toggle node enabled (D), toggle pinned data (P), and inline node search by typing. Shortcuts are documented in the in-app reference and work closely with [Canvas Features](./canvas-features.md) such as Data Pin and node enable/disable.

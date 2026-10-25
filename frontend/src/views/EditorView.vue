@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch, type Ref } from "vue";
 import { storeToRefs } from "pinia";
 import { useMediaQuery } from "@vueuse/core";
 import { useRoute, useRouter } from "vue-router";
@@ -16,6 +16,12 @@ import type {
 import WorkflowCanvas from "@/components/Canvas/WorkflowCanvas.vue";
 import WorkflowShareDialog from "@/components/Dialogs/WorkflowShareDialog.vue";
 import MobileWorkflowTree from "@/components/Canvas/MobileWorkflowTree.vue";
+import CollabOverlay from "@/features/collab/components/CollabOverlay.vue";
+import FollowFrame from "@/features/collab/components/FollowFrame.vue";
+import PanelCursors from "@/features/collab/components/PanelCursors.vue";
+import { useCanvasCollab } from "@/features/collab/useCanvasCollab";
+import { useEditorFollowSignals, type EditorDialog } from "@/features/collab/useEditorFollowSignals";
+import { useWorkflowMetaSync } from "@/features/collab/useWorkflowMetaSync";
 import ContextualShowcase from "@/features/showcase/components/ContextualShowcase.vue";
 import ShareTemplateModal from "@/features/templates/components/ShareTemplateModal.vue";
 import { useRunbookPlayer } from "@/features/runbook/useRunbookPlayer";
@@ -133,6 +139,11 @@ let pendingExecutionReconnectId: number | null = null;
 let pendingExecutionStreamHistoryId: string | null = null;
 
 const workflowId = computed(() => route.params.id as string);
+// Canvas collaboration joins the room once this workflow is loaded.
+const collabWorkflowId = computed<string | null>(() =>
+  !loading.value && workflowStore.currentWorkflow?.id === workflowId.value ? workflowId.value : null,
+);
+const collab = useCanvasCollab(collabWorkflowId);
 const {
   executionTokens, selectedTokenId, tokenVisibility, bearerToken, tokenValue, canUseToken,
   selectToken, replaceTokens, rememberCreatedToken, markRevoked,
@@ -157,6 +168,24 @@ const editingDescriptionValue = ref("");
 const titleInputRef = ref<HTMLInputElement | null>(null);
 const descriptionInputRef = ref<HTMLInputElement | null>(null);
 let skipNextTitleCommit = false;
+// A collaborator typing the name or description shows here as they type.
+const { peerName, peerDescription, peerColor } = useWorkflowMetaSync(collab, {
+  name: {
+    editing: isTitleEditing,
+    value: editingTitleValue,
+    saved: () => workflowStore.currentWorkflow?.name ?? "",
+  },
+  description: {
+    editing: isDescriptionEditing,
+    value: editingDescriptionValue,
+    saved: () => workflowStore.currentWorkflow?.description ?? "",
+  },
+});
+const shownWorkflowName = computed(() => peerName.value || workflowName.value);
+const shownWorkflowDescription = computed(() => peerDescription.value ?? workflowDescription.value);
+const peerDraftStyle = computed(() =>
+  peerColor.value ? { boxShadow: `inset 0 -1px 0 ${peerColor.value}` } : undefined,
+);
 
 function returnToDashboard(event?: MouseEvent): void {
   const target = { name: "dashboard", query: { tab: "dashboard" } };
@@ -424,6 +453,41 @@ function toggleShowcaseGuide(): void {
   }
   pushOverlayState();
 }
+
+// Canvas collaboration: followers open the same dialogs and side panels, each with its own access.
+function refDialog(open: Ref<boolean>): EditorDialog {
+  return { open, set: (next) => { open.value = next; } };
+}
+useEditorFollowSignals({
+  leftPanelOpen,
+  rightPanelOpen,
+  historyOpen,
+  dialogs: {
+    share: refDialog(shareOpen),
+    curl: refDialog(curlOpen),
+    template: refDialog(shareTemplateOpen),
+    editHistory: refDialog(editHistoryOpen),
+    portal: {
+      open: computed<boolean>(() => portalDialogRef.value?.isOpen ?? false),
+      set: (next) => {
+        if (next) portalDialogRef.value?.openDialog();
+        else portalDialogRef.value?.closeDialog();
+      },
+    },
+    analyzer: {
+      open: analysisPanelOpen,
+      set: (next) => {
+        if (next !== analysisPanelOpen.value) toggleAnalysisPanel();
+      },
+    },
+    guide: {
+      open: isShowcaseOpenForEditor,
+      set: (next) => {
+        if (next !== isShowcaseOpenForEditor.value) toggleShowcaseGuide();
+      },
+    },
+  },
+});
 
 function clearPendingExecutionReconnect(): void {
   if (pendingExecutionReconnectId !== null) {
@@ -1311,7 +1375,10 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
     class="h-screen flex flex-col bg-background overflow-x-hidden"
     :style="{ '--showcase-width': '40vw' }"
   >
-    <header class="editor-header hidden h-16 shrink-0 items-center justify-between overflow-x-hidden border-b border-border/30 px-2 sm:px-4 md:flex">
+    <header
+      class="editor-header hidden h-16 shrink-0 items-center justify-between overflow-x-hidden border-b border-border/30 px-2 sm:px-4 md:flex"
+      data-collab-region="header"
+    >
       <div class="flex items-center gap-1 sm:gap-2 md:gap-4 min-w-0 flex-1">
         <router-link
           to="/"
@@ -1348,10 +1415,11 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
             v-else
             data-testid="workflow-title"
             class="block w-full font-semibold text-sm md:text-base truncate cursor-text hover:bg-muted/50 rounded px-0.5 -mx-0.5"
-            :title="workflowName"
+            :title="shownWorkflowName"
+            :style="peerName !== null ? peerDraftStyle : undefined"
             @mousedown.prevent="startTitleEdit"
           >
-            {{ workflowName }}
+            {{ shownWorkflowName }}
             <span
               v-if="isReadOnly"
               data-testid="workflow-read-only-badge"
@@ -1380,11 +1448,12 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
             Unsaved changes
           </p>
           <p
-            v-else-if="workflowDescription"
+            v-else-if="shownWorkflowDescription"
             class="hidden sm:block w-full text-xs text-muted-foreground truncate cursor-text hover:bg-muted/50 rounded px-0.5 -mx-0.5"
+            :style="peerDescription !== null ? peerDraftStyle : undefined"
             @mousedown.prevent="startDescriptionEdit"
           >
-            {{ workflowDescription }}
+            {{ shownWorkflowDescription }}
           </p>
           <p
             v-else
@@ -1507,6 +1576,7 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
             size="sm"
             class="hidden lg:inline-flex gap-2 text-foreground"
             aria-label="Download"
+            data-collab-no-mirror
             @click="downloadWorkflow"
           >
             <Download class="w-4 h-4" />
@@ -2196,9 +2266,11 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
       <NodePanel
         v-if="!isMobile"
         v-show="leftPanelOpen && !analysisPanelOpen && !isReadOnly"
+        data-collab-region="left"
       />
       <AnalysisPanel
         v-if="!isMobile && analysisPanelOpen"
+        data-collab-region="analyzer"
         :workflow-id="analysisWorkflowId"
         :current-workflow="analysisWorkflowPayload"
         :run-workflow="runWorkflowForAnalysis"
@@ -2224,6 +2296,7 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
           </button>
 
           <WorkflowCanvas />
+          <CollabOverlay />
 
           <button
             class="panel-toggle panel-toggle-right absolute top-1/2 -translate-y-1/2 z-30 w-5 h-12 rounded-l-lg flex items-center justify-center transition-all pointer-events-auto right-0"
@@ -2263,11 +2336,17 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
           </template>
         </MobileWorkflowTree>
         <MobileCanvasExecutionDetail />
-        <DebugPanel v-if="!isMobile" />
+        <DebugPanel
+          v-if="!isMobile"
+          data-collab-region="bottom"
+        />
       </div>
 
       <PropertiesPanel v-if="!isMobile && rightPanelOpen" />
     </div>
+
+    <FollowFrame />
+    <PanelCursors />
 
     <Teleport to="body">
       <Transition name="fade">

@@ -52,6 +52,7 @@ const introContent = computed(() => getShowcaseIntroContent(props.definition.id)
       open ? 'translate-x-0' : 'translate-x-full pointer-events-none'
     )"
     :style="{ width: 'var(--showcase-width)' }"
+    data-collab-region="guide"
     aria-label="Contextual showcase panel"
   >
     <div class="relative flex h-full flex-col overflow-hidden">

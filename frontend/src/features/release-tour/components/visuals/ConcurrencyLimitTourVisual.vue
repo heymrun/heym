@@ -46,7 +46,7 @@ const responseLine = computed<string>(() => {
   <div class="flex h-full w-full flex-col gap-2.5 rounded-lg bg-card p-3.5">
     <div class="flex items-center gap-2 text-[11px] leading-4 text-muted-foreground">
       Concurrency limit
-      <span class="ml-auto rounded bg-primary/15 px-1.5 text-[10px] leading-4 text-primary">
+      <span class="ml-auto rounded border border-primary/50 bg-primary/25 px-1.5 text-[10px] font-medium leading-4 text-foreground">
         1 at a time
       </span>
     </div>

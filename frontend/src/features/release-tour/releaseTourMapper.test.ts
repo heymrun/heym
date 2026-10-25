@@ -165,6 +165,19 @@ describe("buildTourSlides", () => {
 
     expect(buildTourSlides(release).map((slide) => slide.id)).toEqual(["alpha"]);
   });
+
+  it("carries a section's external link and doc target onto its slide", () => {
+    const release = makeRelease();
+    const tour = release.sections[0].tour;
+    if (!tour) throw new Error("the alpha fixture needs tour metadata");
+    tour.externalLink = { url: "/enterprise", title: "Learn more on heym.run" };
+    tour.docTarget = { categoryId: "reference", slug: "alpha", title: "Alpha" };
+
+    const slide = buildTourSlides(release).find((item) => item.id === "alpha");
+
+    expect(slide?.externalLink).toEqual({ url: "/enterprise", title: "Learn more on heym.run" });
+    expect(slide?.docTarget).toMatchObject({ categoryId: "reference", slug: "alpha" });
+  });
 });
 
 describe("buildReleaseTour", () => {
@@ -368,10 +381,11 @@ describe("shipped release registry", () => {
     const catalog = buildReleaseTourCatalog(RELEASE_REGISTRY);
 
     expect(catalog?.slides.map((slide) => slide.id)).toEqual([
+      "concurrency-limit",
+      "canvas-collaboration",
       "node-ai-edit",
       "codex-device-sign-in",
       "slack-bot",
-      "google-triggers",
     ]);
   });
 
@@ -385,8 +399,8 @@ describe("shipped release registry", () => {
     );
 
     expect(tours.map((tour) => tour.tourVisual)).toContain("concurrency-limit");
+    expect(tours.map((tour) => tour.tourVisual)).toContain("canvas-collaboration");
     expect(tours.map((tour) => tour.tourVisual)).toContain("slack-bot");
-    expect(tours.map((tour) => tour.tourVisual)).toContain("google-triggers");
     expect(tours.map((tour) => tour.tourVisual)).toContain("codex-device-sign-in");
     for (const tour of tours) {
       expect(TOUR_VISUALS[tour.tourVisual], `missing visual for "${tour.tourVisual}"`)

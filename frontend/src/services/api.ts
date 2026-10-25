@@ -1,4 +1,4 @@
-import axios from "axios";
+import axios, { type InternalAxiosRequestConfig } from "axios";
 
 import { heymClientHeaders } from "@/constants/httpIdentity";
 import type {
@@ -210,6 +210,20 @@ const api = axios.create({
     ...heymClientHeaders,
   },
   withCredentials: true,
+});
+
+let requestGuard: ((config: InternalAxiosRequestConfig) => string | null) | null = null;
+
+/** Lets a mode refuse requests before they leave, e.g. writes while following someone. */
+export function setRequestGuard(
+  guard: ((config: InternalAxiosRequestConfig) => string | null) | null,
+): void {
+  requestGuard = guard;
+}
+
+api.interceptors.request.use((config) => {
+  const reason = requestGuard?.(config);
+  return reason ? Promise.reject(new axios.CanceledError(reason)) : config;
 });
 
 /** The server's `detail` for a failed request, else the error's message, else `fallback`. */
@@ -629,8 +643,13 @@ export const workflowApi = {
       // the stored workflow is newer. Omit to save unconditionally.
       base_updated_at?: string;
     },
+    headers?: Record<string, string>,
   ): Promise<Workflow> => {
-    const response = await api.put<Workflow>(`/workflows/${id}`, data);
+    const response = await api.put<Workflow>(
+      `/workflows/${id}`,
+      data,
+      headers ? { headers } : undefined,
+    );
     return noteWorkflowRevision(response.data);
   },
 

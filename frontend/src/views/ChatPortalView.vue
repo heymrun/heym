@@ -13,6 +13,7 @@ import WorkflowHeroBackground from "@/components/Layout/WorkflowHeroBackground.v
 import { markdownToPlainText, renderMarkdown } from "@/lib/markdown";
 import { useThemeStore } from "@/stores/theme";
 import { playSuccessSound } from "@/utils/audio";
+import { randomUUID } from "@/lib/uuid";
 
 interface PortalInfo {
   workflow_name: string;
@@ -109,7 +110,7 @@ const hasAnyInput = computed(() => {
 const hasResponses = computed(() => messages.value.some(m => m.type === "assistant"));
 
 const MAX_CONVERSATION_HISTORY = 10;
-const conversationId = crypto.randomUUID();
+const conversationId = randomUUID();
 
 const conversationHistory = computed(() => {
   const history: Array<{ role: string; content: string }> = [];
@@ -354,7 +355,7 @@ async function handleSubmit(): Promise<void> {
   if (isExecuting.value) return;
 
   const userMessage: ChatMessage = {
-    id: crypto.randomUUID(),
+    id: randomUUID(),
     type: "user",
     content: formatUserMessage(),
     timestamp: new Date(),
@@ -400,7 +401,7 @@ async function handleSubmit(): Promise<void> {
       return;
     }
     messages.value.push({
-      id: crypto.randomUUID(),
+      id: randomUUID(),
       type: "system",
       content: "Execution failed. Please try again.",
       timestamp: new Date(),
@@ -522,7 +523,7 @@ async function executeStream(
           const outputImages = extractImages(outputsForDisplay, data.node_results || []);
           const duration = (performance.now() - startTime) / 1000;
           messages.value.push({
-            id: crypto.randomUUID(),
+            id: randomUUID(),
             type: "assistant",
             content: outputContent,
             timestamp: new Date(),
@@ -539,7 +540,7 @@ async function executeStream(
             const outputImages = extractImages(data.outputs || {}, data.node_results || []);
             const duration = (performance.now() - startTime) / 1000;
             messages.value.push({
-              id: crypto.randomUUID(),
+              id: randomUUID(),
               type: "assistant",
               content: outputContent,
               timestamp: new Date(),
@@ -590,7 +591,7 @@ async function stopExecution(): Promise<void> {
   }
 
   messages.value.push({
-    id: crypto.randomUUID(),
+    id: randomUUID(),
     type: "system",
     content: "Execution stopped.",
     timestamp: new Date(),

@@ -86,6 +86,7 @@ import {
   s3OperationOptions,
   supabaseOperationOptions,
 } from "./operationOptions";
+import { randomUUID } from "@/lib/uuid";
 
 interface ExpandableFieldRef {
   openExpandDialog(localIndex?: number): void;
@@ -7952,7 +7953,7 @@ export function usePropertiesPanelController() {
   function addAgentMCPConnection(): void {
     if (!selectedNode.value) return;
     const current = selectedNode.value.data.mcpConnections || [];
-    const id = crypto.randomUUID();
+    const id = randomUUID();
     updateNodeData("mcpConnections", [
       ...current,
       {
@@ -7998,7 +7999,7 @@ export function usePropertiesPanelController() {
     updateNodeData("skills", [
       ...current,
       {
-        id: crypto.randomUUID(),
+        id: randomUUID(),
         name: "",
         content: "",
         files: [],
@@ -8181,7 +8182,7 @@ export function usePropertiesPanelController() {
       upsertAgentSkills(
         [
           {
-            id: crypto.randomUUID(),
+            id: randomUUID(),
             name: skillName,
             content: await file.text(),
             files: [],

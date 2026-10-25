@@ -319,6 +319,41 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class TestActiveExecutionOrder(unittest.IsolatedAsyncioTestCase):
+    async def test_running_first_then_the_queue_in_the_order_it_runs(self):
+        now = datetime.now(timezone.utc)
+        running = _active_record(workflow_name="Running", started_at=now - timedelta(seconds=4))
+        held = [
+            SimpleNamespace(
+                execution_id=uuid.uuid4(),
+                workflow_id=running.workflow_id,
+                workflow_name=name,
+                enqueued_at=now - timedelta(seconds=seconds_ago),
+                inputs={},
+                position=position,
+                size=2,
+            )
+            # Newest request last in line: it waits behind the one that came first.
+            for name, seconds_ago, position in (("Second", 1, 2), ("First", 2, 1))
+        ]
+        with (
+            patch(
+                f"{MODULE}.list_persisted_active_executions_for_user",
+                AsyncMock(return_value=[running]),
+            ),
+            patch(f"{MODULE}.list_active_executions", return_value=[]),
+            patch(f"{MODULE}.list_pending_review_executions_for_user", AsyncMock(return_value=[])),
+            patch(
+                f"{MODULE}.workflow_concurrency.list_held_runs_for_user",
+                AsyncMock(return_value=held),
+            ),
+        ):
+            items = await collect_active_executions_for_user(AsyncMock(), uuid.uuid4())
+
+        self.assertEqual([item.workflow_name for item in items], ["Running", "First", "Second"])
+        self.assertEqual([item.queue_position for item in items], [None, 1, 2])
+
+
 class TestQueuedRunsInOverview(unittest.IsolatedAsyncioTestCase):
     async def test_queued_runs_are_counted_apart_with_their_place_in_line(self):
         workflow_id = uuid.uuid4()

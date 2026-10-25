@@ -20,7 +20,13 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.api.analytics import upsert_workflow_analytics_snapshot
 from app.config import settings
-from app.db.models import ActiveWorkflowExecution, ExecutionHistory, Workflow, WorkflowRunQueue
+from app.db.models import (
+    ActiveWorkflowExecution,
+    ExecutionHistory,
+    Workflow,
+    WorkflowRunQueue,
+    execution_started_at,
+)
 from app.observability import tracing
 from app.services import workflow_concurrency
 from app.services.cluster import identity, run_queue
@@ -912,6 +918,7 @@ class RunQueueWorker:
                         status="cancelled",
                         execution_time_ms=0.0,
                         trigger_source=row.trigger_source,
+                        started_at=execution_started_at(row.execution_id, [], 0.0),
                         **attribution_fields(),
                     )
                     .on_conflict_do_nothing(index_elements=["id"])

@@ -7,6 +7,7 @@ import type {
   SkillBuilderFile,
 } from "@/services/skillBuilderApi";
 import { skillBuilderStream } from "@/services/skillBuilderApi";
+import { randomUUID } from "@/lib/uuid";
 
 export interface SkillBuilderChatMessage {
   role: "user" | "assistant";
@@ -21,7 +22,7 @@ export function useSkillBuilder() {
   const hasFilesUpdate = ref(false);
   const abortController = ref<AbortController | null>(null);
   const conversationHistory = ref<SkillBuilderConversationMessage[]>([]);
-  const conversationId = ref(crypto.randomUUID());
+  const conversationId = ref(randomUUID());
 
   function reset(): void {
     abortController.value?.abort();
@@ -32,7 +33,7 @@ export function useSkillBuilder() {
     error.value = null;
     hasFilesUpdate.value = false;
     conversationHistory.value = [];
-    conversationId.value = crypto.randomUUID();
+    conversationId.value = randomUUID();
   }
 
   function initialize(greeting: string, previewFiles: SkillBuilderFile[] = []): void {

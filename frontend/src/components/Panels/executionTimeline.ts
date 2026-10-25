@@ -413,6 +413,41 @@ function hasRecordedTiming(nodeResults: TimelineEntry[]): boolean {
   return nodeResults.length > 0 && nodeResults.every((result) => getTimingBounds(result) !== null);
 }
 
+// Recorded span times are epoch milliseconds; anything smaller is not a wall-clock time.
+const EPOCH_MS_FLOOR = 1_000_000_000_000;
+
+export interface RunWallTimes {
+  startedMs: number | null;
+  /** Null while a span is still running or waiting. */
+  finishedMs: number | null;
+}
+
+/**
+ * When a run started and finished. The start is the earlier of its stored start (a queued
+ * run's request time; older rows stored the time they were written) and its first span.
+ */
+export function runWallTimes(
+  nodeResults: TimelineEntry[],
+  storedStartedAt: string | null | undefined,
+): RunWallTimes {
+  const starts: number[] = [];
+  const ends: number[] = [];
+  for (const result of nodeResults) {
+    const bounds = getTimingBounds(result);
+    if (bounds && bounds.startMs >= EPOCH_MS_FLOOR) {
+      starts.push(bounds.startMs);
+      ends.push(bounds.endMs);
+    }
+  }
+  const stored = storedStartedAt ? Date.parse(storedStartedAt) : Number.NaN;
+  if (Number.isFinite(stored) && stored >= EPOCH_MS_FLOOR) starts.push(stored);
+  const settled = nodeResults.every((result) => isSettledStatus(result.status));
+  return {
+    startedMs: starts.length > 0 ? Math.min(...starts) : null,
+    finishedMs: settled && ends.length > 0 ? Math.max(...ends) : null,
+  };
+}
+
 export function formatTimelineMs(ms: number): string {
   if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`;
   return `${Math.round(ms)}ms`;

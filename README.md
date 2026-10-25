@@ -401,6 +401,10 @@ Skills are portable capability bundles: a `SKILL.md` instruction file plus optio
 
 </div>
 
+### Real-time Collaboration
+
+Open the same workflow with your team and work on it together. Everyone on the canvas shows as an avatar at the top left, pointers move in each person's color, and edits reach every open canvas as they happen. Click an avatar to follow what that person sees, including the dialogs they open and the runs they start, and turn on the microphone to talk directly from the browser.
+
 ### AI Assistant
 
 Describe the system you want in plain text or voice. The assistant generates nodes and edges directly in the editor, where you can inspect and refine the resulting workflow.
@@ -691,7 +695,7 @@ The backend publishes its OpenAPI reference at `/docs` on the backend server (po
 
 ## Documentation and Full Feature Set
 
-For a complete list of all features with short descriptions, see **[Full Feature Set](frontend/src/docs/content/reference/features.md)**. It covers Getting Started, every node type, reference topics (Expression DSL, workflow structure, webhooks, SSE streaming, AI Assistant, Chat with Docs, Portal, security, etc.), and all dashboard tabs (Workflows, Templates, Variables, Chat, Credentials, Vectorstores, MCP, Traces, Alerts, Analytics, Evals, Teams, Logs and more).
+For a complete list of all features with short descriptions, see **[Full Feature Set](frontend/src/docs/content/reference/features.md)**. It covers Getting Started, every node type, reference topics (Expression DSL, workflow structure, real-time canvas collaboration, webhooks, SSE streaming, AI Assistant, Chat with Docs, Portal, security, etc.), and all dashboard tabs (Workflows, Templates, Variables, Chat, Credentials, Vectorstores, MCP, Traces, Alerts, Analytics, Evals, Teams, Logs and more).
 
 Use **Chat with Docs** from the documentation header for questions grounded in the current article. **Ctrl+K** opens search, navigation, and workflow actions from the command palette.
 

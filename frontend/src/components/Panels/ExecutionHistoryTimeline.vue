@@ -18,6 +18,7 @@ interface Props {
   /** The run's workflow graph: sub-agent rows come from its nodes, span inputs from its edges. */
   nodes: WorkflowNode[];
   edges: WorkflowEdge[];
+  startedAt?: string | null;
 }
 
 const props = defineProps<Props>();
@@ -44,6 +45,7 @@ const timelineEntries = computed((): TimelineEntry[] =>
       :edges="edges"
       :total-time-ms="totalTimeMs"
       :sub-agent-label-to-parent-id="subAgentLabelToParentId"
+      :started-at="startedAt ?? null"
     />
   </div>
   <div

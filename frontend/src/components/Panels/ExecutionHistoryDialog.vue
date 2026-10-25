@@ -48,6 +48,7 @@ import {
   type DisplayNodeResult,
 } from "@/lib/executionLog";
 import { cn } from "@/lib/utils";
+import { followedSignals, localFollowSignals } from "@/features/collab/followSignals";
 import { workflowApi } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
 import { useWorkflowStore } from "@/stores/workflow";
@@ -341,6 +342,26 @@ async function selectEntry(entryId: string): Promise<void> {
   expandedNodes.value = new Set();
   await workflowStore.fetchExecutionHistoryEntry(entryId);
 }
+
+watch(selectedId, (id): void => {
+  if (props.open) localFollowSignals.historyExecutionId = id;
+});
+
+watch(
+  () => props.open,
+  (open): void => {
+    if (!open) localFollowSignals.historyExecutionId = null;
+  },
+);
+
+watch(
+  () => followedSignals.value?.historyExecutionId ?? null,
+  (id): void => {
+    if (!props.open || !id || id === selectedId.value) return;
+    void selectEntry(id);
+  },
+  { immediate: true },
+);
 
 async function cancelActiveExecution(item: ActiveExecutionItem): Promise<void> {
   isCancellingId.value = item.execution_id;
@@ -1151,6 +1172,7 @@ function bringToCanvas(): void {
               :total-time-ms="selectedEntry?.result?.execution_time_ms ?? 0"
               :nodes="workflowStore.nodes"
               :edges="workflowStore.edges"
+              :started-at="selectedEntry?.started_at ?? null"
             />
 
             <div

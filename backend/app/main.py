@@ -26,6 +26,7 @@ from app.api import (
     code,
     codex_followups,
     codex_oauth,
+    collab,
     config,
     credential_setup,
     credentials,
@@ -83,6 +84,7 @@ from app.services.clickhouse_pool import warm_up_pools as warm_up_clickhouse_poo
 from app.services.cluster.dispatch import run_queue_worker
 from app.services.cluster.registry import heartbeat_service
 from app.services.cluster.run_result_bus import run_result_bus
+from app.services.collab.bus import collab_bus
 from app.services.cron_scheduler import cron_scheduler
 from app.services.distributed_lock import lock_service
 from app.services.execution_cancel_bus import execution_cancel_listener
@@ -252,6 +254,7 @@ async def lifespan(app: FastAPI):
     await run_result_bus.stop()
     await heartbeat_service.stop()
     await chat_stream_bus.stop()
+    await collab_bus.stop()
     await execution_cancel_listener.stop()
     await active_execution_registry.stop()
     with suppress(Exception):
@@ -342,6 +345,7 @@ app.include_router(
 app.include_router(work_channel.router, prefix="/api/integrations/work", tags=["Heym Work Channel"])
 app.include_router(admin_cluster.router, prefix="/api/admin/cluster", tags=["Cluster Admin"])
 app.include_router(workflows.router, prefix="/api/workflows", tags=["Workflows"])
+app.include_router(collab.router, prefix="/api/workflows", tags=["Canvas Collaboration"])
 app.include_router(agent_memory.router, prefix="/api/workflows", tags=["Agent Memory"])
 app.include_router(playwright.router, prefix="/api/playwright", tags=["Playwright"])
 app.include_router(folders.router, prefix="/api", tags=["Folders"])
