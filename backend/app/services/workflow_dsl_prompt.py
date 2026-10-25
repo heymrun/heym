@@ -4615,7 +4615,8 @@ Use ONLY: `str()`, `int()`, `float()`, `bool()`, `list()`, `dict(key=value)`, `l
 - **Purpose**: Manage Jira projects, issues, comments, attachments, users, notifications, and workflow transitions
 - **Inputs**: 1 | **Outputs**: 1
 - **Required setup**: `credentialId` must point to an owned Jira credential with email,
-  API token, Jira base URL, and deployment mode (`cloud` or `data_center`)
+  API token, Jira base URL, and deployment mode (`cloud` or `data_center`). Data Center
+  credentials may instead use a personal access token (Bearer auth, no email)
 - **Operations**:
   - `getMyself`: authenticated Jira user
   - `listProjects`: projects visible to the user

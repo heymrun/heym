@@ -643,10 +643,11 @@ class CredentialConfigGitHub(BaseModel):
 
 
 class CredentialConfigJira(BaseModel):
-    email: str
+    email: str | None = None
     api_token: str
     base_url: str
     deployment: str | None = None
+    auth_mode: str | None = None
     api_version: str | None = None
 
 

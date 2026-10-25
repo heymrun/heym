@@ -11,6 +11,8 @@ from app.services.ssrf_guard import build_guarded_http_client, guard_http_url
 
 _DEFAULT_API_VERSION = "3"
 _DEFAULT_DEPLOYMENT = "cloud"
+_AUTH_MODE_BASIC = "basic"
+_AUTH_MODE_PAT = "pat"
 _DEFAULT_SEARCH_FIELDS = ["key", "summary", "status", "assignee", "issuetype"]
 _DEFAULT_SEARCH_JQL = "updated >= -30d ORDER BY updated DESC"
 _MAX_ERROR_DETAIL_CHARS = 500
@@ -25,6 +27,9 @@ class JiraService:
         self._base_url = self._normalize_base_url(str(self._config.get("base_url", "") or ""))
         self._deployment = self._normalize_deployment(self._config)
         self._api_version = self._normalize_api_version(self._config, self._deployment)
+        self._auth_mode = self._normalize_auth_mode(self._config)
+        if self._auth_mode == _AUTH_MODE_PAT and self._deployment != "data_center":
+            raise ValueError("Jira personal access token auth requires a Data Center deployment")
         self._owns_client = client is None
         if client is None:
             guard_http_url(self._base_url, "Jira credential base URL")
@@ -438,17 +443,26 @@ class JiraService:
         headers: dict[str, str] | None = None,
         expect_json: bool = True,
     ) -> Any:
-        email = str(self._config.get("email", "") or "").strip()
         api_token = str(
             self._config.get("api_token", "") or self._config.get("api_key", "") or ""
         ).strip()
-        if not email or not api_token:
-            raise ValueError("Jira credential requires email and api_token")
         request_headers = {"Accept": "application/json"}
         if files is None:
             request_headers["Content-Type"] = "application/json"
         if headers:
             request_headers.update(headers)
+        auth_kwargs: dict[str, Any] = {}
+        if self._auth_mode == _AUTH_MODE_PAT:
+            if not api_token:
+                raise ValueError("Jira credential requires a personal access token")
+            # Set after caller headers so they cannot replace it. ``auth=`` is
+            # deliberately omitted: httpx Basic auth would overwrite this header.
+            request_headers["Authorization"] = f"Bearer {api_token}"
+        else:
+            email = str(self._config.get("email", "") or "").strip()
+            if not email or not api_token:
+                raise ValueError("Jira credential requires email and api_token")
+            auth_kwargs["auth"] = (email, api_token)
         try:
             response = self._client.request(
                 method,
@@ -456,8 +470,8 @@ class JiraService:
                 params=params,
                 json=json,
                 files=files,
-                auth=(email, api_token),
                 headers=request_headers,
+                **auth_kwargs,
             )
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
@@ -550,6 +564,12 @@ class JiraService:
         if not raw_deployment and str(config.get("api_version", "") or "").strip() == "2":
             return "data_center"
         return _DEFAULT_DEPLOYMENT
+
+    @staticmethod
+    def _normalize_auth_mode(config: dict[str, Any]) -> str:
+        """Return ``pat`` only when explicitly configured; missing means legacy Basic."""
+        raw_mode = str(config.get("auth_mode", "") or "").strip().lower()
+        return _AUTH_MODE_PAT if raw_mode == _AUTH_MODE_PAT else _AUTH_MODE_BASIC
 
     @staticmethod
     def _normalize_api_version(config: dict[str, Any], deployment: str) -> str:
