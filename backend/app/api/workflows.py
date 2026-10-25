@@ -3213,6 +3213,7 @@ async def execute_workflow_endpoint(
             detail="Workflow not found",
         )
 
+    session_user = current_user
     current_user = await validate_workflow_auth(workflow, request, current_user, db)
     enforce_workflow_http_method(workflow, request, test_run)
 
@@ -3365,6 +3366,12 @@ async def execute_workflow_endpoint(
         trigger_source=trigger_source,
         actor_user_id=credentials_owner_id,
     )
+    # Only the editor's own test runs skip the queue; ?test_run=true alone does not.
+    concurrency_exempt = bool(
+        test_run
+        and session_user is not None
+        and await user_has_workflow_access(db, workflow, session_user.id)
+    )
     await db.commit()
     try:
         execution_result = await dispatch_workflow(
@@ -3384,6 +3391,10 @@ async def execute_workflow_endpoint(
             actor_user_id=credentials_owner_id,
             cancel_event=cancel_event,
             timeout_seconds=getattr(workflow, "workflow_timeout_seconds", None),
+            concurrency_limit=getattr(workflow, "concurrency_limit", None),
+            concurrency_exempt=concurrency_exempt,
+            on_queued="return",
+            mint_status_token=getattr(workflow, "auth_type", None) == WorkflowAuthType.anonymous,
         )
     except WorkflowCancelledError:
         if not test_run:
@@ -3415,6 +3426,21 @@ async def execute_workflow_endpoint(
     finally:
         clear_active_execution(
             execution_id, handle=getattr(cancel_event, "_execution_handle", None)
+        )
+
+    if isinstance(execution_result, workflow_concurrency.Admission):
+        if execution_result.kind == "queue_full":
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=workflow_concurrency.QUEUE_FULL_MESSAGE,
+            )
+        queued = workflow_concurrency.queued_body(
+            execution_result, workflow_id=workflow.id, base_url=build_public_base_url(request)
+        )
+        return JSONResponse(
+            status_code=status.HTTP_202_ACCEPTED,
+            content=queued,
+            headers={"Location": queued["status_url"], "Retry-After": "5"},
         )
 
     if needs_local_pending_persist(execution_result):
