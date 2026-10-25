@@ -146,11 +146,15 @@ async def collect_active_executions_for_user(
             queue_size=record.size,
         )
 
-    return sorted(
-        items_by_execution_id.values(),
-        key=lambda item: item.started_at,
-        reverse=True,
-    )
+    return sorted(items_by_execution_id.values(), key=active_execution_order)
+
+
+def active_execution_order(item: ActiveExecutionItem) -> tuple[int, float, float]:
+    """Runs in progress first, newest first; then the queue in the order it will run."""
+    started = item.started_at.timestamp()
+    if item.status == "queued":
+        return (1, float(item.queue_position or 0), started)
+    return (0, 0.0, -started)
 
 
 def format_duration(total_seconds: float) -> str:

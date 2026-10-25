@@ -18,6 +18,7 @@ import {
   readSpanJsonRepairs,
   readSpanTokenUsage,
   readSpanToolCalls,
+  runWallTimes,
   splitSpanOutput,
   summarizeTimelineModel,
 } from "@/components/Panels/executionTimeline";
@@ -707,5 +708,60 @@ describe("timeline entries from node results", () => {
         labels,
       ),
     ).toBe(false);
+  });
+});
+
+describe("runWallTimes", () => {
+  const span = (
+    startMs: number,
+    endMs: number,
+    status: TimelineEntry["status"] = "success",
+  ): TimelineEntry =>
+    entry({
+      node_id: `n-${startMs}`,
+      node_label: `n-${startMs}`,
+      node_type: "set",
+      status,
+      execution_time_ms: endMs - startMs,
+      metadata: { started_at_ms: startMs, ended_at_ms: endMs },
+    });
+  const first = Date.parse("2026-10-25T17:41:34.000Z");
+
+  it("starts at the first span and finishes at the last", () => {
+    const times = runWallTimes(
+      [span(first + 2_000, first + 12_000), span(first, first + 500)],
+      null,
+    );
+
+    expect(times).toEqual({ startedMs: first, finishedMs: first + 12_000 });
+  });
+
+  it("starts at a queued run's request, before its first span", () => {
+    const requested = first - 20_000;
+
+    const times = runWallTimes(
+      [span(first, first + 10_000)],
+      new Date(requested).toISOString(),
+    );
+
+    expect(times.startedMs).toBe(requested);
+  });
+
+  it("ignores a stored start written after the spans", () => {
+    const times = runWallTimes(
+      [span(first, first + 10_000)],
+      new Date(first + 10_300).toISOString(),
+    );
+
+    expect(times.startedMs).toBe(first);
+  });
+
+  it("has no finish while a span is still running", () => {
+    const times = runWallTimes(
+      [span(first, first + 500), span(first + 500, first + 900, "running")],
+      null,
+    );
+
+    expect(times.finishedMs).toBeNull();
   });
 });

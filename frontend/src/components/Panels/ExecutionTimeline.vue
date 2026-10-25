@@ -20,6 +20,7 @@ import {
   isSameSpan,
   LIVE_TIMELINE_REFRESH_INTERVAL_MS,
   orderSpansByStart,
+  runWallTimes,
   summarizeTimelineModel,
 } from "@/components/Panels/executionTimeline";
 import ExecutionSpanDetails from "@/components/Panels/ExecutionSpanDetails.vue";
@@ -208,16 +209,29 @@ const timelineSummary = computed(() =>
   summarizeTimelineModel(fullTimelineModel.value.rows, fullTimelineModel.value.timeWindow),
 );
 
-// The earlier of the run's recorded start and its first span: older history rows stored the
-// time they were written, and a queued run started when it was requested.
-const startedLabel = computed((): { short: string; full: string } | null => {
-  const candidates = [
-    props.startedAt ? Date.parse(props.startedAt) : Number.NaN,
-    fullTimelineModel.value.timeWindow.startMs,
-  ].filter((ms) => Number.isFinite(ms) && ms >= 1_000_000_000_000);
-  if (candidates.length === 0) return null;
-  const started = new Date(Math.min(...candidates));
+interface WallTimeLabel {
+  short: string;
+  full: string;
+}
+
+const wallTimes = computed(() => runWallTimes(props.nodeResults, props.startedAt));
+const startedLabel = computed((): WallTimeLabel | null => {
+  const ms = wallTimes.value.startedMs;
+  if (ms === null) return null;
+  const started = new Date(ms);
   return { short: started.toLocaleString(), full: started.toISOString() };
+});
+// The finish drops the date when it is the same day as the start.
+const finishedLabel = computed((): WallTimeLabel | null => {
+  const { startedMs, finishedMs } = wallTimes.value;
+  if (finishedMs === null) return null;
+  const finished = new Date(finishedMs);
+  const sameDay =
+    startedMs !== null && new Date(startedMs).toDateString() === finished.toDateString();
+  return {
+    short: sameDay ? finished.toLocaleTimeString() : finished.toLocaleString(),
+    full: finished.toISOString(),
+  };
 });
 const rows = computed(() => fullTimelineModel.value.rows);
 const hiddenRowKeys = ref<Set<string>>(new Set());
@@ -384,6 +398,11 @@ function showAllRows(): void {
         :title="startedLabel.full"
         data-testid="execution-timeline-started-at"
       >Started {{ startedLabel.short }}</span>
+      <span
+        v-if="finishedLabel"
+        :title="finishedLabel.full"
+        data-testid="execution-timeline-finished-at"
+      >Finished {{ finishedLabel.short }}</span>
       <span>{{ formatTimelineMs(timelineSummary.totalDurationMs) }}</span>
       <span>{{ timelineSummary.spanCount }} spans</span>
       <span
