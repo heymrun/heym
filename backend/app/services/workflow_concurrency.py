@@ -13,14 +13,28 @@ from __future__ import annotations
 
 import hmac
 import logging
+import secrets
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 
-from sqlalchemy import func
+from sqlalchemy import delete, func, select, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import StatementError
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.analytics import upsert_workflow_analytics_snapshot
+from app.config import settings
+from app.db.models import (
+    ExecutionHistory,
+    Workflow,
+    WorkflowConcurrencySlot,
+    WorkflowRunQueue,
+)
+from app.db.session import async_session_maker
 from app.services.cluster import identity, run_queue
+from app.services.cluster.attribution import attribution_fields
 from app.services.secret_tokens import hash_secret
 
 logger = logging.getLogger("concurrency")
@@ -234,6 +248,226 @@ def queued_body(admission: Admission, *, workflow_id: uuid.UUID, base_url: str) 
     return body
 
 
+async def _lock(db: AsyncSession, workflow_id: uuid.UUID) -> None:
+    """Serialize every slot and held-row change for one workflow, cluster-wide."""
+    await db.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+        {"key": f"heym.concurrency:{workflow_id}"},
+    )
+
+
+async def _settings(db: AsyncSession, workflow_id: uuid.UUID) -> ConcurrencySettings | None:
+    row = (
+        await db.execute(
+            select(
+                Workflow.concurrency_limit,
+                Workflow.concurrency_max_queue,
+                Workflow.concurrency_max_wait_seconds,
+            ).where(Workflow.id == workflow_id)
+        )
+    ).first()
+    if row is None:
+        return None
+    return ConcurrencySettings(limit=row[0], max_queue=row[1], max_wait_seconds=row[2])
+
+
+async def _running(db: AsyncSession, workflow_id: uuid.UUID) -> int:
+    return int(
+        (
+            await db.execute(
+                select(func.count())
+                .select_from(WorkflowConcurrencySlot)
+                .where(WorkflowConcurrencySlot.workflow_id == workflow_id)
+            )
+        ).scalar_one()
+    )
+
+
+async def _waiting(db: AsyncSession, workflow_id: uuid.UUID) -> int:
+    return int(
+        (
+            await db.execute(
+                select(func.count())
+                .select_from(WorkflowRunQueue)
+                .where(
+                    WorkflowRunQueue.workflow_id == workflow_id,
+                    WorkflowRunQueue.status == run_queue.STATUS_HELD,
+                )
+            )
+        ).scalar_one()
+    )
+
+
+async def admit(run: HeldRun) -> Admission:
+    """Decide whether a production run starts now, waits for a slot, or is turned away."""
+    now = datetime.now(timezone.utc)
+    async with async_session_maker() as db:
+        await _lock(db, run.workflow_id)
+        cfg = await _settings(db, run.workflow_id)
+        if cfg is None or cfg.limit is None:
+            await db.commit()
+            return Admission(kind="unlimited", execution_id=run.execution_id)
+        has_slot = await db.get(WorkflowConcurrencySlot, run.execution_id) is not None
+        running = await _running(db, run.workflow_id)
+        waiting = await _waiting(db, run.workflow_id)
+        kind = decide_admission(cfg, running=running, waiting=waiting, has_slot=has_slot)
+        if kind == "admitted":
+            if not has_slot:
+                db.add(
+                    WorkflowConcurrencySlot(
+                        execution_id=run.execution_id,
+                        workflow_id=run.workflow_id,
+                        acquired_at=now,
+                    )
+                )
+            await db.commit()
+            return Admission(kind="admitted", execution_id=run.execution_id)
+        if kind == "queue_full":
+            await db.commit()
+            return Admission(
+                kind="queue_full",
+                execution_id=run.execution_id,
+                queue=QueueInfo(position=0, size=waiting, running=running, limit=cfg.limit),
+            )
+        token = secrets.token_urlsafe(32) if run.mint_status_token else None
+        try:
+            await db.execute(
+                WorkflowRunQueue.__table__.insert().values(
+                    **held_values(run, cfg=cfg, now=now, token=token)
+                )
+            )
+        except StatementError as error:
+            # Inputs can hold request data; keep them out of the exception text.
+            error.hide_parameters = True
+            raise
+        await db.commit()
+    return Admission(
+        kind="queued",
+        execution_id=run.execution_id,
+        queue=QueueInfo(position=waiting + 1, size=waiting + 1, running=running, limit=cfg.limit),
+        status_token=token,
+    )
+
+
+async def _promotion_target(placement: str) -> str | None:
+    if settings.cluster_enabled:
+        return await run_queue.choose_target(placement)
+    return identity.instance_id()
+
+
+async def _close_held_locked(
+    db: AsyncSession, row: WorkflowRunQueue, *, status: str, message: str, now: datetime
+) -> None:
+    """Retire a held run that will never execute, with a history row that says why."""
+    row.status = status
+    row.finished_at = now
+    row.result = terminal_summary(
+        execution_id=row.execution_id, workflow_id=row.workflow_id, status=status, message=message
+    )
+    await db.execute(
+        pg_insert(ExecutionHistory)
+        .values(
+            id=row.execution_id,
+            workflow_id=row.workflow_id,
+            inputs=row.inputs,
+            outputs={"error": message},
+            node_results=[],
+            status=status,
+            execution_time_ms=0.0,
+            trigger_source=row.trigger_source,
+            **attribution_fields(),
+        )
+        .on_conflict_do_nothing(index_elements=["id"])
+    )
+    workflow = await db.get(Workflow, row.workflow_id)
+    if workflow is not None:
+        await upsert_workflow_analytics_snapshot(
+            db,
+            workflow_id=row.workflow_id,
+            owner_id=workflow.owner_id,
+            workflow_name_snapshot=workflow.name,
+            status=status,
+            execution_time_ms=0.0,
+        )
+    await db.flush()
+    # Wakes any dispatcher waiting on this run; delivered when the transaction commits.
+    await db.execute(
+        text("SELECT pg_notify('heym_run_done', :payload)"), {"payload": str(row.execution_id)}
+    )
+
+
+async def _promote_locked(db: AsyncSession, workflow_id: uuid.UUID) -> int:
+    """Hand free slots to the oldest held runs. Caller holds the workflow lock."""
+    cfg = await _settings(db, workflow_id)
+    if cfg is None:
+        return 0
+    now = datetime.now(timezone.utc)
+    promoted = 0
+    while True:
+        if cfg.limit is not None and await _running(db, workflow_id) >= cfg.limit:
+            return promoted
+        head = (
+            await db.execute(
+                select(WorkflowRunQueue)
+                .where(
+                    WorkflowRunQueue.workflow_id == workflow_id,
+                    WorkflowRunQueue.status == run_queue.STATUS_HELD,
+                )
+                .order_by(WorkflowRunQueue.concurrency_seq)
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if head is None:
+            return promoted
+        if head.expires_at is not None and head.expires_at <= now:
+            await _close_held_locked(
+                db, head, status=run_queue.STATUS_EXPIRED, message=EXPIRED_MESSAGE, now=now
+            )
+            continue
+        if cfg.limit is not None:
+            db.add(
+                WorkflowConcurrencySlot(
+                    execution_id=head.execution_id, workflow_id=workflow_id, acquired_at=now
+                )
+            )
+        target = await _promotion_target(head.placement)
+        head.target_instance_id = target
+        head.status = run_queue.next_status(target_instance_id=target)
+        head.not_after = now + timedelta(seconds=settings.cron_misfire_grace_seconds)
+        await db.flush()
+        if target:
+            await db.execute(
+                text("SELECT pg_notify('heym_run_queue', :payload)"), {"payload": target}
+            )
+        promoted += 1
+
+
+async def release(execution_id: uuid.UUID) -> None:
+    """Free this run's slot, if it holds one, and start whoever is next."""
+    async with async_session_maker() as db:
+        workflow_id = (
+            await db.execute(
+                select(WorkflowConcurrencySlot.workflow_id).where(
+                    WorkflowConcurrencySlot.execution_id == execution_id
+                )
+            )
+        ).scalar_one_or_none()
+        if workflow_id is None:
+            return
+        await _lock(db, workflow_id)
+        await db.execute(
+            delete(WorkflowConcurrencySlot).where(
+                WorkflowConcurrencySlot.execution_id == execution_id
+            )
+        )
+        await _promote_locked(db, workflow_id)
+        await db.commit()
+
+
 async def promote(workflow_id: uuid.UUID) -> int:
-    """Start held runs that now fit under the limit."""
-    return 0
+    """Start held runs that now fit under the limit, for example after a settings save."""
+    async with async_session_maker() as db:
+        await _lock(db, workflow_id)
+        promoted = await _promote_locked(db, workflow_id)
+        await db.commit()
+    return promoted
