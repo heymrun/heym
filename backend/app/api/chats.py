@@ -65,7 +65,13 @@ from app.services.credential_setup import CredentialFormTool
 from app.services.encryption import decrypt_config
 from app.services.hitl_service import build_public_base_url
 from app.services.llm_trace import LLMTraceContext
-from app.services.mcp_chat_service import MCPChatError, MCPChatResult
+from app.services.mcp_chat_service import (
+    MCPChatError,
+    MCPChatResult,
+    WorkflowLink,
+    absolutize_workflow_links,
+    workflow_link,
+)
 from app.services.mcp_elicitation import MCPClientChannel
 from app.services.workflow_access import user_can_write_workflow
 
@@ -108,6 +114,8 @@ class ChatTurnResult:
     paused_for_clarification: bool
     assistant_message_id: uuid.UUID
     stop_worker: bool = False
+    # Ids from this turn's own `workflow_created` events, never from the model's text.
+    saved_workflow_ids: tuple[str, ...] = ()
 
 
 def _build_hidden_workflow_context_marker(workflow_id: str, workflow_name: str) -> str:
@@ -383,7 +391,7 @@ async def _run_chat_turn(
             if cancel_event is None:
                 cancel_event = Event()
                 _cancel_events[conv_id] = cancel_event
-            workflow_note_ids: set[str] = set()
+            workflow_note_ids: list[str] = []
 
             build: ChatBuildSession | None = None
             if turn.build is not None:
@@ -449,7 +457,7 @@ async def _run_chat_turn(
                         w_id = str(payload.get("workflow_id") or "").strip()
                         w_name = str(payload.get("workflow_name") or "").strip()
                         if w_id and w_id not in workflow_note_ids:
-                            workflow_note_ids.add(w_id)
+                            workflow_note_ids.append(w_id)
                             workflow_context_markers.append(
                                 _build_hidden_workflow_context_marker(w_id, w_name or "Workflow")
                             )
@@ -498,7 +506,11 @@ async def _run_chat_turn(
                     "paused_for_clarification": paused_for_clarification,
                 },
             )
-            return ChatTurnResult(paused_for_clarification, assistant_message_id)
+            return ChatTurnResult(
+                paused_for_clarification,
+                assistant_message_id,
+                saved_workflow_ids=tuple(workflow_note_ids),
+            )
 
     except asyncio.CancelledError:
         assistant_content = "".join(assistant_chunks)
@@ -887,6 +899,9 @@ async def run_mcp_chat_turn(
             select(DashboardMessage).where(DashboardMessage.id == result.assistant_message_id)
         )
         assistant_message = msg_result.scalar_one_or_none()
+        workflow_links = await _saved_workflow_links(
+            db, user_id, result.saved_workflow_ids, public_base_url
+        )
 
     if assistant_message is None:
         raise MCPChatError("The assistant did not produce a reply. Try again.")
@@ -898,12 +913,34 @@ async def run_mcp_chat_turn(
     )
     return MCPChatResult(
         conversation_id=conv_uuid,
-        text=_strip_hidden_markers(assistant_message.content),
+        text=absolutize_workflow_links(
+            _strip_hidden_markers(assistant_message.content), public_base_url
+        ),
         tool_names=tool_names,
         awaiting_clarification=result.paused_for_clarification,
         verified=verified,
         credential_form_urls=tuple(credential_form.waiting_urls),
+        workflow_links=workflow_links,
     )
+
+
+async def _saved_workflow_links(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    workflow_ids: tuple[str, ...],
+    public_base_url: str,
+) -> tuple[WorkflowLink, ...]:
+    """Editor links for the workflows a turn saved, limited to ones the user can open."""
+    links: list[WorkflowLink] = []
+    for raw_id in workflow_ids:
+        try:
+            workflow_id = uuid.UUID(raw_id)
+        except ValueError:
+            continue
+        workflow = await get_workflow_for_user(db, workflow_id, user_id)
+        if workflow is not None:
+            links.append(workflow_link(public_base_url, workflow.id, workflow.name))
+    return tuple(links)
 
 
 def _strip_hidden_markers(content: str) -> str:

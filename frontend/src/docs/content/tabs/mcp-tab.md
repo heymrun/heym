@@ -59,6 +59,8 @@ Capabilities added to the Chat tab later become available through `heym_chat` au
 
 `heym_chat` always runs the Chat engine in build mode, the same mode the [Chat tab](./chat-tab.md#creating-workflows) uses. In one call the assistant can save a new workflow, run it with realistic sample inputs, read the run report, fix what failed, and run it again, up to five test runs per call. When the latest run of the latest save passes, it finishes with a one-sentence summary, and the reply ends with `Verified: the latest test run of the saved workflow passed.`
 
+When a call creates or edits a workflow, the reply lists each one with its full editor link, such as `https://heym.example.com/workflows/<id>`, and the links inside the assistant's answer are full links too. They use your configured Heym address (`FRONTEND_URL`) and open for people signed in to Heym who can access that workflow.
+
 - Test runs are real runs. Their side effects happen, and they appear in the workflow's run history like any other run.
 - Saves take the editor's path: a change to the graph keeps the previous graph in the workflow's Edit History.
 - To change a workflow it built earlier, continue the thread with the same `conversation_id`. The assistant updates that workflow instead of creating a new one, and it only changes workflows you can edit.

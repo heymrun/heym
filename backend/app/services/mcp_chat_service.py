@@ -12,6 +12,7 @@ user can read, continue, and audit everything an MCP client did.
 
 from __future__ import annotations
 
+import re
 import uuid
 from dataclasses import dataclass
 
@@ -71,6 +72,14 @@ class ResolvedChatLLM:
 
 
 @dataclass(frozen=True)
+class WorkflowLink:
+    """A workflow the turn created or saved, and its editor URL on the public origin."""
+
+    name: str
+    url: str
+
+
+@dataclass(frozen=True)
 class MCPChatResult:
     conversation_id: uuid.UUID
     text: str
@@ -78,8 +87,35 @@ class MCPChatResult:
     awaiting_clarification: bool
     # True when the turn ended with build mode's finish: the latest test run passed.
     verified: bool = False
+    # Workflows this turn created or saved that the user can still open.
+    workflow_links: tuple[WorkflowLink, ...] = ()
     # Credential form links the user still has to open in a browser.
     credential_form_urls: tuple[str, ...] = ()
+
+
+_UUID = r"[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}"
+_RELATIVE_WORKFLOW_LINK = re.compile(rf"\]\((/workflows/{_UUID}(?:/{_UUID})?)\)")
+
+
+def workflow_editor_url(public_base_url: str, workflow_id: uuid.UUID) -> str:
+    """The workflow's editor URL on the public origin.
+
+    `public_base_url` comes from `build_public_base_url`, which never reads request headers
+    (GHSA-6rv3-wh25-7pg5), and the id is a parsed UUID, so a client cannot steer the link.
+    """
+    return f"{public_base_url.rstrip('/')}/workflows/{workflow_id}"
+
+
+def absolutize_workflow_links(text: str, public_base_url: str) -> str:
+    """Point the reply's relative `/workflows/<id>` markdown links at the public origin."""
+    base = public_base_url.rstrip("/")
+    return _RELATIVE_WORKFLOW_LINK.sub(lambda match: f"]({base}{match.group(1)})", text)
+
+
+def workflow_link(public_base_url: str, workflow_id: uuid.UUID, name: str | None) -> WorkflowLink:
+    """A link for the result text; the name is kept to one line so it cannot add lines."""
+    single_line = " ".join(str(name or "").split())[:120] or "Workflow"
+    return WorkflowLink(name=single_line, url=workflow_editor_url(public_base_url, workflow_id))
 
 
 def build_chat_mcp_tool() -> MCPTool:
@@ -286,6 +322,11 @@ def format_chat_tool_text(result: MCPChatResult) -> str:
             '"I saved the credential form." That call waits until the user saves the form and '
             "continues the conversation on its own."
         )
+    if result.workflow_links:
+        lines.append("")
+        lines.append("Workflows saved in this call (open in a browser signed in to Heym):")
+        for link in result.workflow_links:
+            lines.append(f"- {link.name}: {link.url}")
     lines.append("")
     lines.append(f"conversation_id: {result.conversation_id}")
     if result.tool_names:
