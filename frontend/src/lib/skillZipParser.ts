@@ -1,6 +1,7 @@
 import JSZip from "jszip";
 
 import type { AgentSkill, AgentSkillFile } from "@/types/workflow";
+import { randomUUID } from "@/lib/uuid";
 
 const SKILL_MD_PATTERN = /SKILL\.md$/i;
 const ROOT_SKILL_FILE = "SKILL.md";
@@ -358,7 +359,7 @@ export async function parseSkillZip(file: File): Promise<AgentSkill[]> {
       "skill";
 
     return {
-      id: crypto.randomUUID(),
+      id: randomUUID(),
       name,
       content: skillMd.content,
       files: skillFiles && skillFiles.length > 0 ? skillFiles : undefined,

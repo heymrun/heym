@@ -7,6 +7,7 @@ import type { CredentialListItem, LLMModel } from "@/types/credential";
 import { useAiDefaults } from "@/composables/useAiDefaults";
 import { aiApi, credentialsApi } from "@/services/api";
 import { extractClarifyBlock, serializeAnswers, stripClarifyBlock } from "@/utils/parseClarify";
+import { randomUUID } from "@/lib/uuid";
 
 export interface DocsChatDialogProps {
   open: boolean;
@@ -36,7 +37,7 @@ export function useDocsChatDialog(props: DocsChatDialogProps, onClose: () => voi
   const modelsLoadFailed = ref(false);
   const messages = ref<ChatMessage[]>([]);
   const answeredClarify = reactive(new Set<string>());
-  const conversationId = ref(crypto.randomUUID());
+  const conversationId = ref(randomUUID());
   const inputText = ref("");
   const streaming = ref(false);
   const steps = ref<string[]>([]);
@@ -154,7 +155,7 @@ export function useDocsChatDialog(props: DocsChatDialogProps, onClose: () => voi
     activeAbortController.value?.abort();
     messages.value = [];
     answeredClarify.clear();
-    conversationId.value = crypto.randomUUID();
+    conversationId.value = randomUUID();
     inputText.value = "";
     streaming.value = false;
     steps.value = [];
@@ -176,8 +177,8 @@ export function useDocsChatDialog(props: DocsChatDialogProps, onClose: () => voi
   }
 
   function sendText(text: string): void {
-    messages.value.push({ id: crypto.randomUUID(), role: "user", content: text });
-    const assistantId = crypto.randomUUID();
+    messages.value.push({ id: randomUUID(), role: "user", content: text });
+    const assistantId = randomUUID();
     messages.value.push({ id: assistantId, role: "assistant", content: "" });
     activeAssistantMessageId.value = assistantId;
     streaming.value = true;

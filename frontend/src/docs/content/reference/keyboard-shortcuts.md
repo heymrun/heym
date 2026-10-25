@@ -29,6 +29,7 @@ These shortcuts apply when the canvas is focused (no text input is active).
 | `Shift` (hold) | Drag to select multiple nodes |
 | `Ctrl` / `Cmd` (hold) | Click to add individual nodes to the selection |
 | `Escape` | Deselect all nodes; close inline node search |
+| `Escape` | Stop following someone ([Canvas Collaboration](./canvas-collaboration.md)) |
 
 ### Editing Nodes
 

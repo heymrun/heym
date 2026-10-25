@@ -6,6 +6,7 @@ import type { FileAttachmentPayload } from "@/services/api";
 import { CHAT_CONTEXT_HEADER } from "@/lib/chatContext";
 import { chatApi } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
+import { randomUUID } from "@/lib/uuid";
 
 const DEFAULT_CONVERSATION_TITLE = "New Chat";
 const SIDEBAR_OPEN_KEY = "heym-chat-sidebar-open";
@@ -379,7 +380,7 @@ export const useChatStore = defineStore("chat", () => {
       final.toolCalls.length > 0;
     if (hasContent) {
       _appendMessageIfMissing(conversationId, {
-        id: final.messageId ?? crypto.randomUUID(),
+        id: final.messageId ?? randomUUID(),
         role: "assistant",
         content: final.content,
         ...(final.images.length > 0 ? { images: [...final.images] } : {}),

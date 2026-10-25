@@ -131,6 +131,8 @@ class WorkflowUpdateWebSocketSyncTests(unittest.IsolatedAsyncioTestCase):
             side_effect=[
                 SimpleNamespace(scalar_one_or_none=lambda: widget),
                 SimpleNamespace(scalar=lambda: 0),
+                # The canvas room's ``saved`` notification, queued before commit.
+                SimpleNamespace(),
             ]
         )
         db.add = lambda _row: None

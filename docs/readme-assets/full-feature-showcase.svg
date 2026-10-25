@@ -4,40 +4,41 @@
     <style>
       .ff-orb-a { animation: ffOrbA 7s ease-in-out infinite; transform-origin: 200px 140px; }
       .ff-orb-b { animation: ffOrbB 8s ease-in-out infinite; transform-origin: 1080px 580px; }
-      .ff-progress { animation: ffProgress 100s linear infinite; }
-      .ff-scene { opacity: 0; animation: ffScene 100s linear infinite both; }
-      .ff-scene.s02 { animation-delay: -95s; }
-      .ff-scene.s03 { animation-delay: -90s; }
-      .ff-scene.s04 { animation-delay: -85s; }
-      .ff-scene.s05 { animation-delay: -80s; }
-      .ff-scene.s06 { animation-delay: -75s; }
-      .ff-scene.s07 { animation-delay: -70s; }
-      .ff-scene.s08 { animation-delay: -65s; }
-      .ff-scene.s09 { animation-delay: -60s; }
-      .ff-scene.s10 { animation-delay: -55s; }
-      .ff-scene.s11 { animation-delay: -50s; }
-      .ff-scene.s12 { animation-delay: -45s; }
-      .ff-scene.s13 { animation-delay: -40s; }
-      .ff-scene.s14 { animation-delay: -35s; }
-      .ff-scene.s15 { animation-delay: -30s; }
-      .ff-scene.s16 { animation-delay: -25s; }
-      .ff-scene.s17 { animation-delay: -20s; }
-      .ff-scene.s18 { animation-delay: -15s; }
-      .ff-scene.s19 { animation-delay: -10s; }
-      .ff-scene.s20 { animation-delay: -5s; }
+      .ff-progress { animation: ffProgress 105s linear infinite; }
+      .ff-scene { opacity: 0; animation: ffScene 105s linear infinite both; }
+      .ff-scene.s02 { animation-delay: -100s; }
+      .ff-scene.s03 { animation-delay: -95s; }
+      .ff-scene.s04 { animation-delay: -90s; }
+      .ff-scene.s05 { animation-delay: -85s; }
+      .ff-scene.s06 { animation-delay: -80s; }
+      .ff-scene.s07 { animation-delay: -75s; }
+      .ff-scene.s08 { animation-delay: -70s; }
+      .ff-scene.s09 { animation-delay: -65s; }
+      .ff-scene.s10 { animation-delay: -60s; }
+      .ff-scene.s11 { animation-delay: -55s; }
+      .ff-scene.s12 { animation-delay: -50s; }
+      .ff-scene.s13 { animation-delay: -45s; }
+      .ff-scene.s14 { animation-delay: -40s; }
+      .ff-scene.s15 { animation-delay: -35s; }
+      .ff-scene.s16 { animation-delay: -30s; }
+      .ff-scene.s17 { animation-delay: -25s; }
+      .ff-scene.s18 { animation-delay: -20s; }
+      .ff-scene.s19 { animation-delay: -15s; }
+      .ff-scene.s20 { animation-delay: -10s; }
+      .ff-scene.s21 { animation-delay: -5s; }
       .ff-flow { stroke-dasharray: 8 8; animation: ffDash 1.6s linear infinite; }
       .ff-blink { animation: ffBlink 1s steps(2, jump-none) infinite; }
-      .ff-sse { opacity: 0; animation: ffSSE 100s linear infinite both; animation-delay: -45s; }
-      .ff-sse.q2 { animation-delay: -44.7s; }
-      .ff-sse.q3 { animation-delay: -44.4s; }
-      .ff-sse.q4 { animation-delay: -44.1s; }
-      .ff-sse.q5 { animation-delay: -43.8s; }
-      .ff-sse.q6 { animation-delay: -43.5s; }
-      .ff-sse.q7 { animation-delay: -43.2s; }
-      .ff-sse.q8 { animation-delay: -42.9s; }
-      .ff-sse.q9 { animation-delay: -42.6s; }
-      .ff-kbn { animation: ffKbnMove 100s linear infinite both; animation-delay: -5s; }
-      .ff-kbn-card { animation: ffKbnFill 100s linear infinite both; animation-delay: -5s; }
+      .ff-sse { opacity: 0; animation: ffSSE 105s linear infinite both; animation-delay: -50s; }
+      .ff-sse.q2 { animation-delay: -49.7s; }
+      .ff-sse.q3 { animation-delay: -49.4s; }
+      .ff-sse.q4 { animation-delay: -49.1s; }
+      .ff-sse.q5 { animation-delay: -48.8s; }
+      .ff-sse.q6 { animation-delay: -48.5s; }
+      .ff-sse.q7 { animation-delay: -48.2s; }
+      .ff-sse.q8 { animation-delay: -47.9s; }
+      .ff-sse.q9 { animation-delay: -47.6s; }
+      .ff-kbn { animation: ffKbnMove 105s linear infinite both; animation-delay: -10s; }
+      .ff-kbn-card { animation: ffKbnFill 105s linear infinite both; animation-delay: -10s; }
       .ff-wave { animation: ffWave 1.2s ease-in-out infinite; }
       .ff-wave.w2 { animation-delay: .08s; }
       .ff-wave.w3 { animation-delay: .16s; }
@@ -56,10 +57,12 @@
       .ff-bar.b4 { animation-delay: .36s; }
       .ff-logo-tile { transform-origin: center; animation: ffLogoGlow 2.8s ease-in-out infinite; }
       .ff-logo-mark { stroke-dasharray: 10 6; animation: ffLogoDash 2.4s linear infinite; }
+      .ff-cur-a { animation: ffCurA 3.4s ease-in-out infinite; }
+      .ff-cur-b { animation: ffCurB 3.4s ease-in-out infinite; }
       @keyframes ffScene {
-        0%, 4.37% { opacity: 1; transform: translateY(0); }
-        5% { opacity: 0; transform: translateY(10px); }
-        5.001%, 100% { opacity: 0; transform: translateY(10px); }
+        0%, 4.16% { opacity: 1; transform: translateY(0); }
+        4.76% { opacity: 0; transform: translateY(10px); }
+        4.77%, 100% { opacity: 0; transform: translateY(10px); }
       }
       @keyframes ffProgress {
         0% { width: 0; fill: #A78BFA; }
@@ -71,20 +74,20 @@
       @keyframes ffBlink { 50% { opacity: .15; } }
       @keyframes ffSSE {
         0% { opacity: 0; }
-        0.3% { opacity: 1; }
-        5% { opacity: 1; }
-        5.001%, 100% { opacity: 0; }
+        0.29% { opacity: 1; }
+        4.76% { opacity: 1; }
+        4.77%, 100% { opacity: 0; }
       }
       @keyframes ffKbnMove {
-        0%, 0.7% { transform: translateX(0); }
-        1.6%, 2.4% { transform: translateX(163px); }
-        3.3%, 4.37% { transform: translateX(326px); }
-        4.38%, 100% { transform: translateX(0); }
+        0%, 0.67% { transform: translateX(0); }
+        1.52%, 2.29% { transform: translateX(163px); }
+        3.14%, 4.16% { transform: translateX(326px); }
+        4.17%, 100% { transform: translateX(0); }
       }
       @keyframes ffKbnFill {
-        0%, 1.3% { fill: #0A0E1A; stroke: #4B5563; }
-        1.7%, 2.5% { fill: rgba(245,158,11,0.16); stroke: #F59E0B; }
-        3.3%, 100% { fill: rgba(16,217,160,0.16); stroke: #10D9A0; }
+        0%, 1.24% { fill: #0A0E1A; stroke: #4B5563; }
+        1.62%, 2.38% { fill: rgba(245,158,11,0.16); stroke: #F59E0B; }
+        3.14%, 100% { fill: rgba(16,217,160,0.16); stroke: #10D9A0; }
       }
       @keyframes ffWave {
         0%, 100% { opacity: .35; }
@@ -117,6 +120,14 @@
         50% { transform: translate3d(-20px, -14px, 0) scale(1.06); opacity: .6; }
       }
       @keyframes ffLogoDash { to { stroke-dashoffset: -32; } }
+      @keyframes ffCurA {
+        0%, 100% { transform: translate(330px, 168px); }
+        50% { transform: translate(372px, 120px); }
+      }
+      @keyframes ffCurB {
+        0%, 100% { transform: translate(140px, 176px); }
+        50% { transform: translate(214px, 150px); }
+      }
       @keyframes ffLogoGlow {
         0%, 100% { filter: drop-shadow(0 0 0 rgba(139, 92, 246, 0)); }
         50% { filter: drop-shadow(0 0 14px rgba(139, 92, 246, .65)); }
@@ -171,24 +182,25 @@
     
     <g fill="#374151">
       <circle cx="0" cy="1.5" r="3"></circle>
-      <circle cx="61" cy="1.5" r="3"></circle>
-      <circle cx="121" cy="1.5" r="3"></circle>
-      <circle cx="182" cy="1.5" r="3"></circle>
-      <circle cx="242" cy="1.5" r="3"></circle>
-      <circle cx="303" cy="1.5" r="3"></circle>
-      <circle cx="364" cy="1.5" r="3"></circle>
-      <circle cx="424" cy="1.5" r="3"></circle>
-      <circle cx="485" cy="1.5" r="3"></circle>
-      <circle cx="545" cy="1.5" r="3"></circle>
-      <circle cx="606" cy="1.5" r="3"></circle>
-      <circle cx="667" cy="1.5" r="3"></circle>
-      <circle cx="727" cy="1.5" r="3"></circle>
-      <circle cx="788" cy="1.5" r="3"></circle>
-      <circle cx="848" cy="1.5" r="3"></circle>
-      <circle cx="909" cy="1.5" r="3"></circle>
-      <circle cx="970" cy="1.5" r="3"></circle>
-      <circle cx="1030" cy="1.5" r="3"></circle>
-      <circle cx="1091" cy="1.5" r="3"></circle>
+      <circle cx="57.6" cy="1.5" r="3"></circle>
+      <circle cx="115.2" cy="1.5" r="3"></circle>
+      <circle cx="172.8" cy="1.5" r="3"></circle>
+      <circle cx="230.4" cy="1.5" r="3"></circle>
+      <circle cx="288" cy="1.5" r="3"></circle>
+      <circle cx="345.6" cy="1.5" r="3"></circle>
+      <circle cx="403.2" cy="1.5" r="3"></circle>
+      <circle cx="460.8" cy="1.5" r="3"></circle>
+      <circle cx="518.4" cy="1.5" r="3"></circle>
+      <circle cx="576" cy="1.5" r="3"></circle>
+      <circle cx="633.6" cy="1.5" r="3"></circle>
+      <circle cx="691.2" cy="1.5" r="3"></circle>
+      <circle cx="748.8" cy="1.5" r="3"></circle>
+      <circle cx="806.4" cy="1.5" r="3"></circle>
+      <circle cx="864" cy="1.5" r="3"></circle>
+      <circle cx="921.6" cy="1.5" r="3"></circle>
+      <circle cx="979.2" cy="1.5" r="3"></circle>
+      <circle cx="1036.8" cy="1.5" r="3"></circle>
+      <circle cx="1094.4" cy="1.5" r="3"></circle>
       <circle cx="1152" cy="1.5" r="3"></circle>
     </g>
   </g>
@@ -1032,6 +1044,52 @@
             <rect class="ff-kbn-card" width="130" height="34" rx="7" fill="#0A0E1A" stroke="#4B5563"></rect>
             <text x="10" y="21" font-size="10" fill="#E5E7EB" font-family="&#39;JetBrains Mono&#39;,monospace">Launch email</text>
           </g>
+        </g>
+      </g>
+    </g>
+
+    <g class="ff-scene s21">
+      <text font-size="11" font-family="&#39;JetBrains Mono&#39;, monospace" fill="#22D3EE" letter-spacing="2">21 · REAL-TIME COLLABORATION</text>
+      <text y="64" font-size="64" font-weight="800" fill="#F3F4F6" letter-spacing="-2">Build it.</text>
+      <text y="124" font-size="64" font-weight="800" fill="#22D3EE" letter-spacing="-2">Together.</text>
+      <text y="172" font-size="16" fill="#9CA3AF">Live cursors · shared edits · follow mode · voice on one canvas.</text>
+      <g transform="translate(620,36)">
+        <rect width="500" height="216" rx="14" fill="#0B1020" stroke="#1F2937"></rect>
+        <rect x="6" y="6" width="488" height="204" rx="10" fill="none" stroke="#F59E0B" stroke-opacity="0.6" stroke-width="1.5" class="ff-flow"></rect>
+        <g transform="translate(26,28)">
+          <circle class="ff-pulse" cx="0" cy="0" r="11" fill="#1F2937" stroke="#F59E0B" stroke-width="2"></circle>
+          <text x="0" y="4" font-size="10" font-weight="700" fill="#F3F4F6" text-anchor="middle">A</text>
+          <circle cx="20" cy="0" r="11" fill="#1F2937" stroke="#22D3EE" stroke-width="2"></circle>
+          <text x="20" y="4" font-size="10" font-weight="700" fill="#F3F4F6" text-anchor="middle">B</text>
+          <circle cx="40" cy="0" r="11" fill="#1F2937" stroke="#A78BFA" stroke-width="2"></circle>
+          <text x="40" y="4" font-size="10" font-weight="700" fill="#F3F4F6" text-anchor="middle">C</text>
+          <circle cx="68" cy="0" r="11" fill="#10D9A0" fill-opacity="0.14" stroke="#10D9A0"></circle>
+          <rect x="65" y="-6" width="6" height="9" rx="3" fill="#10D9A0"></rect>
+          <path d="M 62.5 1 Q 68 7 73.5 1 M 68 5 L 68 8" stroke="#10D9A0" stroke-width="1.2" fill="none"></path>
+        </g>
+        <g transform="translate(318,19)" font-family="&#39;JetBrains Mono&#39;,monospace" font-size="9">
+          <rect width="160" height="18" rx="5" fill="#F59E0B" fill-opacity="0.16" stroke="#F59E0B" stroke-opacity="0.55"></rect>
+          <text x="10" y="12.5" fill="#F59E0B">following Ana · esc to stop</text>
+        </g>
+        <g transform="translate(56,112)">
+          <rect width="116" height="40" rx="9" fill="#0F1526" stroke="#2A3446"></rect>
+          <text x="14" y="25" font-size="11" fill="#E5E7EB" font-family="&#39;JetBrains Mono&#39;,monospace">Webhook</text>
+        </g>
+        <path d="M 172 132 L 272 132" stroke="#22D3EE" stroke-width="1.6" class="ff-flow" fill="none"></path>
+        <g transform="translate(272,112)">
+          <rect width="124" height="40" rx="9" fill="#7C3AED" fill-opacity="0.14" stroke="#A78BFA" stroke-opacity="0.7"></rect>
+          <text x="14" y="25" font-size="11" fill="#A78BFA" font-family="&#39;JetBrains Mono&#39;,monospace">Agent</text>
+          <circle class="ff-pulse" cx="112" cy="12" r="3.5" fill="#F59E0B"></circle>
+        </g>
+        <g class="ff-cur-a">
+          <path d="M 0 0 L 14 6 L 7.5 8 L 5 15 Z" fill="#F59E0B" stroke="#0B1020" stroke-width="1"></path>
+          <rect x="12" y="13" width="32" height="15" rx="4" fill="#F59E0B"></rect>
+          <text x="17" y="24" font-size="9" font-weight="700" fill="#0B1020">Ana</text>
+        </g>
+        <g class="ff-cur-b">
+          <path d="M 0 0 L 14 6 L 7.5 8 L 5 15 Z" fill="#22D3EE" stroke="#0B1020" stroke-width="1"></path>
+          <rect x="12" y="13" width="32" height="15" rx="4" fill="#22D3EE"></rect>
+          <text x="17" y="24" font-size="9" font-weight="700" fill="#0B1020">Ben</text>
         </g>
       </g>
     </g>

@@ -21,6 +21,8 @@ import BaseNode from "@/components/Nodes/BaseNode.vue";
 import InsertableEdge from "@/components/Canvas/InsertableEdge.vue";
 import NodeContextMenu from "@/components/Canvas/NodeContextMenu.vue";
 import HighlightPopup from "@/components/Canvas/HighlightPopup.vue";
+import CollabCanvasBridge from "@/features/collab/CollabCanvasBridge";
+import CollabCursors from "@/features/collab/components/CollabCursors.vue";
 import StickyNoteNode from "@/components/Nodes/StickyNoteNode.vue";
 import AgentMemoryGraphDialog from "@/components/Dialogs/AgentMemoryGraphDialog.vue";
 import ExtractSubWorkflowDialog from "@/components/Dialogs/ExtractSubWorkflowDialog.vue";
@@ -1984,6 +1986,11 @@ watch(
           @mouseleave="onMiniMapMouseLeave"
         />
       </Transition>
+
+      <template #zoom-pane>
+        <CollabCursors />
+      </template>
+      <CollabCanvasBridge />
     </VueFlow>
 
     <HighlightPopup :payload="workflowStore.highlightPayload" />

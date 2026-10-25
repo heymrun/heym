@@ -10,7 +10,16 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    status,
+)
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import String, cast, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -81,6 +90,8 @@ from app.services.codex_followup_service import (
     is_codex_pending_execution,
     persist_pending_codex_followup_execution,
 )
+from app.services.collab.protocol import parse_collab_hash_header, parse_collab_session_header
+from app.services.collab.saves import queue_collab_saved
 from app.services.credential_context import credential_context_value
 from app.services.dashboard_widget_policy import dashboard_widget_blocked_nodes_error
 from app.services.encryption import decrypt_config
@@ -1698,6 +1709,8 @@ async def update_workflow(
     workflow_data: WorkflowUpdate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    collab_session: Annotated[str | None, Header(alias="X-Heym-Collab-Session")] = None,
+    collab_hash: Annotated[str | None, Header(alias="X-Heym-Collab-Hash")] = None,
 ) -> WorkflowResponse:
     workflow = await get_workflow_for_user(db, workflow_id, current_user.id)
 
@@ -1885,6 +1898,14 @@ async def update_workflow(
             current_user.id,
         )
 
+    # Delivered when this transaction commits; peers on the canvas adopt the new revision.
+    await queue_collab_saved(
+        db,
+        workflow.id,
+        current_user.id,
+        session=parse_collab_session_header(collab_session),
+        state_hash=parse_collab_hash_header(collab_hash),
+    )
     await db.flush()
     await db.commit()
     await db.refresh(workflow)
@@ -2381,6 +2402,7 @@ async def revert_workflow_to_version(
     workflow.rate_limit_requests = version.rate_limit_requests
     workflow.rate_limit_window_seconds = version.rate_limit_window_seconds
 
+    await queue_collab_saved(db, workflow.id, current_user.id, session=None, state_hash=None)
     await db.flush()
     await db.refresh(workflow)
 

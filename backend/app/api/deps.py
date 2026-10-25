@@ -4,6 +4,7 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.requests import HTTPConnection
 
 from app.config import settings
 from app.db.models import User
@@ -49,7 +50,7 @@ def _extract_token(
     return request.cookies.get("access_token")
 
 
-async def resolve_token_user_id(request: Request, token: str) -> uuid.UUID | None:
+async def resolve_token_user_id(request: HTTPConnection, token: str) -> uuid.UUID | None:
     """Return the user a bearer token names, enforcing Heym Work's key binding."""
     claims = read_access_claims(token)
     if claims is None:

@@ -45,6 +45,7 @@ function openAssistant(): void {
   transition: opacity 120ms ease;
 }
 .vue-flow__node:hover .canvas-node-ai,
+.vue-flow__node[data-collab-hover] .canvas-node-ai,
 .canvas-node-ai:focus-within,
 .canvas-node-ai.canvas-node-ai-focused {
   opacity: 1;

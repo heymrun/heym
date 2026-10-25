@@ -13,9 +13,16 @@ const toastMessage = ref("");
 const toastType = ref<ToastType>("success");
 const toastVisible = ref(false);
 let hideTimer: ReturnType<typeof setTimeout> | null = null;
+let toastFilter: ((type: ToastType) => boolean) | null = null;
+
+/** Lets a mode hide some toasts, e.g. errors from requests paused while following someone. */
+export function setToastFilter(filter: ((type: ToastType) => boolean) | null): void {
+  toastFilter = filter;
+}
 
 export function useToast() {
   function showToast(message: string, type: ToastType = "success", duration = 4000): void {
+    if (toastFilter && !toastFilter(type)) return;
     if (hideTimer) clearTimeout(hideTimer);
     toastMessage.value = message;
     toastType.value = type;

@@ -19,14 +19,14 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
   {
     releaseId: "2026.22",
     publishedAt: new Date("2026-10-26T12:00:00Z"),
-    headline: "Limit how many runs of a workflow execute at once",
+    headline: "Work on one canvas together, and limit how many runs execute at once",
     releaseTour: {
       label: "New in Heym",
       introTitle: "New in this release",
       introDescription:
         "A quick look at what changed since your last update. Takes about a minute.",
-      tourEnabled: false,
-      sectionOrder: ["concurrency-limit"],
+      tourEnabled: true,
+      sectionOrder: ["concurrency-limit", "canvas-collaboration"],
     },
     sections: [
       {
@@ -58,6 +58,38 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
             categoryId: "reference",
             slug: "webhooks",
             title: "Webhooks",
+          },
+        },
+      },
+      {
+        id: "canvas-collaboration",
+        title: "Work on a canvas together",
+        publishedAt: new Date("2026-10-25T12:00:00Z"),
+        blocks: [
+          {
+            type: "prose",
+            markdown:
+              "Everyone who opens a workflow now shows as an avatar at the top left of the canvas. Edits reach every open canvas as they happen, and each person's pointer moves in their own color. Anyone with edit access can save the shared draft, and **Ctrl+Z** undoes only your own changes.",
+          },
+          {
+            type: "prose",
+            markdown:
+              "Click an avatar to **follow** that person: your editor shows what they look at, where they point, the dialogs and AI Assistant they open and the runs they start, with your own access. Press **Esc** to stop. Turn on the **microphone** next to the avatars to talk with everyone on the canvas.",
+          },
+        ],
+        tour: {
+          description:
+            "See who is on the canvas, edit together live, follow someone's view and talk with the microphone.",
+          useCases: [
+            "Build a workflow with a teammate without taking turns",
+            "Walk someone through a run by letting them follow you",
+            "Review a workflow together while talking it through",
+          ],
+          tourVisual: "canvas-collaboration",
+          docTarget: {
+            categoryId: "reference",
+            slug: "canvas-collaboration",
+            title: "Canvas Collaboration",
           },
         },
       },
@@ -152,7 +184,7 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
       introDescription:
         "A quick look at what changed since your last update. Takes about a minute.",
       tourEnabled: true,
-      sectionOrder: ["slack-bot", "google-triggers"],
+      sectionOrder: ["slack-bot"],
     },
     sections: [
       {
@@ -189,38 +221,6 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
             categoryId: "nodes",
             slug: "slack-node",
             title: "Slack",
-          },
-        },
-      },
-      {
-        id: "google-triggers",
-        title: "Start a run when a Drive file or a sheet row changes",
-        publishedAt: new Date("2026-10-17T12:00:00Z"),
-        blocks: [
-          {
-            type: "prose",
-            markdown:
-              "Two new trigger nodes. **Google Drive Trigger** starts a run when a file is created, updated, or deleted in a folder you choose. **Google Sheets Trigger** starts a run when a row is added, updated, or deleted, and tells the run which columns changed.",
-          },
-          {
-            type: "prose",
-            markdown:
-              "Each change starts exactly one run, even on a multi-instance install. Heym keeps file metadata and keyed fingerprints of cells, never cell values. Set a key column such as `Email` so inserted or sorted rows are matched correctly.",
-          },
-        ],
-        tour: {
-          description:
-            "Start a run when a file lands in a Drive folder or a row changes in a sheet, once per change.",
-          useCases: [
-            "Summarize every contract dropped into a shared folder",
-            "Score each new lead as soon as its row appears",
-            "Notify an owner when a status column changes",
-          ],
-          tourVisual: "google-triggers",
-          docTarget: {
-            categoryId: "nodes",
-            slug: "google-sheets-trigger-node",
-            title: "Google Sheets Trigger",
           },
         },
       },

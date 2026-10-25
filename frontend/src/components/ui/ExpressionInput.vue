@@ -38,6 +38,7 @@ import type {
 } from "@/types/workflow";
 import ExpressionOutputPathPicker from "@/components/ui/ExpressionOutputPathPicker.vue";
 import AIExpressionBuilderModal from "@/components/ui/AIExpressionBuilderModal.vue";
+import { followedSignals, localFollowSignals } from "@/features/collab/followSignals";
 import { useExpressionCompletion } from "@/composables/useExpressionCompletion";
 import { onDismissOverlays, pushOverlayState } from "@/composables/useOverlayBackHandler";
 import {
@@ -1735,6 +1736,36 @@ function closeExpandDialog(): void {
   showExpandDialog.value = false;
   showDialogDropdown.value = false;
 }
+
+// Canvas collaboration: report this dialog to followers, and open it when the followed person does.
+const openedByFollow = ref(false);
+
+watch(showExpandDialog, (isOpen): void => {
+  if (!props.currentNodeId || !props.fieldKey) return;
+  const reported = localFollowSignals.expression;
+  if (isOpen) {
+    localFollowSignals.expression = { nodeId: props.currentNodeId, field: props.fieldKey };
+  } else if (reported?.nodeId === props.currentNodeId && reported.field === props.fieldKey) {
+    localFollowSignals.expression = null;
+  }
+  if (!isOpen) openedByFollow.value = false;
+});
+
+watch(
+  () => followedSignals.value?.expression ?? null,
+  (target): void => {
+    const mine = target !== null
+      && target.nodeId === props.currentNodeId
+      && target.field === props.fieldKey;
+    if (mine && !showExpandDialog.value) {
+      openedByFollow.value = true;
+      openExpandDialog();
+    } else if (!mine && openedByFollow.value && showExpandDialog.value) {
+      closeExpandDialog();
+    }
+  },
+  { immediate: true },
+);
 
 function applyDialogChanges(options?: { closeDialog?: boolean }): void {
   emit("update:modelValue", dialogValue.value);

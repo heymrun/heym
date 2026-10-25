@@ -44,6 +44,15 @@ interface HistoryState {
   edges: WorkflowEdge[];
 }
 
+/** What canvas collaboration (features/collab) plugs into saving while the editor is open. */
+export interface CollabStoreHooks {
+  saveHeaders: (kind: "graph" | "metadata") => Record<string, string>;
+  resolveConflict: (updatedAt: string | null) => Promise<boolean>;
+  announceReload: () => void;
+  /** True while this tab follows someone: it watches, it does not run. */
+  isSpectating: () => boolean;
+}
+
 interface EvaluateLoopSelection {
   loopNodeId: string;
   iterationIndex: number;
@@ -81,6 +90,9 @@ export const useWorkflowStore = defineStore("workflow", () => {
    */
   const isReadOnly = computed(() => currentWorkflow.value?.permission === "read");
   const workflowLoadedAt = ref<string | null>(null);
+  let collabHooks: CollabStoreHooks | null = null;
+  // Bumped by every loadWorkflow, so live sync can reset its baseline to the loaded graph.
+  const graphLoadSeq = ref(0);
   const staleSaveDialogOpen = ref(false);
   const staleSaveServerUpdatedAt = ref<string | null>(null);
   // A run that hit a stale-save conflict and is waiting on the dialog. Wrapped in an object so a
@@ -734,6 +746,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
       },
     ];
     historyIndex.value = 0;
+    graphLoadSeq.value += 1;
   }
 
   function knownWorkflowRevision(id: string): string | null {
@@ -755,25 +768,37 @@ export const useWorkflowStore = defineStore("workflow", () => {
    * has changed the workflow since; the check rides along with the write so a save is never lost
    * to an extra round trip, and there is no window between checking and saving.
    */
-  async function _executeSave(baseUpdatedAt: string | null = null): Promise<boolean> {
+  async function _executeSave(
+    baseUpdatedAt: string | null = null,
+    retriedAfterPeerSave = false,
+  ): Promise<boolean> {
     const wf = currentWorkflow.value;
     if (!wf) return false;
 
     isSaving.value = true;
     try {
-      const updated = await workflowApi.update(wf.id, {
-        nodes: nodes.value,
-        edges: edges.value,
-        ...(baseUpdatedAt ? { base_updated_at: baseUpdatedAt } : {}),
-      });
+      const updated = await workflowApi.update(
+        wf.id,
+        {
+          nodes: nodes.value,
+          edges: edges.value,
+          ...(baseUpdatedAt ? { base_updated_at: baseUpdatedAt } : {}),
+        },
+        collabHooks?.saveHeaders("graph"),
+      );
       workflowLoadedAt.value = updated.updated_at;
       hasUnsavedChanges.value = false;
       return true;
     } catch (error: unknown) {
       if (!isStaleSaveConflict(error)) throw error;
+      const conflictAt = conflictUpdatedAt(error);
+      // A peer on the same canvas saved the shared draft a moment earlier: save on top of it.
+      if (!retriedAfterPeerSave && collabHooks && (await collabHooks.resolveConflict(conflictAt))) {
+        return _executeSave(conflictAt, true);
+      }
       // Keep hasUnsavedChanges true: the edits are still only in this tab.
       staleSaveMode.value = "overwrite";
-      staleSaveServerUpdatedAt.value = conflictUpdatedAt(error);
+      staleSaveServerUpdatedAt.value = conflictAt;
       staleSaveDialogOpen.value = true;
       return false;
     } finally {
@@ -816,6 +841,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
     pendingStaleSaveRun.value = null;
     const wf = currentWorkflow.value;
     if (!wf) return;
+    collabHooks?.announceReload();
     await loadWorkflow(wf.id);
     if (pendingRun) await executeWorkflow(pendingRun.body, pendingRun.targetNodeId);
   }
@@ -837,6 +863,68 @@ export const useWorkflowStore = defineStore("workflow", () => {
     }
   }
 
+  function setCollabHooks(hooks: CollabStoreHooks | null): void {
+    collabHooks = hooks;
+  }
+
+  /** A peer's live edit. Not an undo step of this canvas; the undo snapshots are rebased. */
+  function applyRemoteGraph(
+    nextNodes: WorkflowNode[],
+    nextEdges: WorkflowEdge[],
+    rebase: (states: HistoryState[]) => HistoryState[],
+  ): void {
+    nodes.value = nextNodes;
+    edges.value = nextEdges;
+    history.value = rebase(history.value);
+    hasUnsavedChanges.value = true;
+  }
+
+  /** A following tab undoing what a replayed click changed; the room's graph stays as it was. */
+  function revertLocalGraph(nextNodes: WorkflowNode[], nextEdges: WorkflowEdge[]): void {
+    nodes.value = nextNodes;
+    edges.value = nextEdges;
+  }
+
+  /** A late joiner adopting the room's unsaved draft. */
+  function replaceGraphFromPeer(nextNodes: WorkflowNode[], nextEdges: WorkflowEdge[]): void {
+    nodes.value = nextNodes;
+    edges.value = nextEdges;
+    hasUnsavedChanges.value = true;
+    history.value = [
+      {
+        nodes: JSON.parse(JSON.stringify(nextNodes)),
+        edges: JSON.parse(JSON.stringify(nextEdges)),
+      },
+    ];
+    historyIndex.value = 0;
+  }
+
+  /** A peer saved the shared draft. `matchesLocal` is null when the save carried no hash. */
+  function adoptPeerSave(updatedAt: string | null, matchesLocal: boolean | null): void {
+    if (updatedAt) workflowLoadedAt.value = updatedAt;
+    if (matchesLocal === true) hasUnsavedChanges.value = false;
+  }
+
+  /** Re-read settings after a peer's save; nodes and edges stay live. */
+  async function refreshWorkflowSettings(): Promise<void> {
+    const wf = currentWorkflow.value;
+    if (!wf) return;
+    try {
+      const fresh = await workflowApi.get(wf.id);
+      if (currentWorkflow.value?.id !== fresh.id) return;
+      currentWorkflow.value = { ...fresh, nodes: nodes.value, edges: edges.value };
+    } catch {
+      // Keep the settings shown; the next save or reload brings them in.
+    }
+  }
+
+  /** Someone saved outside the canvas while this tab has unsaved edits. */
+  function openExternalSaveConflict(updatedAt: string | null): void {
+    staleSaveMode.value = "overwrite";
+    staleSaveServerUpdatedAt.value = updatedAt;
+    staleSaveDialogOpen.value = true;
+  }
+
   async function updateMetadata(name: string, description: string | null): Promise<void> {
     if (!currentWorkflow.value) return;
 
@@ -845,7 +933,11 @@ export const useWorkflowStore = defineStore("workflow", () => {
     currentWorkflow.value = { ...currentWorkflow.value, name, description };
 
     try {
-      const updated = await workflowApi.update(currentWorkflow.value.id, { name, description });
+      const updated = await workflowApi.update(
+        currentWorkflow.value.id,
+        { name, description },
+        collabHooks?.saveHeaders("metadata"),
+      );
       currentWorkflow.value = updated;
     } catch {
       currentWorkflow.value = { ...currentWorkflow.value, name: previousName, description: previousDescription };
@@ -1482,7 +1574,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
     targetNodeId?: string,
   ): Promise<void> {
     const wf = currentWorkflow.value;
-    if (!wf || isExecuting.value) return;
+    if (!wf || isExecuting.value || collabHooks?.isSpectating()) return;
     runUntilNodeId.value = targetNodeId ?? null;
     fileUploadPollAbortController.value?.abort();
     fileUploadPollAbortController.value = null;
@@ -3652,6 +3744,15 @@ export const useWorkflowStore = defineStore("workflow", () => {
     currentWorkflow,
     nodes,
     edges,
+    graphLoadSeq,
+    currentExecutionId,
+    setCollabHooks,
+    applyRemoteGraph,
+    revertLocalGraph,
+    replaceGraphFromPeer,
+    adoptPeerSave,
+    refreshWorkflowSettings,
+    openExternalSaveConflict,
     selectedNodeId,
     selectedNodeIds,
     selectedNode,

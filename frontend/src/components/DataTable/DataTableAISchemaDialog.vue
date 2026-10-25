@@ -13,6 +13,7 @@ import Textarea from "@/components/ui/Textarea.vue";
 import { useAiDefaults } from "@/composables/useAiDefaults";
 import { credentialsApi, dataTablesApi } from "@/services/api";
 import { playSuccessSound } from "@/utils/audio";
+import { randomUUID } from "@/lib/uuid";
 
 const props = defineProps<{
   mode: "create" | "extend";
@@ -131,7 +132,7 @@ async function handleGenerate(): Promise<void> {
 
 function addColumn(): void {
   columns.value.push({
-    id: crypto.randomUUID(),
+    id: randomUUID(),
     name: "",
     type: "string",
     required: false,

@@ -40,6 +40,12 @@ const apiProxyOptions: ProxyOptions = {
         proxyReq.setHeader("X-Forwarded-For", req.headers["x-forwarded-for"]);
       }
     });
+    // changeOrigin rewrites Host, and the collab socket compares Origin with the host the
+    // browser used (a LAN address, say), so pass that host on.
+    proxy.on("proxyReqWs", (proxyReq: ClientRequest, req: IncomingMessage) => {
+      const host = req.headers["x-forwarded-host"] ?? req.headers.host;
+      if (host) proxyReq.setHeader("X-Forwarded-Host", host);
+    });
     proxy.on("proxyRes", (proxyRes: IncomingMessage, _req: IncomingMessage, _res: ServerResponse) => {
       delete proxyRes.headers["transfer-encoding"];
     });

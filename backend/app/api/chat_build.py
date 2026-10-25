@@ -45,6 +45,7 @@ from app.services.chat_build_mode import (
     build_mode_instructions,
     build_run_report,
 )
+from app.services.collab.saves import queue_collab_saved
 from app.services.credential_access import load_accessible_credential_ids
 from app.services.credential_catalog import (
     CredentialPromptMode,
@@ -486,6 +487,10 @@ class ChatBuildSession:
                 edges=edges,
             )
             self.db.add(workflow)
+        if existing is not None:
+            await queue_collab_saved(
+                self.db, workflow.id, self.user.id, session=None, state_hash=None
+            )
         await self.db.commit()
         await self.db.refresh(workflow)
         await announce_workflow_saved(workflow, self.user.id, created=existing is None)
@@ -668,6 +673,10 @@ class ChatBuildSession:
                 edges=edges,
             )
             self.db.add(workflow)
+        if existing is not None:
+            await queue_collab_saved(
+                self.db, workflow.id, self.user.id, session=None, state_hash=None
+            )
         await self.db.commit()
         await self.db.refresh(workflow)
         await announce_workflow_saved(workflow, self.user.id, created=existing is None)

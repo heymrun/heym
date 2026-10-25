@@ -7,6 +7,7 @@ import Button from "@/components/ui/Button.vue";
 import Dialog from "@/components/ui/Dialog.vue";
 import Input from "@/components/ui/Input.vue";
 import Label from "@/components/ui/Label.vue";
+import { randomUUID } from "@/lib/uuid";
 
 const props = defineProps<{ column: DataTableColumn | null }>();
 const emit = defineEmits<{ save: [column: DataTableColumn]; close: [] }>();
@@ -35,7 +36,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", handleEscape, true))
 function handleSave() {
   if (!name.value.trim()) return;
   emit("save", {
-    id: props.column?.id ?? crypto.randomUUID(),
+    id: props.column?.id ?? randomUUID(),
     name: name.value.trim(),
     type: type.value as DataTableColumn["type"],
     required: required.value,

@@ -11,6 +11,7 @@ import type {
 import type { DataTable, DataTableColumn } from "@/types/dataTable";
 
 import { responseDetail } from "@/lib/responseDetail";
+import { randomUUID } from "@/lib/uuid";
 
 /** The data table calls a question card makes: Heym's data tables API, or Heym Work's proxy to it. */
 export interface ClarifyDataTableSource {
@@ -48,7 +49,7 @@ export function selectedTableOption(
 
 function draftColumns(draft: ClarifyTableDraft): DataTableColumn[] {
   return draft.columns.map((column, order) => ({
-    id: crypto.randomUUID(),
+    id: randomUUID(),
     name: column.name,
     type: column.type,
     required: column.required ?? false,

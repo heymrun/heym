@@ -81,6 +81,7 @@ class ChatBuildSessionTests(unittest.IsolatedAsyncioTestCase):
         self.announce = AsyncMock()
         self.target: Workflow | None = None
         self.writable = True
+        self.queue_saved = AsyncMock()
         self.stack = ExitStack()
         for name, value in {
             "get_workflow_for_user": AsyncMock(side_effect=self._get_workflow),
@@ -91,6 +92,7 @@ class ChatBuildSessionTests(unittest.IsolatedAsyncioTestCase):
             "run_execute_workflow_tool": self.runner,
             "audit": self.audit,
             "announce_workflow_saved": self.announce,
+            "queue_collab_saved": self.queue_saved,
         }.items():
             self.stack.enter_context(patch.object(chat_build, name, value))
 
@@ -163,6 +165,25 @@ class ChatBuildSessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("version 4", outcome.summary)
         self.assertEqual(self.audit.call_args.kwargs["action"], "workflow.update")
         self.assertFalse(self.announce.call_args.kwargs["created"])
+
+    async def test_saving_an_existing_workflow_tells_its_canvas_room(self) -> None:
+        self.target = Workflow(
+            id=uuid.uuid4(), owner_id=self.user.id, name="Old", description="", nodes=[], edges=[]
+        )
+        session = self._session(target=self.target.id)
+
+        await session.call("save_workflow", {"workflow": DSL})
+
+        self.queue_saved.assert_awaited_once()
+        self.assertEqual(self.target.id, self.queue_saved.await_args.args[1])
+        self.assertIsNone(self.queue_saved.await_args.kwargs["session"])
+
+    async def test_a_new_workflow_has_no_canvas_room_to_tell(self) -> None:
+        session = self._session()
+
+        await session.call("save_workflow", {"workflow": DSL})
+
+        self.queue_saved.assert_not_awaited()
 
     async def test_save_refuses_a_read_only_target(self) -> None:
         self.target = Workflow(

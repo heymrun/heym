@@ -111,6 +111,7 @@ export const DOCS_MANIFEST: Record<string, DocCategory> = {
       { slug: "expression-evaluation-dialog", title: "Expression Evaluation Dialog" },
       { slug: "workflow-structure", title: "Workflow Structure" },
       { slug: "canvas-features", title: "Canvas Features" },
+      { slug: "canvas-collaboration", title: "Canvas Collaboration" },
       { slug: "keyboard-shortcuts", title: "Keyboard Shortcuts" },
       { slug: "ai-assistant", title: "AI Assistant" },
       { slug: "workflow-analysis", title: "Workflow Analysis" },

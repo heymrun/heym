@@ -39,6 +39,8 @@ import {
 } from "@/utils/parseClarify";
 import ExecutionTimeline from "@/components/Panels/ExecutionTimeline.vue";
 import NodeEditFocusCard from "@/features/assistant-node-edit/components/NodeEditFocusCard.vue";
+import { followedSignals, localFollowSignals } from "@/features/collab/followSignals";
+import { useAssistantMirror } from "@/features/collab/useAssistantMirror";
 import NodeEditQuickActions from "@/features/assistant-node-edit/components/NodeEditQuickActions.vue";
 import {
   mergeEditedNodeData,
@@ -97,6 +99,7 @@ import {
   sanitizeGeneratedDataTableFields,
   withCreatedDataTables,
 } from "@/utils/generatedDataTableFields";
+import { randomUUID } from "@/lib/uuid";
 
 const { fitView, getNodes, updateNodeInternals } = useVueFlow();
 
@@ -678,6 +681,20 @@ function toggleCollapse(): void {
   workflowStore.setDebugPanelHeight(panelHeight.value);
   setTimeout(() => fitView({ padding: 0.1 }), 300);
 }
+
+watch(isCollapsed, (collapsed): void => {
+  localFollowSignals.debugOpen = !collapsed;
+}, { immediate: true });
+
+watch(
+  () => followedSignals.value?.debugOpen,
+  (open): void => {
+    if (open === undefined || open === !isCollapsed.value) return;
+    panelHeight.value = open ? maxHeight : collapsedHeight;
+    isCollapsed.value = !open;
+    workflowStore.setDebugPanelHeight(panelHeight.value);
+  },
+);
 
 function clearExecutionLog(): void {
   workflowStore.clearExecution();
@@ -1561,7 +1578,7 @@ const aiModelOptions = computed<SelectOption[]>(() =>
 );
 
 const aiMessages = ref<ChatMessage[]>([]);
-const aiConversationId = ref(crypto.randomUUID());
+const aiConversationId = ref(randomUUID());
 const aiInputMessage = ref("");
 const aiMessagesContainer = ref<HTMLDivElement | null>(null);
 const aiTextareaRef = ref<HTMLTextAreaElement | null>(null);
@@ -1620,15 +1637,28 @@ const currentWorkflowContext = computed(() => {
 });
 
 /** Messages to draw; a reply that has nothing to show yet stays hidden behind the thinking indicator. */
-const renderedAiMessages = computed<ChatMessage[]>(() =>
-  aiMessages.value.filter((msg) =>
+// Canvas collaboration: while following someone, their assistant transcript is shown read-only.
+const {
+  mirrored: mirroredAssistant,
+  transcript: mirroredTranscript,
+  author: mirrorAuthor,
+} = useAssistantMirror({
+  open: aiPanelOpen,
+  mode: canvasMode,
+  draft: aiInputMessage,
+  messages: aiMessages,
+});
+
+const renderedAiMessages = computed<ChatMessage[]>(() => {
+  if (mirroredAssistant.value) return mirroredTranscript.value.map((msg) => ({ ...msg }));
+  return aiMessages.value.filter((msg) =>
     msg.role !== "assistant"
     || msg.content.length > 0
     || Boolean(msg.yoloSteps?.length)
     || Boolean(msg.yoloInputs)
     || Boolean(msg.clarify),
-  ),
-);
+  );
+});
 
 const conversationHistory = computed(() => {
   return aiMessages.value
@@ -2856,7 +2886,7 @@ function clearAiChat(): void {
   yoloLoop.reset();
   selectedNodeQuickAction.value = null;
   aiMessages.value = [];
-  aiConversationId.value = crypto.randomUUID();
+  aiConversationId.value = randomUUID();
 }
 
 function handleAiKeydown(event: KeyboardEvent): void {
@@ -3897,6 +3927,7 @@ function renderContent(content: string): string {
       <div
         v-if="aiPanelOpen"
         ref="aiPanelRef"
+        data-collab-region="assistant"
         class="ai-panel"
         :class="{
           'ai-panel-mobile-sheet': props.mobileAiSheet,
@@ -4047,7 +4078,7 @@ function renderContent(content: string): string {
           />
 
           <div
-            v-if="aiMessages.length === 0"
+            v-if="renderedAiMessages.length === 0"
             :class="['empty-state', workflowStore.aiFocusNode && 'empty-state-node']"
           >
             <Bot
@@ -4139,9 +4170,9 @@ function renderContent(content: string): string {
             </div>
             <UserAvatar
               v-if="msg.role === 'user' && msg.kind !== 'yolo-report'"
-              :user-id="authStore.user?.id"
-              :name="authStore.user?.name"
-              :email="authStore.user?.email"
+              :user-id="mirrorAuthor ? mirrorAuthor.userId : authStore.user?.id"
+              :name="mirrorAuthor ? mirrorAuthor.name : authStore.user?.name"
+              :email="mirrorAuthor ? undefined : authStore.user?.email"
               class="ai-message-avatar bg-muted text-xs font-semibold text-muted-foreground"
             />
           </div>
@@ -4210,8 +4241,8 @@ function renderContent(content: string): string {
           <textarea
             ref="aiTextareaRef"
             v-model="aiInputMessage"
-            :disabled="aiStreaming || yoloLoopActive || !selectedCredentialId || !selectedModel"
-            :placeholder="workflowStore.aiFocusNode
+            :disabled="aiStreaming || yoloLoopActive || !selectedCredentialId || !selectedModel || Boolean(mirroredAssistant)"
+            :placeholder="mirroredAssistant ? 'Showing the assistant of the person you follow' : workflowStore.aiFocusNode
               ? (canvasMode === 'ask' ? 'Ask about this node...' : 'Describe what to change...')
               : (canvasMode === 'ask' ? 'Ask a question...' : 'What do you want to automate...')"
             class="ai-textarea"
@@ -4230,6 +4261,7 @@ function renderContent(content: string): string {
               class="ai-btn-secondary"
               :disabled="aiStreaming || yoloLoopActive || isFixingTranscription || !selectedCredentialId || !selectedModel"
               :title="isListening ? 'Stop voice input' : isFixingTranscription ? 'Fixing...' : 'Voice input'"
+              data-collab-no-mirror
               @click="toggleSpeechInput"
             >
               <Loader2

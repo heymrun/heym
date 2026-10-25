@@ -204,7 +204,7 @@ function closeDialog(): void {
   isOpen.value = false;
 }
 
-defineExpose({ openDialog, closeDialog });
+defineExpose({ openDialog, closeDialog, isOpen });
 </script>
 
 <template>

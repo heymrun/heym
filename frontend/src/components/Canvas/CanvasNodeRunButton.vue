@@ -63,6 +63,7 @@ async function run(): Promise<void> {
   transition: opacity 120ms ease;
 }
 .vue-flow__node:hover .canvas-node-run,
+.vue-flow__node[data-collab-hover] .canvas-node-run,
 .canvas-node-run:focus-within {
   opacity: 1;
   pointer-events: auto;
