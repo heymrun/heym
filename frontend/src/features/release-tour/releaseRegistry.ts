@@ -17,6 +17,53 @@ import type { ReleaseEntry } from "@/features/release-tour/releaseTour.types";
  */
 export const RELEASE_REGISTRY: ReleaseEntry[] = [
   {
+    releaseId: "2026.22",
+    publishedAt: new Date("2026-10-26T12:00:00Z"),
+    headline: "Limit how many runs of a workflow execute at once",
+    releaseTour: {
+      label: "New in Heym",
+      introTitle: "New in this release",
+      introDescription:
+        "A quick look at what changed since your last update. Takes about a minute.",
+      tourEnabled: false,
+      sectionOrder: ["concurrency-limit"],
+    },
+    sections: [
+      {
+        id: "concurrency-limit",
+        title: "Run a workflow one at a time, or N at a time",
+        publishedAt: new Date("2026-10-26T12:00:00Z"),
+        blocks: [
+          {
+            type: "prose",
+            markdown:
+              "Turn on **Concurrency limit** in the workflow's **Properties** panel and enter how many production runs may execute at once. Webhook, cron, MCP, Portal and trigger runs above the limit wait in a first-in, first-out queue. Editor test runs always start right away.",
+          },
+          {
+            type: "prose",
+            markdown:
+              "A webhook call that has to wait gets **202 Accepted** at once, with an `execution_id`, a status URL and its place in the queue. Poll the status URL with the same credentials until the result arrives. MCP clients get the same answer and poll with **heym_execution_status**. Optional **Max queue size** and **Max wait** fields bound the queue.",
+          },
+        ],
+        tour: {
+          description:
+            "Cap concurrent runs per workflow. Extra runs wait in order, and callers get an execution id to collect the result.",
+          useCases: [
+            "Process webhooks one at a time so two runs never update the same record",
+            "Keep a rate-limited API from seeing more than two calls at once",
+            "Let an MCP client queue work and pick up the result later",
+          ],
+          tourVisual: "concurrency-limit",
+          docTarget: {
+            categoryId: "reference",
+            slug: "webhooks",
+            title: "Webhooks",
+          },
+        },
+      },
+    ],
+  },
+  {
     releaseId: "2026.21",
     publishedAt: new Date("2026-10-22T12:00:00Z"),
     headline: "Change one node with AI, and sign in to Codex with a short code",
@@ -174,57 +221,6 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
             categoryId: "nodes",
             slug: "google-sheets-trigger-node",
             title: "Google Sheets Trigger",
-          },
-        },
-      },
-    ],
-  },
-  {
-    releaseId: "2026.19",
-    publishedAt: new Date("2026-10-10T18:00:00Z"),
-    headline: "Heym Work for business teams, and skill zips in Chat",
-    releaseTour: {
-      label: "New in Heym",
-      introTitle: "New in this release",
-      introDescription:
-        "A quick look at what changed since your last update. Takes about a minute.",
-      tourEnabled: true,
-      sectionOrder: ["heym-work"],
-    },
-    sections: [
-      {
-        id: "heym-work",
-        title: "Heym Work, the business layer on top of Heym",
-        publishedAt: new Date("2026-10-11T12:00:00Z"),
-        blocks: [
-          {
-            type: "prose",
-            markdown:
-              "**Heym Work** is a second interface for business teams. People describe a job in their own words, answer a few questions, and get a workflow that Heym has built and tested. They work from pages built for them, answer reviews, and see every run with a name on it, while Heym runs each job in the background.",
-          },
-          {
-            type: "prose",
-            markdown:
-              "Heym admins connect it in **Settings, Heym Work**: enter Heym Work's address, generate a key, and enable the connection. People sign in with the single sign-on Heym already uses. Heym Work is licensed separately; see heym.run/enterprise.",
-          },
-        ],
-        tour: {
-          description:
-            "Business teams describe a job, answer a few questions and get a tested workflow, with Heym running it.",
-          useCases: [
-            "Give a legal, finance or operations team its own place to automate work",
-            "Connect it from Settings, Heym Work with an address and a key",
-            "Keep single sign-on, roles and approvals for every team",
-          ],
-          tourVisual: "heym-work",
-          docTarget: {
-            categoryId: "reference",
-            slug: "heym-work",
-            title: "Heym Work",
-          },
-          externalLink: {
-            url: "/enterprise",
-            title: "Learn more on heym.run",
           },
         },
       },
