@@ -173,9 +173,23 @@ class ExecutionRecoveryService:
             workflow_exists=workflow is not None,
         )
         if action == "rerun":
-            await self._rerun(orphan, workflow)
+            try:
+                await self._rerun(orphan, workflow)
+            finally:
+                await self._release_concurrency_slot(orphan.execution_id)
             return
-        await self._finalize(orphan=orphan, workflow=workflow, status=action)
+        if await self._finalize(orphan=orphan, workflow=workflow, status=action):
+            await self._release_concurrency_slot(orphan.execution_id)
+
+    @staticmethod
+    async def _release_concurrency_slot(execution_id: uuid.UUID) -> None:
+        """A recovered or skipped run is over either way; its slot goes to the next in line."""
+        from app.services import workflow_concurrency
+
+        try:
+            await workflow_concurrency.release(execution_id)
+        except Exception:
+            logger.exception("Could not release the concurrency slot of %s", execution_id)
 
     async def _load_workflow(self, workflow_id: uuid.UUID):
         from sqlalchemy import select
@@ -187,8 +201,11 @@ class ExecutionRecoveryService:
             result = await session.execute(select(Workflow).where(Workflow.id == workflow_id))
             return result.scalar_one_or_none()
 
-    async def _finalize(self, *, orphan: ClaimedOrphan, workflow, status: str) -> None:
-        """Write a terminal ExecutionHistory entry and drop the active row."""
+    async def _finalize(self, *, orphan: ClaimedOrphan, workflow, status: str) -> bool:
+        """Write a terminal ExecutionHistory entry and drop the active row.
+
+        Returns False when another process took the run over, so nothing was finalized.
+        """
         from datetime import datetime, timezone
 
         from sqlalchemy import delete, select, update
@@ -234,7 +251,7 @@ class ExecutionRecoveryService:
                         getattr(active_row, "worker_id", None),
                         getattr(queue_row, "claimed_by_process", None),
                     )
-                    return
+                    return False
 
             # A paused run already published history under this id, and its finish write
             # can be dropped by the registry, leaving a claimable active row. Inserting
@@ -319,6 +336,7 @@ class ExecutionRecoveryService:
             status,
             orphan.workflow_id,
         )
+        return True
 
     async def _rerun(self, orphan: ClaimedOrphan, workflow) -> None:
         """Re-run the workflow from scratch with the original inputs."""
