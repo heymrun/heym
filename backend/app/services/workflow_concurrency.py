@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import and_, delete, exists, func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import StatementError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.analytics import upsert_workflow_analytics_snapshot
 from app.config import settings
 from app.db.models import (
+    ActiveWorkflowExecution,
     ExecutionHistory,
     Workflow,
     WorkflowConcurrencySlot,
@@ -36,6 +37,7 @@ from app.db.session import async_session_maker
 from app.services.cluster import identity, run_queue
 from app.services.cluster.attribution import attribution_fields
 from app.services.secret_tokens import hash_secret
+from app.services.workflow_access import workflow_access_clause
 
 logger = logging.getLogger("concurrency")
 
@@ -471,3 +473,281 @@ async def promote(workflow_id: uuid.UUID) -> int:
         promoted = await _promote_locked(db, workflow_id)
         await db.commit()
     return promoted
+
+
+@dataclass(frozen=True)
+class HeldRunRecord:
+    execution_id: uuid.UUID
+    workflow_id: uuid.UUID
+    workflow_name: str
+    enqueued_at: datetime
+    inputs: dict
+    position: int
+    size: int
+
+
+async def cancel_held(workflow_id: uuid.UUID, execution_id: uuid.UUID) -> bool:
+    """Cancel a run that is still waiting. False when it is not held (or not this workflow's)."""
+    async with async_session_maker() as db:
+        await _lock(db, workflow_id)
+        row = (
+            await db.execute(
+                select(WorkflowRunQueue).where(
+                    WorkflowRunQueue.workflow_id == workflow_id,
+                    WorkflowRunQueue.execution_id == execution_id,
+                    WorkflowRunQueue.status == run_queue.STATUS_HELD,
+                )
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            await db.commit()
+            return False
+        await _close_held_locked(
+            db,
+            row,
+            status=run_queue.STATUS_CANCELLED,
+            message=CANCELLED_MESSAGE,
+            now=datetime.now(timezone.utc),
+        )
+        await db.commit()
+        return True
+
+
+async def record_queue_full(
+    *, workflow_id: uuid.UUID, execution_id: uuid.UUID, inputs: dict, trigger_source: str | None
+) -> None:
+    """A history row for a run the full queue turned away, like rate limiting writes."""
+    async with async_session_maker() as db:
+        workflow = await db.get(Workflow, workflow_id)
+        if workflow is None:
+            return
+        db.add(
+            ExecutionHistory(
+                id=execution_id,
+                workflow_id=workflow_id,
+                inputs=inputs,
+                outputs={"error": QUEUE_FULL_MESSAGE},
+                node_results=[],
+                status=HISTORY_STATUS_QUEUE_FULL,
+                execution_time_ms=0.0,
+                trigger_source=trigger_source,
+            )
+        )
+        await upsert_workflow_analytics_snapshot(
+            db,
+            workflow_id=workflow_id,
+            owner_id=workflow.owner_id,
+            workflow_name_snapshot=workflow.name,
+            status=HISTORY_STATUS_QUEUE_FULL,
+            execution_time_ms=0.0,
+        )
+        await db.commit()
+
+
+def _stale_slot_clause(cutoff: datetime) -> Any:
+    """A slot that nothing is executing: no active run and no queued, claimable row."""
+    return and_(
+        WorkflowConcurrencySlot.acquired_at < cutoff,
+        ~exists().where(
+            ActiveWorkflowExecution.execution_id == WorkflowConcurrencySlot.execution_id
+        ),
+        ~exists().where(
+            WorkflowRunQueue.execution_id == WorkflowConcurrencySlot.execution_id,
+            WorkflowRunQueue.status.in_(IN_FLIGHT_STATUSES),
+        ),
+    )
+
+
+async def _maintain_workflow(workflow_id: uuid.UUID, *, now: datetime, cutoff: datetime) -> None:
+    async with async_session_maker() as db:
+        await _lock(db, workflow_id)
+        reclaimed = (
+            (
+                await db.execute(
+                    delete(WorkflowConcurrencySlot)
+                    .where(
+                        WorkflowConcurrencySlot.workflow_id == workflow_id,
+                        _stale_slot_clause(cutoff),
+                    )
+                    .returning(WorkflowConcurrencySlot.execution_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for execution_id in reclaimed:
+            logger.warning(
+                "Reclaimed the concurrency slot of run %s: nothing is running it", execution_id
+            )
+        overdue = (
+            (
+                await db.execute(
+                    select(WorkflowRunQueue).where(
+                        WorkflowRunQueue.workflow_id == workflow_id,
+                        WorkflowRunQueue.status == run_queue.STATUS_HELD,
+                        WorkflowRunQueue.expires_at.is_not(None),
+                        WorkflowRunQueue.expires_at <= now,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for row in overdue:
+            await _close_held_locked(
+                db, row, status=run_queue.STATUS_EXPIRED, message=EXPIRED_MESSAGE, now=now
+            )
+        await _promote_locked(db, workflow_id)
+        await db.commit()
+
+
+async def maintain() -> None:
+    """Leader pass: retire overdue held runs, reclaim dead slots, start whoever fits."""
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(seconds=STALE_SLOT_GRACE_SECONDS)
+    async with async_session_maker() as db:
+        held = select(WorkflowRunQueue.workflow_id).where(
+            WorkflowRunQueue.status == run_queue.STATUS_HELD
+        )
+        stale = select(WorkflowConcurrencySlot.workflow_id).where(_stale_slot_clause(cutoff))
+        workflow_ids = set((await db.execute(held.union(stale))).scalars().all())
+    for workflow_id in workflow_ids:
+        try:
+            await _maintain_workflow(workflow_id, now=now, cutoff=cutoff)
+        except Exception:
+            logger.exception("Concurrency maintenance failed for workflow %s", workflow_id)
+
+
+async def _queue_info(db: AsyncSession, workflow_id: uuid.UUID, concurrency_seq: int) -> QueueInfo:
+    cfg = await _settings(db, workflow_id)
+    position = int(
+        (
+            await db.execute(
+                select(func.count())
+                .select_from(WorkflowRunQueue)
+                .where(
+                    WorkflowRunQueue.workflow_id == workflow_id,
+                    WorkflowRunQueue.status == run_queue.STATUS_HELD,
+                    WorkflowRunQueue.concurrency_seq <= concurrency_seq,
+                )
+            )
+        ).scalar_one()
+    )
+    return QueueInfo(
+        position=position,
+        size=await _waiting(db, workflow_id),
+        running=await _running(db, workflow_id),
+        limit=cfg.limit if cfg else None,
+    )
+
+
+async def build_status_body(
+    workflow_id: uuid.UUID, execution_id: uuid.UUID
+) -> dict[str, Any] | None:
+    """The status URL's body: the queue row when there is one, else the history row."""
+    base: dict[str, Any] = {
+        "execution_id": str(execution_id),
+        "workflow_id": str(workflow_id),
+        "queue": None,
+    }
+    async with async_session_maker() as db:
+        row = (
+            await db.execute(
+                select(WorkflowRunQueue).where(
+                    WorkflowRunQueue.workflow_id == workflow_id,
+                    WorkflowRunQueue.execution_id == execution_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if row is not None:
+            body = {
+                **base,
+                **status_view(row_status=row.status, result=row.result, error=row.error),
+            }
+            if row.status == run_queue.STATUS_HELD and row.concurrency_seq is not None:
+                info = await _queue_info(db, workflow_id, row.concurrency_seq)
+                body["queue"] = info.as_dict()
+            return body
+        history = (
+            await db.execute(
+                select(
+                    ExecutionHistory.status,
+                    ExecutionHistory.outputs,
+                    ExecutionHistory.execution_time_ms,
+                ).where(
+                    ExecutionHistory.id == execution_id,
+                    ExecutionHistory.workflow_id == workflow_id,
+                )
+            )
+        ).first()
+    if history is None:
+        return None
+    return {
+        **base,
+        **history_view(status=history[0], outputs=history[1], execution_time_ms=history[2]),
+    }
+
+
+async def status_token_hash_for(workflow_id: uuid.UUID, execution_id: uuid.UUID) -> str | None:
+    async with async_session_maker() as db:
+        return (
+            await db.execute(
+                select(WorkflowRunQueue.status_token_hash).where(
+                    WorkflowRunQueue.workflow_id == workflow_id,
+                    WorkflowRunQueue.execution_id == execution_id,
+                )
+            )
+        ).scalar_one_or_none()
+
+
+async def list_held_runs_for_user(db: AsyncSession, user_id: uuid.UUID) -> list[HeldRunRecord]:
+    """Held runs of every workflow the user can reach, in queue order, with positions."""
+    rows = (
+        await db.execute(
+            select(
+                WorkflowRunQueue.execution_id,
+                WorkflowRunQueue.workflow_id,
+                Workflow.name,
+                WorkflowRunQueue.enqueued_at,
+                WorkflowRunQueue.inputs,
+            )
+            .join(Workflow, Workflow.id == WorkflowRunQueue.workflow_id)
+            .where(
+                WorkflowRunQueue.status == run_queue.STATUS_HELD,
+                workflow_access_clause(user_id),
+            )
+            .order_by(WorkflowRunQueue.workflow_id, WorkflowRunQueue.concurrency_seq)
+        )
+    ).all()
+    sizes: dict[uuid.UUID, int] = {}
+    for row in rows:
+        sizes[row[1]] = sizes.get(row[1], 0) + 1
+    seen: dict[uuid.UUID, int] = {}
+    records: list[HeldRunRecord] = []
+    for execution_id, workflow_id, name, enqueued_at, inputs in rows:
+        seen[workflow_id] = seen.get(workflow_id, 0) + 1
+        records.append(
+            HeldRunRecord(
+                execution_id=execution_id,
+                workflow_id=workflow_id,
+                workflow_name=name,
+                enqueued_at=enqueued_at,
+                inputs=inputs or {},
+                position=seen[workflow_id],
+                size=sizes[workflow_id],
+            )
+        )
+    return records
+
+
+def holds_slot(row: Any) -> bool:
+    """Whether a claimed queue row must give a slot back when it finishes."""
+    options = getattr(row, "run_options", None) or {}
+    return getattr(row, "concurrency_seq", None) is not None or bool(
+        options.get("holds_concurrency_slot")
+    )
+
+
+def is_concurrency_row(row: Any) -> bool:
+    """A row that waited for a slot: its caller may be gone, so the worker finishes it."""
+    return getattr(row, "concurrency_seq", None) is not None
