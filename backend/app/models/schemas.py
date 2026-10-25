@@ -527,6 +527,25 @@ class HistoryListResponse(BaseModel):
     items: list[ExecutionHistoryListResponse]
 
 
+class WorkflowExecutionQueueInfo(BaseModel):
+    position: int
+    size: int
+    running: int
+    limit: int | None
+
+
+class WorkflowExecutionStatusResponse(BaseModel):
+    """One run's state for callers that got a 202, or an MCP client polling."""
+
+    execution_id: str
+    workflow_id: str
+    status: str
+    queue: WorkflowExecutionQueueInfo | None = None
+    outputs: Any | None = None
+    error: str | None = None
+    execution_time_ms: float | None = None
+
+
 class ActiveExecutionItem(BaseModel):
     """Single currently-running or pending-review execution visible to the requesting user."""
 

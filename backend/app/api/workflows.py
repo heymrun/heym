@@ -59,6 +59,7 @@ from app.models.schemas import (
     RevertVersionRequest,
     WorkflowCreate,
     WorkflowExecuteResponse,
+    WorkflowExecutionStatusResponse,
     WorkflowListResponse,
     WorkflowListWithInputsResponse,
     WorkflowResponse,
@@ -1244,6 +1245,40 @@ async def list_active_workflow_executions(
     """Return running and pending-review executions for the authenticated user."""
 
     return await collect_active_executions_for_user(db, current_user.id)
+
+
+@router.get(
+    "/{workflow_id}/executions/{execution_id}/status",
+    response_model=WorkflowExecutionStatusResponse,
+)
+async def get_workflow_execution_status(
+    workflow_id: uuid.UUID,
+    execution_id: uuid.UUID,
+    request: Request,
+    current_user: User | None = Depends(get_current_user_optional),
+    db: AsyncSession = Depends(get_db),
+) -> WorkflowExecutionStatusResponse:
+    """Status of one run, read with the credential that started it.
+
+    An anonymous workflow has no credential to check, so its queued runs are read with
+    the run token the 202 returned, from a header only. Anything that does not match
+    is a 404, so the response never tells a guesser that an execution exists.
+    """
+    not_found = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Execution not found")
+    workflow = await db.get(Workflow, workflow_id)
+    if workflow is None:
+        raise not_found
+    if workflow.auth_type == WorkflowAuthType.anonymous:
+        stored_hash = await workflow_concurrency.status_token_hash_for(workflow_id, execution_id)
+        presented = request.headers.get(workflow_concurrency.RUN_TOKEN_HEADER)
+        if not workflow_concurrency.status_token_matches(stored_hash, presented):
+            raise not_found
+    else:
+        await validate_workflow_auth(workflow, request, current_user, db)
+    body = await workflow_concurrency.build_status_body(workflow_id, execution_id)
+    if body is None:
+        raise not_found
+    return WorkflowExecutionStatusResponse.model_validate(body)
 
 
 @router.get("/{workflow_id}/executions/{execution_id}/stream")
