@@ -46,6 +46,12 @@ export interface Workflow {
   error_workflow_id: string | null;
   minutes_saved_per_run: number | null;
   workflow_timeout_seconds: number | null;
+  /** Production runs allowed at once; null turns the limit off. */
+  concurrency_limit?: number | null;
+  /** Runs allowed to wait for a slot; null means no limit. */
+  concurrency_max_queue?: number | null;
+  /** Seconds a run may wait before it expires; null means no expiry. */
+  concurrency_max_wait_seconds?: number | null;
   /** Display name of the workflow owner; null when it cannot be resolved. */
   owner_name?: string | null;
   portal_enabled?: boolean;
@@ -1264,6 +1270,21 @@ export interface HistoryListResponse<T = AllExecutionHistoryEntryLight> {
   items: T[];
 }
 
+export interface WorkflowConcurrencyPatch {
+  concurrency_limit?: number | null;
+  concurrency_max_queue?: number | null;
+  concurrency_max_wait_seconds?: number | null;
+}
+
+/** The SSE `queued` event of a run waiting for a concurrency slot. */
+export interface QueuedRunEvent {
+  execution_id: string;
+  position: number;
+  size: number;
+  running: number;
+  limit: number | null;
+}
+
 export interface ActiveExecutionItem {
   execution_id: string;
   workflow_id: string;
@@ -1272,9 +1293,11 @@ export interface ActiveExecutionItem {
   inputs: Record<string, unknown>;
   running_node_ids: string[];
   node_results: NodeResult[];
-  /** running = live worker; pending = waiting on HITL / Codex review */
-  status?: "running" | "pending";
+  /** running = live worker; pending = waiting on HITL / Codex review; queued = waiting for a concurrency slot */
+  status?: "running" | "pending" | "queued";
   pending_kind?: "hitl" | "codex" | null;
+  queue_position?: number | null;
+  queue_size?: number | null;
 }
 
 export interface ServerExecutionHistory {

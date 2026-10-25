@@ -81,6 +81,7 @@ import type {
   InputField,
   LLMBatchProgressEvent,
   NodeResult,
+  QueuedRunEvent,
   ServerExecutionHistory,
   ExecutionToken,
   ExecutionTokenListItem,
@@ -264,6 +265,8 @@ export interface WorkflowExecuteOptions {
   triggerSource?: string;
   /** When false, request full JSON (node_results, etc.). Default API behavior is outputs-only (x-simple-response). */
   simpleResponse?: boolean;
+  /** Streaming only: the run is waiting for a concurrency slot (sent again when its place changes). */
+  onQueued?: (data: QueuedRunEvent) => void;
 }
 
 function buildWorkflowExecuteRequest(
@@ -617,6 +620,9 @@ export const workflowApi = {
         | "error_workflow_id"
         | "minutes_saved_per_run"
         | "workflow_timeout_seconds"
+        | "concurrency_limit"
+        | "concurrency_max_queue"
+        | "concurrency_max_wait_seconds"
       >
     > & {
       // Optimistic concurrency: the revision this edit is based on. The server answers 409 when
@@ -1062,7 +1068,15 @@ export const workflowApi = {
             if (line.startsWith("data: ")) {
               const data = JSON.parse(line.slice(6));
 
-              if (data.type === "execution_started") {
+              if (data.type === "queued") {
+                options?.onQueued?.({
+                  execution_id: data.execution_id,
+                  position: data.position,
+                  size: data.size,
+                  running: data.running,
+                  limit: data.limit ?? null,
+                });
+              } else if (data.type === "execution_started") {
                 onExecutionStarted({
                   execution_id: data.execution_id,
                   server_now_ms:
