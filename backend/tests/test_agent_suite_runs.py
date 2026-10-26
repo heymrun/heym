@@ -5,6 +5,7 @@ around it: which inputs each run gets, which agent traces it records, and that t
 report for a run reads only those traces.
 """
 
+import asyncio
 import json
 import unittest
 import uuid
@@ -16,10 +17,13 @@ from fastapi import HTTPException
 from sqlalchemy import delete
 
 from app.api.agent_suite_runs import (
+    cancel_agent_suite_run,
+    delete_agent_suite_run,
     execute_agent_suite_run,
     get_agent_suite_run,
     get_latest_agent_suite_run,
     get_run_inputs,
+    list_agent_suite_runs,
     start_agent_suite_run,
 )
 from app.api.agent_suites import get_agent_suite_report
@@ -28,9 +32,11 @@ from app.db.session import async_session_maker, engine
 from app.models.agent_suite_schemas import AgentSuiteRunCreate
 from app.services.agent_suite_inputs import (
     agent_trace_ids,
+    build_generation_prompt,
     parse_generated_inputs,
     unwrap_run_inputs,
 )
+from app.services.agent_suite_service import INTERRUPTED_ERROR
 
 AGENT_NODE = "agent-1"
 
@@ -62,6 +68,29 @@ class InputParsingTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             parse_generated_inputs('{"inputs": []}', ["text"], {}, 2)
 
+    def test_generation_prompt_carries_the_agent_and_the_example(self) -> None:
+        prompt = build_generation_prompt(
+            workflow_name="Weather",
+            fields=["city"],
+            example={"city": "Frankfurt"},
+            count=3,
+            agent_label="Forecaster",
+            agent_instructions="Report the weather for the given city.",
+            agent_message="$input.city",
+        )
+        self.assertIn("Report the weather for the given city.", prompt)
+        self.assertIn('{"city": "Frankfurt"}', prompt)
+        self.assertIn("$input.city", prompt)
+        self.assertIn("'Forecaster'", prompt)
+        self.assertIn("exactly these keys: city", prompt)
+
+    def test_generation_prompt_without_instructions_still_names_the_example(self) -> None:
+        prompt = build_generation_prompt(
+            workflow_name="Weather", fields=[], example={"city": "Paris"}, count=2
+        )
+        self.assertNotIn("system instructions", prompt)
+        self.assertIn('{"city": "Paris"}', prompt)
+
     def test_agent_trace_ids_read_the_agent_node_only(self) -> None:
         node_results = [
             {"node_id": "start", "metadata": {"trace_id": "x"}},
@@ -73,7 +102,9 @@ class InputParsingTests(unittest.TestCase):
         self.assertEqual(agent_trace_ids(None, AGENT_NODE), [])
 
 
-class RealPostgresAgentSuiteRunTests(unittest.IsolatedAsyncioTestCase):
+class _AgentSuiteRunFixture(unittest.IsolatedAsyncioTestCase):
+    """A suite on a workflow with traces, shared by the PostgreSQL test classes below."""
+
     async def asyncSetUp(self) -> None:
         await engine.dispose()
         self.owner_id = uuid.uuid4()
@@ -125,7 +156,17 @@ class RealPostgresAgentSuiteRunTests(unittest.IsolatedAsyncioTestCase):
                     id=self.workflow_id,
                     name="Support flow",
                     owner_id=self.owner_id,
-                    nodes=[{"id": AGENT_NODE, "type": "agent", "data": {"label": "Support"}}],
+                    nodes=[
+                        {
+                            "id": AGENT_NODE,
+                            "type": "agent",
+                            "data": {
+                                "label": "Support",
+                                "systemInstruction": "Answer order questions.",
+                                "userMessage": "$input.text",
+                            },
+                        }
+                    ],
                     edges=[],
                 )
             )
@@ -196,6 +237,8 @@ class RealPostgresAgentSuiteRunTests(unittest.IsolatedAsyncioTestCase):
                 )
         return started.id
 
+
+class RealPostgresAgentSuiteRunTests(_AgentSuiteRunFixture):
     async def test_run_inputs_come_from_the_previous_run(self) -> None:
         async with async_session_maker() as session:
             inputs = await get_run_inputs(self.suite_id, self.owner, session)
@@ -222,8 +265,8 @@ class RealPostgresAgentSuiteRunTests(unittest.IsolatedAsyncioTestCase):
             report = await get_agent_suite_report(self.suite_id, 10, run_id, self.owner, session)
         self.assertEqual(suite_run.status, "completed")
         self.assertEqual(
-            [result.trace_ids for result in suite_run.results],
-            [[str(trace_id)] for trace_id in self.run_trace_ids],
+            sorted(result.trace_ids[0] for result in suite_run.results),
+            sorted(str(trace_id) for trace_id in self.run_trace_ids),
         )
         self.assertEqual(latest.id, run_id)
         self.assertEqual(sorted(run.trace_id for run in report.runs), sorted(self.run_trace_ids))
@@ -237,7 +280,7 @@ class RealPostgresAgentSuiteRunTests(unittest.IsolatedAsyncioTestCase):
         with patch("app.api.agent_suite_runs.run_execute_workflow_tool", executor):
             await execute_agent_suite_run(run_id, self.owner_id, "http://test", None, None)
         self.assertEqual(
-            [call.args[3] for call in executor.await_args_list], [{"text": "one"}, {"text": "two"}]
+            sorted(call.args[3]["text"] for call in executor.await_args_list), ["one", "two"]
         )
         async with async_session_maker() as session:
             suite_run = await get_agent_suite_run(run_id, self.owner, session)
@@ -279,12 +322,13 @@ class RealPostgresAgentSuiteRunTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(generator.await_args.kwargs["example"], {"text": "example"})
         self.assertEqual(generator.await_args.kwargs["session_id"], str(run_id))
+        # The model is told what the agent does, not only shown the example.
         self.assertEqual(
-            [call.args[3] for call in executor.await_args_list],
-            [
-                {"text": "one"},
-                {"text": "two"},
-            ],
+            generator.await_args.kwargs["agent_instructions"], "Answer order questions."
+        )
+        self.assertEqual(generator.await_args.kwargs["agent_message"], "$input.text")
+        self.assertEqual(
+            sorted(call.args[3]["text"] for call in executor.await_args_list), ["one", "two"]
         )
 
     async def test_a_failed_generation_fails_the_run(self) -> None:
@@ -332,6 +376,130 @@ class RealPostgresAgentSuiteRunTests(unittest.IsolatedAsyncioTestCase):
                     await call
                 self.assertEqual(ctx.exception.status_code, 404)
         # Nothing ran for the outsider, and the owner's run row is untouched.
+        async with async_session_maker() as session:
+            suite_run = await session.get(AgentSuiteRun, run_id)
+        self.assertEqual(suite_run.status, "running")
+
+
+class RealPostgresAgentSuiteRunControlTests(_AgentSuiteRunFixture):
+    """Parallelism, Stop, interrupted runs and the run history."""
+
+    async def test_runs_go_four_at_a_time(self) -> None:
+        run_id = await self._start(AgentSuiteRunCreate(count=7, inputs={"text": "hi"}))
+        running = 0
+        peak = 0
+
+        async def run(*_args: object, **_kwargs: object) -> str:
+            nonlocal running, peak
+            running += 1
+            peak = max(peak, running)
+            await asyncio.sleep(0.05)
+            running -= 1
+            return self._execution_result(uuid.uuid4())
+
+        with patch(
+            "app.api.agent_suite_runs.run_execute_workflow_tool", AsyncMock(side_effect=run)
+        ):
+            await execute_agent_suite_run(run_id, self.owner_id, "http://test", None, None)
+        self.assertEqual(peak, 4)
+        async with async_session_maker() as session:
+            suite_run = await get_agent_suite_run(run_id, self.owner, session)
+        self.assertEqual((suite_run.status, len(suite_run.results)), ("completed", 7))
+
+    async def test_stop_cancels_the_runs_in_flight_and_starts_no_more(self) -> None:
+        run_id = await self._start(AgentSuiteRunCreate(count=6, inputs={"text": "hi"}))
+        seen_events = []
+
+        async def run(*args: object, **_kwargs: object) -> str:
+            cancel_event = args[5]
+            seen_events.append(cancel_event)
+            for _ in range(250):
+                if cancel_event.is_set():
+                    return json.dumps({"status": "cancelled", "error": "Execution cancelled"})
+                await asyncio.sleep(0.02)
+            return self._execution_result(uuid.uuid4())
+
+        executor = AsyncMock(side_effect=run)
+        with (
+            patch("app.api.agent_suite_runs.WATCH_SECONDS", 0.05),
+            patch("app.api.agent_suite_runs.run_execute_workflow_tool", executor),
+        ):
+            runner = asyncio.create_task(
+                execute_agent_suite_run(run_id, self.owner_id, "http://test", None, None)
+            )
+            await asyncio.sleep(0.3)
+            async with async_session_maker() as session:
+                stopped = await cancel_agent_suite_run(run_id, self.owner, session)
+            self.assertEqual(stopped.status, "cancelled")
+            await asyncio.wait_for(runner, timeout=5)
+
+        self.assertEqual(executor.await_count, 4)
+        self.assertTrue(all(event.is_set() for event in seen_events))
+        async with async_session_maker() as session:
+            suite_run = await get_agent_suite_run(run_id, self.owner, session)
+        self.assertEqual(suite_run.status, "cancelled")
+        self.assertEqual({result.status for result in suite_run.results}, {"cancelled"})
+
+    async def test_a_run_whose_heartbeat_went_quiet_is_closed_as_interrupted(self) -> None:
+        stale_id = uuid.uuid4()
+        async with async_session_maker() as session:
+            session.add(
+                AgentSuiteRun(
+                    id=stale_id,
+                    suite_id=self.suite_id,
+                    status="running",
+                    requested_count=3,
+                    generate_inputs=False,
+                    inputs=[],
+                    results=[],
+                    heartbeat_at=datetime.now(timezone.utc) - timedelta(minutes=5),
+                )
+            )
+            await session.commit()
+        async with async_session_maker() as session:
+            suite_run = await get_agent_suite_run(stale_id, self.owner, session)
+        self.assertEqual((suite_run.status, suite_run.error), ("failed", INTERRUPTED_ERROR))
+        # It no longer blocks a new run of the suite.
+        self.assertIsNotNone(await self._start(AgentSuiteRunCreate(count=1)))
+
+    async def test_a_live_heartbeat_keeps_the_run_running(self) -> None:
+        run_id = await self._start(AgentSuiteRunCreate(count=1))
+        async with async_session_maker() as session:
+            row = await session.get(AgentSuiteRun, run_id)
+            row.heartbeat_at = datetime.now(timezone.utc)
+            await session.commit()
+        async with async_session_maker() as session:
+            suite_run = await get_agent_suite_run(run_id, self.owner, session)
+        self.assertEqual(suite_run.status, "running")
+
+    async def test_runs_are_listed_newest_first_and_deleted_once_stopped(self) -> None:
+        first = await self._start(AgentSuiteRunCreate(count=2))
+        async with async_session_maker() as session:
+            await cancel_agent_suite_run(first, self.owner, session)
+        second = await self._start(AgentSuiteRunCreate(count=1))
+        async with async_session_maker() as session:
+            listed = await list_agent_suite_runs(self.suite_id, self.owner, session)
+            with self.assertRaises(HTTPException) as busy:
+                await delete_agent_suite_run(second, self.owner, session)
+        self.assertEqual([item.id for item in listed], [second, first])
+        self.assertEqual([item.status for item in listed], ["running", "cancelled"])
+        self.assertEqual(busy.exception.status_code, 409)
+        async with async_session_maker() as session:
+            await delete_agent_suite_run(first, self.owner, session)
+            listed = await list_agent_suite_runs(self.suite_id, self.owner, session)
+        self.assertEqual([item.id for item in listed], [second])
+
+    async def test_another_user_cannot_list_stop_or_delete_runs(self) -> None:
+        run_id = await self._start(AgentSuiteRunCreate(count=1))
+        async with async_session_maker() as session:
+            for call in (
+                list_agent_suite_runs(self.suite_id, self.outsider, session),
+                cancel_agent_suite_run(run_id, self.outsider, session),
+                delete_agent_suite_run(run_id, self.outsider, session),
+            ):
+                with self.assertRaises(HTTPException) as ctx:
+                    await call
+                self.assertEqual(ctx.exception.status_code, 404)
         async with async_session_maker() as session:
             suite_run = await session.get(AgentSuiteRun, run_id)
         self.assertEqual(suite_run.status, "running")

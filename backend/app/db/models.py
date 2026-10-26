@@ -1694,6 +1694,13 @@ class EvalRun(Base):
     temperature: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     reasoning_effort: Mapped[str | None] = mapped_column(String(20), nullable=True)
     max_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # The credential the models under test ran on; the suite opens with it again.
+    credential_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("credentials.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     # The judge (a model or a decision model) that scored an LLM-as-Judge run; both stay
     # empty when each model scored its own answer. The model outlives a deleted credential.
     judge_credential_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -1797,6 +1804,8 @@ class AgentSuiteRun(Base):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Written every few seconds while the runner is alive; see agent_suite_service.
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class GeneratedFile(Base):

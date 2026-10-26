@@ -292,10 +292,13 @@ class AgentSuiteRunResult(BaseModel):
     error: str | None = None
 
 
+AgentSuiteRunStatus = Literal["running", "completed", "failed", "cancelled"]
+
+
 class AgentSuiteRunResponse(BaseModel):
     id: uuid.UUID
     suite_id: uuid.UUID
-    status: Literal["running", "completed", "failed"]
+    status: AgentSuiteRunStatus
     requested_count: int
     generate_inputs: bool
     inputs: list[dict[str, Any]]
@@ -306,3 +309,16 @@ class AgentSuiteRunResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class AgentSuiteRunSummary(BaseModel):
+    """One suite run in the suite's history, without its inputs and results."""
+
+    id: uuid.UUID
+    status: AgentSuiteRunStatus
+    requested_count: int
+    finished_count: int
+    generate_inputs: bool
+    error: str | None
+    created_at: datetime
+    completed_at: datetime | None

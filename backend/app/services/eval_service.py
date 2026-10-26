@@ -516,6 +516,7 @@ async def create_run(
         temperature=temperature,
         reasoning_effort=reasoning_effort,
         max_tokens=max_tokens,
+        credential_id=credential.id,
         judge_credential_id=judge.credential_id if judge else None,
         judge_model=judge.model if judge else None,
         status="running",

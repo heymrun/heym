@@ -73,6 +73,52 @@ def parse_generated_inputs(
     return [generated[index % len(generated)] for index in range(count)]
 
 
+MAX_PROMPT_INSTRUCTIONS_CHARS = 6000
+
+
+def build_generation_prompt(
+    *,
+    workflow_name: str,
+    fields: list[str],
+    example: dict[str, Any],
+    count: int,
+    agent_label: str | None = None,
+    agent_instructions: str | None = None,
+    agent_message: str | None = None,
+) -> str:
+    """The request for test inputs: what the agent is for, and the example to stay close to.
+
+    Without the agent's instructions a model only sees the example, so an input such as
+    "Frankfurt" comes back as unrelated text instead of other cities.
+    """
+    keys = ", ".join(fields) if fields else "the same keys as the example"
+    parts = [
+        f"You write test inputs for an AI agent{f' called {agent_label!r}' if agent_label else ''} "
+        f'that runs inside the workflow "{workflow_name}".'
+    ]
+    if agent_instructions and agent_instructions.strip():
+        parts.append(
+            "The agent's system instructions:\n<<<\n"
+            + agent_instructions.strip()[:MAX_PROMPT_INSTRUCTIONS_CHARS]
+            + "\n>>>"
+        )
+    if agent_message and agent_message.strip():
+        parts.append(f"The agent receives the workflow input through this message: {agent_message}")
+    parts.append(
+        "The user wrote this input as the example to vary:\n"
+        + json.dumps(example, ensure_ascii=False, default=str)
+    )
+    parts.append(
+        f"Write {count} new inputs this agent is meant to handle. Stay close to the example in "
+        "subject, kind of value, length, format and language: if it is a city name, write other "
+        "city names; if it is a customer message, write other customer messages. Vary them so "
+        "the runs cover different cases, including a few harder ones.\n"
+        f"Each input is a JSON object with exactly these keys: {keys}.\n"
+        'Answer with JSON only: {"inputs": [...]}'
+    )
+    return "\n\n".join(parts)
+
+
 async def generate_run_inputs(
     db: AsyncSession,
     *,
@@ -84,8 +130,11 @@ async def generate_run_inputs(
     example: dict[str, Any],
     count: int,
     session_id: str,
+    agent_label: str | None = None,
+    agent_instructions: str | None = None,
+    agent_message: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Ask a model for ``count`` varied inputs shaped like the workflow's previous run."""
+    """Ask a model for ``count`` varied inputs close to ``example``, for what the agent does."""
     credential = await get_accessible_credential(
         db=db, credential_id=credential_id, user_id=user_id
     )
@@ -98,14 +147,15 @@ async def generate_run_inputs(
         credential_type=credential.type.value,
         config=config,
     )
-    keys = ", ".join(fields) if fields else "the same keys as the example"
-    prompt = f"""Write {count} different inputs for one run each of the workflow "{workflow_name}".
-Each input is a JSON object with exactly these keys: {keys}.
-Here is the input of its last real run:
-{json.dumps(example, ensure_ascii=False, default=str)}
-
-Keep each input realistic and in the same language, but vary the requests so the runs cover
-different cases, including some unusual ones. Answer with JSON only: {{"inputs": [...]}}"""
+    prompt = build_generation_prompt(
+        workflow_name=workflow_name,
+        fields=fields,
+        example=example,
+        count=count,
+        agent_label=agent_label,
+        agent_instructions=agent_instructions,
+        agent_message=agent_message,
+    )
     llm_kwargs: dict[str, Any] = {
         "credential_type": credential.type.value,
         "api_key": config.get("api_key", ""),

@@ -441,6 +441,7 @@ onUnmounted(() => {
               <EvalsLeftPanel
                 :suite="selectedSuite"
                 :current-run="currentRun"
+                :last-run="runs[0] ?? null"
                 :is-run-in-progress="currentRun?.status === 'running'"
                 :show-edit-button="showEditButton"
                 :initial-temperature="initialTemperature"

@@ -16,11 +16,13 @@ import { useAiDefaults } from "@/composables/useAiDefaults";
 import { credentialsApi, evalsApi } from "@/services/api";
 import type { CredentialListItem } from "@/types/credential";
 import type { LLMModel } from "@/types/credential";
-import type { EvalRun, EvalSuite, ReasoningEffort } from "@/types/evals";
+import type { EvalRun, EvalRunListItem, EvalSuite, ReasoningEffort } from "@/types/evals";
 
 interface Props {
   suite: EvalSuite;
   currentRun?: EvalRun | null;
+  /** The suite's newest run; its credential and models are picked again on load. */
+  lastRun?: EvalRunListItem | null;
   isRunInProgress?: boolean;
   showEditButton?: boolean;
   initialTemperature?: number;
@@ -29,6 +31,7 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   currentRun: null,
+  lastRun: null,
   isRunInProgress: false,
   showEditButton: false,
   initialTemperature: undefined,
@@ -82,6 +85,21 @@ const runError = ref<string | null>(null);
 const temperature = ref(0.7);
 const reasoningEffort = ref<ReasoningEffort>("medium");
 const runsPerTest = ref(1);
+// Models to select once the chosen credential's model list has loaded.
+const pendingModelIds = ref<string[] | null>(null);
+
+/** Pick the credential and models a run used, when that credential is still available. */
+function applyRunSelection(credentialId: string | null | undefined, modelIds: string[]): void {
+  if (!credentialId || !credentials.value.some((c) => c.id === credentialId)) return;
+  if (selectedCredentialId.value === credentialId) {
+    selectedModelIds.value = new Set(
+      modelIds.filter((id) => models.value.some((m) => m.id === id)),
+    );
+    return;
+  }
+  pendingModelIds.value = modelIds;
+  selectedCredentialId.value = credentialId;
+}
 
 const REASONING_EFFORT_OPTIONS: { value: ReasoningEffort; label: string }[] = [
   { value: "low", label: "Low" },
@@ -145,8 +163,17 @@ watch(
       judgeCredentialId.value = run.judge_credential_id ?? "";
       judgeModel.value = run.judge_model ?? "";
     }
+    applyRunSelection(run.credential_id, run.models ?? []);
   },
   { immediate: true },
+);
+
+watch(
+  () => props.lastRun?.id,
+  () => {
+    if (isViewingHistory.value || !props.lastRun) return;
+    applyRunSelection(props.lastRun.credential_id, props.lastRun.models);
+  },
 );
 
 let savePromptTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -215,7 +242,12 @@ async function loadCredentials(): Promise<void> {
       (credential) => credential.type !== "model_router",
     );
     if (credentials.value.length > 0 && !selectedCredentialId.value) {
-      selectedCredentialId.value = aiDefaults.resolveCredentialId(credentials.value, {}) ?? "";
+      const saved = props.lastRun?.credential_id ?? null;
+      const resolved = aiDefaults.resolveCredentialId(credentials.value, {
+        savedCredentialId: saved,
+      });
+      if (resolved && resolved === saved) pendingModelIds.value = props.lastRun?.models ?? [];
+      selectedCredentialId.value = resolved ?? "";
     }
   } catch {
     credentials.value = [];
@@ -231,6 +263,11 @@ async function loadModels(): Promise<void> {
     models.value = await credentialsApi.getModels(selectedCredentialId.value);
   } catch {
     models.value = [];
+  }
+  if (pendingModelIds.value) {
+    const wanted = pendingModelIds.value;
+    pendingModelIds.value = null;
+    selectedModelIds.value = new Set(wanted.filter((id) => models.value.some((m) => m.id === id)));
   }
 }
 

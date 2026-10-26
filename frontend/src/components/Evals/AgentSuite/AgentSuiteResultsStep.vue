@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { RefreshCw } from "lucide-vue-next";
+import { RefreshCw, Trash2 } from "lucide-vue-next";
 import { computed, ref, watch } from "vue";
 
 import AgentSuiteMetricTile from "@/components/Evals/AgentSuite/AgentSuiteMetricTile.vue";
@@ -9,12 +9,18 @@ import {
   apiErrorText,
   formatCount,
   formatMs,
+  formatRunTime,
   formatUsd,
 } from "@/components/Evals/AgentSuite/agentSuiteFormat";
 import Button from "@/components/ui/Button.vue";
 import Select from "@/components/ui/Select.vue";
 import { evalsApi } from "@/services/api";
-import type { AgentDeltaMetric, AgentMetricDelta, AgentSuiteReport } from "@/types/evals";
+import type {
+  AgentDeltaMetric,
+  AgentMetricDelta,
+  AgentSuiteReport,
+  AgentSuiteRunSummary,
+} from "@/types/evals";
 
 interface Props {
   suiteId: string;
@@ -26,18 +32,60 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), { reloadKey: 0, runId: null });
 
-const SUITE_SCOPE = "suite";
+// A scope is one suite run ("run:<id>") or the agent's last N runs ("10").
+const RUN_PREFIX = "run:";
 const DEFAULT_SCOPE = String(RUN_LIMIT_OPTIONS[0]);
+const STATUS_SUFFIX: Record<string, string> = {
+  running: " · running",
+  cancelled: " · stopped",
+  failed: " · failed",
+};
 
 const report = ref<AgentSuiteReport | null>(null);
 const loading = ref(false);
 const error = ref<string | null>(null);
-const scope = ref(props.runId ? SUITE_SCOPE : DEFAULT_SCOPE);
+const suiteRuns = ref<AgentSuiteRunSummary[]>([]);
+const scope = ref(props.runId ? `${RUN_PREFIX}${props.runId}` : DEFAULT_SCOPE);
+
+const selectedRunId = computed((): string | null =>
+  scope.value.startsWith(RUN_PREFIX) ? scope.value.slice(RUN_PREFIX.length) : null,
+);
+const selectedRun = computed(() => suiteRuns.value.find((run) => run.id === selectedRunId.value));
 
 const scopeOptions = computed(() => [
-  ...(props.runId ? [{ value: SUITE_SCOPE, label: "Latest suite run" }] : []),
+  ...suiteRuns.value.map((run) => ({
+    value: `${RUN_PREFIX}${run.id}`,
+    label: `${formatRunTime(run.created_at)} · ${run.finished_count}/${run.requested_count} runs${STATUS_SUFFIX[run.status] ?? ""}`,
+  })),
   ...RUN_LIMIT_OPTIONS.map((value) => ({ value: String(value), label: `Last ${value} runs` })),
 ]);
+
+async function loadSuiteRuns(): Promise<void> {
+  try {
+    suiteRuns.value = await evalsApi.listAgentSuiteRuns(props.suiteId);
+  } catch {
+    suiteRuns.value = [];
+  }
+  const kept = suiteRuns.value.some((run) => `${RUN_PREFIX}${run.id}` === scope.value);
+  if (scope.value.startsWith(RUN_PREFIX) && !kept) scope.value = DEFAULT_SCOPE;
+  if (scope.value === DEFAULT_SCOPE && suiteRuns.value.length > 0 && !props.runId) {
+    scope.value = `${RUN_PREFIX}${suiteRuns.value[0].id}`;
+  }
+}
+
+async function deleteSelectedRun(): Promise<void> {
+  const run = selectedRun.value;
+  if (!run || !confirm("Delete this suite run? Its workflow runs stay in Execution History.")) {
+    return;
+  }
+  try {
+    await evalsApi.deleteAgentSuiteRun(run.id);
+    scope.value = DEFAULT_SCOPE;
+    await loadSuiteRuns();
+  } catch (e: unknown) {
+    error.value = apiErrorText(e, "Could not delete the suite run.");
+  }
+}
 
 const TILES: { metric: AgentDeltaMetric; label: string; format: (v: number | null) => string }[] = [
   { metric: "latency_p95_ms", label: "Latency p95", format: formatMs },
@@ -58,11 +106,11 @@ async function loadReport(): Promise<void> {
   loading.value = true;
   error.value = null;
   try {
-    const fromRun = scope.value === SUITE_SCOPE && props.runId;
+    const runId = selectedRunId.value;
     report.value = await evalsApi.getAgentSuiteReport(
       props.suiteId,
-      fromRun ? undefined : Number(scope.value),
-      fromRun ? props.runId : null,
+      runId ? undefined : Number(scope.value),
+      runId,
     );
   } catch (e: unknown) {
     error.value = apiErrorText(e, "Could not load the report.");
@@ -73,15 +121,14 @@ async function loadReport(): Promise<void> {
 
 watch(
   () => props.runId,
-  (runId) => {
-    if (runId) scope.value = SUITE_SCOPE;
-    else if (scope.value === SUITE_SCOPE) scope.value = DEFAULT_SCOPE;
+  async (runId) => {
+    if (runId) scope.value = `${RUN_PREFIX}${runId}`;
+    await loadSuiteRuns();
   },
 );
 
-watch([() => props.suiteId, () => props.reloadKey, () => props.runId, scope], loadReport, {
-  immediate: true,
-});
+watch([() => props.suiteId, () => props.reloadKey, scope], loadReport, { immediate: true });
+watch(() => props.suiteId, loadSuiteRuns, { immediate: true });
 </script>
 
 <template>
@@ -105,9 +152,20 @@ watch([() => props.suiteId, () => props.reloadKey, () => props.runId, scope], lo
         <Select
           v-model="scope"
           :options="scopeOptions"
-          class="w-44"
+          class="w-60"
           data-testid="agent-suite-report-scope"
         />
+        <Button
+          v-if="selectedRun && selectedRun.status !== 'running'"
+          variant="outline"
+          size="icon"
+          title="Delete this suite run"
+          class="text-muted-foreground hover:text-destructive"
+          data-testid="agent-suite-run-delete"
+          @click="deleteSelectedRun"
+        >
+          <Trash2 class="h-4 w-4" />
+        </Button>
         <Button
           variant="outline"
           size="icon"
@@ -132,7 +190,7 @@ watch([() => props.suiteId, () => props.reloadKey, () => props.runId, scope], lo
         v-if="report.run_count === 0"
         class="rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground"
       >
-        <template v-if="scope === SUITE_SCOPE">
+        <template v-if="selectedRunId">
           None of these runs reached the agent.
         </template>
         <template v-else>

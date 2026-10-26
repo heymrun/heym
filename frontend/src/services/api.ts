@@ -116,6 +116,7 @@ import type {
   AgentSuiteReport,
   AgentSuiteRun,
   AgentSuiteRunInputs,
+  AgentSuiteRunSummary,
   CreateAgentSuiteRunRequest,
   CreateAgentSuiteRequest,
   CreateSuiteRequest,
@@ -3466,6 +3467,20 @@ export const evalsApi = {
   getAgentSuiteRun: async (runId: string): Promise<AgentSuiteRun> => {
     const response = await api.get<AgentSuiteRun>(`/evals/agent-suite-runs/${runId}`);
     return response.data;
+  },
+
+  listAgentSuiteRuns: async (suiteId: string): Promise<AgentSuiteRunSummary[]> => {
+    const response = await api.get<AgentSuiteRunSummary[]>(`/evals/agent-suites/${suiteId}/runs`);
+    return response.data;
+  },
+
+  cancelAgentSuiteRun: async (runId: string): Promise<AgentSuiteRun> => {
+    const response = await api.post<AgentSuiteRun>(`/evals/agent-suite-runs/${runId}/cancel`);
+    return response.data;
+  },
+
+  deleteAgentSuiteRun: async (runId: string): Promise<void> => {
+    await api.delete(`/evals/agent-suite-runs/${runId}`);
   },
 };
 

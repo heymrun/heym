@@ -43,6 +43,8 @@ export interface EvalRun {
   temperature: number;
   reasoning_effort?: string | null;
   max_tokens: number | null;
+  /** The credential the models ran on; empty for runs made before it was stored. */
+  credential_id?: string | null;
   /** The judge that scored an LLM-as-Judge run; empty when each model scored itself. */
   judge_credential_id?: string | null;
   judge_model?: string | null;
@@ -72,6 +74,7 @@ export interface EvalRunListItem {
   id: string;
   name: string;
   models: string[];
+  credential_id?: string | null;
   status: string;
   scoring_method: string;
   judge_model?: string | null;
@@ -354,10 +357,24 @@ export interface AgentSuiteRunResult {
   error: string | null;
 }
 
+export type AgentSuiteRunStatus = "running" | "completed" | "failed" | "cancelled";
+
+/** One suite run in the suite's history, without its inputs and results. */
+export interface AgentSuiteRunSummary {
+  id: string;
+  status: AgentSuiteRunStatus;
+  requested_count: number;
+  finished_count: number;
+  generate_inputs: boolean;
+  error: string | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
 export interface AgentSuiteRun {
   id: string;
   suite_id: string;
-  status: "running" | "completed" | "failed";
+  status: AgentSuiteRunStatus;
   requested_count: number;
   generate_inputs: boolean;
   inputs: Record<string, unknown>[];

@@ -1,7 +1,7 @@
 """Agent eval suites: the one implementation the Evals routes and the chat tools share."""
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import select
@@ -21,6 +21,7 @@ from app.models.agent_suite_schemas import (
     AgentSuiteReportResponse,
     AgentSuiteResponse,
     AgentSuiteRunInputsResponse,
+    AgentSuiteRunSummary,
     AgentSuiteUpdate,
     AgentThresholdsModel,
     AgentToolUsageResponse,
@@ -47,6 +48,15 @@ from app.services.agent_tool_policy import node_tools_for_agent
 from app.services.eval_common import EvalNotFoundError
 from app.services.workflow_access import get_accessible_workflow, workflow_access_clause
 from app.services.workflow_inputs import start_input_fields
+
+# A runner writes its heartbeat every few seconds; one quiet this long has died.
+STALE_RUN_AFTER = timedelta(seconds=60)
+INTERRUPTED_ERROR = "The run stopped reporting progress, for example after a server restart."
+MAX_LISTED_RUNS = 50
+
+
+class AgentSuiteRunBusyError(Exception):
+    """The run is still going; stop it first."""
 
 
 async def load_accessible_workflow(
@@ -77,6 +87,28 @@ async def load_owned_agent_suite(
     return suite
 
 
+def is_stale_run(suite_run: AgentSuiteRun, now: datetime | None = None) -> bool:
+    """A running row whose runner stopped writing its heartbeat."""
+    if suite_run.status != "running":
+        return False
+    last_seen = suite_run.heartbeat_at or suite_run.created_at
+    if last_seen is None:
+        return False
+    return (now or datetime.now(timezone.utc)) - last_seen > STALE_RUN_AFTER
+
+
+async def settle_stale_runs(db: AsyncSession, runs: list[AgentSuiteRun]) -> None:
+    """Close running rows whose runner is gone, so they show as interrupted and stop
+    blocking a new run of the suite."""
+    stale = [suite_run for suite_run in runs if is_stale_run(suite_run)]
+    for suite_run in stale:
+        suite_run.status = "failed"
+        suite_run.error = INTERRUPTED_ERROR
+        suite_run.completed_at = datetime.now(timezone.utc)
+    if stale:
+        await db.commit()
+
+
 async def load_owned_agent_suite_run(
     db: AsyncSession, run_id: uuid.UUID, user_id: uuid.UUID
 ) -> AgentSuiteRun:
@@ -88,6 +120,7 @@ async def load_owned_agent_suite_run(
     suite_run = result.scalar_one_or_none()
     if suite_run is None:
         raise EvalNotFoundError("Run not found")
+    await settle_stale_runs(db, [suite_run])
     return suite_run
 
 
@@ -98,7 +131,73 @@ async def latest_agent_suite_run(db: AsyncSession, suite_id: uuid.UUID) -> Agent
         .order_by(AgentSuiteRun.created_at.desc())
         .limit(1)
     )
-    return result.scalar_one_or_none()
+    suite_run = result.scalar_one_or_none()
+    if suite_run is not None:
+        await settle_stale_runs(db, [suite_run])
+    return suite_run
+
+
+async def list_agent_suite_runs(
+    db: AsyncSession, user_id: uuid.UUID, suite_id: uuid.UUID
+) -> list[AgentSuiteRunSummary]:
+    """The suite's runs, newest first."""
+    suite = await load_owned_agent_suite(db, suite_id, user_id)
+    result = await db.execute(
+        select(AgentSuiteRun)
+        .where(AgentSuiteRun.suite_id == suite.id)
+        .order_by(AgentSuiteRun.created_at.desc())
+        .limit(MAX_LISTED_RUNS)
+    )
+    runs = list(result.scalars().all())
+    await settle_stale_runs(db, runs)
+    return [
+        AgentSuiteRunSummary(
+            id=suite_run.id,
+            status=suite_run.status,
+            requested_count=suite_run.requested_count,
+            finished_count=len(suite_run.results),
+            generate_inputs=suite_run.generate_inputs,
+            error=suite_run.error,
+            created_at=suite_run.created_at,
+            completed_at=suite_run.completed_at,
+        )
+        for suite_run in runs
+    ]
+
+
+async def cancel_agent_suite_run(
+    db: AsyncSession, user_id: uuid.UUID, run_id: uuid.UUID
+) -> AgentSuiteRun:
+    """Mark a running suite run cancelled. Its runner sees this within seconds and cancels
+    the workflow runs still going; a finished run is returned as it is."""
+    suite_run = await load_owned_agent_suite_run(db, run_id, user_id)
+    if suite_run.status == "running":
+        suite_run.status = "cancelled"
+        suite_run.completed_at = datetime.now(timezone.utc)
+        await db.commit()
+        await db.refresh(suite_run)
+    return suite_run
+
+
+async def delete_agent_suite_run(db: AsyncSession, user_id: uuid.UUID, run_id: uuid.UUID) -> None:
+    """Remove a finished suite run from the history; the workflow runs it started stay."""
+    suite_run = await load_owned_agent_suite_run(db, run_id, user_id)
+    if suite_run.status == "running":
+        raise AgentSuiteRunBusyError("Stop the run before deleting it")
+    await db.delete(suite_run)
+    await db.commit()
+
+
+async def has_running_suite_run(db: AsyncSession, suite_id: uuid.UUID) -> bool:
+    """True while a live run of the suite is going; a stale one is closed first."""
+    result = await db.execute(
+        select(AgentSuiteRun).where(
+            AgentSuiteRun.suite_id == suite_id, AgentSuiteRun.status == "running"
+        )
+    )
+    runs = list(result.scalars().all())
+    await settle_stale_runs(db, runs)
+    return any(suite_run.status == "running" for suite_run in runs)
 
 
 def suite_run_trace_ids(suite_run: AgentSuiteRun) -> list[uuid.UUID]:

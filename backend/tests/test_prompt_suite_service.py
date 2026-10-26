@@ -229,6 +229,11 @@ class RealPostgresPromptSuiteTests(unittest.IsolatedAsyncioTestCase):
             listed = await prompt_suites.list_prompt_runs(db, suite.id, self.owner_id)
         self.assertEqual(prompt_suites.prompt_run_response(run, run.results).status, "running")
         self.assertEqual([item.id for item in listed], [launch.run.id])
+        # The run keeps its credential, so the suite opens with it after a reload.
+        self.assertEqual(
+            prompt_suites.prompt_run_response(run, run.results).credential_id, self.credential_id
+        )
+        self.assertEqual(listed[0].credential_id, self.credential_id)
 
     async def test_launch_refuses_another_users_credential(self) -> None:
         async with async_session_maker() as db:

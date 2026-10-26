@@ -15,7 +15,13 @@ class AlembicMigrationGraphTest(unittest.TestCase):
         self.script = ScriptDirectory.from_config(config)
 
     def test_revision_graph_has_one_head(self) -> None:
-        self.assertEqual(self.script.get_heads(), ["144_add_agent_suites"])
+        self.assertEqual(self.script.get_heads(), ["145_suite_run_heartbeat"])
+
+    def test_suite_run_heartbeat_follows_agent_suites(self) -> None:
+        revision = self.script.get_revision("145_suite_run_heartbeat")
+
+        self.assertIsNotNone(revision)
+        self.assertEqual(revision.down_revision, "144_add_agent_suites")
 
     def test_agent_suites_follow_workflow_concurrency(self) -> None:
         revision = self.script.get_revision("144_add_agent_suites")

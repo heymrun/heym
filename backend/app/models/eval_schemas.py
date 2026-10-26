@@ -127,6 +127,7 @@ class EvalRunResponse(BaseModel):
     temperature: float
     reasoning_effort: str | None = None
     max_tokens: int | None
+    credential_id: uuid.UUID | None = None
     judge_credential_id: uuid.UUID | None = None
     judge_model: str | None = None
     status: str
@@ -142,6 +143,7 @@ class EvalRunListResponse(BaseModel):
     id: uuid.UUID
     name: str
     models: list[str]
+    credential_id: uuid.UUID | None = None
     status: str
     scoring_method: str = "exact_match"
     judge_model: str | None = None
