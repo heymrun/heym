@@ -25,6 +25,7 @@ import type { Message, QueuedMessage, WorkflowPreview } from "@/types/chat";
 import ChatToolCall from "@/components/Chat/ChatToolCall.vue";
 import ChatContextBadge from "@/components/Chat/ChatContextBadge.vue";
 import ChatContextChips from "@/components/Chat/ChatContextChips.vue";
+import ChatEvalSuiteCards from "@/components/Chat/ChatEvalSuiteCards.vue";
 import ReadonlyCanvasPreview from "@/components/Canvas/ReadonlyCanvasPreview.vue";
 import Button from "@/components/ui/Button.vue";
 import ClarifyCard from "@/components/ui/ClarifyCard.vue";
@@ -1119,6 +1120,10 @@ onUnmounted(() => {
                 />
               </div>
             </div>
+            <ChatEvalSuiteCards
+              v-if="msg.evalSuites?.length"
+              :suites="msg.evalSuites"
+            />
             <div
               v-if="msg.attachmentName"
               class="mt-1.5 flex items-center gap-1 text-xs opacity-70"
@@ -1201,6 +1206,10 @@ onUnmounted(() => {
                 @click.stop="openImageLightbox(imgSrc, streamState.images)"
               >
             </div>
+            <ChatEvalSuiteCards
+              v-if="streamState.evalSuites.length"
+              :suites="streamState.evalSuites"
+            />
             <div
               v-if="streamState.workflowPreview"
               class="mt-3 overflow-hidden rounded-xl border border-border/50 bg-background/70"

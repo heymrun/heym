@@ -15,6 +15,7 @@ from app.api.mcp import (
 from app.db.models import LLM_CREDENTIAL_TYPES, CredentialType
 from app.models.schemas import MCPChatToolUpdate
 from app.services import mcp_chat_service
+from app.services.chat_eval_mode import EVAL_TOOL_NAMES
 from app.services.mcp_chat_service import (
     MCPChatError,
     MCPChatResult,
@@ -79,6 +80,18 @@ class ChatToolExposureTests(unittest.IsolatedAsyncioTestCase):
             [t.name for t in tools],
             ["My Workflow", mcp_chat_service.MCP_CHAT_TOOL_NAME],
         )
+
+    async def test_eval_tools_stay_inside_heym_chat(self) -> None:
+        """The global server and named servers share build_tools_with_chat."""
+        settings = MCPChatSettings(enabled=True, credential_id=uuid.uuid4(), model="gpt-5")
+
+        with patch(
+            "app.api.mcp.workflow_to_mcp_tool", side_effect=lambda w: SimpleNamespace(name=w.name)
+        ):
+            tools = await build_tools_with_chat([_make_workflow()], settings)
+
+        self.assertFalse(EVAL_TOOL_NAMES & {t.name for t in tools})
+        self.assertIn("eval suites", mcp_chat_service.MCP_CHAT_TOOL_DESCRIPTION)
 
     def test_tool_schema_requires_message_and_offers_conversation_id(self) -> None:
         tool = build_chat_mcp_tool()

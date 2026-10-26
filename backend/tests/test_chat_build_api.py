@@ -259,6 +259,66 @@ class RunChatTurnBuildTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(stream_kwargs["system_prompt"].endswith("## Build mode\n"))
         self.assertEqual(stream_kwargs["system_prompt_parts"].build_block, "\n## Build mode\n")
 
+    async def test_saved_eval_suites_are_collected_like_saved_workflows(self) -> None:
+        conv_id = str(uuid.uuid4())
+        suite_id = str(uuid.uuid4())
+        user = SimpleNamespace(id=uuid.uuid4(), user_rules=None)
+        credential = SimpleNamespace(id=uuid.uuid4(), encrypted_config="x")
+        db = AsyncMock()
+        db.add = MagicMock()
+        user_result = MagicMock()
+        user_result.scalar_one_or_none.return_value = user
+        msgs_result = MagicMock()
+        msgs_result.scalars.return_value.all.return_value = []
+        conv_result = MagicMock()
+        conv_result.scalar_one_or_none.return_value = None
+        db.execute.side_effect = [user_result, msgs_result, conv_result]
+        saved = (
+            f'data: {{"type": "eval_suite_saved", "suite_id": "{suite_id}", '
+            f'"suite_name": "Support", "suite_type": "prompt", '
+            f'"suite_url": "/evals?suite={suite_id}"}}\n\n'
+        )
+
+        async def fake_stream(*_args: Any, **_kwargs: Any) -> Any:
+            yield 'data: {"type": "content", "text": "Saved."}\n\n'
+            yield saved
+            yield saved
+            yield 'data: {"type": "done"}\n\n'
+
+        parts = chats.SystemPromptParts(
+            full_system_prompt="base",
+            base_system_prompt="base",
+            agents_md="",
+            workflows_block="",
+            user_rules="",
+        )
+        turn = chats.ChatTurn(
+            content="Make a suite",
+            credential_id=credential.id,
+            model="gpt-5.5",
+            attachment_data=None,
+            should_generate_title=False,
+        )
+        with (
+            patch.object(chats, "async_session_maker", _fake_session_maker(db)),
+            patch.object(chats, "get_accessible_credential", AsyncMock(return_value=credential)),
+            patch.object(chats, "decrypt_config", return_value={}),
+            patch.object(chats, "_assemble_system_prompt_parts", AsyncMock(return_value=parts)),
+            patch.object(
+                chats,
+                "resolve_model_binding",
+                side_effect=lambda *a, **k: (MagicMock(), "OpenAI", "gpt-5.5", k["trace_context"]),
+            ),
+            patch.object(chats, "stream_dashboard_chat", fake_stream),
+            patch.object(chats.registry, "publish", AsyncMock()),
+        ):
+            result = await chats._run_chat_turn(conv_id, user.id, turn, "http://localhost")
+
+        self.assertEqual(result.saved_eval_suite_ids, (suite_id,))
+        stored = db.add.call_args.args[0]
+        self.assertTrue(stored.content.startswith("Saved."))
+        self.assertEqual(stored.content.count(f"heym-eval-suite-id:{suite_id}"), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

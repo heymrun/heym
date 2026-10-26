@@ -1,9 +1,10 @@
 import { computed, ref } from "vue";
 import { defineStore } from "pinia";
 
-import type { Conversation, ConversationDetail, ContextUsage, Message, QueuedMessage, ToolCall, WorkflowPreview } from "@/types/chat";
+import type { Conversation, ConversationDetail, ContextUsage, EvalSuitePreview, Message, QueuedMessage, ToolCall, WorkflowPreview } from "@/types/chat";
 import type { FileAttachmentPayload } from "@/services/api";
 import { CHAT_CONTEXT_HEADER } from "@/lib/chatContext";
+import { mergeEvalSuite } from "@/lib/evalSuitePreview";
 import { chatApi } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
 import { randomUUID } from "@/lib/uuid";
@@ -42,6 +43,7 @@ export const useChatStore = defineStore("chat", () => {
     toolCalls: ToolCall[];
     contextUsage: ContextUsage | null;
     workflowPreview: WorkflowPreview | null;
+    evalSuites: EvalSuitePreview[];
     error: string | null;
     isStreaming: boolean;
   }
@@ -52,6 +54,7 @@ export const useChatStore = defineStore("chat", () => {
     toolCalls: [],
     contextUsage: null,
     workflowPreview: null,
+    evalSuites: [],
     error: null,
     isStreaming: false,
   }) as StreamState;
@@ -77,6 +80,7 @@ export const useChatStore = defineStore("chat", () => {
       toolCalls: [],
       contextUsage: null,
       workflowPreview: null,
+      evalSuites: [],
       error: null,
       isStreaming: false,
     };
@@ -168,6 +172,7 @@ export const useChatStore = defineStore("chat", () => {
         undefined, // onQueuedMessageDeleted
         undefined, // onQueueCleared
         undefined, // onQueuedMessageStarted
+        undefined, // onEvalSuiteSaved
         controller.signal,
       );
     } catch {
@@ -336,6 +341,7 @@ export const useChatStore = defineStore("chat", () => {
         toolCalls: [],
         contextUsage: null,
         workflowPreview: null,
+        evalSuites: [],
         error: null,
         isStreaming: true,
       });
@@ -356,6 +362,7 @@ export const useChatStore = defineStore("chat", () => {
       toolCalls: [],
       contextUsage: null,
       workflowPreview: null,
+      evalSuites: [],
       error: null,
       isStreaming,
     };
@@ -377,6 +384,7 @@ export const useChatStore = defineStore("chat", () => {
       final.content.length > 0 ||
       final.images.length > 0 ||
       final.workflowPreview !== null ||
+      final.evalSuites.length > 0 ||
       final.toolCalls.length > 0;
     if (hasContent) {
       _appendMessageIfMissing(conversationId, {
@@ -385,6 +393,7 @@ export const useChatStore = defineStore("chat", () => {
         content: final.content,
         ...(final.images.length > 0 ? { images: [...final.images] } : {}),
         ...(final.workflowPreview ? { workflowPreview: final.workflowPreview } : {}),
+        ...(final.evalSuites.length > 0 ? { evalSuites: [...final.evalSuites] } : {}),
         ...(final.toolCalls.length > 0 ? { tool_calls: [...final.toolCalls] } : {}),
         created_at: new Date().toISOString(),
       });
@@ -553,6 +562,13 @@ export const useChatStore = defineStore("chat", () => {
             ...(queued?.attachment_name ? { attachmentName: queued.attachment_name } : {}),
           });
           _setStreamState(conversationId, _emptyStreamingPatch(true));
+        },
+        (suite, messageId) => {
+          const current = getStreamState(conversationId);
+          _setStreamState(conversationId, {
+            messageId: messageId ?? current.messageId,
+            evalSuites: mergeEvalSuite(current.evalSuites, suite),
+          });
         },
         controller.signal,
       );

@@ -8,7 +8,6 @@ on the instance that received the request, so the audit trail stays where AGENTS
 
 import json
 import uuid
-from dataclasses import dataclass, field
 from threading import Event
 from typing import Any
 
@@ -28,6 +27,7 @@ from app.api.ai_assistant import (
     get_workflows_for_user_with_inputs,
     run_execute_workflow_tool,
 )
+from app.api.chat_evals import ChatEvalTools
 from app.api.workflows import extract_input_fields_from_workflow, get_workflow_for_user
 from app.db.models import Credential, User, Workflow
 from app.services import template_service
@@ -42,9 +42,12 @@ from app.services.chat_build_mode import (
     SAVE_WORKFLOW_TOOL,
     BuildProgress,
     BuildRequest,
+    BuildToolOutcome,
     build_mode_instructions,
     build_run_report,
+    tool_error,
 )
+from app.services.chat_eval_mode import eval_instructions
 from app.services.collab.saves import queue_collab_saved
 from app.services.credential_access import load_accessible_credential_ids
 from app.services.credential_catalog import (
@@ -220,25 +223,6 @@ FINISH_TOOL_SCHEMA: dict[str, Any] = {
 }
 
 
-@dataclass(frozen=True)
-class BuildToolOutcome:
-    """One build tool call: the result for the model, the step row and extra stream events."""
-
-    result: str
-    summary: str
-    status: str
-    events: list[dict[str, Any]] = field(default_factory=list)
-    finished_summary: str | None = None
-
-
-def _error(message: str) -> BuildToolOutcome:
-    return BuildToolOutcome(
-        result=json.dumps({"status": "error", "error": message}),
-        summary=f"Error: {message}",
-        status="error",
-    )
-
-
 class ChatBuildSession:
     """The build tools of one chat turn and what they have done."""
 
@@ -271,6 +255,14 @@ class ChatBuildSession:
         # MCP turns: credentials are created on a Heym page, never in the chat.
         self.credential_form = credential_form
         self.progress = BuildProgress(workflow_id=request.target_workflow_id)
+        # Eval suites are part of every build turn; a skill-only turn writes skills only.
+        self.evals = (
+            None
+            if request.skill_only
+            else ChatEvalTools(
+                user=user, public_base_url=public_base_url, cancel_event=cancel_event
+            )
+        )
 
     @property
     def builder_mode(self) -> CredentialPromptMode:
@@ -324,7 +316,10 @@ class ChatBuildSession:
             target.name if target is not None else None,
             target.id if target is not None else None,
         )
-        return f"{instructions}\n{skill_block}\n## Workflow DSL reference\n\n{reference}"
+        return (
+            f"{instructions}\n{eval_instructions()}\n{skill_block}\n"
+            f"## Workflow DSL reference\n\n{reference}"
+        )
 
     def tools(self, base_tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """The chat's own tools without the AI Builder, plus what build mode allows now."""
@@ -333,6 +328,8 @@ class ChatBuildSession:
             tools.append(REQUEST_CREDENTIAL_FORM_TOOL_SCHEMA)
         if self.request.skill_only:
             return tools + [APPLY_SKILL_TOOL_SCHEMA]
+        if self.evals is not None:
+            tools += self.evals.schemas()
         if not self.progress.budget_spent:
             return tools + [
                 APPLY_SKILL_TOOL_SCHEMA,
@@ -349,10 +346,14 @@ class ChatBuildSession:
             return self.credential_form is not None
         if self.request.skill_only:
             return name == APPLY_SKILL_TOOL
+        if self.evals is not None and self.evals.handles(name):
+            return True
         return name in BUILD_TOOL_NAMES or name == APPLY_SKILL_TOOL
 
     def display_args(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
         """Arguments for the step row, the stored message and the trace, without the whole DSL."""
+        if self.evals is not None and self.evals.handles(name):
+            return self.evals.display_args(name, args)
         if name == APPLY_SKILL_TOOL:
             edits = args.get("file_edits") if isinstance(args.get("file_edits"), list) else []
             paths = [item.get("path") for item in edits if isinstance(item, dict)]
@@ -374,6 +375,8 @@ class ChatBuildSession:
         }
 
     def step_label(self, name: str) -> str:
+        if self.evals is not None and self.evals.handles(name):
+            return self.evals.step_label(name)
         if name == REQUEST_CREDENTIAL_FORM_TOOL:
             return "Opening the credential form..."
         if name == APPLY_SKILL_TOOL:
@@ -392,7 +395,9 @@ class ChatBuildSession:
         if name == APPLY_SKILL_TOOL:
             return await self._apply_skill(args)
         if self.request.skill_only:
-            return _error("This chat writes skills. It does not build other workflows.")
+            return tool_error("This chat writes skills. It does not build other workflows.")
+        if self.evals is not None and self.evals.handles(name):
+            return await self.evals.call(name, args)
         if name == SAVE_WORKFLOW_TOOL:
             return await self._save(args)
         if name == RUN_WORKFLOW_TEST_TOOL:
@@ -407,11 +412,11 @@ class ChatBuildSession:
     async def _save(self, args: dict[str, Any]) -> BuildToolOutcome:
         workflow_arg = args.get("workflow")
         if not isinstance(workflow_arg, dict):
-            return _error("Pass the workflow as an object with name, nodes and edges.")
+            return tool_error("Pass the workflow as an object with name, nodes and edges.")
         try:
             config = _extract_generated_workflow_config(json.dumps(workflow_arg), "Chat build")
         except ValueError as exc:
-            return _error(str(exc))
+            return tool_error(str(exc))
 
         requested = self._requested_workflow_id(args.get("workflow_id"))
         if isinstance(requested, BuildToolOutcome):
@@ -421,9 +426,9 @@ class ChatBuildSession:
         if workflow_id is not None:
             existing = await get_workflow_for_user(self.db, workflow_id, self.user.id)
             if existing is None:
-                return _error("Workflow not found or no access")
+                return tool_error("Workflow not found or no access")
             if not await user_can_write_workflow(self.db, existing, self.user.id):
-                return _error("You have read-only access to this workflow")
+                return tool_error("You have read-only access to this workflow")
 
         catalog = await load_credential_catalog(self.db, self.user.id)
         table_catalog = await load_data_table_catalog(self.db, self.user.id)
@@ -468,7 +473,7 @@ class ChatBuildSession:
             if getattr(existing, "kind", "workflow") == "dashboard_widget":
                 blocked = dashboard_widget_blocked_nodes_error(nodes)
                 if blocked is not None:
-                    return _error(blocked)
+                    return tool_error(blocked)
             before = WorkflowSnapshot.capture(existing)
             existing.name = config["name"]
             existing.description = config["description"]
@@ -545,7 +550,7 @@ class ChatBuildSession:
             return None
         raw = decode_zip_payload(self.attachment.content)
         if raw is None:
-            return _error("The zip could not be read.")
+            return tool_error("The zip could not be read.")
         reading = read_zip(raw)
         if not reading.skills:
             return None
@@ -599,13 +604,13 @@ class ChatBuildSession:
         if workflow_id is not None:
             existing = await get_workflow_for_user(self.db, workflow_id, self.user.id)
             if existing is None:
-                return _error("Workflow not found or no access")
+                return tool_error("Workflow not found or no access")
             if not await user_can_write_workflow(self.db, existing, self.user.id):
-                return _error("You have read-only access to this workflow")
+                return tool_error("You have read-only access to this workflow")
 
         if existing is None:
             if bundle is None:
-                return _error(
+                return tool_error(
                     "Attach a skill zip to create a workflow, or name the workflow to update."
                 )
             title, nodes, edges = new_skill_workflow(
@@ -614,7 +619,7 @@ class ChatBuildSession:
             if edits:
                 placed = place_skill(nodes, bundle, skill_name=bundle.name, edits=edits)
                 if placed.status != "saved" or placed.nodes is None:
-                    return _error(placed.message)
+                    return tool_error(placed.message)
                 nodes = placed.nodes
             return await self._persist_skill(None, title, nodes, edges)
 
@@ -638,7 +643,7 @@ class ChatBuildSession:
                 status="pending",
             )
         if placed.status != "saved" or placed.nodes is None:
-            return _error(placed.message)
+            return tool_error(placed.message)
         return await self._persist_skill(
             existing, existing.name, placed.nodes, list(existing.edges or [])
         )
@@ -654,7 +659,7 @@ class ChatBuildSession:
         if existing is not None and getattr(existing, "kind", "workflow") == "dashboard_widget":
             blocked = dashboard_widget_blocked_nodes_error(nodes)
             if blocked is not None:
-                return _error(blocked)
+                return tool_error(blocked)
         version_number: int | None = None
         if existing is not None:
             before = WorkflowSnapshot.capture(existing)
@@ -728,10 +733,10 @@ class ChatBuildSession:
         try:
             requested = uuid.UUID(str(raw))
         except ValueError:
-            return _error("workflow_id must be a workflow UUID.")
+            return tool_error("workflow_id must be a workflow UUID.")
         target = self.request.target_workflow_id
         if target is not None and requested != target:
-            return _error(f"This turn changes workflow {target}; pass that id or none.")
+            return tool_error(f"This turn changes workflow {target}; pass that id or none.")
         return requested
 
     async def _run_test(self, args: dict[str, Any]) -> BuildToolOutcome:
@@ -743,7 +748,7 @@ class ChatBuildSession:
             )
         workflow = await self._target_workflow()
         if workflow is None:
-            return _error("Save the workflow with save_workflow before testing it.")
+            return tool_error("Save the workflow with save_workflow before testing it.")
         inputs = dict(args.get("inputs") or {}) if isinstance(args.get("inputs"), dict) else {}
         expect = str(args.get("expect") or "").strip()
         run_inputs = dict(inputs)
@@ -784,10 +789,10 @@ class ChatBuildSession:
     async def _finish(self, args: dict[str, Any]) -> BuildToolOutcome:
         refusal = self.progress.finish_refusal()
         if refusal is not None:
-            return _error(refusal)
+            return tool_error(refusal)
         workflow = await self._target_workflow()
         if workflow is None:
-            return _error("Workflow not found or no access")
+            return tool_error("Workflow not found or no access")
         summary = str(args.get("summary") or "").strip() or (
             "The workflow is saved and its latest test run passed."
         )
