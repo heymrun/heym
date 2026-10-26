@@ -20,14 +20,14 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
     releaseId: "2026.22",
     publishedAt: new Date("2026-10-26T12:00:00Z"),
     headline:
-      "Work on one canvas together, limit how many runs execute at once, and check agents against their real runs",
+      "Work on one canvas together, limit how many runs execute at once, and check agents against their real runs, from Evals or from Chat",
     releaseTour: {
       label: "New in Heym",
       introTitle: "New in this release",
       introDescription:
         "A quick look at what changed since your last update. Takes about a minute.",
       tourEnabled: true,
-      sectionOrder: ["agent-suite", "concurrency-limit", "canvas-collaboration"],
+      sectionOrder: ["agent-suite", "chat-evals", "concurrency-limit", "canvas-collaboration"],
     },
     sections: [
       {
@@ -59,6 +59,38 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
             categoryId: "tabs",
             slug: "evals-tab",
             title: "Evals",
+          },
+        },
+      },
+      {
+        id: "chat-evals",
+        title: "Create and run eval suites from Chat",
+        publishedAt: new Date("2026-10-26T12:00:00Z"),
+        blocks: [
+          {
+            type: "prose",
+            markdown:
+              "Ask **Chat** for an eval suite in plain words, for example *\"make a prompt suite for my support prompt and compare gpt-4o with gpt-4.1-mini\"*. Chat writes the test cases with their expected answers. It asks which credential and models to use, or uses your only one. Then it saves the suite in **Evals**, runs it, and reports each model's pass count and the cases that failed.",
+          },
+          {
+            type: "prose",
+            markdown:
+              "For an **agent suite**, Chat picks the agent and writes the run inputs itself. It can run the workflow and save those runs as the baseline, take the baseline from the agent's latest runs, or store the numbers you give it. The same works from an MCP client through `heym_chat`.",
+          },
+        ],
+        tour: {
+          description:
+            "Describe the suite you want. Chat writes the test cases, picks the credential with you, and runs it.",
+          useCases: [
+            "Compare two models on a prompt without building the suite by hand",
+            "Build an agent's baseline from fresh runs when it has none yet",
+            "Re-run a suite from an MCP client and read what failed",
+          ],
+          tourVisual: "chat-evals",
+          docTarget: {
+            categoryId: "tabs",
+            slug: "chat-tab",
+            title: "Chat",
           },
         },
       },
@@ -131,14 +163,14 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
   {
     releaseId: "2026.21",
     publishedAt: new Date("2026-10-22T12:00:00Z"),
-    headline: "Change one node with AI, and sign in to Codex with a short code",
+    headline: "Change or fix one node with AI",
     releaseTour: {
       label: "New in Heym",
       introTitle: "New in this release",
       introDescription:
         "A quick look at what changed since your last update. Takes about a minute.",
       tourEnabled: true,
-      sectionOrder: ["node-ai-edit", "codex-device-sign-in"],
+      sectionOrder: ["node-ai-edit"],
     },
     sections: [
       {
@@ -170,38 +202,6 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
             categoryId: "reference",
             slug: "ai-assistant",
             title: "AI Assistant",
-          },
-        },
-      },
-      {
-        id: "codex-device-sign-in",
-        title: "Sign in to ChatGPT for Codex with a short code",
-        publishedAt: new Date("2026-10-18T12:00:00Z"),
-        blocks: [
-          {
-            type: "prose",
-            markdown:
-              "The **OpenAI Codex** credential now signs in to ChatGPT with a short code. Click **Sign in with ChatGPT**, enter the code Heym shows (it is already copied) on OpenAI's page, and approve. Heym finishes on its own and closes the OpenAI window. There is no `localhost:1455` address to copy back anymore.",
-          },
-          {
-            type: "prose",
-            markdown:
-              "Device code sign-in has to be allowed in ChatGPT under **Settings → Security**, and a workspace admin has to allow it for workspace accounts. Where it is off, **paste a redirect URL instead** keeps the previous flow.",
-          },
-        ],
-        tour: {
-          description:
-            "Connect a ChatGPT subscription to the Codex node with a short code. Nothing to paste back.",
-          useCases: [
-            "Run Codex on a ChatGPT Plus or Pro plan instead of API credits",
-            "Reconnect a Codex credential without leaving the dialog",
-            "Sign in from a phone or another computer by entering the code there",
-          ],
-          tourVisual: "codex-device-sign-in",
-          docTarget: {
-            categoryId: "nodes",
-            slug: "codex-node",
-            title: "Codex",
           },
         },
       },
