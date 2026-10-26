@@ -45,7 +45,7 @@ With a judge, each model answers the test input with the suite prompt alone, the
 - **A model judge** (OpenAI, OpenAI compatible or Gemini) reads the question, the expected output and the answer, and returns a score with a one-line reason. It runs at temperature `0`, or at `low` reasoning effort for a reasoning model, so the same answer gets the same verdict.
 - **A decision model judge** rates the answer on a five-level rubric, from *Completely off* to *Fully matches*. The score is the probability-weighted position on that rubric, so it comes from a distribution the model computed rather than a number it wrote.
 
-The cell's hover card shows the judge's reason, or for a decision model the level, the score and its confidence. Latency and tokens describe the model under test; the judge's own calls appear in [Traces](./traces-tab.md) under the **Evals** source. The model picker leaves out Model Router credentials, because an eval compares specific models.
+The cell's hover card shows the judge's reason, or for a decision model the level, the score and its confidence. Latency and tokens describe the model under test; the judge's own calls appear in [Traces](./traces-tab.md) under the **Evals** source. The judge picker leaves out Model Router credentials, because a judge has to be one fixed model. The credential for the models under test can be a [Model Router](../reference/credentials.md#model-router-auto-model): its **Auto** model picks a model per request, the same way it does in a workflow.
 
 Without a judge, each model answers and scores its own answer in a single request.
 

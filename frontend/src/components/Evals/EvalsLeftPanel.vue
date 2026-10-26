@@ -268,10 +268,8 @@ watch(suiteName, () => {
 
 async function loadCredentials(): Promise<void> {
   try {
-    // Evals compares specific models, and a Model Router picks its own per request.
-    credentials.value = (await credentialsApi.listLLM()).filter(
-      (credential) => credential.type !== "model_router",
-    );
+    // A Model Router runs as its Auto model, the same as when a run comes from MCP or chat.
+    credentials.value = await credentialsApi.listLLM();
     if (credentials.value.length > 0 && !selectedCredentialId.value) {
       const saved = props.lastRun?.credential_id ?? null;
       const resolved = aiDefaults.resolveCredentialId(credentials.value, {

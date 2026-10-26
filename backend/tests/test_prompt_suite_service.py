@@ -265,6 +265,33 @@ class RealPostgresPromptSuiteTests(unittest.IsolatedAsyncioTestCase):
                 credential_id=self.credential_id, models=["m"], reasoning_effort="ultra"
             )
 
+    async def test_a_model_router_credential_runs_its_auto_model(self) -> None:
+        router_id = uuid.uuid4()
+        async with async_session_maker() as db:
+            db.add(
+                Credential(
+                    id=router_id,
+                    owner_id=self.owner_id,
+                    name=f"router-{router_id.hex[:6]}",
+                    type=CredentialType.model_router,
+                    encrypted_config="x",
+                )
+            )
+            await db.commit()
+            suite = await prompt_suites.create_prompt_suite(
+                db, self.owner_id, EvalSuiteCreate(name="Routed")
+            )
+            launch = await prompt_suites.launch_prompt_run(
+                db,
+                SimpleNamespace(id=self.owner_id),
+                suite.id,
+                RunEvalsRequest(credential_id=router_id, models=["auto"]),
+            )
+            listed = await prompt_suites.list_prompt_runs(db, suite.id, self.owner_id)
+        self.assertEqual(launch.run.status, "running")
+        # The suite reopens on the router, since the run keeps its credential.
+        self.assertEqual((listed[0].credential_id, listed[0].models), (router_id, ["auto"]))
+
     async def test_launch_refuses_another_users_credential(self) -> None:
         async with async_session_maker() as db:
             suite = await prompt_suites.create_prompt_suite(
