@@ -163,6 +163,8 @@ export interface AgentThresholds {
   tool_calls: number | null;
 }
 
+export type AgentBaselineSourceKind = "latest_runs" | "suite_run" | "manual";
+
 export interface AgentBaseline {
   run_count: number;
   error_count: number;
@@ -176,6 +178,25 @@ export interface AgentBaseline {
   tool_calls_max: number | null;
   unpriced_models: string[];
   captured_at: string | null;
+  source?: AgentBaselineSourceKind;
+  suite_run_id?: string | null;
+}
+
+export interface AgentBaselineValues {
+  latency_p50_ms?: number | null;
+  latency_p95_ms?: number | null;
+  cost_avg_usd?: number | null;
+  cost_p95_usd?: number | null;
+  tokens_avg?: number | null;
+  tokens_p95?: number | null;
+  tool_calls_avg?: number | null;
+  tool_calls_max?: number | null;
+}
+
+export interface AgentBaselineSourceRequest {
+  source: AgentBaselineSourceKind;
+  run_id?: string | null;
+  values?: AgentBaselineValues | null;
 }
 
 export interface AgentToolCall {
@@ -254,6 +275,7 @@ export interface CreateAgentSuiteRequest {
   node_id: string;
   tool_assertions: ToolAssertion[];
   thresholds: AgentThresholds;
+  baseline?: AgentBaselineSourceRequest;
 }
 
 export interface UpdateAgentSuiteRequest {
@@ -261,6 +283,7 @@ export interface UpdateAgentSuiteRequest {
   tool_assertions?: ToolAssertion[];
   thresholds?: AgentThresholds;
   refresh_baseline?: boolean;
+  baseline?: AgentBaselineSourceRequest;
 }
 
 export type AgentCheckKind = "run" | "assertion" | "threshold";
@@ -321,6 +344,7 @@ export interface CreateAgentSuiteRunRequest {
   generate_inputs: boolean;
   credential_id?: string | null;
   model?: string | null;
+  inputs_list?: Record<string, unknown>[] | null;
 }
 
 export interface AgentSuiteRunResult {

@@ -3,6 +3,7 @@ import { RefreshCw } from "lucide-vue-next";
 
 import AgentSuiteToolAssertions from "@/components/Evals/AgentSuite/AgentSuiteToolAssertions.vue";
 import {
+  baselineSourceLabel,
   formatCount,
   formatMs,
   formatRunTime,
@@ -105,7 +106,8 @@ function setThreshold(key: ThresholdKey, raw: string, integer: boolean): void {
           class="flex items-center gap-2 text-xs text-muted-foreground"
         >
           <span v-if="savedBaseline.captured_at">
-            Saved baseline: {{ formatRunTime(savedBaseline.captured_at) }}
+            Saved baseline: {{ formatRunTime(savedBaseline.captured_at) }} ·
+            {{ baselineSourceLabel(savedBaseline) }}
           </span>
           <Button
             variant="outline"

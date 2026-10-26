@@ -1,6 +1,6 @@
 import axios from "axios";
 
-import type { AgentThresholds, ToolKind } from "@/types/evals";
+import type { AgentBaseline, AgentThresholds, ToolKind } from "@/types/evals";
 
 export const EMPTY_THRESHOLDS: AgentThresholds = {
   latency_ms: null,
@@ -46,6 +46,13 @@ export function formatRunTime(iso: string): string {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+/** Where a saved baseline came from; one saved before sources existed is the latest runs. */
+export function baselineSourceLabel(baseline: Pick<AgentBaseline, "source">): string {
+  if (baseline.source === "manual") return "entered manually";
+  if (baseline.source === "suite_run") return "from a suite run";
+  return "from the latest runs";
 }
 
 export function traceLink(traceId: string): { path: string; query: Record<string, string> } {
