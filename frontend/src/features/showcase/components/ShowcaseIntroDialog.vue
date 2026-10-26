@@ -63,7 +63,8 @@ function dismiss(): void {
 }
 
 function handleKeydown(event: KeyboardEvent): void {
-  if (event.key === "Escape") {
+  // While closed it must not swallow Escape, or no field on the page ever receives it.
+  if (event.key === "Escape" && isOpen.value) {
     event.preventDefault();
     event.stopPropagation();
     dismiss();

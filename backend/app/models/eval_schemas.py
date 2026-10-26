@@ -40,6 +40,7 @@ class EvalSuiteListResponse(BaseModel):
     name: str
     description: str | None
     created_at: datetime
+    suite_type: Literal["prompt", "agent"] = "prompt"
 
     class Config:
         from_attributes = True

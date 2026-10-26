@@ -9,11 +9,14 @@ export interface EvalSuite {
   test_cases?: EvalTestCase[];
 }
 
+export type EvalSuiteType = "prompt" | "agent";
+
 export interface EvalSuiteListItem {
   id: string;
   name: string;
   description: string | null;
   created_at: string;
+  suite_type: EvalSuiteType;
 }
 
 export interface EvalTestCase {
@@ -138,4 +141,204 @@ export interface GenerateTestDataRequest {
 
 export interface GenerateTestDataResponse {
   test_cases: CreateTestCaseRequest[];
+}
+
+export type ToolExpect = "called" | "not_called";
+
+export type ToolKind = "tool" | "mcp" | "sub_agent" | "sub_workflow" | "skill" | "node" | "review";
+
+/** `name` identifies the call within its kind: a sub-agent's label, a sub-workflow's id. */
+export interface ToolAssertion {
+  kind: ToolKind;
+  name: string;
+  label?: string | null;
+  expect: ToolExpect;
+}
+
+/** Upper bounds per run; null turns that check off. */
+export interface AgentThresholds {
+  latency_ms: number | null;
+  cost_usd: number | null;
+  total_tokens: number | null;
+  tool_calls: number | null;
+}
+
+export interface AgentBaseline {
+  run_count: number;
+  error_count: number;
+  latency_p50_ms: number | null;
+  latency_p95_ms: number | null;
+  cost_avg_usd: number | null;
+  cost_p95_usd: number | null;
+  tokens_avg: number | null;
+  tokens_p95: number | null;
+  tool_calls_avg: number | null;
+  tool_calls_max: number | null;
+  unpriced_models: string[];
+  captured_at: string | null;
+}
+
+export interface AgentToolCall {
+  kind: ToolKind;
+  name: string;
+  label: string;
+  status: string;
+  elapsed_ms: number | null;
+  server: string | null;
+}
+
+export interface AgentRun {
+  trace_id: string;
+  created_at: string;
+  model: string | null;
+  latency_ms: number;
+  model_ms: number;
+  tool_ms: number;
+  cost_usd: number | null;
+  total_tokens: number;
+  tool_count: number;
+  tool_calls: AgentToolCall[];
+  error: string | null;
+}
+
+export interface AgentToolUsage {
+  kind: ToolKind;
+  name: string;
+  label: string;
+  server: string | null;
+  configured: boolean;
+  runs_called: number;
+  call_count: number;
+  error_count: number;
+  avg_ms: number | null;
+}
+
+/** An agent node to pick; one without runs has nothing to read yet. */
+export interface AgentCandidate {
+  workflow_id: string;
+  workflow_name: string;
+  node_id: string;
+  node_label: string;
+  run_count: number;
+  last_run_at: string | null;
+}
+
+export interface AgentMetrics {
+  workflow_id: string;
+  workflow_name: string;
+  node_id: string;
+  node_label: string;
+  runs: AgentRun[];
+  baseline: AgentBaseline;
+  tools: AgentToolUsage[];
+  suggested_thresholds: AgentThresholds;
+}
+
+export interface AgentSuite {
+  id: string;
+  name: string;
+  workflow_id: string;
+  workflow_name: string;
+  node_id: string;
+  node_label: string;
+  tool_assertions: ToolAssertion[];
+  thresholds: AgentThresholds;
+  baseline: AgentBaseline;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateAgentSuiteRequest {
+  name: string;
+  workflow_id: string;
+  node_id: string;
+  tool_assertions: ToolAssertion[];
+  thresholds: AgentThresholds;
+}
+
+export interface UpdateAgentSuiteRequest {
+  name?: string;
+  tool_assertions?: ToolAssertion[];
+  thresholds?: AgentThresholds;
+  refresh_baseline?: boolean;
+}
+
+export type AgentCheckKind = "run" | "assertion" | "threshold";
+export type AgentCheckStatus = "pass" | "fail" | "skip";
+
+export interface AgentCheckResult {
+  key: string;
+  label: string;
+  kind: AgentCheckKind;
+  status: AgentCheckStatus;
+  detail: string | null;
+}
+
+export interface AgentRunEvaluation extends AgentRun {
+  passed: boolean;
+  checks: AgentCheckResult[];
+}
+
+export interface AgentCheckSummary {
+  key: string;
+  label: string;
+  kind: AgentCheckKind;
+  passed: number;
+  failed: number;
+  skipped: number;
+}
+
+export type AgentDeltaMetric = "latency_p95_ms" | "cost_avg_usd" | "tokens_avg" | "tool_calls_avg";
+
+export interface AgentMetricDelta {
+  metric: AgentDeltaMetric;
+  baseline: number | null;
+  current: number | null;
+  delta_pct: number | null;
+}
+
+export interface AgentSuiteReport {
+  suite_id: string;
+  run_count: number;
+  passed_count: number;
+  pass_rate: number | null;
+  checks: AgentCheckSummary[];
+  current: AgentBaseline;
+  baseline: AgentBaseline;
+  deltas: AgentMetricDelta[];
+  runs: AgentRunEvaluation[];
+}
+
+export interface AgentSuiteRunInputs {
+  fields: string[];
+  previous_inputs: Record<string, unknown> | null;
+  previous_run_at: string | null;
+}
+
+export interface CreateAgentSuiteRunRequest {
+  count: number;
+  inputs: Record<string, unknown>;
+  generate_inputs: boolean;
+  credential_id?: string | null;
+  model?: string | null;
+}
+
+export interface AgentSuiteRunResult {
+  execution_id: string | null;
+  status: string;
+  trace_ids: string[];
+  error: string | null;
+}
+
+export interface AgentSuiteRun {
+  id: string;
+  suite_id: string;
+  status: "running" | "completed" | "failed";
+  requested_count: number;
+  generate_inputs: boolean;
+  inputs: Record<string, unknown>[];
+  results: AgentSuiteRunResult[];
+  error: string | null;
+  created_at: string;
+  completed_at: string | null;
 }

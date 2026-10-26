@@ -20,6 +20,10 @@ import { cn } from "@/lib/utils";
 interface Option {
   value: string | undefined;
   label: string;
+  /** Short tag shown beside the label, such as a type; search matches it too. */
+  hint?: string;
+  /** Listed but not selectable. */
+  disabled?: boolean;
 }
 
 interface InternalOption extends Option {
@@ -198,7 +202,7 @@ function filterOptions(keys: string[], term: string): string[] {
       return false;
     }
 
-    return [option.label, option.value ?? ""].some((text) =>
+    return [option.label, option.value ?? "", option.hint ?? ""].some((text) =>
       text.toLowerCase().includes(normalizedTerm)
     );
   });
@@ -326,6 +330,7 @@ function clearValue(): void {
               v-for="option in group.options"
               :key="option.key"
               :value="option.key"
+              :disabled="option.disabled"
               class="relative flex min-h-9 w-full cursor-pointer select-none items-center rounded-lg py-2 pl-8 pr-3 text-sm outline-none transition-colors data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50"
               @select="handleItemSelect($event, option)"
             >
@@ -333,6 +338,14 @@ function clearValue(): void {
                 <Check class="h-4 w-4" />
               </ComboboxItemIndicator>
               <span class="min-w-0 whitespace-normal break-words">{{ option.label }}</span>
+              <span
+                v-if="option.hint"
+                class="ml-auto shrink-0 pl-3"
+              >
+                <span class="rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+                  {{ option.hint }}
+                </span>
+              </span>
             </ComboboxItem>
           </ComboboxGroup>
         </ComboboxViewport>

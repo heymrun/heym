@@ -15,6 +15,8 @@ from starlette.responses import Response
 from app.api import (
     admin_cluster,
     agent_memory,
+    agent_suite_runs,
+    agent_suites,
     ai_assistant,
     alerts,
     analytics,
@@ -408,6 +410,8 @@ app.include_router(boards.router, prefix="/api/boards", tags=["Boards"])
 app.include_router(logs.router, prefix="/api/logs", tags=["Logs"])
 app.include_router(plugins.router, prefix="/api/plugins", tags=["Plugins"])
 app.include_router(evals.router, prefix="/api/evals", tags=["Evals"])
+app.include_router(agent_suites.router, prefix="/api/evals", tags=["Evals"])
+app.include_router(agent_suite_runs.router, prefix="/api/evals", tags=["Evals"])
 app.include_router(chats.router, prefix="/api/chats", tags=["Chats"])
 app.include_router(voice.router, prefix="/api/voice", tags=["Voice"])
 app.include_router(expressions.router, prefix="/api/expressions", tags=["Expressions"])

@@ -381,11 +381,11 @@ describe("shipped release registry", () => {
     const catalog = buildReleaseTourCatalog(RELEASE_REGISTRY);
 
     expect(catalog?.slides.map((slide) => slide.id)).toEqual([
+      "agent-suite",
       "concurrency-limit",
       "canvas-collaboration",
       "node-ai-edit",
       "codex-device-sign-in",
-      "slack-bot",
     ]);
   });
 
@@ -400,7 +400,7 @@ describe("shipped release registry", () => {
 
     expect(tours.map((tour) => tour.tourVisual)).toContain("concurrency-limit");
     expect(tours.map((tour) => tour.tourVisual)).toContain("canvas-collaboration");
-    expect(tours.map((tour) => tour.tourVisual)).toContain("slack-bot");
+    expect(tours.map((tour) => tour.tourVisual)).toContain("agent-suite");
     expect(tours.map((tour) => tour.tourVisual)).toContain("codex-device-sign-in");
     for (const tour of tours) {
       expect(TOUR_VISUALS[tour.tourVisual], `missing visual for "${tour.tourVisual}"`)

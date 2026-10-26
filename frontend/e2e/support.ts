@@ -231,9 +231,14 @@ export async function deleteEvalSuite(page: Page, suiteId: string): Promise<void
 export async function clearEvalSuites(page: Page): Promise<void> {
   const response = await page.request.get("/api/evals/suites");
   await expectOk(response);
-  const suites = (await response.json()) as { id: string }[];
+  const suites = (await response.json()) as { id: string; suite_type: string }[];
   for (const suite of suites) {
-    await deleteEvalSuite(page, suite.id);
+    if (suite.suite_type === "agent") {
+      const deleted = await page.request.delete(`/api/evals/agent-suites/${suite.id}`);
+      expect([204, 404]).toContain(deleted.status());
+    } else {
+      await deleteEvalSuite(page, suite.id);
+    }
   }
 }
 

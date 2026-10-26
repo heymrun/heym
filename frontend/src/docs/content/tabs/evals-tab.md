@@ -1,6 +1,6 @@
 # Evals Tab
 
-The **Evals** tab is a separate page at `/evals`. It lets you create evaluation suites, define test cases, and run evaluations against your [Agent](../nodes/agent-node.md) workflows.
+The **Evals** tab is a separate page at `/evals`. It lets you create evaluation suites, define test cases, and run evaluations against your [Agent](../nodes/agent-node.md) workflows. An [agent suite](#agent-suites) runs an agent or reads its real runs, and checks the tools it calls, its latency, its USD cost, its tokens and its number of tool calls.
 
 <video src="/features/showcase/evals.webm" controls playsinline muted preload="metadata" style="width:100%;border-radius:12px;margin:16px 0"></video>
 <p class="github-video-link"><a href="../../../../public/features/showcase/evals.webm">▶ Watch Evals demo</a></p>
@@ -13,6 +13,8 @@ The **Evals** tab is a separate page at `/evals`. It lets you create evaluation 
 
 ## Eval Suites
 
+- **New Suite** – Choose **Prompt suite** to test a system prompt across models, or **Agent suite** to check an agent's real runs (see [Agent Suites](#agent-suites))
+- **Suite picker** – Lists prompt and agent suites together with the type beside each name; type to search
 - **Create suite** – Define a suite with a name and description
 - **Select workflow** – Choose which workflow to evaluate
 - **Select credential** – API key for running the workflow
@@ -57,6 +59,30 @@ Temperature and reasoning effort are hidden in this mode, and the run uses fixed
 - Open historical runs from the results panel and inspect saved prompt/input/output snapshots
 - Opening a past run loads its scoring method and judge into the left panel, so **Re-Run Evals** repeats the same evaluation
 - **Export** downloads the run as JSON, including `judge_credential_id` and `judge_model`
+
+## Agent Suites
+
+An agent suite checks one [Agent](../nodes/agent-node.md) node against its runs. It reads them from [Traces](./traces-tab.md), where every run already records its time, tokens, cost and tool calls, and it can also run the workflow for you.
+
+Create one with **New Suite** → **Agent suite** and follow three steps:
+
+1. **Agent** – Pick the workflow, then its agent node. Only workflows with an agent node are listed; a workflow or agent that has not run yet is shown but cannot be picked. The picked agent's settings (model, instructions, tools and limits) show on the right, and a read-only canvas of its workflow, with the agent highlighted, shows below.
+2. **Baseline** – The agent's last 10 runs: latency p50 and p95, cost per run, tokens per run and tool calls per run, which tools it called and how often, and each run's own numbers. Runs that ended in an error are listed but left out of the baseline.
+3. **Checks** – Mark each tool **Must call**, **Must not call** or **Either**. Every kind of call is listed with its type: Python and node tools, **MCP** tools with their server, **sub-agents** by label, **sub-workflows** by name and **skills**. Add one by kind and name when it has not run yet, and remove it again with its **X**. Set upper bounds for latency, cost, total tokens and tool calls; each starts 20% above the baseline's p95 and can be turned off.
+
+A saved suite opens on **Results**, with **Baseline** and **Edit checks** next to it:
+
+- **Run the workflow** – Choose how many runs (up to 20). The inputs are filled from the workflow's most recent run and can be edited, and every run uses them. Turn on **Generate inputs** (the sparkle), then pick a credential and model, to have the model write a different input for each run in the shape of those values. Each run executes the whole workflow like any other run and is listed in Execution History with the `agent_suite` trigger. To skip later steps, such as one that sends email, open the workflow with **Go to workflow** in the panel and disable those nodes first.
+- **Results** – The latest suite run is scored by default; switch to the last 10, 20 or 50 runs of the agent to include its other runs. You see the pass rate, how often each check passed, latency, cost, tokens and tool calls next to the saved baseline, and each run with the reason it failed and a link to its trace.
+- **Go to workflow** opens the agent's workflow in a new tab. In the name field, **Esc** or the **X** clears it.
+
+How the numbers are read:
+
+- **Latency** is the model's time plus the time of the run's tool calls.
+- **Cost** uses the same prices as Traces. A run of a model without a price skips the cost check instead of failing it.
+- A run **passes** when it finished without an error and every check passed.
+- The suite reads your own traces only, the same rule as the Traces tab.
+- **Use latest runs as baseline** in **Edit checks** replaces the saved baseline with the agent's latest runs.
 
 ## Benchmark Matrix Ideas
 

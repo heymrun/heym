@@ -19,7 +19,7 @@ test.beforeEach(async ({ page }) => {
 test("creates and deletes an eval suite", async ({ page }) => {
   await page.goto("/evals");
   await expect(page.getByText("Create a suite to get started")).toBeVisible();
-  await page.getByRole("button", { name: "Create your first suite" }).click();
+  await page.getByRole("button", { name: "Prompt suite" }).click();
   await expect(page.getByTestId("eval-suite-name")).toHaveValue("New Eval Suite");
 
   await acceptNextDialog(
@@ -40,7 +40,7 @@ test("edits the suite name and system prompt with autosave", async ({ page }) =>
       response.request().method() === "POST" &&
       new URL(response.url()).pathname === "/api/evals/suites",
   );
-  await page.getByRole("button", { name: "Create your first suite" }).click();
+  await page.getByRole("button", { name: "Prompt suite" }).click();
   const suite = (await (await suiteResponsePromise).json()) as { id: string };
 
   try {
