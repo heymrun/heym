@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 import {
   acceptNextDialog,
@@ -70,4 +70,77 @@ test("edits the suite name and system prompt with autosave", async ({ page }) =>
   } finally {
     await deleteEvalSuite(page, suite.id);
   }
+});
+
+async function createPromptSuite(page: Page, name: string): Promise<string> {
+  const response = await page.request.post("/api/evals/suites", { data: { name } });
+  expect(response.ok()).toBeTruthy();
+  return ((await response.json()) as { id: string }).id;
+}
+
+test("a selected suite shows its loading state, never the empty state", async ({ page }) => {
+  const suiteId = await createPromptSuite(page, "QA Evals");
+  let release = (): void => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route(`**/api/evals/suites/${suiteId}`, async (route) => {
+    if (route.request().method() === "GET") await held;
+    await route.continue();
+  });
+
+  await page.goto(`/evals?suite=${suiteId}`);
+  await expect(page.getByTestId("eval-suite-loading")).toBeVisible();
+  await expect(page.getByText("Create a suite to get started")).toHaveCount(0);
+
+  release();
+  await expect(page.getByTestId("eval-suite-name")).toHaveValue("QA Evals");
+});
+
+test("a suite that fails to load offers a retry instead of the empty state", async ({ page }) => {
+  const suiteId = await createPromptSuite(page, "QA Evals");
+  let failing = true;
+  await page.route(`**/api/evals/suites/${suiteId}`, async (route) => {
+    if (failing && route.request().method() === "GET") {
+      await route.fulfill({ status: 500, json: { detail: "boom" } });
+      return;
+    }
+    await route.continue();
+  });
+
+  await page.goto(`/evals?suite=${suiteId}`);
+  await expect(page.getByText("Could not load this suite.")).toBeVisible();
+  await expect(page.getByText("Create a suite to get started")).toHaveCount(0);
+
+  failing = false;
+  await page.getByRole("button", { name: "Retry" }).click();
+  await expect(page.getByTestId("eval-suite-name")).toHaveValue("QA Evals");
+});
+
+test("a slow answer for the previous suite does not replace the selected one", async ({ page }) => {
+  const firstId = await createPromptSuite(page, "First suite");
+  await createPromptSuite(page, "Second suite");
+  let release = (): void => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route(`**/api/evals/suites/${firstId}`, async (route) => {
+    if (route.request().method() === "GET") await held;
+    await route.continue();
+  });
+
+  await page.goto(`/evals?suite=${firstId}`);
+  // The picker's options carry the suite type as a hint, so match the name's start.
+  const picker = page.getByTestId("eval-suite-select").getByRole("combobox");
+  await picker.click();
+  await picker.fill("Second");
+  await page.getByRole("option", { name: /^Second suite/ }).click();
+  await expect(page.getByTestId("eval-suite-name")).toHaveValue("Second suite");
+
+  const firstAnswer = page.waitForResponse((response) =>
+    response.url().endsWith(`/api/evals/suites/${firstId}`),
+  );
+  release();
+  await firstAnswer;
+  await expect(page.getByTestId("eval-suite-name")).toHaveValue("Second suite");
 });
