@@ -15,7 +15,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import Text, cast, select
 
 from app.db.models import HeymEvent, Workflow
 from app.db.session import async_session_maker
@@ -127,21 +127,29 @@ class HeymEventDispatcher:
             await asyncio.sleep(DISPATCH_INTERVAL_SECONDS)
 
     async def _tick(self) -> None:
-        workflows = await self._get_subscribing_workflows()
-        if workflows:
-            events = await self._get_recent_events()
-            if events:
-                for workflow in workflows:
-                    await self._dispatch_workflow(workflow, events)
+        # Every worker of every instance runs this loop. The event lookup is an indexed
+        # range scan, while finding subscribers reads workflow nodes, so look for events
+        # first and skip the workflow scan when there is nothing to deliver.
+        events = await self._get_recent_events()
+        if events:
+            for workflow in await self._get_subscribing_workflows():
+                await self._dispatch_workflow(workflow, events)
         await self._maybe_cleanup()
 
-    async def _get_subscribing_workflows(self) -> list[Workflow]:
+    async def _get_subscribing_workflows(self) -> list[Any]:
+        """Workflows with an active ``heymTrigger`` node, as ``id``/``owner_id``/``nodes`` rows.
+
+        The text match only keeps unrelated workflows inside the database;
+        ``find_heym_trigger_nodes`` still makes the exact decision per node.
+        """
         async with async_session_maker() as db:
-            result = await db.execute(select(Workflow))
-            all_workflows = result.scalars().all()
-        return [
-            workflow for workflow in all_workflows if find_heym_trigger_nodes(workflow.nodes or [])
-        ]
+            result = await db.execute(
+                select(Workflow.id, Workflow.owner_id, Workflow.nodes).where(
+                    cast(Workflow.nodes, Text).contains('"heymTrigger"')
+                )
+            )
+            rows = result.all()
+        return [row for row in rows if find_heym_trigger_nodes(row.nodes or [])]
 
     async def _get_recent_events(self) -> list[HeymEvent]:
         cutoff = datetime.now(timezone.utc) - timedelta(minutes=DISPATCH_LOOKBACK_MINUTES)
@@ -153,7 +161,7 @@ class HeymEventDispatcher:
             )
             return list(result.scalars().all())
 
-    async def _dispatch_workflow(self, workflow: Workflow, events: list[HeymEvent]) -> None:
+    async def _dispatch_workflow(self, workflow: Any, events: list[HeymEvent]) -> None:
         """Claim and deliver every matching event to each subscribing node."""
         for node in find_heym_trigger_nodes(workflow.nodes or []):
             node_id = str(node.get("id", "")).strip()
@@ -203,7 +211,7 @@ class HeymEventDispatcher:
                     node_id=node_id,
                 )
 
-    async def _run_workflow(self, workflow: Workflow, node_id: str, inputs: dict[str, Any]) -> None:
+    async def _run_workflow(self, workflow: Any, node_id: str, inputs: dict[str, Any]) -> None:
         """Execute the workflow and persist the run, mirroring the IMAP trigger."""
         from app.api.analytics import upsert_workflow_analytics_snapshot
         from app.api.workflows import (

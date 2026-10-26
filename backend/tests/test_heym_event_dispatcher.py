@@ -3,7 +3,11 @@
 import unittest
 import uuid
 from datetime import datetime, timezone
+from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
+
+from sqlalchemy.dialects import postgresql
 
 from app.services import heym_event_dispatcher as dispatcher
 
@@ -17,6 +21,17 @@ def _event(name: str, owner_id: uuid.UUID | None = None, minute: int = 0) -> Mag
     event.workflow_id = uuid.uuid4()
     event.created_at = datetime(2026, 8, 11, 12, minute, tzinfo=timezone.utc)
     return event
+
+
+def _session_factory(rows: list[Any]) -> tuple[MagicMock, AsyncMock]:
+    db = AsyncMock()
+    result = MagicMock()
+    result.all.return_value = rows
+    db.execute.return_value = result
+    session = MagicMock()
+    session.__aenter__ = AsyncMock(return_value=db)
+    session.__aexit__ = AsyncMock(return_value=False)
+    return MagicMock(return_value=session), db
 
 
 class FindTriggerNodesTest(unittest.TestCase):
@@ -256,3 +271,81 @@ class FailedDeliveryTest(unittest.IsolatedAsyncioTestCase):
             await manager._dispatch_workflow(self.workflow, events)
 
         self.assertEqual(run.await_count, 2)
+
+
+class TickTest(unittest.IsolatedAsyncioTestCase):
+    async def test_no_recent_events_skips_the_workflow_scan(self) -> None:
+        manager = dispatcher.HeymEventDispatcher()
+
+        with (
+            patch.object(manager, "_get_recent_events", AsyncMock(return_value=[])),
+            patch.object(manager, "_get_subscribing_workflows", AsyncMock()) as subscribers,
+            patch.object(manager, "_dispatch_workflow", AsyncMock()) as dispatch,
+            patch.object(manager, "_maybe_cleanup", AsyncMock()) as cleanup,
+        ):
+            await manager._tick()
+
+        subscribers.assert_not_awaited()
+        dispatch.assert_not_awaited()
+        cleanup.assert_awaited_once()
+
+    async def test_recent_events_reach_every_subscribing_workflow(self) -> None:
+        events = [_event("heym.started")]
+        first, second = MagicMock(), MagicMock()
+        manager = dispatcher.HeymEventDispatcher()
+
+        with (
+            patch.object(manager, "_get_recent_events", AsyncMock(return_value=events)),
+            patch.object(
+                manager, "_get_subscribing_workflows", AsyncMock(return_value=[first, second])
+            ),
+            patch.object(manager, "_dispatch_workflow", AsyncMock()) as dispatch,
+            patch.object(manager, "_maybe_cleanup", AsyncMock()) as cleanup,
+        ):
+            await manager._tick()
+
+        self.assertEqual(
+            [call.args for call in dispatch.await_args_list], [(first, events), (second, events)]
+        )
+        cleanup.assert_awaited_once()
+
+
+class SubscribingWorkflowsTest(unittest.IsolatedAsyncioTestCase):
+    async def test_scan_is_narrowed_in_sql(self) -> None:
+        session_factory, db = _session_factory([])
+
+        with patch.object(dispatcher, "async_session_maker", session_factory):
+            await dispatcher.HeymEventDispatcher()._get_subscribing_workflows()
+
+        stmt = db.execute.await_args.args[0]
+        sql = str(
+            stmt.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True})
+        )
+        self.assertEqual(
+            [column.name for column in stmt.selected_columns], ["id", "owner_id", "nodes"]
+        )
+        self.assertIn("CAST(workflows.nodes AS TEXT) LIKE", sql)
+        self.assertIn("'\"heymTrigger\"'", sql)
+
+    async def test_text_match_alone_does_not_subscribe(self) -> None:
+        subscribed = SimpleNamespace(
+            id=uuid.uuid4(),
+            owner_id=uuid.uuid4(),
+            nodes=[{"id": "n1", "type": "heymTrigger", "data": {}}],
+        )
+        mentioned_in_a_note = SimpleNamespace(
+            id=uuid.uuid4(),
+            owner_id=uuid.uuid4(),
+            nodes=[{"id": "n1", "type": "sticky", "data": {"note": '"heymTrigger"'}}],
+        )
+        inactive = SimpleNamespace(
+            id=uuid.uuid4(),
+            owner_id=uuid.uuid4(),
+            nodes=[{"id": "n1", "type": "heymTrigger", "data": {"active": False}}],
+        )
+        session_factory, _db = _session_factory([subscribed, mentioned_in_a_note, inactive])
+
+        with patch.object(dispatcher, "async_session_maker", session_factory):
+            workflows = await dispatcher.HeymEventDispatcher()._get_subscribing_workflows()
+
+        self.assertEqual(workflows, [subscribed])
