@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, model_validator
 
 ToolExpect = Literal["called", "not_called"]
 ToolKind = Literal["tool", "mcp", "sub_agent", "sub_workflow", "skill", "node", "review"]
+BaselineSource = Literal["latest_runs", "suite_run", "manual"]
 
 
 class ToolAssertion(BaseModel):
@@ -42,6 +43,8 @@ class AgentBaselineResponse(BaseModel):
     tool_calls_max: int | None = None
     unpriced_models: list[str] = []
     captured_at: datetime | None = None
+    source: BaselineSource = "latest_runs"
+    suite_run_id: uuid.UUID | None = None
 
     class Config:
         from_attributes = True
@@ -118,12 +121,56 @@ class AgentMetricsResponse(BaseModel):
     suggested_thresholds: AgentThresholdsModel
 
 
+class AgentBaselineValues(BaseModel):
+    """Baseline numbers the user states instead of measuring them from runs."""
+
+    latency_p50_ms: float | None = Field(None, gt=0)
+    latency_p95_ms: float | None = Field(None, gt=0)
+    cost_avg_usd: float | None = Field(None, ge=0)
+    cost_p95_usd: float | None = Field(None, ge=0)
+    tokens_avg: float | None = Field(None, gt=0)
+    tokens_p95: float | None = Field(None, gt=0)
+    tool_calls_avg: float | None = Field(None, ge=0)
+    tool_calls_max: int | None = Field(None, ge=0)
+
+    @model_validator(mode="after")
+    def _at_least_one_value(self) -> "AgentBaselineValues":
+        if all(value is None for value in self.model_dump().values()):
+            raise ValueError("Give at least one baseline value")
+        return self
+
+
+class AgentBaselineSource(BaseModel):
+    """Where a suite's baseline comes from: the agent's latest runs, one suite run, or numbers."""
+
+    source: BaselineSource = "latest_runs"
+    run_id: uuid.UUID | None = None
+    values: AgentBaselineValues | None = None
+
+    @model_validator(mode="after")
+    def _source_needs_its_input(self) -> "AgentBaselineSource":
+        if self.source == "suite_run" and self.run_id is None:
+            raise ValueError("A suite_run baseline needs run_id")
+        if self.source == "manual" and self.values is None:
+            raise ValueError("A manual baseline needs values")
+        return self
+
+
 class AgentSuiteCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     workflow_id: uuid.UUID
     node_id: str = Field(min_length=1, max_length=64)
     tool_assertions: list[ToolAssertion] = Field(default_factory=list, max_length=100)
     thresholds: AgentThresholdsModel = Field(default_factory=AgentThresholdsModel)
+    baseline: AgentBaselineSource = Field(default_factory=AgentBaselineSource)
+
+    @model_validator(mode="after")
+    def _a_new_suite_has_no_runs(self) -> "AgentSuiteCreate":
+        if self.baseline.source == "suite_run":
+            raise ValueError(
+                "A new suite has no runs yet. Create it, run it, then use that run as its baseline."
+            )
+        return self
 
 
 class AgentSuiteUpdate(BaseModel):
@@ -132,6 +179,13 @@ class AgentSuiteUpdate(BaseModel):
     thresholds: AgentThresholdsModel | None = None
     # Re-reads the agent's latest runs into the stored baseline.
     refresh_baseline: bool = False
+    baseline: AgentBaselineSource | None = None
+
+    @model_validator(mode="after")
+    def _one_baseline_change(self) -> "AgentSuiteUpdate":
+        if self.refresh_baseline and self.baseline is not None:
+            raise ValueError("Send refresh_baseline or baseline, not both")
+        return self
 
 
 class AgentSuiteResponse(BaseModel):
@@ -215,11 +269,19 @@ class AgentSuiteRunCreate(BaseModel):
     generate_inputs: bool = False
     credential_id: uuid.UUID | None = None
     model: str | None = Field(None, max_length=255)
+    # One input per run, in order; the run count is its length.
+    inputs_list: list[dict[str, Any]] | None = Field(None, min_length=1, max_length=20)
 
     @model_validator(mode="after")
     def _generation_needs_a_model(self) -> "AgentSuiteRunCreate":
         if self.generate_inputs and (self.credential_id is None or not (self.model or "").strip()):
             raise ValueError("Pick a credential and a model to generate inputs")
+        return self
+
+    @model_validator(mode="after")
+    def _inputs_list_is_not_generated(self) -> "AgentSuiteRunCreate":
+        if self.inputs_list is not None and self.generate_inputs:
+            raise ValueError("Send inputs_list or generate_inputs, not both")
         return self
 
 

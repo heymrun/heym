@@ -3,6 +3,7 @@
 import json
 import logging
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
@@ -10,10 +11,9 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request,
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.agent_suites import accessible_workflow, owned_agent_suite
+from app.api.agent_suites import owned_agent_suite
 from app.api.ai_assistant import run_execute_workflow_tool
 from app.api.deps import get_current_user
-from app.api.workflows import extract_input_fields_from_workflow
 from app.db.models import AgentSuite, AgentSuiteRun, User
 from app.db.session import get_db
 from app.models.agent_suite_schemas import (
@@ -21,11 +21,13 @@ from app.models.agent_suite_schemas import (
     AgentSuiteRunInputsResponse,
     AgentSuiteRunResponse,
 )
+from app.services import agent_suite_service as agent_suites
 from app.services.agent_suite_inputs import (
     agent_trace_ids,
     generate_run_inputs,
     previous_run_inputs,
 )
+from app.services.eval_common import DeferredJob, EvalNotFoundError
 from app.services.hitl_service import build_public_base_url
 from app.services.workflow_access import get_accessible_workflow
 
@@ -36,8 +38,16 @@ router = APIRouter()
 TRIGGER_SOURCE = "agent_suite"
 
 
-def _input_keys(workflow: Any) -> list[str]:
-    return [field.key for field in extract_input_fields_from_workflow(workflow) if field.key]
+class AgentSuiteBusyError(Exception):
+    """The suite has a run going; a second one waits until it finishes."""
+
+
+@dataclass(frozen=True)
+class AgentSuiteRunLaunch:
+    """A created suite run row and the job that executes it."""
+
+    suite_run: AgentSuiteRun
+    job: DeferredJob
 
 
 async def execute_agent_suite_run(
@@ -70,7 +80,7 @@ async def execute_agent_suite_run(
                     credential_id=credential_id,
                     model=model,
                     workflow_name=workflow.name,
-                    fields=_input_keys(workflow),
+                    fields=agent_suites.input_keys(workflow),
                     example=(inputs_list[0] if inputs_list else None) or previous or {},
                     count=suite_run.requested_count,
                     session_id=str(suite_run.id),
@@ -115,6 +125,60 @@ async def execute_agent_suite_run(
         await db.commit()
 
 
+async def launch_agent_suite_run(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    suite: AgentSuite,
+    body: AgentSuiteRunCreate,
+    public_base_url: str,
+) -> AgentSuiteRunLaunch:
+    """Create the run row ``body`` asks for and the job that runs it.
+
+    ``suite`` is one the user owns. Raises ``AgentSuiteBusyError`` while another run of it is
+    going, and ``EvalNotFoundError`` when its workflow is out of reach.
+    """
+    await agent_suites.load_accessible_workflow(db, suite.workflow_id, user_id)
+    running = await db.execute(
+        select(AgentSuiteRun.id).where(
+            AgentSuiteRun.suite_id == suite.id, AgentSuiteRun.status == "running"
+        )
+    )
+    if running.first() is not None:
+        raise AgentSuiteBusyError("This suite is already running")
+    if body.inputs_list is not None:
+        inputs = [dict(item) for item in body.inputs_list]
+        requested = len(inputs)
+    elif body.generate_inputs:
+        # The edited form is the example the model varies.
+        inputs = [body.inputs] if body.inputs else []
+        requested = body.count
+    else:
+        inputs = [body.inputs] * body.count
+        requested = body.count
+    suite_run = AgentSuiteRun(
+        suite_id=suite.id,
+        status="running",
+        requested_count=requested,
+        generate_inputs=body.generate_inputs,
+        inputs=inputs,
+        results=[],
+    )
+    db.add(suite_run)
+    await db.commit()
+    await db.refresh(suite_run)
+    job = DeferredJob(
+        execute_agent_suite_run,
+        {
+            "run_id": suite_run.id,
+            "user_id": user_id,
+            "public_base_url": public_base_url,
+            "credential_id": body.credential_id,
+            "model": (body.model or "").strip() or None,
+        },
+    )
+    return AgentSuiteRunLaunch(suite_run=suite_run, job=job)
+
+
 @router.get("/agent-suites/{suite_id}/run-inputs", response_model=AgentSuiteRunInputsResponse)
 async def get_run_inputs(
     suite_id: uuid.UUID,
@@ -122,12 +186,10 @@ async def get_run_inputs(
     db: AsyncSession = Depends(get_db),
 ) -> AgentSuiteRunInputsResponse:
     """The workflow's input fields, filled with the values of its most recent run."""
-    suite = await owned_agent_suite(db, suite_id, current_user.id)
-    workflow = await accessible_workflow(db, suite.workflow_id, current_user.id)
-    previous, started_at = await previous_run_inputs(db, workflow.id)
-    return AgentSuiteRunInputsResponse(
-        fields=_input_keys(workflow), previous_inputs=previous, previous_run_at=started_at
-    )
+    try:
+        return await agent_suites.agent_run_inputs(db, current_user.id, suite_id)
+    except EvalNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @router.post(
@@ -143,42 +205,19 @@ async def start_agent_suite_run(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> AgentSuiteRunResponse:
-    """Run the workflow ``count`` times in the background, with the given inputs each time or
-    with inputs a model writes, and score the agent's runs once they finish."""
+    """Run the workflow in the background, with the given inputs, one input per run, or
+    inputs a model writes, and score the agent's runs once they finish."""
     suite = await owned_agent_suite(db, suite_id, current_user.id)
-    await accessible_workflow(db, suite.workflow_id, current_user.id)
-    running = await db.execute(
-        select(AgentSuiteRun.id).where(
-            AgentSuiteRun.suite_id == suite.id, AgentSuiteRun.status == "running"
+    try:
+        launch = await launch_agent_suite_run(
+            db, current_user.id, suite, body, build_public_base_url(request)
         )
-    )
-    if running.first() is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="This suite is already running"
-        )
-    suite_run = AgentSuiteRun(
-        suite_id=suite.id,
-        status="running",
-        requested_count=body.count,
-        generate_inputs=body.generate_inputs,
-        inputs=[] if body.generate_inputs else [body.inputs] * body.count,
-        results=[],
-    )
-    if body.generate_inputs and body.inputs:
-        # The edited form is the example the model varies.
-        suite_run.inputs = [body.inputs]
-    db.add(suite_run)
-    await db.commit()
-    await db.refresh(suite_run)
-    background_tasks.add_task(
-        execute_agent_suite_run,
-        run_id=suite_run.id,
-        user_id=current_user.id,
-        public_base_url=build_public_base_url(request),
-        credential_id=body.credential_id,
-        model=(body.model or "").strip() or None,
-    )
-    return AgentSuiteRunResponse.model_validate(suite_run)
+    except EvalNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except AgentSuiteBusyError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    background_tasks.add_task(launch.job.func, **launch.job.kwargs)
+    return AgentSuiteRunResponse.model_validate(launch.suite_run)
 
 
 @router.get("/agent-suites/{suite_id}/runs/latest", response_model=AgentSuiteRunResponse | None)
@@ -188,13 +227,7 @@ async def get_latest_agent_suite_run(
     db: AsyncSession = Depends(get_db),
 ) -> AgentSuiteRunResponse | None:
     suite = await owned_agent_suite(db, suite_id, current_user.id)
-    result = await db.execute(
-        select(AgentSuiteRun)
-        .where(AgentSuiteRun.suite_id == suite.id)
-        .order_by(AgentSuiteRun.created_at.desc())
-        .limit(1)
-    )
-    suite_run = result.scalar_one_or_none()
+    suite_run = await agent_suites.latest_agent_suite_run(db, suite.id)
     return AgentSuiteRunResponse.model_validate(suite_run) if suite_run else None
 
 
@@ -204,12 +237,8 @@ async def get_agent_suite_run(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> AgentSuiteRunResponse:
-    result = await db.execute(
-        select(AgentSuiteRun)
-        .join(AgentSuite, AgentSuite.id == AgentSuiteRun.suite_id)
-        .where(AgentSuiteRun.id == run_id, AgentSuite.owner_id == current_user.id)
-    )
-    suite_run = result.scalar_one_or_none()
-    if suite_run is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+    try:
+        suite_run = await agent_suites.load_owned_agent_suite_run(db, run_id, current_user.id)
+    except EvalNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return AgentSuiteRunResponse.model_validate(suite_run)

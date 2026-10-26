@@ -229,6 +229,35 @@ class RealPostgresAgentSuiteRunTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sorted(run.trace_id for run in report.runs), sorted(self.run_trace_ids))
         self.assertEqual((report.run_count, report.passed_count), (2, 1))
 
+    async def test_an_inputs_list_runs_each_input_once(self) -> None:
+        run_id = await self._start(
+            AgentSuiteRunCreate(inputs_list=[{"text": "one"}, {"text": "two"}])
+        )
+        executor = AsyncMock(side_effect=[self._execution_result(t) for t in self.run_trace_ids])
+        with patch("app.api.agent_suite_runs.run_execute_workflow_tool", executor):
+            await execute_agent_suite_run(run_id, self.owner_id, "http://test", None, None)
+        self.assertEqual(
+            [call.args[3] for call in executor.await_args_list], [{"text": "one"}, {"text": "two"}]
+        )
+        async with async_session_maker() as session:
+            suite_run = await get_agent_suite_run(run_id, self.owner, session)
+        self.assertEqual((suite_run.requested_count, suite_run.status), (2, "completed"))
+
+    async def test_the_route_queues_the_launch_job(self) -> None:
+        queued: list[tuple] = []
+        tasks = SimpleNamespace(add_task=lambda func, **kwargs: queued.append((func, kwargs)))
+        request = SimpleNamespace(headers={}, base_url="http://test/")
+        async with async_session_maker() as session:
+            with patch(
+                "app.api.agent_suite_runs.build_public_base_url", return_value="http://test"
+            ):
+                started = await start_agent_suite_run(
+                    self.suite_id, AgentSuiteRunCreate(count=1), request, tasks, self.owner, session
+                )
+        self.assertIs(queued[0][0], execute_agent_suite_run)
+        self.assertEqual(queued[0][1]["run_id"], started.id)
+        self.assertEqual(queued[0][1]["public_base_url"], "http://test")
+
     async def test_generated_inputs_replace_the_form_values(self) -> None:
         run_id = await self._start(
             AgentSuiteRunCreate(

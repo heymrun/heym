@@ -62,6 +62,12 @@ class EvalTestCaseUpdate(BaseModel):
     order_index: int | None = None
 
 
+class EvalTestCaseUpsert(EvalTestCaseUpdate):
+    """A case to change (``id`` of one of the suite's cases) or to add (no ``id``)."""
+
+    id: uuid.UUID | None = None
+
+
 class EvalTestCaseResponse(BaseModel):
     id: uuid.UUID
     suite_id: uuid.UUID
