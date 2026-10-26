@@ -8,7 +8,7 @@ suite agrees with the Traces and Analytics tabs about the same runs.
 
 import math
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from decimal import Decimal
@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import LLMTrace, Workflow
 from app.services.agent_tool_observability import resolve_tool_call_status, summarize_tool_calls
+from app.services.agent_tool_policy import NodeTool
 from app.services.analytics_metrics import calculate_percentile
 from app.services.llm_pricing import resolve_costs_for_user
 from app.services.workflow_access import workflow_access_clause
@@ -233,9 +234,13 @@ def skill_tool_name(skill_name: str) -> str:
 
 
 def configured_tools(
-    node: dict[str, Any], workflow_names: dict[str, str] | None = None
+    node: dict[str, Any],
+    workflow_names: dict[str, str] | None = None,
+    *,
+    node_tools: Sequence[NodeTool] = (),
 ) -> list[ConfiguredTool]:
-    """Tools known from the node's settings. MCP tools only show up once called."""
+    """Tools known from the node's settings and the nodes on its tool input. MCP tools
+    only show up once called."""
     data = node.get("data") if isinstance(node.get("data"), dict) else {}
     found: list[ConfiguredTool] = []
     for tool in data.get("tools") or []:
@@ -256,6 +261,8 @@ def configured_tools(
             continue
         label = configured_names.get(workflow_id) or (workflow_names or {}).get(workflow_id)
         found.append(ConfiguredTool("sub_workflow", workflow_id, label or workflow_id))
+    for tool in node_tools:
+        found.append(ConfiguredTool("node", tool.name, tool.label))
     unique: dict[tuple[str, str], ConfiguredTool] = {}
     for tool in found:
         unique.setdefault((tool.kind, tool.name), tool)

@@ -25,6 +25,7 @@ from app.services.agent_suite_metrics import (
     summarize_tool_usage,
     tool_call_from_entry,
 )
+from app.services.agent_tool_policy import node_tools_for_agent
 
 
 def make_run(
@@ -144,6 +145,33 @@ class AgentNodeTests(unittest.TestCase):
                 ("sub_agent", "Critic", "Critic"),
                 ("sub_workflow", "wf-1", "Billing"),
                 ("sub_workflow", "wf-2", "Refunds"),
+            ],
+        )
+
+    def test_nodes_on_the_tool_input_are_configured_tools_named_like_the_agent_calls_them(
+        self,
+    ) -> None:
+        agent = {"id": "a", "type": "agent", "data": {"label": "chatbotAgent"}}
+        nodes = [
+            agent,
+            {"id": "rag", "type": "rag", "data": {"label": "imperumKnowledge"}},
+            {"id": "rag2", "type": "rag", "data": {"label": "imperum knowledge!"}},
+            {"id": "map", "type": "jsonOutputMapper", "data": {"label": "payload"}},
+            {"id": "out", "type": "output", "data": {"label": "finalResponse"}},
+        ]
+        edges = [
+            {"source": "rag", "target": "a", "targetHandle": "tool-input"},
+            {"source": "rag2", "target": "a", "targetHandle": "tool-input"},
+            {"source": "map", "target": "a", "targetHandle": "tool-input"},
+            {"source": "missing", "target": "a", "targetHandle": "tool-input"},
+            {"source": "a", "target": "out"},
+        ]
+        tools = configured_tools(agent, node_tools=node_tools_for_agent(nodes, edges, "a"))
+        self.assertEqual(
+            [(t.kind, t.name, t.label) for t in tools],
+            [
+                ("node", "imperumknowledge", "imperumKnowledge"),
+                ("node", "imperum_knowledge", "imperum knowledge!"),
             ],
         )
 

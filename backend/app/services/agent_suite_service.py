@@ -43,6 +43,7 @@ from app.services.agent_suite_metrics import (
     summarize_runs,
     summarize_tool_usage,
 )
+from app.services.agent_tool_policy import node_tools_for_agent
 from app.services.eval_common import EvalNotFoundError
 from app.services.workflow_access import get_accessible_workflow, workflow_access_clause
 from app.services.workflow_inputs import start_input_fields
@@ -186,7 +187,14 @@ async def agent_metrics(
         tools=[
             AgentToolUsageResponse.model_validate(usage)
             for usage in summarize_tool_usage(
-                runs, configured_tools(node, await _sub_workflow_names(db, node, user_id))
+                runs,
+                configured_tools(
+                    node,
+                    await _sub_workflow_names(db, node, user_id),
+                    node_tools=node_tools_for_agent(
+                        workflow.nodes or [], workflow.edges or [], node_id
+                    ),
+                ),
             )
         ],
         suggested_thresholds=AgentThresholdsModel.model_validate(suggest_thresholds(baseline)),
