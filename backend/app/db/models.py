@@ -866,7 +866,10 @@ class WorkflowAnalyticsSnapshot(Base):
 
 class LLMTrace(Base):
     __tablename__ = "llm_traces"
-    __table_args__ = (Index("ix_llm_traces_user_created", "user_id", "created_at"),)
+    __table_args__ = (
+        Index("ix_llm_traces_user_created", "user_id", "created_at"),
+        Index("ix_llm_traces_workflow_node_created", "workflow_id", "node_id", "created_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(
@@ -1740,6 +1743,60 @@ class EvalRunResult(Base):
 
     run: Mapped["EvalRun"] = relationship("EvalRun", back_populates="results")
     test_case: Mapped["EvalTestCase"] = relationship("EvalTestCase", back_populates="run_results")
+
+
+class AgentSuite(Base):
+    """Checks one agent node's real runs, read from its LLM traces, against tool
+    assertions and metric thresholds. It never starts a run of its own."""
+
+    __tablename__ = "agent_suites"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    owner_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    workflow_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workflows.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    node_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    node_label: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    tool_assertions: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    thresholds: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    baseline: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class AgentSuiteRun(Base):
+    """One press of Run on an agent suite: its workflow executed a chosen number of times.
+
+    ``results`` holds one entry per execution with the agent's trace ids, so the report
+    scores exactly these runs.
+    """
+
+    __tablename__ = "agent_suite_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    suite_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("agent_suites.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="running")
+    requested_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    generate_inputs: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    inputs: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    results: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class GeneratedFile(Base):

@@ -530,7 +530,7 @@ def _result_indicates_error(result: dict[str, Any]) -> bool:
     return isinstance(outputs, dict) and outputs.get("error") is not None
 
 
-def _resolved_status(entry: dict[str, Any]) -> str:
+def resolve_tool_call_status(entry: dict[str, Any]) -> str:
     """Status of one tool-call record, deriving it from the result for legacy entries."""
     raw_status = entry.get("status")
     status = normalize_tool_call_status(raw_status)
@@ -569,7 +569,7 @@ def summarize_tool_calls(tool_calls: Any) -> dict[str, Any]:
         if not isinstance(entry, dict) or entry.get("name") == "_context_compression":
             continue
         summary["count"] += 1
-        status = _resolved_status(entry)
+        status = resolve_tool_call_status(entry)
         if status in summary:
             summary[status] += 1
         duration = entry.get("elapsed_ms")
@@ -594,7 +594,7 @@ def outline_tool_calls(tool_calls: Any) -> list[dict[str, Any]]:
             continue
         item: dict[str, Any] = {
             "name": str(entry.get("name") or "tool"),
-            "status": _resolved_status(entry),
+            "status": resolve_tool_call_status(entry),
         }
         duration = entry.get("elapsed_ms")
         if isinstance(duration, (int, float)):

@@ -43,12 +43,13 @@ Both actions first **run the workflow** (when it is valid and runnable) and incl
 
 The generated report covers three sections, in order: **Improvement areas** (concrete suggestions, including a **security** angle whenever the workflow touches credentials, user input, external requests, or data exposure), the workflow's **Purpose**, and **What it does** (a step-by-step walk through the nodes).
 
-The **Improvement areas** section always runs four explicit checks:
+The **Improvement areas** section always runs five explicit checks:
 
 1. **Error coverage** — if the canvas has no [Error Handler](../nodes/error-handler-node.md) node and no error workflow is configured, the report calls this out and recommends adding error handling.
 2. **Time saved** — if no estimated time saved per run is set, the report recommends configuring one so the [Analytics](../tabs/analytics-tab.md) **Time Saved** metric can populate.
 3. **Network nodes** — for nodes that make network calls (such as [HTTP](../nodes/http-node.md) and integration nodes), the report recommends node-specific error handling (retry and/or continue-on-error) on those nodes.
 4. **Alerts** — when no [alerts](../tabs/alerts-tab.md) are configured for the workflow, the report recommends setting up alerts before going to prod.
+5. **Evals**: when the workflow has an [Agent](../nodes/agent-node.md) node without an agent suite, the report recommends an **Agent Suite** (or a **Prompt Suite**) in [Evals](../tabs/evals-tab.md#agent-suites); when it has an [LLM](../nodes/llm-node.md) node, it recommends a **Prompt Suite** to test that prompt across models.
 
 ### Run Analyzer from Properties
 

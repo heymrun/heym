@@ -19,16 +19,49 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
   {
     releaseId: "2026.22",
     publishedAt: new Date("2026-10-26T12:00:00Z"),
-    headline: "Work on one canvas together, and limit how many runs execute at once",
+    headline:
+      "Work on one canvas together, limit how many runs execute at once, and check agents against their real runs",
     releaseTour: {
       label: "New in Heym",
       introTitle: "New in this release",
       introDescription:
         "A quick look at what changed since your last update. Takes about a minute.",
       tourEnabled: true,
-      sectionOrder: ["concurrency-limit", "canvas-collaboration"],
+      sectionOrder: ["agent-suite", "concurrency-limit", "canvas-collaboration"],
     },
     sections: [
+      {
+        id: "agent-suite",
+        title: "Agent suites: check an agent against its real runs",
+        publishedAt: new Date("2026-10-26T12:00:00Z"),
+        blocks: [
+          {
+            type: "prose",
+            markdown:
+              "In **Evals**, choose **New Suite** and then **Agent suite**, and pick a workflow's agent node. The suite reads the agent's last runs from Traces and shows its latency, USD cost, tokens and tool calls, with every tool, MCP tool, sub-agent, sub-workflow and skill it called and how often.",
+          },
+          {
+            type: "prose",
+            markdown:
+              "Mark each one **Must call** or **Must not call**, and keep the upper bounds for latency, cost, tokens and tool calls that start 20% above the baseline. **Results** runs the workflow as many times as you choose, with the last run's inputs or inputs an AI model writes, scores every run against the checks and links each failed run to its trace. The suite picker now lists prompt and agent suites together, with their type, and is searchable.",
+          },
+        ],
+        tour: {
+          description:
+            "Pick an agent, see its baseline from real runs, and fail any run that calls the wrong tool or costs too much.",
+          useCases: [
+            "Make sure a support agent always searches the docs before answering",
+            "Catch an agent that starts sending email it should only draft",
+            "Notice when a prompt change makes runs slower or more expensive",
+          ],
+          tourVisual: "agent-suite",
+          docTarget: {
+            categoryId: "tabs",
+            slug: "evals-tab",
+            title: "Evals",
+          },
+        },
+      },
       {
         id: "concurrency-limit",
         title: "Run a workflow one at a time, or N at a time",
@@ -169,58 +202,6 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
             categoryId: "nodes",
             slug: "codex-node",
             title: "Codex",
-          },
-        },
-      },
-    ],
-  },
-  {
-    releaseId: "2026.20",
-    publishedAt: new Date("2026-10-17T12:00:00Z"),
-    headline: "Slack approvals, buttons and forms that pause a run",
-    releaseTour: {
-      label: "New in Heym",
-      introTitle: "New in this release",
-      introDescription:
-        "A quick look at what changed since your last update. Takes about a minute.",
-      tourEnabled: true,
-      sectionOrder: ["slack-bot"],
-    },
-    sections: [
-      {
-        id: "slack-bot",
-        title: "Slack with a bot token: approvals, buttons, forms and threads",
-        publishedAt: new Date("2026-10-17T12:00:00Z"),
-        blocks: [
-          {
-            type: "prose",
-            markdown:
-              "A new **Slack Bot (Token)** credential turns the **Slack** node into a full Slack step: channel messages and DMs, thread replies, message updates, colored outcome cards, reactions, reading messages and looking people up. Each post returns its `channel`, `ts` and `threadTs`, so later steps stay in one thread.",
-          },
-          {
-            type: "prose",
-            markdown:
-              "**Request approval**, **Send message with buttons** and **Send form** pause the run until someone answers in Slack. The same request waits in the inbox, so it can be decided in Heym too, and the step continues with `approval`, `choice` or the form's `values`. **Copy app manifest** in the credential dialog sets up the Slack app with every scope.",
-          },
-          {
-            type: "prose",
-            markdown:
-              "One Slack app now serves every **Slack Trigger** on its credential: point Event Subscriptions at the credential's events URL, and each workflow starts only on what it listens to, such as direct messages to the bot, mentions, or one channel.",
-          },
-        ],
-        tour: {
-          description:
-            "Post to Slack with a bot token, and let a click on Approve or a submitted form continue the run.",
-          useCases: [
-            "Ask a finance channel to approve a refund before it is paid",
-            "Collect incident details through a Slack form, then file them",
-            "Close the loop with an outcome card in the same thread",
-          ],
-          tourVisual: "slack-bot",
-          docTarget: {
-            categoryId: "nodes",
-            slug: "slack-node",
-            title: "Slack",
           },
         },
       },

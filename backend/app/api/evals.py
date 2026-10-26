@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy import func, select
@@ -6,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import get_current_user
-from app.db.models import EvalRun, EvalSuite, EvalTestCase, User
+from app.db.models import AgentSuite, EvalRun, EvalSuite, EvalTestCase, User
 from app.db.session import get_db
 from app.models.eval_schemas import (
     EvalRunListResponse,
@@ -36,13 +37,41 @@ async def list_suites(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[EvalSuiteListResponse]:
-    result = await db.execute(
-        select(EvalSuite)
-        .where(EvalSuite.owner_id == current_user.id)
-        .order_by(EvalSuite.updated_at.desc())
+    """Prompt and agent suites together, most recently updated first."""
+    prompt_rows = await db.execute(
+        select(
+            EvalSuite.id,
+            EvalSuite.name,
+            EvalSuite.description,
+            EvalSuite.created_at,
+            EvalSuite.updated_at,
+        ).where(EvalSuite.owner_id == current_user.id)
     )
-    suites = result.scalars().all()
-    return [EvalSuiteListResponse.model_validate(s) for s in suites]
+    agent_rows = await db.execute(
+        select(AgentSuite.id, AgentSuite.name, AgentSuite.created_at, AgentSuite.updated_at).where(
+            AgentSuite.owner_id == current_user.id
+        )
+    )
+    entries = [
+        (row.updated_at, EvalSuiteListResponse(**row._asdict(), suite_type="prompt"))
+        for row in prompt_rows.all()
+    ]
+    entries.extend(
+        (
+            row.updated_at,
+            EvalSuiteListResponse(
+                id=row.id,
+                name=row.name,
+                description=None,
+                created_at=row.created_at,
+                suite_type="agent",
+            ),
+        )
+        for row in agent_rows.all()
+    )
+    oldest = datetime.min.replace(tzinfo=timezone.utc)
+    entries.sort(key=lambda entry: entry[0] or oldest, reverse=True)
+    return [suite for _updated_at, suite in entries]
 
 
 @router.post("/suites", response_model=EvalSuiteResponse)

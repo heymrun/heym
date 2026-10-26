@@ -246,11 +246,12 @@ WORKFLOW_ANALYZE_SYSTEM_PROMPT = """You analyze an automation workflow and produ
 Given the workflow's nodes and edges, write Markdown with these sections, in this exact order:
 
 ## Improvement areas
-A bulleted list of concrete, actionable suggestions (reliability, error handling, missing validation, cost, clarity). Whenever the workflow handles credentials, user input, external requests, data exposure, injection-prone steps, or anything else security-relevant, include a clear **security** angle here (risks and how to mitigate them). Always cover these four checks explicitly:
+A bulleted list of concrete, actionable suggestions (reliability, error handling, missing validation, cost, clarity). Whenever the workflow handles credentials, user input, external requests, data exposure, injection-prone steps, or anything else security-relevant, include a clear **security** angle here (risks and how to mitigate them). Always cover these five checks explicitly:
 1. **Error handling** — Inspect the provided `analysisContext`. ONLY when BOTH `hasErrorHandler` is false AND `errorWorkflowConfigured` is false (the workflow has no error handling at all), call this out and recommend adding an errorHandler node and/or configuring an error workflow ("on error, run workflow"). If at least one is present (`hasErrorHandler` true OR `errorWorkflowConfigured` true), the workflow already catches errors — do NOT mention error handling at all: no suggestion to add more, and no acknowledgement.
 2. **Time saved** — ONLY when `minutesSavedPerRun` is null or zero, recommend setting an estimated "time saved per run" so the analytics time saved metric can populate. If it is already set, do NOT mention time saved at all (no acknowledgement).
 3. **Network nodes** — For any node that performs network I/O (e.g. `httpRequest` and integration/API nodes such as slack, drive, notion, etc.), recommend node-specific error handling (enable retry and/or onError "continue on error") on those specific nodes by label.
 4. **Alerts** — Inspect the provided `analysisContext`. ONLY when `hasAlertConfigured` is false (no alerts watch this workflow), recommend setting up alerts before going to prod — for example an error, duration, or cost alert. If alerts are already configured, do NOT mention alerts at all.
+5. **Evals** — Inspect the provided `analysisContext`. When `agentNodes` is not empty and `hasAgentSuite` is false, recommend adding an **Agent Suite** in Evals for those agents (name them by label) to check which tools they must and must not call, and their latency, USD cost, tokens and tool calls against a baseline, or a **Prompt Suite** to test the agent's prompt across models. When `llmNodes` is not empty, recommend a **Prompt Suite** in Evals to test those LLM nodes' prompts (by label) across models. When both lists are empty, or the only agents already have an agent suite and there are no LLM nodes, do NOT mention evals.
 
 If the workflow already looks solid, say so and suggest small refinements.
 
@@ -263,9 +264,21 @@ A numbered, step-by-step walk through the nodes in execution order, in plain lan
 Output ONLY Markdown. Do not include JSON, code fences around the whole document, or tool calls. Be concise and specific to THIS workflow."""
 
 
+def _node_labels(nodes: list, node_type: str) -> list[str]:
+    labels = []
+    for node in nodes:
+        if not isinstance(node, dict) or node.get("type") != node_type:
+            continue
+        data = node.get("data") if isinstance(node.get("data"), dict) else {}
+        label = data.get("label")
+        labels.append(label if isinstance(label, str) and label.strip() else str(node.get("id")))
+    return labels
+
+
 def _build_workflow_analysis_context(
     current_workflow: dict | None,
     has_alert_configured: bool,
+    has_agent_suite: bool = False,
 ) -> dict[str, Any]:
     """Derive the ``analysisContext`` block the analyzer prompt reasons over."""
     workflow = current_workflow or {}
@@ -276,6 +289,9 @@ def _build_workflow_analysis_context(
         "errorWorkflowConfigured": bool(workflow.get("error_workflow_id")),
         "minutesSavedPerRun": workflow.get("minutes_saved_per_run"),
         "hasAlertConfigured": has_alert_configured,
+        "agentNodes": _node_labels(nodes, "agent"),
+        "llmNodes": _node_labels(nodes, "llm"),
+        "hasAgentSuite": has_agent_suite,
     }
 
 
@@ -290,6 +306,22 @@ async def _workflow_has_alert(db: AsyncSession, user: Any, workflow_id: uuid.UUI
         select(func.count())
         .select_from(Alert)
         .where(accessible_alerts_filter(user.id), Alert.workflow_id == workflow_id)
+    )
+    return bool((result.scalar_one() or 0) > 0)
+
+
+async def _workflow_has_agent_suite(
+    db: AsyncSession, user: Any, workflow_id: uuid.UUID | None
+) -> bool:
+    """True when the user already has an agent suite on the given workflow."""
+    if workflow_id is None:
+        return False
+    from app.db.models import AgentSuite
+
+    result = await db.execute(
+        select(func.count())
+        .select_from(AgentSuite)
+        .where(AgentSuite.owner_id == user.id, AgentSuite.workflow_id == workflow_id)
     )
     return bool((result.scalar_one() or 0) > 0)
 
@@ -5612,7 +5644,9 @@ async def analyze_workflow_stream(
         system_prompt += f"\n\nWorkflow:\n```json\n{wf_summary}\n```"
         has_alert_configured = await _workflow_has_alert(db, current_user, workflow_id)
         analysis_context = _build_workflow_analysis_context(
-            request.current_workflow, has_alert_configured
+            request.current_workflow,
+            has_alert_configured,
+            await _workflow_has_agent_suite(db, current_user, workflow_id),
         )
         system_prompt += (
             "\n\nanalysisContext:\n```json\n"

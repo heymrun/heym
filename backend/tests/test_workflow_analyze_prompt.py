@@ -11,6 +11,13 @@ class TestAnalyzePrompt(unittest.TestCase):
         self.assertIn("time saved", p)
         self.assertIn("network", p)
 
+    def test_recommends_evals_for_agent_and_llm_nodes(self) -> None:
+        p = WORKFLOW_ANALYZE_SYSTEM_PROMPT
+        self.assertIn("five checks", p)
+        self.assertIn("**Agent Suite**", p)
+        self.assertIn("**Prompt Suite**", p)
+        self.assertIn("`hasAgentSuite`", p)
+
 
 if __name__ == "__main__":
     unittest.main()

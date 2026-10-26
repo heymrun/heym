@@ -110,6 +110,14 @@ import type {
   UpdateGlobalVariableRequest,
 } from "@/types/globalVariable";
 import type {
+  AgentCandidate,
+  AgentMetrics,
+  AgentSuite,
+  AgentSuiteReport,
+  AgentSuiteRun,
+  AgentSuiteRunInputs,
+  CreateAgentSuiteRunRequest,
+  CreateAgentSuiteRequest,
   CreateSuiteRequest,
   CreateTestCaseRequest,
   EvalRun,
@@ -121,6 +129,7 @@ import type {
   OptimizePromptRequest,
   OptimizePromptResponse,
   RunEvalsRequest,
+  UpdateAgentSuiteRequest,
   UpdateSuiteRequest,
   UpdateTestCaseRequest,
 } from "@/types/evals";
@@ -3383,6 +3392,78 @@ export const evalsApi = {
 
   clearAllRuns: async (suiteId: string): Promise<void> => {
     await api.delete(`/evals/suites/${suiteId}/runs`);
+  },
+
+  listAgents: async (): Promise<AgentCandidate[]> => {
+    const response = await api.get<AgentCandidate[]>("/evals/agents");
+    return response.data;
+  },
+
+  getAgentMetrics: async (
+    workflowId: string,
+    nodeId: string,
+    limit?: number,
+  ): Promise<AgentMetrics> => {
+    const response = await api.get<AgentMetrics>("/evals/agent-metrics", {
+      params: { workflow_id: workflowId, node_id: nodeId, limit },
+    });
+    return response.data;
+  },
+
+  createAgentSuite: async (data: CreateAgentSuiteRequest): Promise<AgentSuite> => {
+    const response = await api.post<AgentSuite>("/evals/agent-suites", data);
+    return response.data;
+  },
+
+  getAgentSuite: async (id: string): Promise<AgentSuite> => {
+    const response = await api.get<AgentSuite>(`/evals/agent-suites/${id}`);
+    return response.data;
+  },
+
+  updateAgentSuite: async (
+    id: string,
+    data: UpdateAgentSuiteRequest,
+  ): Promise<AgentSuite> => {
+    const response = await api.patch<AgentSuite>(`/evals/agent-suites/${id}`, data);
+    return response.data;
+  },
+
+  deleteAgentSuite: async (id: string): Promise<void> => {
+    await api.delete(`/evals/agent-suites/${id}`);
+  },
+
+  getAgentSuiteReport: async (
+    id: string,
+    limit?: number,
+    runId?: string | null,
+  ): Promise<AgentSuiteReport> => {
+    const response = await api.get<AgentSuiteReport>(`/evals/agent-suites/${id}/report`, {
+      params: { limit, run_id: runId ?? undefined },
+    });
+    return response.data;
+  },
+
+  getAgentSuiteRunInputs: async (id: string): Promise<AgentSuiteRunInputs> => {
+    const response = await api.get<AgentSuiteRunInputs>(`/evals/agent-suites/${id}/run-inputs`);
+    return response.data;
+  },
+
+  startAgentSuiteRun: async (
+    id: string,
+    data: CreateAgentSuiteRunRequest,
+  ): Promise<AgentSuiteRun> => {
+    const response = await api.post<AgentSuiteRun>(`/evals/agent-suites/${id}/runs`, data);
+    return response.data;
+  },
+
+  getLatestAgentSuiteRun: async (id: string): Promise<AgentSuiteRun | null> => {
+    const response = await api.get<AgentSuiteRun | null>(`/evals/agent-suites/${id}/runs/latest`);
+    return response.data;
+  },
+
+  getAgentSuiteRun: async (runId: string): Promise<AgentSuiteRun> => {
+    const response = await api.get<AgentSuiteRun>(`/evals/agent-suite-runs/${runId}`);
+    return response.data;
   },
 };
 
