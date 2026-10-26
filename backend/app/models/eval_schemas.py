@@ -4,7 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-ReasoningEffort = Literal["low", "medium", "high"]
+# The same levels the LLM and Agent nodes offer.
+ReasoningEffort = Literal["low", "medium", "high", "xhigh", "max"]
 
 
 class EvalSuiteCreate(BaseModel):
@@ -60,6 +61,12 @@ class EvalTestCaseUpdate(BaseModel):
     input_mode: str | None = None
     expected_mode: str | None = None
     order_index: int | None = None
+
+
+class EvalTestCaseUpsert(EvalTestCaseUpdate):
+    """A case to change (``id`` of one of the suite's cases) or to add (no ``id``)."""
+
+    id: uuid.UUID | None = None
 
 
 class EvalTestCaseResponse(BaseModel):
@@ -121,6 +128,8 @@ class EvalRunResponse(BaseModel):
     temperature: float
     reasoning_effort: str | None = None
     max_tokens: int | None
+    runs_per_test: int = 1
+    credential_id: uuid.UUID | None = None
     judge_credential_id: uuid.UUID | None = None
     judge_model: str | None = None
     status: str
@@ -133,9 +142,17 @@ class EvalRunResponse(BaseModel):
 
 
 class EvalRunListResponse(BaseModel):
+    """A run in the history, with the settings it ran with so the suite can open with them."""
+
     id: uuid.UUID
     name: str
     models: list[str]
+    credential_id: uuid.UUID | None = None
+    temperature: float | None = None
+    reasoning_effort: str | None = None
+    max_tokens: int | None = None
+    runs_per_test: int = 1
+    judge_credential_id: uuid.UUID | None = None
     status: str
     scoring_method: str = "exact_match"
     judge_model: str | None = None

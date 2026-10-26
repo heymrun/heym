@@ -55,7 +55,9 @@ const saving = ref(false);
 const refreshing = ref(false);
 const saveError = ref<string | null>(null);
 const reportKey = ref(0);
-const finishedRunId = ref<string | null>(null);
+// The newest suite run as the run panel sees it, and the results scope the user picked.
+const activeRun = ref<AgentSuiteRun | null>(null);
+const reportScope = ref<string | null>(null);
 
 const isNew = computed((): boolean => props.suiteId === null);
 
@@ -67,7 +69,7 @@ const view = computed((): AgentSuiteView | null => {
 });
 
 function onRunChanged(run: AgentSuiteRun | null): void {
-  if (run && run.status !== "running") finishedRunId.value = run.id;
+  activeRun.value = run;
 }
 
 function reset(): void {
@@ -81,7 +83,8 @@ function reset(): void {
   assertions.value = [];
   thresholds.value = { ...EMPTY_THRESHOLDS };
   saveError.value = null;
-  finishedRunId.value = null;
+  activeRun.value = null;
+  reportScope.value = null;
 }
 
 async function loadSuite(id: string): Promise<void> {
@@ -273,9 +276,10 @@ const { pushStep } = useStepQuery(applyStep, () => isNew.value);
           @run-changed="onRunChanged"
         />
         <AgentSuiteResultsStep
+          v-model:scope="reportScope"
           :suite-id="suite.id"
           :reload-key="reportKey"
-          :run-id="finishedRunId"
+          :active-run="activeRun"
         />
       </div>
     </div>

@@ -2,6 +2,7 @@
 import { Bot } from "lucide-vue-next";
 import { computed, onMounted, ref } from "vue";
 
+import { TOOL_KIND_LABELS, nodeToolLabels } from "@/components/Evals/AgentSuite/agentSuiteFormat";
 import { credentialsApi } from "@/services/api";
 import type { NodeData, Workflow } from "@/types/workflow";
 
@@ -53,6 +54,9 @@ const chips = computed((): Chip[] => {
   }
   for (const id of d.subWorkflowIds ?? []) {
     list.push({ kind: "Sub-workflow", label: d.subWorkflowNames?.[id] ?? id.slice(0, 8) });
+  }
+  for (const label of nodeToolLabels(props.workflow, props.nodeId)) {
+    list.push({ kind: TOOL_KIND_LABELS.node, label });
   }
   return list;
 });

@@ -744,6 +744,8 @@ def _stored_run(**fields: object) -> SimpleNamespace:
         "temperature": 0.7,
         "reasoning_effort": None,
         "max_tokens": None,
+        "runs_per_test": 1,
+        "credential_id": MAIN_CREDENTIAL_ID,
         "judge_credential_id": JUDGE_CREDENTIAL_ID,
         "judge_model": "jev-latest",
         "status": "completed",
@@ -784,6 +786,7 @@ class EvalRunApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(create_kwargs["judge_model"], "jev-latest")
         self.assertEqual(response.judge_credential_id, JUDGE_CREDENTIAL_ID)
         self.assertEqual(response.judge_model, "jev-latest")
+        self.assertEqual(response.credential_id, MAIN_CREDENTIAL_ID)
         self.assertEqual(len(background.tasks), 1)
         self.assertNotIn("judge_model", background.tasks[0].kwargs)
 

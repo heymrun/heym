@@ -59,6 +59,7 @@ from app.models.chat_schemas import (
 )
 from app.services import chat_task_registry as registry
 from app.services.chat_build_mode import BuildRequest
+from app.services.chat_eval_mode import EVAL_SUITE_SAVED_EVENT
 from app.services.credential_access import get_accessible_credential
 from app.services.credential_catalog import CredentialPromptMode, build_credentials_prompt
 from app.services.credential_setup import CredentialFormTool
@@ -70,9 +71,11 @@ from app.services.mcp_chat_service import (
     MCPChatResult,
     WorkflowLink,
     absolutize_workflow_links,
+    eval_suite_link,
     workflow_link,
 )
 from app.services.mcp_elicitation import MCPClientChannel
+from app.services.prompt_suite_service import owned_suite_name
 from app.services.workflow_access import user_can_write_workflow
 
 router = APIRouter()
@@ -116,11 +119,19 @@ class ChatTurnResult:
     stop_worker: bool = False
     # Ids from this turn's own `workflow_created` events, never from the model's text.
     saved_workflow_ids: tuple[str, ...] = ()
+    # Ids from this turn's own `eval_suite_saved` events, never from the model's text.
+    saved_eval_suite_ids: tuple[str, ...] = ()
 
 
 def _build_hidden_workflow_context_marker(workflow_id: str, workflow_name: str) -> str:
     safe_name = workflow_name.replace("--", "").strip()
     return f"\n<!-- heym-workflow-id:{workflow_id} heym-workflow-name:{safe_name} -->"
+
+
+def _build_hidden_eval_suite_marker(suite_id: str, suite_name: str) -> str:
+    """Keeps the suite's id in the history, so a later turn can change or run it."""
+    safe_name = suite_name.replace("--", "").strip()
+    return f"\n<!-- heym-eval-suite-id:{suite_id} heym-eval-suite-name:{safe_name} -->"
 
 
 def _ingest_tool_event(tool_calls_for_message: list[dict], payload: dict) -> None:
@@ -392,6 +403,7 @@ async def _run_chat_turn(
                 cancel_event = Event()
                 _cancel_events[conv_id] = cancel_event
             workflow_note_ids: list[str] = []
+            eval_suite_ids: list[str] = []
 
             build: ChatBuildSession | None = None
             if turn.build is not None:
@@ -461,6 +473,14 @@ async def _run_chat_turn(
                             workflow_context_markers.append(
                                 _build_hidden_workflow_context_marker(w_id, w_name or "Workflow")
                             )
+                    elif ptype == EVAL_SUITE_SAVED_EVENT:
+                        s_id = str(payload.get("suite_id") or "").strip()
+                        s_name = str(payload.get("suite_name") or "").strip()
+                        if s_id and s_id not in eval_suite_ids:
+                            eval_suite_ids.append(s_id)
+                            workflow_context_markers.append(
+                                _build_hidden_eval_suite_marker(s_id, s_name or "Eval suite")
+                            )
                     elif ptype in ("tool_start", "tool_end", "compressed"):
                         _ingest_tool_event(tool_calls_for_message, payload)
                 await _publish_payload_with_message_id(conv_id, chunk, assistant_message_id)
@@ -510,6 +530,7 @@ async def _run_chat_turn(
                 paused_for_clarification,
                 assistant_message_id,
                 saved_workflow_ids=tuple(workflow_note_ids),
+                saved_eval_suite_ids=tuple(eval_suite_ids),
             )
 
     except asyncio.CancelledError:
@@ -902,6 +923,9 @@ async def run_mcp_chat_turn(
         workflow_links = await _saved_workflow_links(
             db, user_id, result.saved_workflow_ids, public_base_url
         )
+        eval_suite_links = await _saved_eval_suite_links(
+            db, user_id, result.saved_eval_suite_ids, public_base_url
+        )
 
     if assistant_message is None:
         raise MCPChatError("The assistant did not produce a reply. Try again.")
@@ -921,7 +945,27 @@ async def run_mcp_chat_turn(
         verified=verified,
         credential_form_urls=tuple(credential_form.waiting_urls),
         workflow_links=workflow_links,
+        eval_suite_links=eval_suite_links,
     )
+
+
+async def _saved_eval_suite_links(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    suite_ids: tuple[str, ...],
+    public_base_url: str,
+) -> tuple[WorkflowLink, ...]:
+    """Evals links for the suites a turn saved, limited to ones the user still owns."""
+    links: list[WorkflowLink] = []
+    for raw_id in suite_ids:
+        try:
+            suite_id = uuid.UUID(raw_id)
+        except ValueError:
+            continue
+        name = await owned_suite_name(db, suite_id, user_id)
+        if name is not None:
+            links.append(eval_suite_link(public_base_url, suite_id, name))
+    return tuple(links)
 
 
 async def _saved_workflow_links(
@@ -944,8 +988,8 @@ async def _saved_workflow_links(
 
 
 def _strip_hidden_markers(content: str) -> str:
-    """Drop the hidden HTML comment markers the Chat UI uses for workflow context."""
-    return re.sub(r"<!--\s*heym-workflow-id:.*?-->", "", content).strip()
+    """Drop the hidden HTML comment markers the Chat UI uses for workflow and suite context."""
+    return re.sub(r"<!--\s*heym-(?:workflow|eval-suite)-id:.*?-->", "", content).strip()
 
 
 @router.get("", response_model=ConversationListResponse)

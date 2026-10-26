@@ -382,10 +382,10 @@ describe("shipped release registry", () => {
 
     expect(catalog?.slides.map((slide) => slide.id)).toEqual([
       "agent-suite",
+      "chat-evals",
       "concurrency-limit",
       "canvas-collaboration",
       "node-ai-edit",
-      "codex-device-sign-in",
     ]);
   });
 
@@ -401,7 +401,7 @@ describe("shipped release registry", () => {
     expect(tours.map((tour) => tour.tourVisual)).toContain("concurrency-limit");
     expect(tours.map((tour) => tour.tourVisual)).toContain("canvas-collaboration");
     expect(tours.map((tour) => tour.tourVisual)).toContain("agent-suite");
-    expect(tours.map((tour) => tour.tourVisual)).toContain("codex-device-sign-in");
+    expect(tours.map((tour) => tour.tourVisual)).toContain("chat-evals");
     for (const tour of tours) {
       expect(TOUR_VISUALS[tour.tourVisual], `missing visual for "${tour.tourVisual}"`)
         .toBeDefined();

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Loader2, Play, Sparkles } from "lucide-vue-next";
+import { Loader2, Play, Square } from "lucide-vue-next";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 
 import {
@@ -8,6 +8,7 @@ import {
   inputText,
   parseInputValue,
 } from "@/components/Evals/AgentSuite/agentSuiteFormat";
+import AgentSuiteGenerateToggle from "@/components/Evals/AgentSuite/AgentSuiteGenerateToggle.vue";
 import AgentSuiteRunCount from "@/components/Evals/AgentSuite/AgentSuiteRunCount.vue";
 import Button from "@/components/ui/Button.vue";
 import Label from "@/components/ui/Label.vue";
@@ -41,6 +42,7 @@ const models = ref<LLMModel[]>([]);
 const model = ref("");
 const activeRun = ref<AgentSuiteRun | null>(null);
 const starting = ref(false);
+const stopping = ref(false);
 const error = ref<string | null>(null);
 const aiDefaults = useAiDefaults();
 let pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -57,11 +59,23 @@ const progressText = computed((): string => {
   if (run.generate_inputs && run.results.length === 0 && run.inputs.length <= 1) {
     return "Writing inputs...";
   }
-  return `Running ${Math.min(run.results.length + 1, run.requested_count)} of ${run.requested_count}...`;
+  return `${run.results.length} of ${run.requested_count} done...`;
 });
 
 const canRun = computed((): boolean =>
   !running.value && (!generate.value || (Boolean(credentialId.value) && Boolean(model.value))));
+
+async function stopRun(): Promise<void> {
+  if (!activeRun.value) return;
+  stopping.value = true;
+  try {
+    setRun(await evalsApi.cancelAgentSuiteRun(activeRun.value.id));
+  } catch (e: unknown) {
+    error.value = apiErrorText(e, "Could not stop the run.");
+  } finally {
+    stopping.value = false;
+  }
+}
 
 function stopPolling(): void {
   if (pollTimer) clearInterval(pollTimer);
@@ -187,27 +201,20 @@ onUnmounted(stopPolling);
             :max="MAX_RUNS"
           />
         </div>
-        <button
-          type="button"
-          role="switch"
-          :aria-checked="generate"
-          class="flex min-h-[44px] items-center gap-2 text-sm text-foreground"
-          data-testid="agent-suite-generate-toggle"
-          @click="generate = !generate"
-        >
-          <span
-            class="relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors"
-            :class="generate ? 'bg-primary' : 'bg-muted'"
-          >
-            <span
-              class="inline-block h-4 w-4 rounded-full bg-background shadow transition-transform"
-              :class="generate ? 'translate-x-[18px]' : 'translate-x-0.5'"
-            />
-          </span>
-          Generate inputs
-          <Sparkles class="h-4 w-4 text-primary dark:text-brand-primary-soft" />
-        </button>
+        <AgentSuiteGenerateToggle v-model="generate" />
         <Button
+          v-if="running"
+          variant="outline"
+          class="gap-2"
+          :loading="stopping"
+          data-testid="agent-suite-run-stop"
+          @click="stopRun"
+        >
+          <Square class="h-3.5 w-3.5" />
+          Stop
+        </Button>
+        <Button
+          v-else
           variant="gradient"
           class="gap-2"
           :loading="starting"

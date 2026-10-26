@@ -11,7 +11,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from app.api import chat_build
 from app.api.ai_assistant import DASHBOARD_CHAT_TOOLS, FileAttachment
 from app.db.models import CredentialType, Workflow, WorkflowVersion
-from app.services.chat_build_mode import MAX_BUILD_TEST_RUNS, BuildRequest
+from app.services.chat_build_mode import MAX_BUILD_TEST_RUNS, BuildRequest, BuildToolOutcome
+from app.services.chat_eval_mode import EVAL_TOOL_NAMES
 from app.services.credential_catalog import CatalogCredential, CredentialPromptMode
 
 DSL = {
@@ -371,6 +372,42 @@ class ChatBuildSessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(f'"Lead intake" ({self.target.id})', prompt)
         self.assertIn("## Workflow DSL reference", prompt)
         self.assertIn("## Current Workflow Context", prompt)
+        self.assertIn("## Eval suites", prompt)
+
+    async def test_build_turns_offer_the_eval_tools_and_hand_them_over(self) -> None:
+        session = self._session()
+        names = [t["function"]["name"] for t in session.tools(DASHBOARD_CHAT_TOOLS)]
+        self.assertTrue(EVAL_TOOL_NAMES <= set(names))
+        self.assertEqual(names[-3:], ["save_workflow", "run_workflow_test", "finish"])
+        self.assertTrue(session.handles("run_eval_suite"))
+        self.assertEqual(session.step_label("save_prompt_suite"), "Saving the prompt suite...")
+        self.assertEqual(
+            session.display_args("save_prompt_suite", {"name": "x", "test_cases": [{}, {}]}),
+            {"name": "x", "test_cases": 2},
+        )
+        outcome = BuildToolOutcome(result="{}", summary="2 suites", status="success")
+        with patch.object(session.evals, "call", AsyncMock(return_value=outcome)) as call:
+            self.assertIs(await session.call("list_eval_suites", {}), outcome)
+        call.assert_awaited_once_with("list_eval_suites", {})
+
+    async def test_skill_only_turns_get_no_eval_tools(self) -> None:
+        session = chat_build.ChatBuildSession(
+            db=self.db,
+            user=self.user,
+            request=BuildRequest(skill_only=True),
+            selected_credential=SimpleNamespace(
+                id=uuid.uuid4(), owner_id=self.user.id, type="openai"
+            ),
+            model="gpt-5.5",
+            credential_mode=CredentialPromptMode.ASK_AND_CREATE,
+            public_base_url="http://localhost",
+            cancel_event=None,
+            llm_session_id="conv-1",
+        )
+        names = {t["function"]["name"] for t in session.tools(DASHBOARD_CHAT_TOOLS)}
+        self.assertFalse(EVAL_TOOL_NAMES & names)
+        self.assertFalse(session.handles("save_prompt_suite"))
+        self.assertIsNone(session.evals)
 
     async def test_tools_replace_the_ai_builder_and_follow_the_budget(self) -> None:
         session = self._session()

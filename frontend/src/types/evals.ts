@@ -31,7 +31,14 @@ export interface EvalTestCase {
   updated_at: string;
 }
 
-export type ReasoningEffort = "low" | "medium" | "high";
+/** The same levels the LLM and Agent nodes offer. */
+export type ReasoningEffort = "low" | "medium" | "high" | "xhigh" | "max";
+
+export const REASONING_EFFORTS: ReasoningEffort[] = ["low", "medium", "high", "xhigh", "max"];
+
+export function isReasoningEffort(value: unknown): value is ReasoningEffort {
+  return typeof value === "string" && (REASONING_EFFORTS as string[]).includes(value);
+}
 
 export interface EvalRun {
   id: string;
@@ -43,6 +50,9 @@ export interface EvalRun {
   temperature: number;
   reasoning_effort?: string | null;
   max_tokens: number | null;
+  runs_per_test?: number;
+  /** The credential the models ran on; empty for runs made before it was stored. */
+  credential_id?: string | null;
   /** The judge that scored an LLM-as-Judge run; empty when each model scored itself. */
   judge_credential_id?: string | null;
   judge_model?: string | null;
@@ -72,6 +82,12 @@ export interface EvalRunListItem {
   id: string;
   name: string;
   models: string[];
+  credential_id?: string | null;
+  temperature?: number | null;
+  reasoning_effort?: string | null;
+  max_tokens?: number | null;
+  runs_per_test?: number;
+  judge_credential_id?: string | null;
   status: string;
   scoring_method: string;
   judge_model?: string | null;
@@ -163,6 +179,8 @@ export interface AgentThresholds {
   tool_calls: number | null;
 }
 
+export type AgentBaselineSourceKind = "latest_runs" | "suite_run" | "manual";
+
 export interface AgentBaseline {
   run_count: number;
   error_count: number;
@@ -176,6 +194,25 @@ export interface AgentBaseline {
   tool_calls_max: number | null;
   unpriced_models: string[];
   captured_at: string | null;
+  source?: AgentBaselineSourceKind;
+  suite_run_id?: string | null;
+}
+
+export interface AgentBaselineValues {
+  latency_p50_ms?: number | null;
+  latency_p95_ms?: number | null;
+  cost_avg_usd?: number | null;
+  cost_p95_usd?: number | null;
+  tokens_avg?: number | null;
+  tokens_p95?: number | null;
+  tool_calls_avg?: number | null;
+  tool_calls_max?: number | null;
+}
+
+export interface AgentBaselineSourceRequest {
+  source: AgentBaselineSourceKind;
+  run_id?: string | null;
+  values?: AgentBaselineValues | null;
 }
 
 export interface AgentToolCall {
@@ -254,6 +291,7 @@ export interface CreateAgentSuiteRequest {
   node_id: string;
   tool_assertions: ToolAssertion[];
   thresholds: AgentThresholds;
+  baseline?: AgentBaselineSourceRequest;
 }
 
 export interface UpdateAgentSuiteRequest {
@@ -261,6 +299,7 @@ export interface UpdateAgentSuiteRequest {
   tool_assertions?: ToolAssertion[];
   thresholds?: AgentThresholds;
   refresh_baseline?: boolean;
+  baseline?: AgentBaselineSourceRequest;
 }
 
 export type AgentCheckKind = "run" | "assertion" | "threshold";
@@ -321,6 +360,7 @@ export interface CreateAgentSuiteRunRequest {
   generate_inputs: boolean;
   credential_id?: string | null;
   model?: string | null;
+  inputs_list?: Record<string, unknown>[] | null;
 }
 
 export interface AgentSuiteRunResult {
@@ -330,10 +370,24 @@ export interface AgentSuiteRunResult {
   error: string | null;
 }
 
+export type AgentSuiteRunStatus = "running" | "completed" | "failed" | "cancelled";
+
+/** One suite run in the suite's history, without its inputs and results. */
+export interface AgentSuiteRunSummary {
+  id: string;
+  status: AgentSuiteRunStatus;
+  requested_count: number;
+  finished_count: number;
+  generate_inputs: boolean;
+  error: string | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
 export interface AgentSuiteRun {
   id: string;
   suite_id: string;
-  status: "running" | "completed" | "failed";
+  status: AgentSuiteRunStatus;
   requested_count: number;
   generate_inputs: boolean;
   inputs: Record<string, unknown>[];

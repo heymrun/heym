@@ -94,6 +94,14 @@ function selectWorkflow(value: string | undefined): void {
   }
 }
 
+// Clicking an agent on the canvas picks it, like the Agent dropdown; other nodes do nothing.
+function onCanvasNodeClick(node: { id: string }): void {
+  const candidate = candidates.value.find(
+    (item) => item.workflow_id === props.workflowId && item.node_id === node.id,
+  );
+  if (candidate && candidate.run_count > 0) selectNode(candidate.node_id);
+}
+
 function selectNode(value: string | undefined, workflowId = props.workflowId): void {
   emit("update:nodeId", value ?? "");
   const candidate = candidates.value.find(
@@ -184,12 +192,18 @@ onMounted(async () => {
             :edges="workflow.edges"
             :flow-key="workflow.id"
             :selected-node-id="nodeId || null"
-            :interactive="false"
             :show-controls="false"
             :show-mini-map="false"
             :framed="false"
+            @node-click="onCanvasNodeClick"
           />
         </div>
+        <p
+          v-if="workflow"
+          class="-mt-3 text-xs text-muted-foreground"
+        >
+          Click an agent on the canvas to pick it.
+        </p>
       </template>
     </div>
     <AgentSuiteAgentDetails

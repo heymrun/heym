@@ -9,6 +9,14 @@ export interface WorkflowPreview {
   edges: WorkflowEdge[]
 }
 
+/** An eval suite the chat created or changed, shown as a link card like a saved workflow. */
+export interface EvalSuitePreview {
+  id: string
+  name: string
+  suiteType: 'prompt' | 'agent'
+  url: string
+}
+
 export type ToolCallStatus = 'running' | 'success' | 'error' | 'pending' | 'timeout' | 'compressed' | 'cancelled'
 export type ToolCallTerminalStatus = 'success' | 'error' | 'pending' | 'timeout' | 'cancelled'
 
@@ -82,6 +90,7 @@ export interface Message {
   images?: string[]
   attachmentName?: string
   workflowPreview?: WorkflowPreview
+  evalSuites?: EvalSuitePreview[]
   tool_calls?: ToolCall[]
   created_at: string
 }
@@ -123,6 +132,7 @@ export type SSEChunk =
   | { type: 'context'; used: number; limit: number; breakdown: ContextBreakdown }
   | { type: 'tool_output'; images: string[] }
   | { type: 'workflow_created'; workflow: WorkflowPreview; message_id?: string }
+  | { type: 'eval_suite_saved'; suite_id: string; suite_name: string; suite_type: 'prompt' | 'agent'; suite_url: string; message_id?: string }
   | { type: 'title'; title: string }
   | { type: 'assistant_done'; message_id?: string; paused_for_clarification?: boolean; cancelled?: boolean }
   | { type: 'queued_message_created'; queued_message: QueuedMessage }

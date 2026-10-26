@@ -24,6 +24,7 @@ import { useRecentWorkflows } from "@/composables/useRecentWorkflows";
 import { evalsApi, workflowApi } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
 import type { WorkflowListItem } from "@/types/workflow";
+import { isReasoningEffort } from "@/types/evals";
 import type {
   AgentSuite,
   EvalRun,
@@ -38,6 +39,8 @@ const suites = ref<EvalSuiteListItem[]>([]);
 const runs = ref<EvalRunListItem[]>([]);
 const selectedSuiteId = ref<string | null>(null);
 const suiteDetail = ref<EvalSuite | null>(null);
+// The selected prompt suite could not be loaded; the view offers a retry.
+const detailError = ref(false);
 const loading = ref(true);
 const selectedCredentialId = ref<string | null>(null);
 const currentRun = ref<EvalRun | null>(null);
@@ -54,7 +57,10 @@ const showcaseContext = computed(() => {
   return resolveShowcaseContext({ routePath: route.path });
 });
 
-const selectedSuite = computed(() => suiteDetail.value);
+// Only the detail of the suite that is selected now, never one left from an earlier pick.
+const selectedSuite = computed(() =>
+  suiteDetail.value?.id === selectedSuiteId.value ? suiteDetail.value : null,
+);
 // A new agent suite is set up in the panel before anything is saved. It lives in the URL
 // (`?new=agent`), so the browser's back button walks out of it like any other page.
 const agentDraft = computed(() => route.query.new === "agent");
@@ -158,7 +164,7 @@ const initialTemperature = computed(() => {
 const initialReasoningEffort = computed((): ReasoningEffort | undefined => {
   const r = route.query.reasoning_effort;
   if (typeof r !== "string") return undefined;
-  if (["low", "medium", "high"].includes(r)) return r as ReasoningEffort;
+  if (isReasoningEffort(r)) return r;
   return undefined;
 });
 
@@ -177,29 +183,41 @@ async function loadSuites(): Promise<void> {
   }
 }
 
+// Each load is numbered: an answer for an earlier selection arrives after the user moved on
+// and must not replace what they picked since.
+let detailRequest = 0;
+let runsRequest = 0;
+
 async function loadSuiteDetail(): Promise<void> {
-  if (!selectedSuiteId.value || selectedSuiteType.value !== "prompt") {
+  const id = selectedSuiteId.value;
+  const request = ++detailRequest;
+  detailError.value = false;
+  if (!id || selectedSuiteType.value !== "prompt") {
     suiteDetail.value = null;
     return;
   }
   try {
-    suiteDetail.value = await evalsApi.getSuite(selectedSuiteId.value);
+    const detail = await evalsApi.getSuite(id);
+    if (request === detailRequest) suiteDetail.value = detail;
   } catch {
-    suiteDetail.value = null;
+    if (request === detailRequest) detailError.value = true;
   }
 }
 
 watch(selectedSuiteId, loadSuiteDetail, { immediate: true });
 
 async function loadRuns(): Promise<void> {
-  if (!selectedSuiteId.value || selectedSuiteType.value !== "prompt") {
+  const id = selectedSuiteId.value;
+  const request = ++runsRequest;
+  if (!id || selectedSuiteType.value !== "prompt") {
     runs.value = [];
     return;
   }
   try {
-    runs.value = await evalsApi.listRuns(selectedSuiteId.value);
+    const loaded = await evalsApi.listRuns(id);
+    if (request === runsRequest) runs.value = loaded;
   } catch {
-    runs.value = [];
+    if (request === runsRequest) runs.value = [];
   }
 }
 
@@ -291,7 +309,8 @@ async function deleteSuite(): Promise<void> {
 }
 
 function onSuiteUpdated(updated: EvalSuite): void {
-  suiteDetail.value = updated;
+  // A late autosave of the previous suite renames it in the list but leaves the open one alone.
+  if (updated.id === selectedSuiteId.value) suiteDetail.value = updated;
   const idx = suites.value.findIndex((s) => s.id === updated.id);
   if (idx >= 0) {
     suites.value = [
@@ -423,6 +442,7 @@ onUnmounted(() => {
               <EvalsLeftPanel
                 :suite="selectedSuite"
                 :current-run="currentRun"
+                :last-run="runs[0] ?? null"
                 :is-run-in-progress="currentRun?.status === 'running'"
                 :show-edit-button="showEditButton"
                 :initial-temperature="initialTemperature"
@@ -456,6 +476,27 @@ onUnmounted(() => {
               />
             </template>
           </ResizablePanels>
+          <div
+            v-else-if="selectedSuiteId && detailError"
+            class="flex-1 flex flex-col items-center justify-center gap-3 text-muted-foreground min-h-[200px]"
+          >
+            <p class="text-base">
+              Could not load this suite.
+            </p>
+            <Button
+              variant="outline"
+              @click="loadSuiteDetail"
+            >
+              Retry
+            </Button>
+          </div>
+          <div
+            v-else-if="selectedSuiteId"
+            class="flex-1 flex items-center justify-center text-muted-foreground min-h-[200px]"
+            data-testid="eval-suite-loading"
+          >
+            Loading suite...
+          </div>
           <div
             v-else
             class="flex-1 flex flex-col items-center justify-center gap-4 text-muted-foreground min-h-[200px]"

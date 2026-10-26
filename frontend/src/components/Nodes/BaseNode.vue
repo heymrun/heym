@@ -549,15 +549,10 @@ const hasThrowErrorWarning = computed(() => {
           >{{ batchRuntimeLabel }}</span>
         </div>
         <div
-          v-if="type === 'agent' && (data.model || data.persistentMemoryEnabled || previewAttachments)"
+          v-if="type === 'agent' && (data.model || data.persistentMemoryEnabled)"
           class="text-xs text-muted-foreground flex items-center gap-1.5 flex-wrap"
         >
           <span v-if="data.model">{{ data.model }}</span>
-          <span
-            v-if="previewAttachments"
-            class="truncate max-w-[140px]"
-            :title="previewAttachments"
-          >{{ previewAttachments }}</span>
           <button
             v-if="data.persistentMemoryEnabled"
             type="button"
@@ -568,6 +563,16 @@ const hasThrowErrorWarning = computed(() => {
           >
             <Brain class="w-3.5 h-3.5" />
           </button>
+        </div>
+        <!-- Read-only previews only. w-0 + min-w-full: the line takes the node's width and never
+             widens it, so the node keeps its editor size and does not cover its neighbours. -->
+        <div
+          v-if="type === 'agent' && previewAttachments"
+          class="w-0 min-w-full truncate text-xs text-muted-foreground"
+          :title="previewAttachments"
+          data-testid="node-preview-attachments"
+        >
+          {{ previewAttachments }}
         </div>
         <div
           v-if="type === 'wait' && data.duration"

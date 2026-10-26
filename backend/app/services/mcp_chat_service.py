@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import LLM_CREDENTIAL_TYPES, Credential, MCPServer, User
 from app.models.schemas import MCPTool, MCPToolInputProperty, MCPToolInputSchema
+from app.services.chat_eval_mode import suite_url
 from app.services.credential_access import get_accessible_credential
 from app.services.credential_setup import wait_for_conversation_forms
 from app.services.mcp_elicitation import MCPClientChannel
@@ -32,7 +33,8 @@ MCP_CHAT_TOOL_DESCRIPTION = (
     "account. This is the same engine that powers the Heym Chat tab, so it can do "
     "everything that tab can: list, inspect and run workflows; build a new workflow or "
     "change one it built earlier in the conversation, test-run it with sample inputs (at "
-    "most 5 test runs per call) and fix it until a run passes; report analytics, recent "
+    "most 5 test runs per call) and fix it until a run passes; create, edit and run prompt "
+    "and agent eval suites, including an agent's baseline; report analytics, recent "
     "executions, the run history of one workflow (how many times it ran, statuses, when, "
     "and the details of a single run), "
     "and which executions are "
@@ -73,7 +75,7 @@ class ResolvedChatLLM:
 
 @dataclass(frozen=True)
 class WorkflowLink:
-    """A workflow the turn created or saved, and its editor URL on the public origin."""
+    """A workflow or eval suite the turn created or saved, and its URL on the public origin."""
 
     name: str
     url: str
@@ -89,6 +91,8 @@ class MCPChatResult:
     verified: bool = False
     # Workflows this turn created or saved that the user can still open.
     workflow_links: tuple[WorkflowLink, ...] = ()
+    # Eval suites this turn created or changed that the user still owns.
+    eval_suite_links: tuple[WorkflowLink, ...] = ()
     # Credential form links the user still has to open in a browser.
     credential_form_urls: tuple[str, ...] = ()
 
@@ -112,10 +116,24 @@ def absolutize_workflow_links(text: str, public_base_url: str) -> str:
     return _RELATIVE_WORKFLOW_LINK.sub(lambda match: f"]({base}{match.group(1)})", text)
 
 
+def _single_line(name: str | None, fallback: str) -> str:
+    """A name kept to one line, so it cannot add lines to the result text."""
+    return " ".join(str(name or "").split())[:120] or fallback
+
+
 def workflow_link(public_base_url: str, workflow_id: uuid.UUID, name: str | None) -> WorkflowLink:
     """A link for the result text; the name is kept to one line so it cannot add lines."""
-    single_line = " ".join(str(name or "").split())[:120] or "Workflow"
-    return WorkflowLink(name=single_line, url=workflow_editor_url(public_base_url, workflow_id))
+    return WorkflowLink(
+        name=_single_line(name, "Workflow"),
+        url=workflow_editor_url(public_base_url, workflow_id),
+    )
+
+
+def eval_suite_link(public_base_url: str, suite_id: uuid.UUID, name: str | None) -> WorkflowLink:
+    """The suite on the Evals page, on the public origin; the id is a parsed UUID."""
+    return WorkflowLink(
+        name=_single_line(name, "Eval suite"), url=suite_url(public_base_url, suite_id)
+    )
 
 
 def build_chat_mcp_tool() -> MCPTool:
@@ -326,6 +344,11 @@ def format_chat_tool_text(result: MCPChatResult) -> str:
         lines.append("")
         lines.append("Workflows saved in this call (open in a browser signed in to Heym):")
         for link in result.workflow_links:
+            lines.append(f"- {link.name}: {link.url}")
+    if result.eval_suite_links:
+        lines.append("")
+        lines.append("Eval suites saved in this call (open in a browser signed in to Heym):")
+        for link in result.eval_suite_links:
             lines.append(f"- {link.name}: {link.url}")
     lines.append("")
     lines.append(f"conversation_id: {result.conversation_id}")

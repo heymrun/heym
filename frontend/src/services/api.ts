@@ -116,6 +116,7 @@ import type {
   AgentSuiteReport,
   AgentSuiteRun,
   AgentSuiteRunInputs,
+  AgentSuiteRunSummary,
   CreateAgentSuiteRunRequest,
   CreateAgentSuiteRequest,
   CreateSuiteRequest,
@@ -189,12 +190,14 @@ import type {
   ConversationDetail,
   ConversationUpdate,
   ContextUsage,
+  EvalSuitePreview,
   Message,
   QueuedMessage,
   SendMessageResponse,
   ToolCallTerminalStatus,
   WorkflowPreview,
 } from "@/types/chat";
+import { parseEvalSuiteSaved } from "@/lib/evalSuitePreview";
 
 const API_URL = import.meta.env.VITE_API_URL || "";
 const AI_REQUEST_TIMEOUT_MS = 120_000;
@@ -3465,6 +3468,20 @@ export const evalsApi = {
     const response = await api.get<AgentSuiteRun>(`/evals/agent-suite-runs/${runId}`);
     return response.data;
   },
+
+  listAgentSuiteRuns: async (suiteId: string): Promise<AgentSuiteRunSummary[]> => {
+    const response = await api.get<AgentSuiteRunSummary[]>(`/evals/agent-suites/${suiteId}/runs`);
+    return response.data;
+  },
+
+  cancelAgentSuiteRun: async (runId: string): Promise<AgentSuiteRun> => {
+    const response = await api.post<AgentSuiteRun>(`/evals/agent-suite-runs/${runId}/cancel`);
+    return response.data;
+  },
+
+  deleteAgentSuiteRun: async (runId: string): Promise<void> => {
+    await api.delete(`/evals/agent-suite-runs/${runId}`);
+  },
 };
 
 export const logsApi = {
@@ -3939,6 +3956,7 @@ export const chatApi = {
     onQueuedMessageDeleted?: (queuedMessageId: string) => void,
     onQueueCleared?: () => void,
     onQueuedMessageStarted?: (payload: { queuedMessageId: string; userMessage: Message }) => void,
+    onEvalSuiteSaved?: (suite: EvalSuitePreview, messageId?: string) => void,
     signal?: AbortSignal,
   ): Promise<void> => {
     const base = import.meta.env.VITE_API_URL || "";
@@ -4061,6 +4079,9 @@ export const chatApi = {
               nodes: parsed.nodes,
               edges: parsed.edges,
             }, messageId);
+          } else if (parsed.type === "eval_suite_saved") {
+            const suite = parseEvalSuiteSaved(parsed);
+            if (suite) onEvalSuiteSaved?.(suite, messageId);
           } else if (parsed.type === "queued_message_created" && parsed.queued_message) {
             onQueuedMessageCreated?.(parsed.queued_message as QueuedMessage);
           } else if (parsed.type === "queued_message_updated" && parsed.queued_message) {

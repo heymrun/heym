@@ -85,7 +85,27 @@ class BuildProgress:
         return None
 
 
-def _truncate(text: str, max_chars: int) -> str:
+@dataclass(frozen=True)
+class BuildToolOutcome:
+    """One tool call of a build turn: the result for the model, the step row and extra
+    stream events."""
+
+    result: str
+    summary: str
+    status: str
+    events: list[dict[str, Any]] = field(default_factory=list)
+    finished_summary: str | None = None
+
+
+def tool_error(message: str) -> BuildToolOutcome:
+    return BuildToolOutcome(
+        result=json.dumps({"status": "error", "error": message}),
+        summary=f"Error: {message}",
+        status="error",
+    )
+
+
+def truncate_text(text: str, max_chars: int) -> str:
     if len(text) <= max_chars:
         return text
     suffix = "...[truncated]"
@@ -100,7 +120,7 @@ def _bounded_json(value: Any, max_chars: int) -> Any:
         text = str(value)
     if len(text) <= max_chars:
         return value
-    return _truncate(text, max_chars)
+    return truncate_text(text, max_chars)
 
 
 def build_run_report(
@@ -122,7 +142,7 @@ def build_run_report(
             "status": node.get("status"),
         }
         if node.get("error"):
-            entry["error"] = _truncate(str(node["error"]), REPORT_NODE_OUTPUT_MAX_CHARS)
+            entry["error"] = truncate_text(str(node["error"]), REPORT_NODE_OUTPUT_MAX_CHARS)
         if node.get("output") not in (None, {}, []):
             entry["output"] = _bounded_json(node["output"], REPORT_NODE_OUTPUT_MAX_CHARS)
         nodes.append(entry)
@@ -139,7 +159,7 @@ def build_run_report(
     if len(nodes) > REPORT_MAX_NODES:
         report["nodes_omitted"] = len(nodes) - REPORT_MAX_NODES
     if result.get("error"):
-        report["error"] = _truncate(str(result["error"]), REPORT_NODE_OUTPUT_MAX_CHARS)
+        report["error"] = truncate_text(str(result["error"]), REPORT_NODE_OUTPUT_MAX_CHARS)
     if result.get("pending_review"):
         report["pending_review"] = result["pending_review"]
     if result.get("execution_history_id"):

@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from app.api import ai_assistant, chat_build
 from app.db.models import Workflow
 from app.services.chat_build_mode import MAX_BUILD_TEST_RUNS, BuildRequest
+from app.services.chat_eval_mode import EVAL_TOOL_NAMES
 from app.services.credential_catalog import CredentialPromptMode
 from app.services.llm_trace import LLMTraceContext
 
@@ -188,6 +189,7 @@ class ChatBuildStreamTests(IsolatedAsyncioTestCase):
         self.assertNotIn("run_workflow_test", names)
         self.assertNotIn("finish", names)
         self.assertIn("create_workflow", names)
+        self.assertFalse(EVAL_TOOL_NAMES & set(names))
 
     async def test_cancel_during_a_test_run_ends_the_turn(self) -> None:
         async def cancelled_run(*_args: Any, **_kwargs: Any) -> str:

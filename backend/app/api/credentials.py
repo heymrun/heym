@@ -56,7 +56,6 @@ from app.services.embedding import (
 from app.services.encryption import decrypt_config, encrypt_config, mask_api_key
 from app.services.model_router import ModelRouterConfigError, parse_router_config
 from app.services.opencode_usage_service import fetch_opencode_usage
-from app.services.ssrf_guard import SsrfBlockedError
 from app.services.vector_store import VECTOR_STORE_BACKENDS
 from app.services.vector_store_pg import pgvector_dimension_message
 
@@ -1914,6 +1913,29 @@ async def get_model_router_config(
     return ModelRouterConfigResponse(**decrypt_config(credential.encrypted_config))
 
 
+async def list_credential_models(credential: Credential) -> list[LLMModel]:
+    """The models an LLM credential offers. Raises ValueError for a type that lists none,
+    and for an endpoint the SSRF guard blocks."""
+    if credential.type == CredentialType.model_router:
+        return build_model_router_models()
+    if credential.type not in (CredentialType.openai, CredentialType.google, CredentialType.custom):
+        raise ValueError("This credential type does not support model listing")
+
+    config = decrypt_config(credential.encrypted_config)
+
+    from app.services.context_compressor import KNOWN_LIMITS
+    from app.services.llm_provider import fetch_models
+
+    models = await fetch_models(credential.type, config)
+    for m in models:
+        model_lower = m.id.lower()
+        for key, limit in KNOWN_LIMITS.items():
+            if key in model_lower:
+                m.context_window = limit
+                break
+    return models
+
+
 @router.get("/{credential_id}/models", response_model=list[LLMModel])
 async def get_credential_models(
     credential_id: uuid.UUID,
@@ -1950,31 +1972,11 @@ async def get_credential_models(
             detail="Credential not found",
         )
 
-    if credential.type == CredentialType.model_router:
-        return build_model_router_models()
-
-    if credential.type not in (CredentialType.openai, CredentialType.google, CredentialType.custom):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="This credential type does not support model listing",
-        )
-
-    config = decrypt_config(credential.encrypted_config)
-
-    from app.services.context_compressor import KNOWN_LIMITS
-    from app.services.llm_provider import fetch_models
-
     try:
-        models = await fetch_models(credential.type, config)
-    except SsrfBlockedError as exc:
+        return await list_credential_models(credential)
+    except ValueError as exc:
+        # SsrfBlockedError is a ValueError: both are a 400 for the caller.
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    for m in models:
-        model_lower = m.id.lower()
-        for key, limit in KNOWN_LIMITS.items():
-            if key in model_lower:
-                m.context_window = limit
-                break
-    return models
 
 
 @router.get("/{credential_id}/codex-usage", response_model=CodexUsageResponse)

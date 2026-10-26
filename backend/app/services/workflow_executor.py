@@ -37,7 +37,7 @@ from app.api.data_tables import (
 from app.http_identity import HEYM_USER_AGENT
 from app.observability import tracing
 from app.services import expression_syntax
-from app.services.agent_tool_policy import is_blocked_as_tool
+from app.services.agent_tool_policy import node_tools_for_agent
 from app.services.cancellation_bridge import CancellationBridge
 from app.services.chart_payload import (
     build_chart_payload,  # noqa: F401 - public patch alias for node handlers
@@ -165,7 +165,6 @@ _DOLLAR_NAME_RE = re.compile(r"\$([a-zA-Z_][a-zA-Z0-9_]*)")
 _ITEM_EXPRESSION_STRING_START_RE = re.compile(r"\.(?:distinctBy|distinct_by|filter|map|sort)\(\s*$")
 _POSTGRES_UNSAFE_JSON_STRING_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\ud800-\udfff]")
 
-_SLUG_RE = re.compile(r"[^a-zA-Z0-9]+")
 _EXECUTION_CONTEXT_INPUT_KEY = "__heym_execution_context"
 
 
@@ -187,11 +186,6 @@ def _reconcile_resumed_tool_calls(
         }
         tool_call["finished_at"] = finished_at
     return reconciled
-
-
-def _slugify_tool_name(label: str) -> str:
-    slug = _SLUG_RE.sub("_", label.strip()).strip("_").lower()
-    return slug[:64] or "node_tool"
 
 
 def _coerce_boolean(value: object, *, default: bool = False) -> bool:
@@ -4975,32 +4969,9 @@ class WorkflowExecutor:
 
     def _build_node_tool_schemas(self, agent_node_id: str) -> list[dict]:
         """Build OpenAI-compatible tool schemas for canvas nodes on the tool-input handle."""
-        tool_node_ids = [
-            edge["source"]
-            for edge in self.edges
-            if edge.get("target") == agent_node_id and edge.get("targetHandle") == "tool-input"
-        ]
-
         schemas: list[dict] = []
-        seen_names: set[str] = set()
-
-        for node_id in tool_node_ids:
-            node = self.nodes.get(node_id)
-            if node is None:
-                continue
-            if is_blocked_as_tool(node.get("type")):
-                continue
-            node_data = node.get("data", {})
-            label = node_data.get("label") or node_id
-            base_name = _slugify_tool_name(label)
-
-            name = base_name
-            suffix = 2
-            while name in seen_names:
-                name = f"{base_name}_{suffix}"
-                suffix += 1
-            seen_names.add(name)
-
+        for tool in node_tools_for_agent(self.nodes, self.edges, agent_node_id):
+            node_data = self.nodes[tool.node_id].get("data", {})
             agent_provided: list[str] = node_data.get("agentProvidedFields") or []
             properties = {
                 field: {"type": "string", "description": f"Value for {field}"}
@@ -5009,15 +4980,15 @@ class WorkflowExecutor:
 
             schemas.append(
                 {
-                    "name": name,
-                    "description": f"Execute the '{label}' node",
+                    "name": tool.name,
+                    "description": f"Execute the '{tool.label}' node",
                     "parameters": {
                         "type": "object",
                         "properties": properties,
                         "required": list(agent_provided),
                     },
                     "_source": "node_tool",
-                    "_node_id": node_id,
+                    "_node_id": tool.node_id,
                 }
             )
 

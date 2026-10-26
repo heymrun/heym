@@ -69,6 +69,14 @@ async def _execute_llm_with_retry(**kwargs: object) -> dict:
     raise last_exc or RuntimeError("Unexpected retry loop exit")
 
 
+# A decision model picks among options instead of writing an answer, so it can only judge.
+DECISION_CANNOT_RUN_MESSAGE = (
+    "A Decision Model credential cannot run a prompt suite, because it picks among options "
+    "instead of writing answers. Run the models on an OpenAI, Google or OpenAI compatible "
+    "credential, and use the Decision Model as the judge: scoring_method llm_judge with "
+    "judge_credential_id and a judge_model the user types, such as jev-latest."
+)
+
 SCORING_EXACT_MATCH = "exact_match"
 SCORING_CONTAINS = "contains"
 SCORING_LLM_JUDGE = "llm_judge"
@@ -486,6 +494,8 @@ async def create_run(
     )
     if not credential:
         raise ValueError("Credential not found")
+    if credential.type == CredentialType.decision:
+        raise ValueError(DECISION_CANNOT_RUN_MESSAGE)
     if credential.type not in LLM_CREDENTIAL_TYPES:
         raise ValueError("Credential must be OpenAI, Google, or Custom type")
 
@@ -516,6 +526,8 @@ async def create_run(
         temperature=temperature,
         reasoning_effort=reasoning_effort,
         max_tokens=max_tokens,
+        runs_per_test=runs_per_test,
+        credential_id=credential.id,
         judge_credential_id=judge.credential_id if judge else None,
         judge_model=judge.model if judge else None,
         status="running",
