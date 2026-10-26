@@ -64,11 +64,14 @@ When it is on, `heym_chat` appears in `tools/list` alongside your workflow tools
 - Report what is running right now: how many executions are active, their workflow names, how long each has been running, the node each is currently on, and a link to the live run
 - List boards, create cards, and read card detail on the [Board tab](./board-tab.md)
 - List your data tables with their columns, create new ones, and wire them into the workflows it builds
+- Create, edit and run prompt and agent [eval suites](./evals-tab.md#from-chat-and-mcp), including an agent's baseline: reported, built from runs, or stated as numbers. The result lists the Evals link of every suite saved in the call.
 - Create or update your credentials on Heym's own page (see [Credentials](#credentials))
 - Read teams and global variables, and search the documentation
 - Approve, edit, or refuse pending human-in-the-loop reviews
 
 Capabilities added to the Chat tab later become available through `heym_chat` automatically — there is no per-capability toggle to keep in sync.
+
+These capabilities run inside `heym_chat`: `tools/list` shows `heym_chat` and your workflow tools, never the chat's internal tools such as the eval suite ones.
 
 ### Build mode
 

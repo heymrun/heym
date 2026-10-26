@@ -107,6 +107,7 @@ A dashboard chat turn that carries `allow_build` (Heym's Chat tab, Heym Work's C
 - `MAX_BUILD_TEST_RUNS` equals the editor's `MAX_YOLO_ATTEMPTS` (`yoloProtocol.ts`); change both together.
 - Saves go through `backend/app/services/workflow_save.py`, like the editor's update endpoint, so Edit History, trigger resync and platform events stay identical. Do not write workflow versions anywhere else.
 - `finish` is refused until a test run of the latest save has passed. The Verified card depends on that; keep it.
+- Build turns also carry the eval suite tools (`backend/app/api/chat_evals.py`); skill-only turns and the canvas assistant do not, and MCP `tools/list` never shows them. They call `prompt_suite_service.py`, `agent_suite_service.py` and `launch_agent_suite_run`, the same code as the Evals routes. Do not write eval rows anywhere else.
 - Every model request and test run in a build turn carries the conversation id as its OpenCode session (`ChatBuildSession.llm_session_id`); see the OpenCode section above.
 
 ### Credentials over MCP (URL elicitation)

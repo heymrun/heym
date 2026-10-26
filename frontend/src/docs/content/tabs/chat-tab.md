@@ -124,6 +124,30 @@ the trigger-source breakdown for execution-count alerts. It reports what was tru
 fired rather than recomputing the window, because the window has passed and a fresh calculation
 can give a different answer.
 
+## Working with Evals
+
+Chat can create, change and run the suites in [Evals](./evals-tab.md), both prompt suites and agent suites:
+
+- **Prompt suite**: "make a prompt suite for my support reply prompt with 8 test cases and compare gpt-4o with gpt-4.1-mini". Chat writes the test cases with their expected answers, picks a scoring method and saves the suite.
+  - Before it creates the suite, it settles which LLM credential and models to use. With exactly one LLM credential it uses that one and says so; otherwise it asks.
+  - For LLM-as-Judge scoring, it also asks whether a separate judge should score the answers.
+- **Agent suite**: "check that my support agent always searches the docs and never sends email". Chat finds the agent and saves the tool checks and thresholds. When you ask, it runs the workflow, writing a different input for each run.
+  - Agent suite runs are real workflow runs, so their side effects happen. Chat says how many runs it starts.
+- **Baseline**: Chat can work with an agent's baseline in three ways:
+  - Report it from the agent's latest runs.
+  - Build it from runs it starts ("run it 5 times and use that as the baseline").
+  - Store numbers you give it ("set the baseline to 3 seconds p95 and $0.01 per run").
+- **Runs**: Chat waits up to a minute for a run, then reports the result:
+  - For a prompt suite: each model's pass count and the cases that failed.
+  - For an agent suite: the pass rate, the failed checks and the drift from the baseline.
+  - A longer run keeps going in Evals; ask Chat to check it again.
+
+After Chat creates or changes a suite, the reply shows a card with the suite's name, its type and an **Open in Evals** button, like the card of a saved workflow. Over MCP, the `heym_chat` result lists the link of every suite saved in that call.
+
+The same works from an MCP client through `heym_chat` (see [Using Chat from an MCP Client](#using-chat-from-an-mcp-client)). The eval tools stay inside `heym_chat`; MCP clients do not see them as separate tools.
+
+The editor's AI Assistant does not create suites.
+
 ## User Rules
 
 [User Rules](../reference/user-settings.md) (configured in Settings) are automatically injected into every Chat conversation as system-level instructions. Set them once to apply persistent preferences to all chat requests.

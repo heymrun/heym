@@ -84,6 +84,25 @@ How the numbers are read:
 - The suite reads your own traces only, the same rule as the Traces tab.
 - **Use latest runs as baseline** in **Edit checks** replaces the saved baseline with the agent's latest runs.
 
+A suite's baseline comes from one of three places. **Edit checks** shows which one next to **Saved baseline**:
+
+- the agent's latest runs (the default, and what **Use latest runs as baseline** takes),
+- one finished suite run,
+- numbers entered by hand.
+
+The last two are set from [Chat](./chat-tab.md#working-with-evals) or the API:
+
+- `PATCH /api/evals/agent-suites/{id}` takes `baseline: {"source": "suite_run", "run_id": "…"}` or `{"source": "manual", "values": {"latency_p95_ms": 3000, "cost_avg_usd": 0.01}}`.
+- `POST /api/evals/agent-suites/{id}/runs` takes `inputs_list`: one input object per run, up to 20.
+
+### From Chat and MCP
+
+[Chat](./chat-tab.md#working-with-evals) and the MCP `heym_chat` tool can create, change and run prompt and agent suites:
+
+- They write test cases and run inputs themselves.
+- They ask which credential to use before creating a prompt suite, unless only one fits.
+- They link every suite they mention on this page.
+
 ## Benchmark Matrix Ideas
 
 When you build a benchmark matrix for agent workflows, include HITL scenarios as first-class cases instead of treating them as edge cases.
