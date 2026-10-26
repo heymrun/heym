@@ -7,9 +7,8 @@ Create Date: 2026-10-26 00:00:00.000000
 A running suite run writes ``heartbeat_at`` every few seconds; a row whose heartbeat went
 quiet lost its runner, for example to a server restart, and is closed as interrupted.
 
-``eval_runs.credential_id`` and ``eval_runs.runs_per_test`` record the rest of a prompt
-suite run's settings, so the suite opens with them again. Existing runs keep a NULL
-credential (it was never stored) and one run per test.
+``eval_runs.credential_id`` records the credential a prompt suite run used, so the suite
+opens with it again. Existing runs keep NULL: the credential was never stored.
 """
 
 from collections.abc import Sequence
@@ -40,14 +39,9 @@ def upgrade() -> None:
         ),
     )
     op.create_index("ix_eval_runs_credential_id", "eval_runs", ["credential_id"])
-    op.add_column(
-        "eval_runs",
-        sa.Column("runs_per_test", sa.Integer(), nullable=False, server_default="1"),
-    )
 
 
 def downgrade() -> None:
-    op.drop_column("eval_runs", "runs_per_test")
     op.drop_index("ix_eval_runs_credential_id", table_name="eval_runs")
     op.drop_column("eval_runs", "credential_id")
     op.drop_column("agent_suite_runs", "heartbeat_at")

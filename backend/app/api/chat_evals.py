@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.agent_suite_runs import AgentSuiteBusyError, launch_agent_suite_run
 from app.api.credentials import list_credential_models
 from app.api.workflows import _spawn_detached_task
-from app.db.models import User
+from app.db.models import CredentialType, User
 from app.db.session import async_session_maker
 from app.models.agent_suite_schemas import (
     AgentBaselineValues,
@@ -83,6 +83,7 @@ from app.services.chat_eval_mode import (
 )
 from app.services.credential_access import get_accessible_credential
 from app.services.eval_common import EvalNotFoundError
+from app.services.eval_service import DECISION_CANNOT_RUN_MESSAGE
 from app.services.prompt_suite_service import SCORING_METHODS, SuiteType
 
 # The prompt run settings the chat may pass through to RunEvalsRequest.
@@ -159,8 +160,14 @@ EVAL_TOOL_SCHEMAS: list[dict[str, Any]] = [
     ),
     _function(
         LIST_LLM_MODELS_TOOL,
-        "List the models an LLM credential offers, to choose the models a prompt suite compares.",
-        {"credential_id": {**_ID, "description": "An LLM credential from the Credentials list."}},
+        "List the models an LLM credential offers, to choose the models a prompt suite compares. "
+        "A Decision Model credential has no list: ask the user to type its model name.",
+        {
+            "credential_id": {
+                **_ID,
+                "description": "An OpenAI, Google or OpenAI compatible credential.",
+            }
+        },
         ["credential_id"],
     ),
     _function(
@@ -262,7 +269,9 @@ EVAL_TOOL_SCHEMAS: list[dict[str, Any]] = [
             "suite_id": {**_ID},
             "credential_id": {
                 **_ID,
-                "description": "Prompt suites: the LLM credential the models run on.",
+                "description": "Prompt suites: the OpenAI, Google or OpenAI compatible "
+                "credential the models run on. A Decision Model credential cannot run a suite; "
+                "it can only judge.",
             },
             "models": {
                 "type": "array",
@@ -275,10 +284,15 @@ EVAL_TOOL_SCHEMAS: list[dict[str, Any]] = [
             },
             "judge_credential_id": {
                 **_ID,
-                "description": "llm_judge: a separate judge's credential. Omit it to let each "
-                "model score its own answer.",
+                "description": "llm_judge: a separate judge's credential, an OpenAI, Google, "
+                "OpenAI compatible or Decision Model one. Omit it to let each model score its "
+                "own answer.",
             },
-            "judge_model": {"type": "string"},
+            "judge_model": {
+                "type": "string",
+                "description": "llm_judge: the judge's model. For a Decision Model judge, ask the "
+                "user to type the model name (for example jev-latest); it cannot be listed.",
+            },
             "runs_per_test": {"type": "integer", "description": "Prompt suites: 1 to 20."},
             "temperature": {"type": "number"},
             "inputs": {
@@ -488,6 +502,8 @@ class ChatEvalTools:
         )
         if credential is None:
             raise EvalNotFoundError("Credential not found")
+        if credential.type == CredentialType.decision:
+            raise ValueError(DECISION_CANNOT_RUN_MESSAGE)
         models = await list_credential_models(credential)
         return {
             "credential": credential.name,

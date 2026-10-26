@@ -336,6 +336,33 @@ class RealPostgresChatEvalToolTests(unittest.IsolatedAsyncioTestCase):
         error = await self._error("get_eval_run", {"run_id": result["run_id"]}, outsider)
         self.assertEqual(error, "Run not found")
 
+    async def test_a_decision_credential_can_only_judge(self) -> None:
+        decision_id = uuid.uuid4()
+        async with async_session_maker() as session:
+            session.add(
+                Credential(
+                    id=decision_id,
+                    owner_id=self.owner_id,
+                    name=f"jev-{decision_id.hex[:6]}",
+                    type=CredentialType.decision,
+                    encrypted_config="x",
+                )
+            )
+            await session.commit()
+        listed = await self._error("list_llm_models", {"credential_id": str(decision_id)})
+        self.assertIn("cannot run a prompt suite", listed)
+        self.assertIn("judge_model the user types", listed)
+        saved = await self._prompt_suite()
+        refused = await self._error(
+            "run_eval_suite",
+            {
+                "suite_id": saved["suite"]["id"],
+                "credential_id": str(decision_id),
+                "models": ["jev-latest"],
+            },
+        )
+        self.assertIn("use the Decision Model as the judge", refused)
+
     async def test_a_run_on_another_users_credential_is_refused(self) -> None:
         saved = await self._prompt_suite()
         error = await self._error(

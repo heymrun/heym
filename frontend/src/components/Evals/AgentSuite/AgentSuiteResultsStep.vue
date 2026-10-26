@@ -19,6 +19,7 @@ import type {
   AgentDeltaMetric,
   AgentMetricDelta,
   AgentSuiteReport,
+  AgentSuiteRun,
   AgentSuiteRunSummary,
 } from "@/types/evals";
 
@@ -26,11 +27,17 @@ interface Props {
   suiteId: string;
   /** Bumped by the parent after the checks change, to score the runs again. */
   reloadKey?: number;
-  /** The latest finished press of Run; its runs are scored by default. */
-  runId?: string | null;
+  /** The newest suite run, refreshed while it goes; its progress updates the report live. */
+  activeRun?: AgentSuiteRun | null;
+  /** The chosen scope, kept by the parent so it survives switching to another view. */
+  scope?: string | null;
 }
 
-const props = withDefaults(defineProps<Props>(), { reloadKey: 0, runId: null });
+const props = withDefaults(defineProps<Props>(), { reloadKey: 0, activeRun: null, scope: null });
+
+const emit = defineEmits<{
+  (e: "update:scope", value: string): void;
+}>();
 
 // A scope is one suite run ("run:<id>") or the agent's last N runs ("10").
 const RUN_PREFIX = "run:";
@@ -45,7 +52,10 @@ const report = ref<AgentSuiteReport | null>(null);
 const loading = ref(false);
 const error = ref<string | null>(null);
 const suiteRuns = ref<AgentSuiteRunSummary[]>([]);
-const scope = ref(props.runId ? `${RUN_PREFIX}${props.runId}` : DEFAULT_SCOPE);
+const scope = computed({
+  get: (): string => props.scope ?? "",
+  set: (value: string) => emit("update:scope", value),
+});
 
 const selectedRunId = computed((): string | null =>
   scope.value.startsWith(RUN_PREFIX) ? scope.value.slice(RUN_PREFIX.length) : null,
@@ -68,10 +78,18 @@ async function loadSuiteRuns(): Promise<void> {
   }
   const kept = suiteRuns.value.some((run) => `${RUN_PREFIX}${run.id}` === scope.value);
   if (scope.value.startsWith(RUN_PREFIX) && !kept) scope.value = DEFAULT_SCOPE;
-  if (scope.value === DEFAULT_SCOPE && suiteRuns.value.length > 0 && !props.runId) {
-    scope.value = `${RUN_PREFIX}${suiteRuns.value[0].id}`;
+  // First visit: the newest suite run, or the agent's latest runs when there is none.
+  if (!scope.value) {
+    const newest = props.activeRun?.id ?? suiteRuns.value[0]?.id;
+    scope.value = newest ? `${RUN_PREFIX}${newest}` : DEFAULT_SCOPE;
   }
 }
+
+// A suite run's numbers change only while it goes; the agent's latest runs keep changing.
+const showRefresh = computed((): boolean => !selectedRunId.value);
+const followsActiveRun = computed(
+  (): boolean => !selectedRunId.value || selectedRunId.value === props.activeRun?.id,
+);
 
 async function deleteSelectedRun(): Promise<void> {
   const run = selectedRun.value;
@@ -103,6 +121,7 @@ function checkTotal(passed: number, failed: number): number {
 }
 
 async function loadReport(): Promise<void> {
+  if (!scope.value) return;
   loading.value = true;
   error.value = null;
   try {
@@ -119,11 +138,23 @@ async function loadReport(): Promise<void> {
   }
 }
 
+// A new press of Run is shown as it starts.
 watch(
-  () => props.runId,
-  async (runId) => {
-    if (runId) scope.value = `${RUN_PREFIX}${runId}`;
+  () => props.activeRun?.id,
+  async (runId, previous) => {
+    if (!runId || runId === previous) return;
+    scope.value = `${RUN_PREFIX}${runId}`;
     await loadSuiteRuns();
+  },
+);
+
+// Each finished workflow run, and the end of the suite run, refresh the list and the report.
+watch(
+  () => `${props.activeRun?.results.length}:${props.activeRun?.status}`,
+  async () => {
+    if (!props.activeRun) return;
+    await loadSuiteRuns();
+    if (followsActiveRun.value) await loadReport();
   },
 );
 
@@ -167,6 +198,7 @@ watch(() => props.suiteId, loadSuiteRuns, { immediate: true });
           <Trash2 class="h-4 w-4" />
         </Button>
         <Button
+          v-if="showRefresh"
           variant="outline"
           size="icon"
           title="Refresh"
