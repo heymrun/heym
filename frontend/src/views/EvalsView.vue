@@ -24,6 +24,7 @@ import { useRecentWorkflows } from "@/composables/useRecentWorkflows";
 import { evalsApi, workflowApi } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
 import type { WorkflowListItem } from "@/types/workflow";
+import { isReasoningEffort } from "@/types/evals";
 import type {
   AgentSuite,
   EvalRun,
@@ -163,7 +164,7 @@ const initialTemperature = computed(() => {
 const initialReasoningEffort = computed((): ReasoningEffort | undefined => {
   const r = route.query.reasoning_effort;
   if (typeof r !== "string") return undefined;
-  if (["low", "medium", "high"].includes(r)) return r as ReasoningEffort;
+  if (isReasoningEffort(r)) return r;
   return undefined;
 });
 

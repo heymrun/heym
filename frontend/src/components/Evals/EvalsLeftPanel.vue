@@ -16,7 +16,13 @@ import { useAiDefaults } from "@/composables/useAiDefaults";
 import { credentialsApi, evalsApi } from "@/services/api";
 import type { CredentialListItem } from "@/types/credential";
 import type { LLMModel } from "@/types/credential";
-import type { EvalRun, EvalRunListItem, EvalSuite, ReasoningEffort } from "@/types/evals";
+import {
+  isReasoningEffort,
+  type EvalRun,
+  type EvalRunListItem,
+  type EvalSuite,
+  type ReasoningEffort,
+} from "@/types/evals";
 
 interface Props {
   suite: EvalSuite;
@@ -57,13 +63,8 @@ const displayTemperature = computed(() =>
 );
 
 const displayReasoningEffort = computed((): ReasoningEffort => {
-  if (
-    isViewingHistory.value &&
-    props.currentRun?.reasoning_effort &&
-    ["low", "medium", "high"].includes(props.currentRun.reasoning_effort)
-  ) {
-    return props.currentRun.reasoning_effort as ReasoningEffort;
-  }
+  const fromRun = props.currentRun?.reasoning_effort;
+  if (isViewingHistory.value && isReasoningEffort(fromRun)) return fromRun;
   return reasoningEffort.value;
 });
 
@@ -88,6 +89,35 @@ const runsPerTest = ref(1);
 // Models to select once the chosen credential's model list has loaded.
 const pendingModelIds = ref<string[] | null>(null);
 
+interface RunSettings {
+  credential_id?: string | null;
+  models: string[];
+  scoring_method: string;
+  temperature?: number | null;
+  reasoning_effort?: string | null;
+  runs_per_test?: number | null;
+  judge_credential_id?: string | null;
+  judge_model?: string | null;
+}
+
+/** Load every setting a run used, so the next run repeats it. URL settings stay. */
+function applyRunSettings(run: RunSettings): void {
+  if (SCORING_OPTIONS.some((option) => option.value === run.scoring_method)) {
+    scoringMethod.value = run.scoring_method;
+  }
+  const judged = run.scoring_method === "llm_judge";
+  judgeCredentialId.value = judged ? (run.judge_credential_id ?? "") : "";
+  judgeModel.value = judged ? (run.judge_model ?? "") : "";
+  if (typeof run.temperature === "number" && props.initialTemperature == null) {
+    temperature.value = run.temperature;
+  }
+  if (isReasoningEffort(run.reasoning_effort) && props.initialReasoningEffort == null) {
+    reasoningEffort.value = run.reasoning_effort;
+  }
+  if (run.runs_per_test) runsPerTest.value = run.runs_per_test;
+  applyRunSelection(run.credential_id, run.models ?? []);
+}
+
 /** Pick the credential and models a run used, when that credential is still available. */
 function applyRunSelection(credentialId: string | null | undefined, modelIds: string[]): void {
   if (!credentialId || !credentials.value.some((c) => c.id === credentialId)) return;
@@ -105,6 +135,8 @@ const REASONING_EFFORT_OPTIONS: { value: ReasoningEffort; label: string }[] = [
   { value: "low", label: "Low" },
   { value: "medium", label: "Medium" },
   { value: "high", label: "High" },
+  { value: "xhigh", label: "Extra high" },
+  { value: "max", label: "Max" },
 ];
 let pollIntervalId: ReturnType<typeof setInterval> | null = null;
 
@@ -150,30 +182,29 @@ const judgeIncomplete = computed(
   (): boolean => isJudgeScoring.value && !!judgeCredentialId.value && !judgeModel.value.trim(),
 );
 
-// Opening a past run loads its scoring setup, so Re-Run Evals repeats the same judge.
+// Opening a past run loads all of its settings, so Re-Run Evals repeats the same run.
 watch(
   () => props.currentRun?.id,
   () => {
     const run = props.currentRun;
     if (!run || !isViewingHistory.value) return;
-    if (SCORING_OPTIONS.some((option) => option.value === run.scoring_method)) {
-      scoringMethod.value = run.scoring_method;
-    }
-    if (run.scoring_method === "llm_judge") {
-      judgeCredentialId.value = run.judge_credential_id ?? "";
-      judgeModel.value = run.judge_model ?? "";
-    }
-    applyRunSelection(run.credential_id, run.models ?? []);
+    applyRunSettings(run);
   },
   { immediate: true },
 );
 
+// A suite opens with its newest run's settings, once, so a run finishing later does not
+// undo changes made since.
+let settingsLoadedForSuite: string | null = null;
 watch(
   () => props.lastRun?.id,
   () => {
     if (isViewingHistory.value || !props.lastRun) return;
-    applyRunSelection(props.lastRun.credential_id, props.lastRun.models);
+    if (settingsLoadedForSuite === props.suite.id) return;
+    settingsLoadedForSuite = props.suite.id;
+    applyRunSettings(props.lastRun);
   },
+  { immediate: true },
 );
 
 let savePromptTimeout: ReturnType<typeof setTimeout> | null = null;

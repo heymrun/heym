@@ -34,8 +34,9 @@ The **Evals** tab is a separate page at `/evals`. It lets you create evaluation 
 - **Scoring method** – Choose `Exact Match`, `Contains`, or `LLM-as-Judge`
 - **Judge** – For `LLM-as-Judge`, optionally pick an OpenAI, OpenAI compatible (Custom), Gemini (Google) or [Decision Model](../nodes/decision-node.md) credential and type the judge's model (for example `gpt-4o-mini` or `jev-latest`) to score with an independent judge
 - **Runs per test** – Repeat each test case multiple times in one run
+- **Remembered settings** – A suite opens with its newest run's settings: credential, models, scoring method and judge, temperature, reasoning effort and runs per test. Opening a past run loads that run's settings, so **Re-Run Evals** repeats it
 - **Temperature** – Set model temperature (`Exact Match` and `Contains`)
-- **Reasoning effort** – Set reasoning effort for reasoning models (`Exact Match` and `Contains`)
+- **Reasoning effort** – Set reasoning effort for reasoning models, from Low to Extra high and Max like the LLM and Agent nodes (`Exact Match` and `Contains`)
 
 ### LLM-as-Judge
 

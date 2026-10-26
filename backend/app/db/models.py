@@ -1694,6 +1694,9 @@ class EvalRun(Base):
     temperature: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     reasoning_effort: Mapped[str | None] = mapped_column(String(20), nullable=True)
     max_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    runs_per_test: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
     # The credential the models under test ran on; the suite opens with it again.
     credential_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),

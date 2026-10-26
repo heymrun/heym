@@ -744,6 +744,7 @@ def _stored_run(**fields: object) -> SimpleNamespace:
         "temperature": 0.7,
         "reasoning_effort": None,
         "max_tokens": None,
+        "runs_per_test": 1,
         "credential_id": MAIN_CREDENTIAL_ID,
         "judge_credential_id": JUDGE_CREDENTIAL_ID,
         "judge_model": "jev-latest",

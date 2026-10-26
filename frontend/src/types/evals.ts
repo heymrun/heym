@@ -31,7 +31,14 @@ export interface EvalTestCase {
   updated_at: string;
 }
 
-export type ReasoningEffort = "low" | "medium" | "high";
+/** The same levels the LLM and Agent nodes offer. */
+export type ReasoningEffort = "low" | "medium" | "high" | "xhigh" | "max";
+
+export const REASONING_EFFORTS: ReasoningEffort[] = ["low", "medium", "high", "xhigh", "max"];
+
+export function isReasoningEffort(value: unknown): value is ReasoningEffort {
+  return typeof value === "string" && (REASONING_EFFORTS as string[]).includes(value);
+}
 
 export interface EvalRun {
   id: string;
@@ -43,6 +50,7 @@ export interface EvalRun {
   temperature: number;
   reasoning_effort?: string | null;
   max_tokens: number | null;
+  runs_per_test?: number;
   /** The credential the models ran on; empty for runs made before it was stored. */
   credential_id?: string | null;
   /** The judge that scored an LLM-as-Judge run; empty when each model scored itself. */
@@ -75,6 +83,11 @@ export interface EvalRunListItem {
   name: string;
   models: string[];
   credential_id?: string | null;
+  temperature?: number | null;
+  reasoning_effort?: string | null;
+  max_tokens?: number | null;
+  runs_per_test?: number;
+  judge_credential_id?: string | null;
   status: string;
   scoring_method: string;
   judge_model?: string | null;

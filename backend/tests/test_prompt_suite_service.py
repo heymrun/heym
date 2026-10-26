@@ -216,7 +216,13 @@ class RealPostgresPromptSuiteTests(unittest.IsolatedAsyncioTestCase):
                 db,
                 owner,
                 suite.id,
-                RunEvalsRequest(credential_id=self.credential_id, models=["gpt-4o"]),
+                RunEvalsRequest(
+                    credential_id=self.credential_id,
+                    models=["gpt-4o"],
+                    temperature=0.3,
+                    reasoning_effort="xhigh",
+                    runs_per_test=3,
+                ),
             )
         self.assertEqual(launch.run.status, "running")
         self.assertIs(launch.job.func, eval_service.execute_evals_for_run)
@@ -234,6 +240,30 @@ class RealPostgresPromptSuiteTests(unittest.IsolatedAsyncioTestCase):
             prompt_suites.prompt_run_response(run, run.results).credential_id, self.credential_id
         )
         self.assertEqual(listed[0].credential_id, self.credential_id)
+        # Every setting the run used comes back, so the panel can show it again.
+        self.assertEqual(
+            (
+                listed[0].models,
+                listed[0].temperature,
+                listed[0].reasoning_effort,
+                listed[0].runs_per_test,
+            ),
+            (["gpt-4o"], 0.3, "xhigh", 3),
+        )
+        self.assertEqual(prompt_suites.prompt_run_response(run, run.results).runs_per_test, 3)
+
+    def test_reasoning_effort_accepts_the_node_levels(self) -> None:
+        for level in ("low", "medium", "high", "xhigh", "max"):
+            self.assertEqual(
+                RunEvalsRequest(
+                    credential_id=self.credential_id, models=["m"], reasoning_effort=level
+                ).reasoning_effort,
+                level,
+            )
+        with self.assertRaises(ValueError):
+            RunEvalsRequest(
+                credential_id=self.credential_id, models=["m"], reasoning_effort="ultra"
+            )
 
     async def test_launch_refuses_another_users_credential(self) -> None:
         async with async_session_maker() as db:
