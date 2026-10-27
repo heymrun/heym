@@ -13,6 +13,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from app.api import (
+    a2a,
     admin_cluster,
     agent_memory,
     agent_suite_runs,
@@ -394,6 +395,8 @@ app.include_router(skill_builder.router, prefix="/api/ai", tags=["Skill Builder"
 app.include_router(config.router, prefix="/api/config", tags=["Config"])
 app.include_router(mcp.router, prefix="/api/mcp", tags=["MCP"])
 app.include_router(mcp_servers.router, prefix="/api/mcp/servers", tags=["MCP Servers"])
+app.include_router(a2a.router, prefix="/api/a2a", tags=["A2A"])
+app.include_router(a2a.well_known_router, tags=["A2A"])
 app.include_router(traces.router, prefix="/api/traces", tags=["Traces"])
 app.include_router(llm_pricing.router, prefix="/api/llm-pricing", tags=["LLM Pricing"])
 app.include_router(portal.router, prefix="/api/portal", tags=["Portal"])
