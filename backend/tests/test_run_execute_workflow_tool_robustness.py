@@ -5164,7 +5164,7 @@ class PostgresAllowDownstreamSeparateSessionsTests(unittest.IsolatedAsyncioTestC
             clean_producer(),
             is_disconnected=fake_not_disconnected,
             cancel_event=cancel_event_normal,
-            heartbeat_seconds=1.0,
+            keepalive_seconds=1.0,
         ):
             chunks_normal.append(chunk)
 
@@ -5187,7 +5187,7 @@ class PostgresAllowDownstreamSeparateSessionsTests(unittest.IsolatedAsyncioTestC
             infinite_producer(),
             is_disconnected=fake_not_disconnected,
             cancel_event=cancel_event_aborted,
-            heartbeat_seconds=1.0,
+            keepalive_seconds=1.0,
         )
         try:
             async for chunk in gen:
@@ -5212,7 +5212,7 @@ class PostgresAllowDownstreamSeparateSessionsTests(unittest.IsolatedAsyncioTestC
             infinite_producer(),
             is_disconnected=disconnect_checker,
             cancel_event=cancel_event_watcher,
-            heartbeat_seconds=1.0,
+            keepalive_seconds=1.0,
             poll_seconds=0.01,
         )
         chunks_watcher = []
