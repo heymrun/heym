@@ -5,7 +5,9 @@ import { MessagesSquare, ToggleLeft, ToggleRight } from "lucide-vue-next";
 import type { CredentialListItem, LLMModel } from "@/types/credential";
 import type { MCPChatToolConfig, MCPChatToolUpdate } from "@/services/api";
 
+import MCPA2AControls from "@/components/MCP/MCPA2AControls.vue";
 import SearchableSelect from "@/components/ui/SearchableSelect.vue";
+import { agentReachText } from "@/components/MCP/a2aLinks";
 import { useAiDefaults } from "@/composables/useAiDefaults";
 import { cn } from "@/lib/utils";
 import { credentialsApi } from "@/services/api";
@@ -15,12 +17,15 @@ interface Props {
   credentials: CredentialListItem[];
   /** Rendered inside a named server panel, which uses tighter spacing. */
   compact?: boolean;
+  /** The named server this card belongs to; null for the global server. */
+  serverId?: string | null;
 }
 
-const props = withDefaults(defineProps<Props>(), { compact: false });
+const props = withDefaults(defineProps<Props>(), { compact: false, serverId: null });
 
 const emit = defineEmits<{
   update: [update: MCPChatToolUpdate];
+  copy: [text: string, label: string];
 }>();
 
 const aiDefaults = useAiDefaults();
@@ -62,11 +67,7 @@ const isConfigured = computed(
   () => Boolean(effectiveCredentialId.value) && Boolean(effectiveModel.value),
 );
 
-const statusText = computed(() => {
-  if (!props.chatTool.enabled) return "Disabled, heym_chat is not listed as an MCP tool";
-  if (!isConfigured.value) return "Pick a credential and a model so heym_chat can run";
-  return "Enabled, MCP clients can call heym_chat";
-});
+const statusText = computed(() => agentReachText(props.chatTool, isConfigured.value));
 
 async function loadModels(credentialId: string | null): Promise<void> {
   models.value = [];
@@ -135,7 +136,7 @@ function onModelSelect(value: string | undefined): void {
         </div>
         <div class="min-w-0">
           <p :class="cn('font-medium', compact ? 'text-sm' : 'text-base')">
-            Heym Chat Tool
+            Heym Agent
           </p>
           <p class="text-xs text-muted-foreground mt-0.5">
             {{ statusText }}
@@ -146,7 +147,7 @@ function onModelSelect(value: string | undefined): void {
         class="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
         :disabled="saving"
         :aria-pressed="chatTool.enabled"
-        aria-label="Toggle the Heym chat tool"
+        aria-label="Toggle the Heym Agent"
         data-testid="mcp-chat-tool-toggle"
         @click="toggleEnabled"
       >
@@ -165,9 +166,10 @@ function onModelSelect(value: string | undefined): void {
       v-if="!compact"
       class="text-sm text-muted-foreground mt-3"
     >
-      Turns the Chat tab engine into one <code class="px-1 py-0.5 bg-muted rounded">heym_chat</code> tool.
-      MCP clients send a plain message and Heym handles the rest: workflows, analytics, boards, schedules,
-      docs, and anything the Chat tab picks up later. Every call lands in your Chat history.
+      The Chat tab engine as one agent. MCP clients call it as the
+      <code class="px-1 py-0.5 bg-muted rounded">heym_chat</code> tool; with A2A on, other agents
+      send it tasks. It handles workflows, analytics, boards, schedules, docs, and anything the
+      Chat tab picks up later. Every call lands in your Chat history.
     </p>
 
     <div
@@ -219,7 +221,14 @@ function onModelSelect(value: string | undefined): void {
       v-else-if="chatTool.enabled && !isConfigured"
       class="text-xs text-amber-600 dark:text-amber-400 mt-2"
     >
-      heym_chat is listed but calls will fail until a credential and model are selected.
+      The Heym Agent is on but calls will fail until a credential and model are selected.
     </p>
+    <MCPA2AControls
+      v-if="chatTool.enabled"
+      :chat-tool="chatTool"
+      :server-id="serverId"
+      @update="emitUpdate"
+      @copy="(text, label) => emit('copy', text, label)"
+    />
   </div>
 </template>
