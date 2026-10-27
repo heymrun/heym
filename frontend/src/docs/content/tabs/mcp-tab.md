@@ -1,10 +1,10 @@
-# MCP Tab
+# MCP / A2A Tab
 
-The **MCP** tab configures Model Context Protocol (MCP) integration. MCP lets AI clients (Claude, ChatGPT, Gemini, Cursor, and any MCP-compatible tool) call your Heym workflows as tools.
+The **MCP / A2A** tab configures Model Context Protocol (MCP) integration and the Heym Agent's Agent2Agent (A2A) face. MCP lets AI clients (Claude, ChatGPT, Gemini, Cursor, and any MCP-compatible tool) call your Heym workflows as tools.
 
 Heym supports two modes: a **default server** that exposes all MCP-enabled workflows under a single endpoint, and **named servers** that give each logical group of workflows its own dedicated URL and API key.
 
-Both modes can expose two kinds of tools: individual **workflows**, and the **Heym chat tool** — the whole [Chat tab](./chat-tab.md) engine behind one `heym_chat` tool.
+Both modes can expose two kinds of tools: individual **workflows**, and the **Heym Agent**, the whole [Chat tab](./chat-tab.md) engine behind one `heym_chat` tool, which other agents can also reach over [A2A](../reference/a2a.md).
 
 <video src="/features/showcase/mcp.webm" controls playsinline muted preload="metadata" style="width:100%;border-radius:12px;margin:16px 0"></video>
 <p class="github-video-link"><a href="../../../../public/features/showcase/mcp.webm">▶ Watch MCP demo</a></p>
@@ -51,7 +51,7 @@ A workflow with a [concurrency limit](../reference/webhooks.md#concurrency-limit
 
 The client polls the `heym_execution_status` tool with that `execution_id`. It returns the same body as the [status URL](../reference/webhooks.md#status-url): `queued` with the current position, `running`, then `success` or `error` with the outputs. It only finds runs of workflows that the same server exposes. The tool is listed on the default server and on each named server only while at least one of its workflows has a concurrency limit. When the workflow's queue is full, the call returns an error, "Concurrency queue is full".
 
-## Heym Chat Tool
+## Heym Agent
 
 The **Heym Capabilities** section turns the Chat tab engine into a single MCP tool named `heym_chat`. Enable it on the default server, on any named server, or on both — each surface keeps its own toggle and model selection.
 
@@ -127,6 +127,14 @@ Every call is written to your [Chat tab](./chat-tab.md) history as a normal conv
 
 When the assistant needs clarification, it pauses and says so; reply with the answers using the same `conversation_id`.
 
+### Enable A2A
+
+While the Heym Agent is on, the card shows an **Enable A2A** checkbox. Tick it and other agents can send the Heym Agent tasks over the Agent2Agent protocol (A2A 1.0). The card then lists the **Agent Card** URL and the **JSON-RPC endpoint**, each with a copy button, and a `curl` that fetches the card. A2A uses the same key and OAuth sign-in as MCP. Turning the agent off turns A2A off too. See [A2A](../reference/a2a.md) for the methods, task states and an example.
+
+### Progress
+
+A long `heym_chat` call reports what the agent is doing as MCP progress (`notifications/progress`), in the words the Chat tab shows, for example `Testing the workflow · attempt 2/5`. Clients that reset their timeout on progress keep waiting while the agent works.
+
 ## Named MCP Servers
 
 Named servers let you segment workflows into isolated MCP endpoints. Each server has its own URL and API key, so different AI clients, teams, or use cases can connect to exactly the workflows they need.
@@ -146,7 +154,8 @@ Each server card shows:
 | **SSE Endpoint** | Unique URL: `{origin}/api/mcp/servers/{uuid}/sse` |
 | **API Key** | Independent key, shown once when generated or regenerated. Copy it right away; it is stored hashed and cannot be revealed later |
 | **How to connect** | **Copy JSON** copies the ready-to-paste MCP config; **Add to Cursor** installs it in one click |
-| **Heym Capabilities** | Toggle the `heym_chat` tool for this server and pick its credential and model |
+| **Heym Capabilities** | Toggle the Heym Agent (`heym_chat`) for this server and pick its credential and model |
+| **Enable A2A** | This server's own A2A switch, with its own Agent Card at `{origin}/api/a2a/servers/{uuid}/agent-card.json` |
 | **Assigned Workflows** | Toggle which of your workflows this server exposes |
 
 ### Workflow Assignment
@@ -183,6 +192,7 @@ Both endpoints support the SSE transport (GET, MCP spec 2024-11-05) and Streamab
 - [Agent Architecture](../reference/agent-architecture.md) – MCP client, tool dispatch, orchestrator
 - [Triggers](../reference/triggers.md) – MCP as a workflow entry point
 - [Chat Tab](./chat-tab.md) – The engine behind the `heym_chat` tool
+- [A2A](../reference/a2a.md) – The Heym Agent over the Agent2Agent protocol
 - [Workflows Tab](./workflows-tab.md) – Create and manage workflows
 - [Node Types](../reference/node-types.md) – AI nodes overview
 - [Contextual Showcase](../reference/contextual-showcase.md) – Compact page guide for dashboard surfaces

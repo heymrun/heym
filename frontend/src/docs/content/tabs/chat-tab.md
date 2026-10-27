@@ -39,7 +39,7 @@ You can also start a conversation from the chat box on the [Workflows tab](./wor
 
 ## Using Chat from an MCP Client
 
-The Chat engine can also be reached from outside the browser. Enable the **Heym Chat Tool** in the [MCP tab](./mcp-tab.md) and MCP clients — Claude, Cursor, and anything else that speaks MCP — get a single `heym_chat` tool that runs this same engine with all of its capabilities.
+The Chat engine can also be reached from outside the browser. Turn on the **Heym Agent** in the [MCP / A2A tab](./mcp-tab.md) and MCP clients (Claude, Cursor, and anything else that speaks MCP) get a single `heym_chat` tool that runs this same engine with all of its capabilities. Tick **Enable A2A** as well and other agents can send it tasks over [A2A](../reference/a2a.md); those conversations show a network icon in the list.
 
 Those conversations land in this tab's history, marked with a plug icon in the conversation list. Open one to read what the client asked, see the tool cards it triggered, and continue the thread yourself. Answering a clarification question works the same way whether the turn started here or from an MCP client.
 
@@ -155,7 +155,8 @@ The editor's AI Assistant does not create suites.
 
 ## Related
 
-- [MCP Tab](./mcp-tab.md) – Expose this engine to MCP clients as the `heym_chat` tool
+- [MCP / A2A Tab](./mcp-tab.md) – Expose this engine to MCP clients as the `heym_chat` tool
+- [A2A](../reference/a2a.md) – Let other agents send this engine tasks
 - [Settings](../reference/user-settings.md) – Set User Rules applied to all chat requests
 - [Credentials Tab](./credentials-tab.md) – Add and manage API keys
 - [Variables Tab](./global-variables-tab.md) – Global variables available to Chat
