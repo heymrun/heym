@@ -1,6 +1,7 @@
 """GHSA-6x65-w7q7-wg93 finding 1: webhook header_auth secret exposure."""
 
 import datetime
+import hmac
 import unittest
 import uuid
 from types import SimpleNamespace
@@ -8,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi import HTTPException
 
+from app.api import workflows as workflows_module
 from app.api.workflows import (
     _build_workflow_response,
     _build_workflow_version_response,
@@ -15,6 +17,7 @@ from app.api.workflows import (
     _webhook_secret_names,
     get_workflow,
     update_workflow,
+    validate_workflow_auth,
 )
 from app.config import settings
 from app.models.schemas import WorkflowUpdate
@@ -186,6 +189,47 @@ class WorkflowVersionMaskingTests(unittest.TestCase):
         visible = _build_workflow_version_response(self._version(), is_owner=True)
 
         self.assertEqual(visible.auth_header_value, "s3cr3t")
+
+
+class HeaderAuthComparisonTests(unittest.IsolatedAsyncioTestCase):
+    """The inbound header secret is compared in constant time (CWE-208)."""
+
+    async def test_a_matching_header_authenticates(self) -> None:
+        workflow = _workflow(owner_id=uuid.uuid4(), header_key="X-Key", header_value="s3cr3t")
+        request = SimpleNamespace(headers={"X-Key": "s3cr3t"})
+
+        result = await validate_workflow_auth(workflow, request, None, AsyncMock())
+
+        self.assertIsNone(result)
+
+    async def test_a_wrong_header_is_rejected(self) -> None:
+        workflow = _workflow(owner_id=uuid.uuid4(), header_key="X-Key", header_value="s3cr3t")
+        request = SimpleNamespace(headers={"X-Key": "s3cr3"})
+
+        with self.assertRaises(HTTPException) as raised:
+            await validate_workflow_auth(workflow, request, None, AsyncMock())
+
+        self.assertEqual(raised.exception.status_code, 401)
+
+    async def test_a_missing_header_is_rejected(self) -> None:
+        workflow = _workflow(owner_id=uuid.uuid4(), header_key="X-Key", header_value="s3cr3t")
+        request = SimpleNamespace(headers={})
+
+        with self.assertRaises(HTTPException) as raised:
+            await validate_workflow_auth(workflow, request, None, AsyncMock())
+
+        self.assertEqual(raised.exception.status_code, 401)
+
+    async def test_the_comparison_is_constant_time(self) -> None:
+        workflow = _workflow(owner_id=uuid.uuid4(), header_key="X-Key", header_value="s3cr3t")
+        request = SimpleNamespace(headers={"X-Key": "s3cr3t"})
+
+        with patch.object(workflows_module, "hmac", MagicMock(wraps=hmac)) as spy:
+            await validate_workflow_auth(workflow, request, None, AsyncMock())
+
+        spy.compare_digest.assert_called_once()
+        (first, second), _ = spy.compare_digest.call_args
+        self.assertEqual((first, second), (b"s3cr3t", b"s3cr3t"))
 
 
 if __name__ == "__main__":
