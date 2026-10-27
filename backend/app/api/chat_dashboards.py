@@ -1,10 +1,11 @@
-"""Dashboards in chat: which dashboards a user can open, the widgets on each, and placing a
-workflow on one as a widget.
+"""Dashboards in chat: which dashboards a user can open, the widgets on each, placing a workflow
+on one as a widget, renaming and deleting widgets, and tidying a dashboard's layout.
 
 Heym Work shows these dashboards as its pages, so ``list_dashboards`` is also the page to widget
-map there. Both tools follow the Dashboards routes' access rules: a dashboard is reached by
+map there. The tools follow the Dashboards routes' access rules: a dashboard is reached by
 owning it or through a share, a filtered HITL widget stays hidden from a viewer who cannot open
-its workflow, and placing a widget needs write access.
+its workflow, and changing a dashboard needs write access. Tidying arranges the dashboard in
+Heym, as the Dashboard tab's Tidy up button does; Heym Work keeps its own arrangement of a page.
 
 A new chart widget starts empty, on the placeholder graph the Dashboard tab starts one with, and
 the chat then writes its graph with build mode's save_workflow, so no stray workflow is left
@@ -32,6 +33,7 @@ from app.services.dashboard_access import (
     PERMISSION_READ,
     shared_dashboard_permissions,
 )
+from app.services.dashboard_tidy import MAX_PER_ROW, tidy_layouts
 from app.services.dashboard_widget_plan import WIDGET_CHART_TYPES
 from app.services.dashboard_widget_policy import dashboard_widget_blocked_nodes_error
 from app.services.file_run_widget import FILE_RUN_WIDGET_TYPE
@@ -46,7 +48,18 @@ from app.services.workflow_dsl_prompt import DASHBOARD_WIDGET_PROMPT_HINT
 
 LIST_DASHBOARDS_TOOL = "list_dashboards"
 ADD_DASHBOARD_WIDGET_TOOL = "add_dashboard_widget"
-DASHBOARD_TOOL_NAMES = frozenset({LIST_DASHBOARDS_TOOL, ADD_DASHBOARD_WIDGET_TOOL})
+RENAME_DASHBOARD_WIDGET_TOOL = "rename_dashboard_widget"
+DELETE_DASHBOARD_WIDGET_TOOL = "delete_dashboard_widget"
+TIDY_DASHBOARD_TOOL = "tidy_dashboard"
+DASHBOARD_TOOL_NAMES = frozenset(
+    {
+        LIST_DASHBOARDS_TOOL,
+        ADD_DASHBOARD_WIDGET_TOOL,
+        RENAME_DASHBOARD_WIDGET_TOOL,
+        DELETE_DASHBOARD_WIDGET_TOOL,
+        TIDY_DASHBOARD_TOOL,
+    }
+)
 
 WIDGET_KIND_CHART = "chart"
 WIDGET_KIND_RUN = "run"
@@ -113,12 +126,82 @@ DASHBOARD_TOOL_SCHEMAS: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": RENAME_DASHBOARD_WIDGET_TOOL,
+            "description": "Rename a widget on a dashboard, and change its description when description is given. A chart widget's workflow takes the new name too; a run widget's workflow keeps its own. Needs write access to the dashboard. Resolve widget_id with list_dashboards.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "widget_id": {
+                        "type": "string",
+                        "description": "UUID of the widget, from list_dashboards.",
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "The widget's new title: one or two words that say what it shows.",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Optional new description.",
+                    },
+                },
+                "required": ["widget_id", "title"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": DELETE_DASHBOARD_WIDGET_TOOL,
+            "description": "Delete a widget from its dashboard, for everyone who opens it. A chart widget's workflow and its edit history go with it; a run widget's workflow stays. Call it only when the user asked to delete or remove that widget. Needs write access to the dashboard. Resolve widget_id with list_dashboards.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "widget_id": {
+                        "type": "string",
+                        "description": "UUID of the widget, from list_dashboards.",
+                    },
+                },
+                "required": ["widget_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": TIDY_DASHBOARD_TOOL,
+            "description": "Rearrange a dashboard's widgets into a tidy grid in their current order, as the Dashboard tab's Tidy up button does: rows of two or three widgets at random, the widgets in a row sharing its width, so calling it again gives another arrangement. Pass per_row for rows of that many widgets. It arranges the dashboard in Heym; Heym Work keeps its own arrangement of a page. Needs write access to the dashboard.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "dashboard_id": {
+                        "type": "string",
+                        "description": "UUID of the dashboard to tidy.",
+                    },
+                    "per_row": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": MAX_PER_ROW,
+                        "description": "Optional number of widgets in every row. Omit it for the random rows of two or three.",
+                    },
+                },
+                "required": ["dashboard_id"],
+            },
+        },
+    },
 ]
 
 _STEP_LABELS = {
     LIST_DASHBOARDS_TOOL: "Reading dashboards...",
     ADD_DASHBOARD_WIDGET_TOOL: "Adding widget to dashboard...",
+    RENAME_DASHBOARD_WIDGET_TOOL: "Renaming widget...",
+    DELETE_DASHBOARD_WIDGET_TOOL: "Deleting widget...",
+    TIDY_DASHBOARD_TOOL: "Tidying dashboard...",
 }
+WIDGET_ID_ERROR = "widget_id must be a widget id from list_dashboards"
+DASHBOARD_ID_ERROR = "dashboard_id must be a dashboard id from list_dashboards"
 
 
 def dashboard_tool_label(name: str) -> str:
@@ -325,7 +408,7 @@ async def add_dashboard_widget_for_chat(
     workflow_id = _uuid_arg(args.get("workflow_id"))
     chart_type = str(args.get("chart_type") or DEFAULT_EMPTY_CHART_TYPE)
     if dashboard_id is None:
-        return {"error": "dashboard_id must be a dashboard id from list_dashboards"}
+        return {"error": DASHBOARD_ID_ERROR}
     if args.get("workflow_id") and workflow_id is None:
         return {"error": "workflow_id must be a workflow id from list_workflows"}
     if workflow_id is None and not can_build:
@@ -381,16 +464,152 @@ async def add_dashboard_widget_for_chat(
     result: dict[str, Any] = {
         "created": True,
         "widget": _widget_entry(widget),
-        "dashboard": {
-            "id": str(dashboard.id),
-            "name": dashboard.name,
-            "url": dashboard_url(public_base_url, dashboard.id),
-        },
+        "dashboard": _dashboard_ref(dashboard, public_base_url),
     }
     if workflow_id is None:
         result["next_step"] = _next_step(new)
         result["widget_rules"] = DASHBOARD_WIDGET_PROMPT_HINT.strip()
     return result
+
+
+def _dashboard_ref(dashboard: Dashboard, public_base_url: str) -> dict[str, str]:
+    return {
+        "id": str(dashboard.id),
+        "name": dashboard.name,
+        "url": dashboard_url(public_base_url, dashboard.id),
+    }
+
+
+async def rename_dashboard_widget_for_chat(
+    db: AsyncSession, user: User, args: dict[str, Any], public_base_url: str
+) -> dict[str, Any]:
+    """Rename a widget, as the widget settings do, without renaming a run widget's workflow."""
+    from app.api.dashboards import _load_widget_for_user
+
+    widget_id = _uuid_arg(args.get("widget_id"))
+    title = _text_arg(args.get("title"))[:MAX_WIDGET_TITLE_LENGTH]
+    description = args.get("description")
+    if widget_id is None:
+        return {"error": WIDGET_ID_ERROR}
+    if not title:
+        return {"error": "title must not be empty"}
+    try:
+        widget, dashboard, _ = await _load_widget_for_user(db, widget_id, user, write=True)
+    except HTTPException as exc:
+        return {"error": str(exc.detail)}
+
+    widget.title = title
+    if isinstance(description, str):
+        widget.description = description.strip() or None
+    workflow = (
+        await db.execute(select(Workflow).where(Workflow.id == widget.workflow_id))
+    ).scalar_one_or_none()
+    # The canvas shows a chart widget's own workflow under the widget's name. A run widget's
+    # workflow is an ordinary one the dashboard only runs, so it keeps its name.
+    if workflow is not None and workflow.kind == "dashboard_widget":
+        workflow.name = widget.title
+        if isinstance(description, str):
+            workflow.description = widget.description
+    await db.commit()
+    return {
+        "renamed": True,
+        "widget": _widget_entry(widget),
+        "dashboard": _dashboard_ref(dashboard, public_base_url),
+    }
+
+
+async def delete_dashboard_widget_for_chat(
+    db: AsyncSession, user: User, args: dict[str, Any], public_base_url: str
+) -> dict[str, Any]:
+    """Delete a widget, and a chart widget's workflow with it, as the Dashboard tab does."""
+    from app.api.dashboards import _delete_widget, _load_widget_for_user
+
+    widget_id = _uuid_arg(args.get("widget_id"))
+    if widget_id is None:
+        return {"error": WIDGET_ID_ERROR}
+    try:
+        widget, dashboard, _ = await _load_widget_for_user(db, widget_id, user, write=True)
+    except HTTPException as exc:
+        return {"error": str(exc.detail)}
+
+    entry = _widget_entry(widget)
+    workflow_deleted = await _delete_widget(db, widget)
+    await db.commit()
+    audit(
+        action="dashboard.widget_delete",
+        actor=user,
+        target_type="dashboard",
+        target_id=dashboard.id,
+        target_name=dashboard.name,
+        widget_id=widget_id,
+        widget_title=entry["title"],
+    )
+    return {
+        "deleted": True,
+        "widget": entry,
+        "workflow_deleted": workflow_deleted,
+        "dashboard": _dashboard_ref(dashboard, public_base_url),
+    }
+
+
+def _per_row_arg(value: object) -> int | None:
+    """``per_row`` as a whole number, or None when it was not given. Raises ValueError."""
+    if value is None or value == "":
+        return None
+    per_row = int(str(value))
+    if not 1 <= per_row <= MAX_PER_ROW:
+        raise ValueError(per_row)
+    return per_row
+
+
+def _grid_layout(widget: DashboardWidget) -> dict[str, Any]:
+    saved = widget.layout or {}
+    return {key: saved.get(key, default) for key, default in WidgetLayout().model_dump().items()}
+
+
+async def tidy_dashboard_for_chat(
+    db: AsyncSession, user: User, args: dict[str, Any], public_base_url: str
+) -> dict[str, Any]:
+    """Arrange the widgets the user sees, in their order, as the Tidy up button does."""
+    from app.api.dashboards import _get_dashboard_for_user
+
+    dashboard_id = _uuid_arg(args.get("dashboard_id"))
+    if dashboard_id is None:
+        return {"error": DASHBOARD_ID_ERROR}
+    try:
+        per_row = _per_row_arg(args.get("per_row"))
+    except ValueError:
+        return {"error": f"per_row must be a whole number from 1 to {MAX_PER_ROW}"}
+    try:
+        dashboard, _ = await _get_dashboard_for_user(db, dashboard_id, user, write=True)
+    except HTTPException as exc:
+        return {"error": str(exc.detail)}
+
+    widgets = list(
+        (
+            await db.execute(
+                select(DashboardWidget).where(DashboardWidget.dashboard_id == dashboard.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    hitl_filters = await hitl_filters_for_widgets(db, widgets)
+    hidden = await hidden_hitl_widgets(db, hitl_filters, user.id, dashboard.owner_id)
+    ordered = sorted((w for w in widgets if w.id not in hidden), key=_reading_order)
+    if not ordered:
+        return {"error": "This dashboard has no widgets to tidy"}
+
+    tidy = tidy_layouts([_grid_layout(widget) for widget in ordered], per_row)
+    for widget, layout in zip(ordered, tidy.layouts, strict=True):
+        widget.layout = layout
+    await db.commit()
+    return {
+        "tidied": True,
+        "widget_count": len(ordered),
+        "rows": tidy.rows,
+        "dashboard": _dashboard_ref(dashboard, public_base_url),
+    }
 
 
 async def call_dashboard_tool(
@@ -408,6 +627,12 @@ async def call_dashboard_tool(
     """
     if name == LIST_DASHBOARDS_TOOL:
         return await list_dashboards_for_chat(db, user, args, public_base_url)
+    if name == RENAME_DASHBOARD_WIDGET_TOOL:
+        return await rename_dashboard_widget_for_chat(db, user, args, public_base_url)
+    if name == DELETE_DASHBOARD_WIDGET_TOOL:
+        return await delete_dashboard_widget_for_chat(db, user, args, public_base_url)
+    if name == TIDY_DASHBOARD_TOOL:
+        return await tidy_dashboard_for_chat(db, user, args, public_base_url)
     return await add_dashboard_widget_for_chat(db, user, args, public_base_url, can_build=can_build)
 
 
@@ -422,6 +647,16 @@ def summarize_dashboard_tool(name: str, data: object) -> str:
         return f"{int(data.get('count') or 0)} dashboard(s), {widgets} widget(s) listed"
     widget = data.get("widget") or {}
     dashboard = data.get("dashboard") or {}
+    if name == RENAME_DASHBOARD_WIDGET_TOOL:
+        return f"Renamed widget to {widget.get('title')!r} on dashboard {dashboard.get('name')!r}"
+    if name == DELETE_DASHBOARD_WIDGET_TOOL:
+        return f"Deleted widget {widget.get('title')!r} from dashboard {dashboard.get('name')!r}"
+    if name == TIDY_DASHBOARD_TOOL:
+        rows = ", ".join(str(size) for size in data.get("rows") or [])
+        return (
+            f"Tidied {int(data.get('widget_count') or 0)} widget(s) on dashboard "
+            f"{dashboard.get('name')!r} into rows of {rows}"
+        )
     return (
         f"Added {widget.get('kind')} widget {widget.get('title')!r} "
         f"to dashboard {dashboard.get('name')!r}"

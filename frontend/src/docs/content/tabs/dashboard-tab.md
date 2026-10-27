@@ -100,13 +100,15 @@ Use a widget's **Fine-tune with AI** button to revise an existing widget with a 
 
 ## From Chat and MCP
 
-[Chat](./chat-tab.md), and MCP clients through the [`heym_chat` tool](./mcp-tab.md), can read your dashboards and add widgets to them. Heym Work shows each dashboard as a page, so the same answers cover its pages.
+[Chat](./chat-tab.md), and MCP clients through the [`heym_chat` tool](./mcp-tab.md), can read your dashboards, add widgets to them, rename or delete widgets, and tidy a dashboard's layout. Heym Work shows each dashboard as a page, so the same answers cover its pages.
 
 - **Which dashboards, and what is on them.** Ask "which dashboards do I have?", "what is on the Sales dashboard?" or "which dashboard is the revenue workflow on?". Chat lists your own dashboards and the ones shared with you, with your access and a link to each, and every widget on them: its title, chart type, and the workflow behind it. A [HITL widget](#hitl-widgets) filtered on a workflow you cannot open stays hidden, as it does on the dashboard.
 - **A new widget.** Ask "add a chart of open cases by status to the Sales dashboard". Chat first puts an empty widget on the dashboard, then writes the widget's own workflow, test-runs it and fixes it until a run passes, the same way it [builds workflows](./chat-tab.md#creating-workflows). No separate workflow is left behind, and each save appears in the widget's Edit History. The widget's title and chart type follow what Chat saves.
 - **An existing workflow.** Ask "put the revenue workflow on the Sales dashboard". A workflow that ends in a Chart Output node becomes a chart widget with its own copy of the workflow, so later changes to the widget never touch the original. A workflow with a trigger or input node cannot become a chart widget. Any other workflow becomes a [run widget](#run-widgets), which also needs a workflow the dashboard owner can run.
+- **Rename or delete a widget.** Ask "rename the Revenue widget to Sales" or "delete the Open cases widget". A chart widget's workflow takes the new name too; a run widget's workflow keeps its own. Deleting a chart widget deletes its workflow with it, as the widget's delete button does; a run widget's workflow stays. Chat deletes only a widget you asked it to, and asks which one first when your words match several.
+- **Tidy up.** Ask "tidy up the Sales dashboard", or "add these three widgets and tidy up". Chat arranges the widgets you see in their order, as the **Tidy up** button does: rows of two or three at random, so asking again gives another arrangement. Ask for a number per row ("three per row") to get rows of that size. This arranges the dashboard in Heym; Heym Work keeps its own arrangement of a page, which the page's own **Tidy up** button changes.
 
-New widgets go below the dashboard's existing widgets and, like every widget, run as the dashboard owner. Adding one needs write access to the dashboard. Building a new widget needs a chat that can build workflows: the Chat tab, Heym Work's Chat for editors, and `heym_chat`.
+New widgets go below the dashboard's existing widgets and, like every widget, run as the dashboard owner. Adding, renaming, deleting and tidying need write access to the dashboard. Building a new widget needs a chat that can build workflows: the Chat tab, Heym Work's Chat for editors, and `heym_chat`.
 
 ## Editing the layout
 

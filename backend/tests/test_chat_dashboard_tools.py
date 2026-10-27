@@ -1,4 +1,5 @@
-"""Chat tools for dashboards: the dashboard to widget map, and placing a workflow as a widget."""
+"""Chat tools for dashboards: the dashboard to widget map, placing a workflow as a widget,
+renaming and deleting widgets, and tidying a dashboard."""
 
 import json
 import unittest
@@ -12,7 +13,7 @@ from app.api import ai_assistant, chat_dashboards
 from app.api import dashboards as dashboards_api
 from app.db.models import DashboardWidget, Workflow
 from app.models.dashboard_schemas import HitlWidgetFilterModel
-from app.services import mcp_chat_service
+from app.services import dashboard_tidy, mcp_chat_service
 
 BASE_URL = "https://heym.example"
 
@@ -64,8 +65,14 @@ def _session():
 class TestDashboardToolsRegistered(unittest.TestCase):
     def test_tools_present_on_every_chat_surface(self):
         names = {t["function"]["name"] for t in ai_assistant.DASHBOARD_CHAT_TOOLS}
-        self.assertIn("list_dashboards", names)
-        self.assertIn("add_dashboard_widget", names)
+        for name in (
+            "list_dashboards",
+            "add_dashboard_widget",
+            "rename_dashboard_widget",
+            "delete_dashboard_widget",
+            "tidy_dashboard",
+        ):
+            self.assertIn(name, names)
 
     def test_add_needs_only_a_dashboard(self):
         tool = next(
@@ -77,6 +84,17 @@ class TestDashboardToolsRegistered(unittest.TestCase):
         self.assertEqual(parameters["required"], ["dashboard_id"])
         self.assertIn("hitl", parameters["properties"]["chart_type"]["enum"])
 
+    def test_rename_delete_and_tidy_parameters(self):
+        tools = {t["function"]["name"]: t["function"] for t in ai_assistant.DASHBOARD_CHAT_TOOLS}
+        self.assertEqual(
+            tools["rename_dashboard_widget"]["parameters"]["required"], ["widget_id", "title"]
+        )
+        self.assertEqual(tools["delete_dashboard_widget"]["parameters"]["required"], ["widget_id"])
+        tidy = tools["tidy_dashboard"]["parameters"]
+        self.assertEqual(tidy["required"], ["dashboard_id"])
+        self.assertEqual(tidy["properties"]["per_row"]["minimum"], 1)
+        self.assertEqual(tidy["properties"]["per_row"]["maximum"], 4)
+
     def test_prompt_and_mcp_description_cover_dashboards(self):
         prompt = ai_assistant.DASHBOARD_CHAT_SYSTEM_PROMPT
         self.assertIn("list_dashboards", prompt)
@@ -86,6 +104,16 @@ class TestDashboardToolsRegistered(unittest.TestCase):
         self.assertIn("Never build a separate workflow to copy onto a dashboard", prompt)
         self.assertIn("dashboards", mcp_chat_service.MCP_CHAT_TOOL_DESCRIPTION)
         self.assertIn("as a widget", mcp_chat_service.MCP_CHAT_TOOL_DESCRIPTION)
+
+    def test_prompt_and_mcp_description_cover_renaming_deleting_and_tidying(self):
+        prompt = ai_assistant.DASHBOARD_CHAT_SYSTEM_PROMPT
+        self.assertIn("call rename_dashboard_widget", prompt)
+        self.assertIn("Call delete_dashboard_widget only when the user asked", prompt)
+        self.assertIn("call tidy_dashboard once the widgets are added", prompt)
+        self.assertIn("A Heym Work page keeps its own arrangement", prompt)
+        description = mcp_chat_service.MCP_CHAT_TOOL_DESCRIPTION
+        self.assertIn("rename or delete a widget", description)
+        self.assertIn("tidy a dashboard's layout", description)
 
 
 class TestListDashboardsForChat(unittest.IsolatedAsyncioTestCase):
@@ -498,6 +526,254 @@ class TestAddDashboardWidgetForChat(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(added, [])
 
 
+def _widget_row(widget, dashboard):
+    res = MagicMock()
+    res.one_or_none.return_value = (widget, dashboard)
+    return res
+
+
+def _one(item):
+    res = MagicMock()
+    res.scalar_one_or_none.return_value = item
+    return res
+
+
+class TestRenameDashboardWidgetForChat(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.user = SimpleNamespace(id=uuid.uuid4())
+        self.dashboard = SimpleNamespace(id=uuid.uuid4(), name="Ops", owner_id=self.user.id)
+        self.widget = _widget(self.dashboard.id, title="Revenue")
+        self.widget.description = "Old"
+
+    async def _rename(self, args, *, workflow=None, permission="write"):
+        db = AsyncMock()
+        db.execute = AsyncMock(
+            side_effect=[_widget_row(self.widget, self.dashboard), _one(workflow)]
+        )
+        with patch.object(
+            dashboards_api, "dashboard_permission", AsyncMock(return_value=permission)
+        ):
+            result = await chat_dashboards.rename_dashboard_widget_for_chat(
+                db, self.user, args, BASE_URL
+            )
+        return db, result
+
+    async def test_chart_widget_and_its_workflow_take_the_new_name(self):
+        workflow = SimpleNamespace(kind="dashboard_widget", name="Revenue", description="Old")
+
+        db, result = await self._rename(
+            {"widget_id": str(self.widget.id), "title": " Sales ", "description": "Per month"},
+            workflow=workflow,
+        )
+
+        self.assertEqual((self.widget.title, self.widget.description), ("Sales", "Per month"))
+        self.assertEqual((workflow.name, workflow.description), ("Sales", "Per month"))
+        db.commit.assert_awaited_once()
+        self.assertTrue(result["renamed"])
+        self.assertEqual(result["widget"]["title"], "Sales")
+        self.assertEqual(result["dashboard"]["name"], "Ops")
+
+    async def test_rename_without_description_keeps_it(self):
+        workflow = SimpleNamespace(kind="dashboard_widget", name="Revenue", description="Old")
+
+        await self._rename({"widget_id": str(self.widget.id), "title": "Sales"}, workflow=workflow)
+
+        self.assertEqual(self.widget.description, "Old")
+        self.assertEqual(workflow.description, "Old")
+
+    async def test_run_widget_workflow_keeps_its_own_name(self):
+        self.widget.chart_type = "fileRun"
+        workflow = SimpleNamespace(kind="workflow", name="Import invoices", description="Mine")
+
+        _, result = await self._rename(
+            {"widget_id": str(self.widget.id), "title": "Upload", "description": "Drop files"},
+            workflow=workflow,
+        )
+
+        self.assertEqual(self.widget.title, "Upload")
+        self.assertEqual((workflow.name, workflow.description), ("Import invoices", "Mine"))
+        self.assertEqual(result["widget"]["kind"], "run")
+
+    async def test_read_only_dashboard_refuses_the_rename(self):
+        db, result = await self._rename(
+            {"widget_id": str(self.widget.id), "title": "Sales"}, permission="read"
+        )
+
+        self.assertEqual(result, {"error": "Read-only access to this dashboard"})
+        self.assertEqual(self.widget.title, "Revenue")
+        db.commit.assert_not_awaited()
+
+    async def test_bad_arguments_are_refused_before_any_lookup(self):
+        db = AsyncMock()
+        bad = [
+            ({"widget_id": "nope", "title": "Sales"}, chat_dashboards.WIDGET_ID_ERROR),
+            ({"widget_id": str(self.widget.id), "title": "  "}, "title must not be empty"),
+        ]
+        for args, error in bad:
+            result = await chat_dashboards.rename_dashboard_widget_for_chat(
+                db, self.user, args, BASE_URL
+            )
+            self.assertEqual(result, {"error": error})
+        db.execute.assert_not_awaited()
+
+
+class TestDeleteDashboardWidgetForChat(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.user = SimpleNamespace(id=uuid.uuid4())
+        self.dashboard = SimpleNamespace(id=uuid.uuid4(), name="Ops", owner_id=self.user.id)
+        self.widget = _widget(self.dashboard.id, title="Revenue")
+
+    async def _delete(self, *, workflow=None, permission="owner"):
+        db = AsyncMock()
+        db.execute = AsyncMock(
+            side_effect=[_widget_row(self.widget, self.dashboard), _one(workflow)]
+        )
+        with (
+            patch.object(
+                dashboards_api, "dashboard_permission", AsyncMock(return_value=permission)
+            ),
+            patch.object(chat_dashboards, "audit") as audit,
+        ):
+            result = await chat_dashboards.delete_dashboard_widget_for_chat(
+                db, self.user, {"widget_id": str(self.widget.id)}, BASE_URL
+            )
+        return db, result, audit
+
+    async def test_chart_widget_goes_with_its_workflow(self):
+        workflow = SimpleNamespace(kind="dashboard_widget")
+
+        db, result, audit = await self._delete(workflow=workflow)
+
+        self.assertEqual(
+            [call.args[0] for call in db.delete.await_args_list], [self.widget, workflow]
+        )
+        db.commit.assert_awaited_once()
+        self.assertTrue(result["deleted"])
+        self.assertTrue(result["workflow_deleted"])
+        self.assertEqual(result["widget"]["title"], "Revenue")
+        audit.assert_called_once()
+        self.assertEqual(audit.call_args.kwargs["action"], "dashboard.widget_delete")
+        self.assertEqual(audit.call_args.kwargs["widget_id"], self.widget.id)
+
+    async def test_run_widget_workflow_stays(self):
+        self.widget.chart_type = "fileRun"
+
+        db, result, _ = await self._delete(workflow=SimpleNamespace(kind="workflow"))
+
+        self.assertEqual([call.args[0] for call in db.delete.await_args_list], [self.widget])
+        self.assertFalse(result["workflow_deleted"])
+
+    async def test_read_only_dashboard_keeps_its_widget(self):
+        db, result, audit = await self._delete(permission="read")
+
+        self.assertEqual(result, {"error": "Read-only access to this dashboard"})
+        db.delete.assert_not_awaited()
+        db.commit.assert_not_awaited()
+        audit.assert_not_called()
+
+    async def test_invalid_widget_id_is_refused(self):
+        result = await chat_dashboards.delete_dashboard_widget_for_chat(
+            AsyncMock(), self.user, {"widget_id": "nope"}, BASE_URL
+        )
+        self.assertEqual(result, {"error": chat_dashboards.WIDGET_ID_ERROR})
+
+
+class TestTidyDashboardForChat(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.user = SimpleNamespace(id=uuid.uuid4())
+        self.dashboard = SimpleNamespace(id=uuid.uuid4(), name="Ops", owner_id=self.user.id)
+
+    async def _tidy(self, args, widgets, *, permission="owner", hidden=None, rand=None):
+        db = AsyncMock()
+        db.execute = AsyncMock(side_effect=[_one(self.dashboard), _scalars(widgets)])
+
+        def _tidy_layouts(current, per_row):
+            return dashboard_tidy.tidy_layouts(current, per_row, rand or (lambda: 0.0))
+
+        with (
+            patch.object(
+                dashboards_api, "dashboard_permission", AsyncMock(return_value=permission)
+            ),
+            patch.object(chat_dashboards, "hitl_filters_for_widgets", AsyncMock(return_value={})),
+            patch.object(
+                chat_dashboards, "hidden_hitl_widgets", AsyncMock(return_value=hidden or set())
+            ),
+            patch.object(chat_dashboards, "tidy_layouts", side_effect=_tidy_layouts),
+        ):
+            result = await chat_dashboards.tidy_dashboard_for_chat(db, self.user, args, BASE_URL)
+        return db, result
+
+    async def test_widgets_fill_rows_in_their_order(self):
+        third = _widget(self.dashboard.id, title="C", position=2)
+        first = _widget(self.dashboard.id, title="A", position=0)
+        second = _widget(self.dashboard.id, title="B", position=1)
+
+        db, result = await self._tidy(
+            {"dashboard_id": str(self.dashboard.id)}, [third, first, second]
+        )
+
+        self.assertEqual(first.layout, {"x": 0, "y": 0, "w": 6, "h": 5})
+        self.assertEqual(second.layout, {"x": 6, "y": 0, "w": 6, "h": 5})
+        self.assertEqual(third.layout, {"x": 0, "y": 5, "w": 12, "h": 5})
+        db.commit.assert_awaited_once()
+        self.assertEqual(result["rows"], [2, 1])
+        self.assertEqual(result["widget_count"], 3)
+        self.assertEqual(result["dashboard"]["name"], "Ops")
+
+    async def test_per_row_gives_every_row_the_same_width(self):
+        widgets = [_widget(self.dashboard.id, title=str(i), position=i) for i in range(4)]
+
+        _, result = await self._tidy(
+            {"dashboard_id": str(self.dashboard.id), "per_row": 3}, widgets
+        )
+
+        self.assertEqual([w.layout["w"] for w in widgets], [4, 4, 4, 4])
+        self.assertEqual([(w.layout["x"], w.layout["y"]) for w in widgets][3], (0, 5))
+        self.assertEqual(result["rows"], [3, 1])
+
+    async def test_widget_hidden_from_the_user_keeps_its_place(self):
+        shown = _widget(self.dashboard.id, title="Shown", position=0, x=4, y=8)
+        hidden = _widget(self.dashboard.id, title="Hidden", chart_type="hitl", position=1)
+        before = dict(hidden.layout)
+
+        _, result = await self._tidy(
+            {"dashboard_id": str(self.dashboard.id)}, [shown, hidden], hidden={hidden.id}
+        )
+
+        self.assertEqual(shown.layout, {"x": 0, "y": 0, "w": 12, "h": 5})
+        self.assertEqual(hidden.layout, before)
+        self.assertEqual(result["widget_count"], 1)
+
+    async def test_empty_and_read_only_dashboards_are_refused(self):
+        db, result = await self._tidy({"dashboard_id": str(self.dashboard.id)}, [])
+        self.assertEqual(result, {"error": "This dashboard has no widgets to tidy"})
+        db.commit.assert_not_awaited()
+
+        widgets = [_widget(self.dashboard.id, title="A")]
+        db, result = await self._tidy(
+            {"dashboard_id": str(self.dashboard.id)}, widgets, permission="read"
+        )
+        self.assertEqual(result, {"error": "Read-only access to this dashboard"})
+        db.commit.assert_not_awaited()
+
+    async def test_bad_arguments_are_refused_before_any_lookup(self):
+        db = AsyncMock()
+        for args, error in [
+            ({"dashboard_id": "nope"}, chat_dashboards.DASHBOARD_ID_ERROR),
+            (
+                {"dashboard_id": str(self.dashboard.id), "per_row": 5},
+                "per_row must be a whole number from 1 to 4",
+            ),
+            (
+                {"dashboard_id": str(self.dashboard.id), "per_row": "two"},
+                "per_row must be a whole number from 1 to 4",
+            ),
+        ]:
+            result = await chat_dashboards.tidy_dashboard_for_chat(db, self.user, args, BASE_URL)
+            self.assertEqual(result, {"error": error})
+        db.execute.assert_not_awaited()
+
+
 class TestDashboardToolSummaries(unittest.TestCase):
     def test_summaries(self):
         listed = {"count": 2, "dashboards": [{"widgets": [{}, {}]}, {"widgets": [{}]}]}
@@ -515,6 +791,20 @@ class TestDashboardToolSummaries(unittest.TestCase):
                 "add_dashboard_widget", json.dumps({"error": "Workflow not found"})
             ),
             "Error: Workflow not found",
+        )
+        renamed = {"widget": {"title": "Sales"}, "dashboard": {"name": "Ops"}}
+        self.assertEqual(
+            ai_assistant._summarize_tool_result("rename_dashboard_widget", json.dumps(renamed)),
+            "Renamed widget to 'Sales' on dashboard 'Ops'",
+        )
+        self.assertEqual(
+            ai_assistant._summarize_tool_result("delete_dashboard_widget", json.dumps(renamed)),
+            "Deleted widget 'Sales' from dashboard 'Ops'",
+        )
+        tidied = {"widget_count": 5, "rows": [3, 2], "dashboard": {"name": "Ops"}}
+        self.assertEqual(
+            ai_assistant._summarize_tool_result("tidy_dashboard", json.dumps(tidied)),
+            "Tidied 5 widget(s) on dashboard 'Ops' into rows of 3, 2",
         )
 
 

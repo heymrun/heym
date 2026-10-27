@@ -628,6 +628,21 @@ async def _load_widget_for_user(
     return widget, dashboard, permission
 
 
+async def _delete_widget(db: AsyncSession, widget: DashboardWidget) -> bool:
+    """Delete a widget and the hidden workflow that draws it, without committing.
+
+    A run widget's workflow is an ordinary one and stays. Returns whether a workflow was deleted.
+    """
+    workflow_id = widget.workflow_id
+    await db.delete(widget)
+    wf_result = await db.execute(select(Workflow).where(Workflow.id == workflow_id))
+    workflow = wf_result.scalar_one_or_none()
+    if workflow is None or workflow.kind != "dashboard_widget":
+        return False
+    await db.delete(workflow)
+    return True
+
+
 def _find_chart_output_node(workflow: Workflow) -> dict[str, Any] | None:
     for node in workflow.nodes or []:
         if isinstance(node, dict) and node.get("type") == "chartOutput":
@@ -1079,12 +1094,7 @@ async def delete_widget(
         widget_id=widget.id,
         widget_title=widget.title,
     )
-    workflow_id = widget.workflow_id
-    await db.delete(widget)
-    wf_result = await db.execute(select(Workflow).where(Workflow.id == workflow_id))
-    workflow = wf_result.scalar_one_or_none()
-    if workflow is not None and workflow.kind == "dashboard_widget":
-        await db.delete(workflow)
+    await _delete_widget(db, widget)
     await db.commit()
 
 
