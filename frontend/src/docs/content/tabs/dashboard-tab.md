@@ -98,6 +98,16 @@ The widget API can also make a **count card** without AI: a `text` widget on a d
 
 Use a widget's **Fine-tune with AI** button to revise an existing widget with a new instruction. Each AI fine-tune snapshots the previous workflow into the widget's **Edit History**, so you can review or roll back changes from the workflow editor.
 
+## From Chat and MCP
+
+[Chat](./chat-tab.md), and MCP clients through the [`heym_chat` tool](./mcp-tab.md), can read your dashboards and add widgets to them. Heym Work shows each dashboard as a page, so the same answers cover its pages.
+
+- **Which dashboards, and what is on them.** Ask "which dashboards do I have?", "what is on the Sales dashboard?" or "which dashboard is the revenue workflow on?". Chat lists your own dashboards and the ones shared with you, with your access and a link to each, and every widget on them: its title, chart type, and the workflow behind it. A [HITL widget](#hitl-widgets) filtered on a workflow you cannot open stays hidden, as it does on the dashboard.
+- **A new widget.** Ask "add a chart of open cases by status to the Sales dashboard". Chat first puts an empty widget on the dashboard, then writes the widget's own workflow, test-runs it and fixes it until a run passes, the same way it [builds workflows](./chat-tab.md#creating-workflows). No separate workflow is left behind, and each save appears in the widget's Edit History. The widget's title and chart type follow what Chat saves.
+- **An existing workflow.** Ask "put the revenue workflow on the Sales dashboard". A workflow that ends in a Chart Output node becomes a chart widget with its own copy of the workflow, so later changes to the widget never touch the original. A workflow with a trigger or input node cannot become a chart widget. Any other workflow becomes a [run widget](#run-widgets), which also needs a workflow the dashboard owner can run.
+
+New widgets go below the dashboard's existing widgets and, like every widget, run as the dashboard owner. Adding one needs write access to the dashboard. Building a new widget needs a chat that can build workflows: the Chat tab, Heym Work's Chat for editors, and `heym_chat`.
+
 ## Editing the layout
 
 Toggle **Edit** to enter edit mode, where you can drag widgets and resize them on a 12-column grid. Layout changes are saved automatically. Widget titles are editable inline from the widget header.

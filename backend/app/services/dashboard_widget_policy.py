@@ -21,6 +21,11 @@ DASHBOARD_WIDGET_BLOCKED_NODE_TYPES: frozenset[str] = frozenset(
 )
 
 
+DASHBOARD_WIDGET_NEEDS_CHART_ERROR = (
+    "A dashboard widget's workflow must end in a chartOutput node that draws the widget."
+)
+
+
 def find_blocked_dashboard_widget_nodes(nodes: list[dict[str, Any]] | None) -> list[str]:
     """Return display names for nodes that dashboard widgets are not allowed to run."""
     blocked: list[str] = []

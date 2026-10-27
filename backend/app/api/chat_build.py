@@ -60,7 +60,10 @@ from app.services.credential_setup import (
     REQUEST_CREDENTIAL_FORM_TOOL_SCHEMA,
     CredentialFormTool,
 )
-from app.services.dashboard_widget_policy import dashboard_widget_blocked_nodes_error
+from app.services.dashboard_widget_policy import (
+    DASHBOARD_WIDGET_NEEDS_CHART_ERROR,
+    dashboard_widget_blocked_nodes_error,
+)
 from app.services.data_table_catalog import (
     DataTablePromptMode,
     format_data_tables_prompt,
@@ -89,6 +92,7 @@ from app.services.workflow_save import (
     WorkflowSnapshot,
     add_workflow_version,
     announce_workflow_saved,
+    sync_dashboard_widget,
 )
 
 SAVE_WORKFLOW_TOOL_SCHEMA: dict[str, Any] = {
@@ -474,13 +478,19 @@ class ChatBuildSession:
                 blocked = dashboard_widget_blocked_nodes_error(nodes)
                 if blocked is not None:
                     return tool_error(blocked)
+                if not any(node.get("type") == "chartOutput" for node in nodes):
+                    return tool_error(DASHBOARD_WIDGET_NEEDS_CHART_ERROR)
             before = WorkflowSnapshot.capture(existing)
             existing.name = config["name"]
             existing.description = config["description"]
             existing.nodes = nodes
             existing.edges = edges
-            if before.nodes != nodes or before.edges != edges:
+            graph_changed = before.nodes != nodes or before.edges != edges
+            if graph_changed:
                 version_number = await add_workflow_version(self.db, existing, before, self.user.id)
+            await sync_dashboard_widget(
+                self.db, existing, renamed=True, described=True, graph_changed=graph_changed
+            )
             workflow = existing
         else:
             workflow = Workflow(

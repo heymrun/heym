@@ -56,6 +56,27 @@ AGENT_DSL = {
 }
 
 
+WIDGET_DSL = {
+    "name": "Open cases",
+    "description": "Cases still open",
+    "nodes": [
+        {
+            "id": "rows",
+            "type": "set",
+            "position": {"x": 0, "y": 0},
+            "data": {"label": "rows", "mappings": [{"key": "rows", "value": "$array(1, 2)"}]},
+        },
+        {
+            "id": "chart",
+            "type": "chartOutput",
+            "position": {"x": 300, "y": 0},
+            "data": {"label": "chart", "chartType": "numeric", "dataPath": "rows"},
+        },
+    ],
+    "edges": [{"id": "e1", "source": "rows", "target": "chart"}],
+}
+
+
 def _run_result(status: str = "success") -> str:
     return json.dumps(
         {
@@ -213,6 +234,50 @@ class ChatBuildSessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(json.loads(outcome.result)["status"], "saved")
         self.assertEqual(self.target.name, "Lead intake")
         self.assertEqual(session.progress.workflow_id, self.target.id)
+
+    def _widget_target(self) -> Workflow:
+        return Workflow(
+            id=uuid.uuid4(),
+            owner_id=self.user.id,
+            name="Widget",
+            description=None,
+            kind="dashboard_widget",
+            nodes=[],
+            edges=[],
+        )
+
+    async def test_saving_a_widget_workflow_carries_onto_its_widget(self) -> None:
+        self.target = self._widget_target()
+        session = self._session()
+        sync = AsyncMock()
+
+        with patch.object(chat_build, "sync_dashboard_widget", sync):
+            outcome = await session.call(
+                "save_workflow", {"workflow_id": str(self.target.id), "workflow": WIDGET_DSL}
+            )
+
+        self.assertEqual(json.loads(outcome.result)["status"], "saved")
+        sync.assert_awaited_once_with(
+            self.db, self.target, renamed=True, described=True, graph_changed=True
+        )
+
+    async def test_a_widget_workflow_without_a_chart_is_refused(self) -> None:
+        self.target = self._widget_target()
+        session = self._session()
+        nodes = [n for n in WIDGET_DSL["nodes"] if n["type"] != "chartOutput"]
+
+        outcome = await session.call(
+            "save_workflow",
+            {
+                "workflow_id": str(self.target.id),
+                "workflow": {**WIDGET_DSL, "nodes": nodes, "edges": []},
+            },
+        )
+
+        self.assertEqual(outcome.status, "error")
+        self.assertIn("chartOutput", outcome.result)
+        self.db.commit.assert_not_awaited()
+        self.assertEqual(self.target.nodes, [])
 
     async def test_save_refuses_another_workflow_on_a_targeted_turn(self) -> None:
         target = uuid.uuid4()

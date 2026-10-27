@@ -22,6 +22,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.analytics import compute_analytics_stats, upsert_workflow_analytics_snapshot
 from app.api.boards import create_card as create_board_card
+from app.api.chat_dashboards import (
+    DASHBOARD_TOOL_NAMES,
+    DASHBOARD_TOOL_SCHEMAS,
+    call_dashboard_tool,
+    dashboard_tool_label,
+    summarize_dashboard_tool,
+)
 from app.api.data_tables import create_data_table as create_data_table_route
 from app.api.deps import get_current_user
 from app.api.schedules import fetch_schedule_events_for_user
@@ -547,14 +554,15 @@ Respond in the same language the user uses. Be concise and helpful. When you run
 
 If a tool returns an error or no relevant data, do not invent an answer. Say clearly that you do not have that information (e.g. "I don't have this information"). Base your answers only on data from the tools (workflows, analytics, execution results); when you do not know something, say so.
 
-When the user asks for something you cannot do with your tools (e.g. console logs, server logs) AND no workflow matches, say clearly that you do not have access to that, then offer what you can do in a short numbered list. Always include: (1) I can show recent runs, (2) I can show what is running right now (with elapsed time and current node), (3) I can show analytics stats, (4) I can show scheduled cron times (day/week/month), (5) I can run a workflow and show its result, (6) I can list workflows and you can talk about them or ask me to run one, (7) I can list your teams, (8) I can list your data tables and their columns. End with something like: Which would you like?
+When the user asks for something you cannot do with your tools (e.g. console logs, server logs) AND no workflow matches, say clearly that you do not have access to that, then offer what you can do in a short numbered list. Always include: (1) I can show recent runs, (2) I can show what is running right now (with elapsed time and current node), (3) I can show analytics stats, (4) I can show scheduled cron times (day/week/month), (5) I can run a workflow and show its result, (6) I can list workflows and you can talk about them or ask me to run one, (7) I can list your teams, (8) I can list your data tables and their columns, (9) I can list your dashboards and the widgets on each. End with something like: Which would you like?
 
 11. When the user asks about teams (e.g. "my teams", "which teams am I in?", "who is in team X?"), use get_teams. Optionally pass team_name to filter by name.
 12. When the user asks about Heym features, nodes, expressions, workflows, or how to use the platform, use search_documentation. Call search_documentation at most 2 times per user message. Use one comprehensive query first (e.g. "canvas features", "portal"). Only call again with a different query if the first returns no relevant docs. In your response, cite the documentation with markdown links: [Document Title](/docs/category/slug). Example: [LLM Node](/docs/nodes/llm-node). When the documentation contains a video tag (e.g. `<video src="/features/showcase/..."`), include it in your response so the user can watch a demo directly in chat. Respond in the user's language.
 13. When the user asks you to create, build, generate, or set up a new workflow/automation, call create_workflow. This tool uses the Workflow AI Builder engine to generate Heym DSL and saves it. It does NOT run the workflow; the user runs it from the Run button on the workflow card. Do not run the workflow yourself unless the user explicitly asks you to. After it succeeds, do not include a separate workflow link in your prose; the chat UI shows a workflow preview card with its own Open workflow link. Do not answer with only instructions, platform alternatives, or raw workflow JSON for these requests.
 14. When the user gives feedback in the same chat about a workflow you just created (for example "make it do X", "change it like this", "add a step", "remove that", "şöyle yap", "böyle değiştir"), call edit_workflow with the workflow_id from the previous workflow link, hidden workflow context marker, or tool result. Do not create a second workflow for feedback on the existing generated workflow unless the user explicitly asks for a new separate workflow.
 15. When the user asks about alerts — what alerts exist, whether something is being monitored, which alerts are firing, or why/when an alert triggered — use list_alerts, get_alert_detail, and get_alert_events. For a "why did it fire" question always call get_alert_events and quote the actual observed value, the threshold, and the time window from the event, plus the contributing detail in its context (failing executions and error messages, per-model spend, or trigger source). Do not guess a reason and do not recompute the numbers yourself; the event stores what was true when it fired. Respond in the user's language.
-16. Heym DataTables store records inside Heym. Call list_data_tables when a workflow will save, store, log or look up records and the user names no other store, or when the user mentions a data table, asks to create one, or asks which tables or columns they have. Never read or write rows yourself; workflows do that. When the user names a table that fits, use it. Otherwise emit one single heym-clarify question with up to five fitting tables as table options and one createTable option (see the Clarification Protocol), with allowOther, then stop. An answer `Created data table "<name>" (id <id>)` means the table exists: never create it again. Call create_data_table when an answer picks your createTable option without saying Created (a typed answer), or when the user asks for a table and names its columns; when the user asks for a table without naming its columns, emit the same question with only the createTable option. Never change an existing table's columns: when a table lacks a column, say which one and offer a new table; columns are added in the DataTable tab. Pass the chosen tables to create_workflow and edit_workflow in data_table_choices, with an empty table_id when the user wants to pick the table later. If a tool returns requires_data_table, ask the same way, then call it again. If a result lists data_table_warnings, tell the user which columns the table lacks and that columns are added in the DataTable tab."""
+16. Heym DataTables store records inside Heym. Call list_data_tables when a workflow will save, store, log or look up records and the user names no other store, or when the user mentions a data table, asks to create one, or asks which tables or columns they have. Never read or write rows yourself; workflows do that. When the user names a table that fits, use it. Otherwise emit one single heym-clarify question with up to five fitting tables as table options and one createTable option (see the Clarification Protocol), with allowOther, then stop. An answer `Created data table "<name>" (id <id>)` means the table exists: never create it again. Call create_data_table when an answer picks your createTable option without saying Created (a typed answer), or when the user asks for a table and names its columns; when the user asks for a table without naming its columns, emit the same question with only the createTable option. Never change an existing table's columns: when a table lacks a column, say which one and offer a new table; columns are added in the DataTable tab. Pass the chosen tables to create_workflow and edit_workflow in data_table_choices, with an empty table_id when the user wants to pick the table later. If a tool returns requires_data_table, ask the same way, then call it again. If a result lists data_table_warnings, tell the user which columns the table lacks and that columns are added in the DataTable tab.
+17. Dashboards hold widgets, and Heym Work shows each dashboard as a page. When the user asks which dashboards or pages exist, what is on one, or which dashboard or page a widget or workflow is on, call list_dashboards (dashboard_id to read one, workflow_id to find where a workflow is placed) and answer from it, linking each dashboard's url. When the user asks for a new widget, chart or metric on a dashboard or page, resolve the dashboard with list_dashboards and call add_dashboard_widget without workflow_id, with a short title and the chart_type: it puts an empty widget on the dashboard. Then follow its next_step: write the widget's graph with save_workflow and the widget's workflow_id, test it with run_workflow_test and finish. Never build a separate workflow to copy onto a dashboard. When the user asks to put, add or place an existing workflow on a dashboard or page, resolve the workflow with list_workflows and call add_dashboard_widget with its workflow_id. Call add_dashboard_widget once per widget. If the user names no dashboard and several have permission owner or write, emit one heym-clarify question of type single whose options are those dashboard names, then stop and wait. A dashboard with permission read cannot take widgets: say so. After adding, say whether it became a chart widget or a run widget and link the dashboard url. Changes to a chart widget go to the widget's workflow_id from the result, never to the workflow it was copied from."""
 
 DASHBOARD_CHAT_SYSTEM_PROMPT = DASHBOARD_CHAT_SYSTEM_PROMPT + CLARIFY_PROTOCOL_PROMPT
 
@@ -1123,6 +1131,7 @@ DASHBOARD_CHAT_TOOLS = [
             },
         },
     },
+    *DASHBOARD_TOOL_SCHEMAS,
 ]
 
 
@@ -3546,6 +3555,8 @@ def _summarize_tool_result(tool_name: str, result_json: str) -> str:
             column_count = len(table.get("columns") or [])
             return f"Created data table {table.get('name')!r} with {column_count} column(s)"
         return result_json[:200] + ("..." if len(result_json) > 200 else "")
+    if tool_name in DASHBOARD_TOOL_NAMES:
+        return summarize_dashboard_tool(tool_name, data)
     if tool_name == "get_board_tasks":
         if isinstance(data, dict) and "error" in data:
             return f"Error: {str(data.get('error'))[:150]}"
@@ -5378,6 +5389,50 @@ async def stream_dashboard_chat(
                     step_start = time.time()
                     result = json.dumps(
                         await get_card_detail_for_chat(db, user_id, args.get("card_id", "") or "")
+                    )
+                    step_ms = round((time.time() - step_start) * 1000, 2)
+                    run_steps.append(
+                        {
+                            "label": step_label,
+                            "tool": name,
+                            "request": args,
+                            "response_summary": _summarize_tool_result(name, result),
+                            "execution_time_ms": step_ms,
+                        }
+                    )
+                    yield _tool_end_yield(
+                        tc.id,
+                        run_steps[-1]["response_summary"],
+                        run_steps[-1]["execution_time_ms"],
+                        status=_chat_tool_lifecycle_status(name, result),
+                    )
+                elif name in DASHBOARD_TOOL_NAMES:
+                    step_label = dashboard_tool_label(name)
+                    yield (
+                        "data: "
+                        + json.dumps(
+                            {
+                                "type": "tool_start",
+                                "id": tc.id,
+                                "name": name,
+                                "label": step_label,
+                                "args": args,
+                            }
+                        )
+                        + "\n\n"
+                    )
+                    step_start = time.time()
+                    result = json.dumps(
+                        await call_dashboard_tool(
+                            db,
+                            user,
+                            name,
+                            args,
+                            public_base_url,
+                            can_build=build is not None
+                            and not build.request.skill_only
+                            and build.request.target_workflow_id is None,
+                        )
                     )
                     step_ms = round((time.time() - step_start) * 1000, 2)
                     run_steps.append(
