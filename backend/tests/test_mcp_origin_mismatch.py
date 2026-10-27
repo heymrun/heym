@@ -369,6 +369,7 @@ class MCPConfigURLTests(unittest.IsolatedAsyncioTestCase):
             mcp_chat_enabled=False,
             mcp_chat_credential_id=None,
             mcp_chat_model=None,
+            mcp_a2a_enabled=False,
         )
         request = _make_request(
             "http://127.0.0.1:10105/",
@@ -397,6 +398,7 @@ class MCPConfigURLTests(unittest.IsolatedAsyncioTestCase):
             mcp_chat_enabled=False,
             mcp_chat_credential_id=None,
             mcp_chat_model=None,
+            mcp_a2a_enabled=False,
         )
         request = _make_request("http://localhost:10105/")
 
@@ -417,6 +419,7 @@ class MCPConfigURLTests(unittest.IsolatedAsyncioTestCase):
             mcp_chat_enabled=False,
             mcp_chat_credential_id=None,
             mcp_chat_model=None,
+            mcp_a2a_enabled=False,
         )
         request = _make_request(
             "http://127.0.0.1:10105/",
@@ -443,6 +446,7 @@ class MCPConfigURLTests(unittest.IsolatedAsyncioTestCase):
             mcp_chat_enabled=False,
             mcp_chat_credential_id=None,
             mcp_chat_model=None,
+            mcp_a2a_enabled=False,
         )
         request = _make_request(
             "http://127.0.0.1:10105/",
