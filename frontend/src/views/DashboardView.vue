@@ -84,6 +84,7 @@ import { resolveShowcaseContext } from "@/features/showcase/showcaseResolver";
 import TemplatesPage from "@/features/templates/components/TemplatesPage.vue";
 import { useRunbookPlayer } from "@/features/runbook/useRunbookPlayer";
 import { joinOriginAndPath } from "@/lib/appUrl";
+import { dashboardTabAlias } from "@/lib/dashboardTabAliases";
 import {
   buildHeymUsersFolder,
   collectHeymUsersWorkflowIds,
@@ -115,13 +116,17 @@ const tabParam = route.query.tab as string;
 if (tabParam === "chat") {
   void router.replace("/chats");
 }
+const initialTabAlias = dashboardTabAlias(tabParam);
+if (initialTabAlias) {
+  void router.replace({ path: "/", query: { ...route.query, tab: initialTabAlias } });
+}
 
 function parseTabParam(raw: string | undefined | null): { tab: string; subPath: string | null } {
   if (!raw) return { tab: "workflows", subPath: null };
   if (raw.startsWith("datatable/")) {
     return { tab: "datatable", subPath: raw.slice("datatable/".length) };
   }
-  return { tab: raw, subPath: null };
+  return { tab: dashboardTabAlias(raw) ?? raw, subPath: null };
 }
 
 const validTabs = new Set([
@@ -196,6 +201,11 @@ watch(
   (newTabParam) => {
     if (newTabParam === "chat") {
       void router.replace("/chats");
+      return;
+    }
+    const aliasTab = dashboardTabAlias(newTabParam as string);
+    if (aliasTab) {
+      void router.replace({ query: { ...route.query, tab: aliasTab } });
       return;
     }
     const parsed = parseTabParam(newTabParam as string);

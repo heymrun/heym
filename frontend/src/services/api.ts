@@ -2569,12 +2569,15 @@ export interface MCPChatToolConfig {
   enabled: boolean;
   credential_id: string | null;
   model: string | null;
+  /** The Heym Agent is also reachable over A2A. Never true while `enabled` is false. */
+  a2a_enabled: boolean;
 }
 
 export interface MCPChatToolUpdate {
   enabled?: boolean;
   credential_id?: string | null;
   model?: string | null;
+  a2a_enabled?: boolean;
 }
 
 export interface MCPConfigResponse {

@@ -87,3 +87,10 @@ describe("rankByPaletteScore", () => {
     expect(ranked.map((tab) => tab.label)).toEqual(["Workflows", "Evals", "Traces", "Credentials"]);
   });
 });
+
+describe("the MCP / A2A tab", () => {
+  it("is found by either protocol", () => {
+    expect(termScore("a2a", "MCP / A2A")).toBeGreaterThan(0);
+    expect(termScore("mcp", "MCP / A2A")).toBeGreaterThan(0);
+  });
+});
