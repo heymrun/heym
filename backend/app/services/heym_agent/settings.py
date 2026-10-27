@@ -10,7 +10,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import LLM_CREDENTIAL_TYPES, Credential, MCPServer, User
@@ -124,3 +124,40 @@ async def resolve_agent_llm(
         )
 
     return ResolvedAgentLLM(credential=credential, model=model)
+
+
+def apply_switches(
+    *,
+    enabled: bool,
+    a2a_enabled: bool,
+    update_enabled: bool | None,
+    update_a2a: bool | None,
+) -> tuple[bool, bool]:
+    """Apply an update's two switches. A2A rides on the agent, so it cannot be on alone."""
+    new_enabled = enabled if update_enabled is None else update_enabled
+    new_a2a = a2a_enabled if update_a2a is None else update_a2a
+    if update_a2a and not new_enabled:
+        raise AgentError("Turn the Heym Agent on before enabling A2A.")
+    return new_enabled, new_a2a and new_enabled
+
+
+async def any_global_a2a_enabled(db: AsyncSession) -> bool:
+    """Whether some user's global server answers A2A, which decides the domain Agent Card."""
+    result = await db.execute(
+        select(exists().where(User.mcp_chat_enabled.is_(True), User.mcp_a2a_enabled.is_(True)))
+    )
+    return bool(result.scalar())
+
+
+async def server_a2a_enabled(db: AsyncSession, server_id: uuid.UUID) -> bool:
+    """Whether a named server answers A2A, which decides whether its card exists."""
+    result = await db.execute(
+        select(
+            exists().where(
+                MCPServer.id == server_id,
+                MCPServer.chat_enabled.is_(True),
+                MCPServer.a2a_enabled.is_(True),
+            )
+        )
+    )
+    return bool(result.scalar())

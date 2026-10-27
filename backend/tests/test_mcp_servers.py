@@ -7,13 +7,19 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.api.mcp_servers import (
     _get_named_server_context,
+    _server_response,
     create_mcp_server,
     delete_mcp_server,
     list_mcp_servers,
     list_named_server_tools,
     toggle_server_workflow,
+    update_server_chat_tool,
 )
-from app.models.schemas import MCPServerCreate, MCPServerWorkflowToggleRequest
+from app.models.schemas import (
+    MCPChatToolUpdate,
+    MCPServerCreate,
+    MCPServerWorkflowToggleRequest,
+)
 from app.services.heym_agent.settings import AgentSettings
 
 
@@ -318,6 +324,53 @@ class MCPServerAuthTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(str(user.id), user_id)
         self.assertEqual(server.id, server_id)
         db.execute.assert_not_called()
+
+
+class MCPServerA2ASwitchTests(unittest.IsolatedAsyncioTestCase):
+    async def test_server_patch_turns_a2a_on_with_the_agent(self) -> None:
+        user_id = uuid.uuid4()
+        server = _make_server(user_id)
+        server.chat_enabled = True
+        db = AsyncMock()
+
+        with patch("app.api.mcp_servers._fetch_server_for_user", AsyncMock(return_value=server)):
+            result = await update_server_chat_tool(
+                server_id=server.id,
+                body=MCPChatToolUpdate(a2a_enabled=True),
+                current_user=SimpleNamespace(id=user_id),
+                db=db,
+            )
+
+        self.assertTrue(result.a2a_enabled)
+        self.assertTrue(server.a2a_enabled)
+
+    async def test_server_patch_rejects_a2a_while_the_agent_is_off(self) -> None:
+        from fastapi import HTTPException
+
+        user_id = uuid.uuid4()
+        server = _make_server(user_id)
+
+        with (
+            patch("app.api.mcp_servers._fetch_server_for_user", AsyncMock(return_value=server)),
+            self.assertRaises(HTTPException) as ctx,
+        ):
+            await update_server_chat_tool(
+                server_id=server.id,
+                body=MCPChatToolUpdate(a2a_enabled=True),
+                current_user=SimpleNamespace(id=user_id),
+                db=AsyncMock(),
+            )
+
+        self.assertEqual(ctx.exception.status_code, 400)
+
+    def test_server_response_reports_a2a(self) -> None:
+        server = _make_server(uuid.uuid4())
+        server.chat_enabled = True
+        server.a2a_enabled = True
+
+        response = _server_response(server, [])
+
+        self.assertTrue(response.chat_tool.a2a_enabled)
 
 
 class MCPServerDefaultUnaffectedTests(unittest.TestCase):

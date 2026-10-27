@@ -886,6 +886,7 @@ async def get_mcp_config(
             enabled=current_user.mcp_chat_enabled,
             credential_id=current_user.mcp_chat_credential_id,
             model=current_user.mcp_chat_model,
+            a2a_enabled=current_user.mcp_a2a_enabled,
         ),
     )
 
@@ -896,15 +897,24 @@ async def update_mcp_chat_tool(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> MCPChatToolConfig:
-    """Enable/disable the `heym_chat` tool on the global MCP server and set its model."""
+    """Turn the Heym Agent on or off on the global MCP server, its model, and its A2A face."""
     provided = body.model_fields_set
+    try:
+        enabled, a2a_enabled = agent_settings.apply_switches(
+            enabled=bool(current_user.mcp_chat_enabled),
+            a2a_enabled=bool(current_user.mcp_a2a_enabled),
+            update_enabled=body.enabled,
+            update_a2a=body.a2a_enabled,
+        )
+    except AgentError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     if "credential_id" in provided:
         await validate_chat_tool_credential(db, current_user.id, body.credential_id)
         current_user.mcp_chat_credential_id = body.credential_id
     if "model" in provided:
         current_user.mcp_chat_model = body.model
-    if body.enabled is not None:
-        current_user.mcp_chat_enabled = body.enabled
+    current_user.mcp_chat_enabled = enabled
+    current_user.mcp_a2a_enabled = a2a_enabled
 
     await db.flush()
     await db.refresh(current_user)
@@ -912,6 +922,7 @@ async def update_mcp_chat_tool(
         enabled=current_user.mcp_chat_enabled,
         credential_id=current_user.mcp_chat_credential_id,
         model=current_user.mcp_chat_model,
+        a2a_enabled=current_user.mcp_a2a_enabled,
     )
 
 

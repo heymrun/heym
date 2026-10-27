@@ -61,6 +61,7 @@ from app.services.execution_cancellation import clear_execution as clear_active_
 from app.services.execution_cancellation import register_execution
 from app.services.global_variables_service import get_global_variables_context
 from app.services.heym_agent import settings as agent_settings
+from app.services.heym_agent.errors import AgentError
 from app.services.hitl_service import build_default_public_base_url
 from app.services.mcp_elicitation import MCPClientChannel
 from app.services.mcp_session import mcp_session_store, mcp_sse_channels
@@ -127,6 +128,7 @@ def _server_response(
             enabled=bool(server.chat_enabled),
             credential_id=server.chat_credential_id,
             model=server.chat_model,
+            a2a_enabled=bool(server.a2a_enabled),
         ),
     )
 
@@ -359,17 +361,26 @@ async def update_server_chat_tool(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> MCPChatToolConfig:
-    """Enable/disable the `heym_chat` tool on this named server and set its model."""
+    """Turn the Heym Agent on or off on this named server, its model, and its A2A face."""
     server = await _fetch_server_for_user(db, server_id, current_user.id)
 
     provided = body.model_fields_set
+    try:
+        enabled, a2a_enabled = agent_settings.apply_switches(
+            enabled=bool(server.chat_enabled),
+            a2a_enabled=bool(server.a2a_enabled),
+            update_enabled=body.enabled,
+            update_a2a=body.a2a_enabled,
+        )
+    except AgentError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     if "credential_id" in provided:
         await validate_chat_tool_credential(db, current_user.id, body.credential_id)
         server.chat_credential_id = body.credential_id
     if "model" in provided:
         server.chat_model = body.model
-    if body.enabled is not None:
-        server.chat_enabled = body.enabled
+    server.chat_enabled = enabled
+    server.a2a_enabled = a2a_enabled
 
     await db.commit()
     await db.refresh(server)
@@ -377,6 +388,7 @@ async def update_server_chat_tool(
         enabled=server.chat_enabled,
         credential_id=server.chat_credential_id,
         model=server.chat_model,
+        a2a_enabled=server.a2a_enabled,
     )
 
 

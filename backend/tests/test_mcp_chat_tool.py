@@ -448,6 +448,40 @@ class ChatToolConfigEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result.credential_id)
         self.assertEqual(result.model, "gpt-5")
 
+    async def test_global_patch_turns_a2a_on_with_the_agent(self) -> None:
+        user = _make_user(mcp_chat_enabled=True)
+
+        result = await update_mcp_chat_tool(
+            body=MCPChatToolUpdate(a2a_enabled=True), current_user=user, db=AsyncMock()
+        )
+
+        self.assertTrue(result.a2a_enabled)
+        self.assertTrue(user.mcp_a2a_enabled)
+
+    async def test_global_patch_rejects_a2a_while_the_agent_is_off(self) -> None:
+        from fastapi import HTTPException
+
+        user = _make_user(mcp_chat_enabled=False)
+
+        with self.assertRaises(HTTPException) as ctx:
+            await update_mcp_chat_tool(
+                body=MCPChatToolUpdate(a2a_enabled=True), current_user=user, db=AsyncMock()
+            )
+
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertFalse(user.mcp_a2a_enabled)
+
+    async def test_global_patch_turning_the_agent_off_clears_a2a(self) -> None:
+        user = _make_user(mcp_chat_enabled=True, mcp_a2a_enabled=True)
+
+        result = await update_mcp_chat_tool(
+            body=MCPChatToolUpdate(enabled=False), current_user=user, db=AsyncMock()
+        )
+
+        self.assertFalse(result.enabled)
+        self.assertFalse(result.a2a_enabled)
+        self.assertFalse(user.mcp_a2a_enabled)
+
     async def test_non_llm_credential_is_rejected_with_400(self) -> None:
         from fastapi import HTTPException
 

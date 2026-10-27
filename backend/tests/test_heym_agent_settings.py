@@ -6,8 +6,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 from app.services.heym_agent import profile
+from app.services.heym_agent.errors import AgentError
 from app.services.heym_agent.settings import (
     AgentSettings,
+    apply_switches,
     get_global_agent_settings,
     get_server_agent_settings,
 )
@@ -66,3 +68,27 @@ class AgentProfileTests(unittest.TestCase):
             with self.subTest(skill=skill.id):
                 self.assertTrue(skill.tags)
                 self.assertTrue(skill.examples)
+
+
+class SwitchRuleTests(unittest.TestCase):
+    def test_a2a_cannot_turn_on_while_the_agent_is_off(self) -> None:
+        with self.assertRaises(AgentError):
+            apply_switches(enabled=False, a2a_enabled=False, update_enabled=None, update_a2a=True)
+
+    def test_a2a_and_agent_can_turn_on_together(self) -> None:
+        self.assertEqual(
+            apply_switches(enabled=False, a2a_enabled=False, update_enabled=True, update_a2a=True),
+            (True, True),
+        )
+
+    def test_turning_the_agent_off_turns_a2a_off(self) -> None:
+        self.assertEqual(
+            apply_switches(enabled=True, a2a_enabled=True, update_enabled=False, update_a2a=None),
+            (False, False),
+        )
+
+    def test_untouched_switches_keep_their_values(self) -> None:
+        self.assertEqual(
+            apply_switches(enabled=True, a2a_enabled=True, update_enabled=None, update_a2a=None),
+            (True, True),
+        )
