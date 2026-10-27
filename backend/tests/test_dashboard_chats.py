@@ -383,7 +383,7 @@ class TestClearConversations(unittest.IsolatedAsyncioTestCase):
 
 
 class TestStreamConversation(unittest.IsolatedAsyncioTestCase):
-    async def test_emits_heartbeat_while_waiting_for_chat_events(self) -> None:
+    async def test_emits_keepalive_while_waiting_for_chat_events(self) -> None:
         user = _make_user()
         conv = _make_conversation(user.id)
         queue: asyncio.Queue[object | None] = asyncio.Queue()
@@ -401,7 +401,7 @@ class TestStreamConversation(unittest.IsolatedAsyncioTestCase):
             ),
             patch("app.api.chats.async_session_maker", _fake_session),
             patch("app.api.chats.registry.subscribe", return_value=_QueueContext(queue)),
-            patch("app.api.chats.CHAT_STREAM_HEARTBEAT_SECONDS", 0.001),
+            patch("app.api.chats.CHAT_STREAM_KEEPALIVE_SECONDS", 0.001),
         ):
             response = await stream_conversation(
                 conversation_id=conv.id,

@@ -797,7 +797,7 @@ class LiveExecutionSnapshotTests(unittest.IsolatedAsyncioTestCase):
                     "app.api.workflows.get_workflow_for_user",
                     AsyncMock(return_value=workflow),
                 ),
-                patch("app.api.workflows.WORKFLOW_SSE_HEARTBEAT_SECONDS", 0),
+                patch("app.api.workflows.WORKFLOW_SSE_KEEPALIVE_SECONDS", 0),
             ):
                 response = await stream_active_workflow_execution(
                     workflow_id=workflow_id,
@@ -813,7 +813,7 @@ class LiveExecutionSnapshotTests(unittest.IsolatedAsyncioTestCase):
                 await iterator.aclose()
 
             self.assertIn('"type": "execution_started"', started)
-            self.assertEqual(heartbeat, ": heartbeat\n\n")
+            self.assertEqual(heartbeat, ": keepalive\n\n")
         finally:
             clear_execution(execution_id)
 

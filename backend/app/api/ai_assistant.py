@@ -336,12 +336,12 @@ async def _workflow_has_agent_suite(
 MAX_DASHBOARD_CHAT_HISTORY = 25
 DASHBOARD_CHAT_TEMPERATURE = 0.1
 WORKFLOW_BUILDER_TEMPERATURE = 0.0
-WORKFLOW_ASSISTANT_SSE_HEARTBEAT_SECONDS = 10.0
-DASHBOARD_CHAT_SSE_HEARTBEAT_SECONDS = 10.0
+WORKFLOW_ASSISTANT_SSE_KEEPALIVE_SECONDS = 10.0
+DASHBOARD_CHAT_SSE_KEEPALIVE_SECONDS = 10.0
 
 
-WORKFLOW_ASSISTANT_SSE_HEARTBEAT_SECONDS = 10.0
-DASHBOARD_CHAT_SSE_HEARTBEAT_SECONDS = 10.0
+WORKFLOW_ASSISTANT_SSE_KEEPALIVE_SECONDS = 10.0
+DASHBOARD_CHAT_SSE_KEEPALIVE_SECONDS = 10.0
 EXECUTION_LOG_NODE_OUTPUT_MAX_CHARS = 2048
 EXECUTION_LOG_TOTAL_MAX_CHARS = 12_000
 
@@ -5630,10 +5630,10 @@ async def stream_llm_response(
         yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
 
 
-async def _stream_sse_with_heartbeat(
+async def _stream_sse_with_keepalive(
     source: AsyncGenerator[str, None],
     *,
-    heartbeat_seconds: float,
+    keepalive_seconds: float,
 ) -> AsyncGenerator[str, None]:
     """Forward SSE chunks from a sync-backed generator while sending idle keepalives."""
     queue: asyncio.Queue[str | Exception | None] = asyncio.Queue()
@@ -5655,9 +5655,9 @@ async def _stream_sse_with_heartbeat(
 
     while True:
         try:
-            item = await asyncio.wait_for(queue.get(), timeout=heartbeat_seconds)
+            item = await asyncio.wait_for(queue.get(), timeout=keepalive_seconds)
         except TimeoutError:
-            yield ": heartbeat\n\n"
+            yield ": keepalive\n\n"
             continue
 
         if item is None:
@@ -5738,9 +5738,9 @@ async def analyze_workflow_stream(
     )
 
     return StreamingResponse(
-        _stream_sse_with_heartbeat(
+        _stream_sse_with_keepalive(
             assistant_stream,
-            heartbeat_seconds=WORKFLOW_ASSISTANT_SSE_HEARTBEAT_SECONDS,
+            keepalive_seconds=WORKFLOW_ASSISTANT_SSE_KEEPALIVE_SECONDS,
         ),
         media_type="text/event-stream",
         headers={
@@ -5813,7 +5813,7 @@ def _yolo_assistant_response(
             turn,
             is_disconnected=http_request.is_disconnected,
             cancel_event=cancel_event,
-            heartbeat_seconds=WORKFLOW_ASSISTANT_SSE_HEARTBEAT_SECONDS,
+            keepalive_seconds=WORKFLOW_ASSISTANT_SSE_KEEPALIVE_SECONDS,
         ),
         media_type="text/event-stream",
         headers={
@@ -5980,9 +5980,9 @@ async def workflow_assistant_stream(
     )
 
     return StreamingResponse(
-        _stream_sse_with_heartbeat(
+        _stream_sse_with_keepalive(
             assistant_stream,
-            heartbeat_seconds=WORKFLOW_ASSISTANT_SSE_HEARTBEAT_SECONDS,
+            keepalive_seconds=WORKFLOW_ASSISTANT_SSE_KEEPALIVE_SECONDS,
         ),
         media_type="text/event-stream",
         headers={
@@ -6123,7 +6123,7 @@ async def dashboard_chat_stream(
             while True:
                 try:
                     item = await asyncio.wait_for(
-                        queue.get(), timeout=DASHBOARD_CHAT_SSE_HEARTBEAT_SECONDS
+                        queue.get(), timeout=DASHBOARD_CHAT_SSE_KEEPALIVE_SECONDS
                     )
                 except TimeoutError:
                     if cancel_event.is_set():

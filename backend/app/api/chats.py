@@ -93,7 +93,7 @@ DEFAULT_QUICK_PROMPTS: list[str] = [
 ]
 MAX_QUICK_PROMPTS = 7
 MAX_PROMPT_LENGTH = 200
-CHAT_STREAM_HEARTBEAT_SECONDS = 10.0
+CHAT_STREAM_KEEPALIVE_SECONDS = 10.0
 CLARIFY_FENCE = "```heym-clarify"
 
 
@@ -1556,7 +1556,7 @@ async def stream_conversation(
             while True:
                 try:
                     item = await asyncio.wait_for(
-                        queue.get(), timeout=CHAT_STREAM_HEARTBEAT_SECONDS
+                        queue.get(), timeout=CHAT_STREAM_KEEPALIVE_SECONDS
                     )
                 except TimeoutError:
                     yield ": ping\n\n"

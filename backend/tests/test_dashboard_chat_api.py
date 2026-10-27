@@ -575,7 +575,7 @@ class DashboardChatApiTests(unittest.IsolatedAsyncioTestCase):
             patch(
                 "app.api.ai_assistant.stream_dashboard_chat", side_effect=fake_stream_dashboard_chat
             ),
-            patch("app.api.ai_assistant.DASHBOARD_CHAT_SSE_HEARTBEAT_SECONDS", 0.001),
+            patch("app.api.ai_assistant.DASHBOARD_CHAT_SSE_KEEPALIVE_SECONDS", 0.001),
         ):
             response = await dashboard_chat_stream(
                 http_request=http_request,

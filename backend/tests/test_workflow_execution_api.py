@@ -487,8 +487,8 @@ class PortalCancelExecutionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(context.exception.detail, "Execution not found or already finished")
 
 
-class PortalExecuteStreamHeartbeatTests(unittest.IsolatedAsyncioTestCase):
-    async def test_emits_hidden_heartbeat_while_waiting_for_workflow_events(self) -> None:
+class PortalExecuteStreamKeepaliveTests(unittest.IsolatedAsyncioTestCase):
+    async def test_emits_hidden_keepalive_while_waiting_for_workflow_events(self) -> None:
         workflow = SimpleNamespace(
             id=uuid.uuid4(),
             owner_id=uuid.uuid4(),
@@ -530,7 +530,7 @@ class PortalExecuteStreamHeartbeatTests(unittest.IsolatedAsyncioTestCase):
             patch("app.api.portal.execute_workflow_streaming", fake_streaming_executor),
             patch("app.api.portal._persist_global_variables_from_execution", AsyncMock()),
             patch("app.api.portal.upsert_workflow_analytics_snapshot", AsyncMock()),
-            patch("app.api.portal.PORTAL_SSE_HEARTBEAT_SECONDS", 0.001),
+            patch("app.api.portal.PORTAL_SSE_KEEPALIVE_SECONDS", 0.001),
         ):
             response = await portal_execute_stream(
                 slug="portal-test",
@@ -541,7 +541,7 @@ class PortalExecuteStreamHeartbeatTests(unittest.IsolatedAsyncioTestCase):
 
             stream = response.body_iterator
             self.assertIn('"type": "execution_started"', await stream.__anext__())
-            self.assertEqual(await stream.__anext__(), ": heartbeat\n\n")
+            self.assertEqual(await stream.__anext__(), ": keepalive\n\n")
 
             release_executor.set()
             complete_chunk = ""
@@ -550,7 +550,7 @@ class PortalExecuteStreamHeartbeatTests(unittest.IsolatedAsyncioTestCase):
                 if '"type": "execution_complete"' in chunk:
                     complete_chunk = chunk
                     break
-                self.assertEqual(chunk, ": heartbeat\n\n")
+                self.assertEqual(chunk, ": keepalive\n\n")
 
             self.assertIn('"type": "execution_complete"', complete_chunk)
             with self.assertRaises(StopAsyncIteration):
@@ -613,7 +613,7 @@ class PortalExecuteStreamCancelPersistenceTests(unittest.IsolatedAsyncioTestCase
         analytics.assert_awaited_once()
 
 
-class ExecuteWorkflowStreamHeartbeatTests(unittest.IsolatedAsyncioTestCase):
+class ExecuteWorkflowStreamKeepaliveTests(unittest.IsolatedAsyncioTestCase):
     async def test_test_run_caches_its_terminal_payload_for_live_observers(self) -> None:
         workflow = SimpleNamespace(
             id=uuid.uuid4(),
@@ -687,7 +687,7 @@ class ExecuteWorkflowStreamHeartbeatTests(unittest.IsolatedAsyncioTestCase):
             },
         )
 
-    async def test_emits_hidden_heartbeat_while_waiting_for_workflow_events(self) -> None:
+    async def test_emits_hidden_keepalive_while_waiting_for_workflow_events(self) -> None:
         workflow = SimpleNamespace(
             id=uuid.uuid4(),
             owner_id=uuid.uuid4(),
@@ -731,7 +731,7 @@ class ExecuteWorkflowStreamHeartbeatTests(unittest.IsolatedAsyncioTestCase):
             patch("app.api.workflows.execute_workflow_streaming", fake_streaming_executor),
             patch("app.api.workflows._persist_global_variables_from_execution", AsyncMock()),
             patch("app.api.workflows.upsert_workflow_analytics_snapshot", AsyncMock()),
-            patch("app.api.workflows.WORKFLOW_SSE_HEARTBEAT_SECONDS", 0.001),
+            patch("app.api.workflows.WORKFLOW_SSE_KEEPALIVE_SECONDS", 0.001),
         ):
             response = await execute_workflow_stream(
                 workflow_id=workflow.id,
@@ -745,7 +745,7 @@ class ExecuteWorkflowStreamHeartbeatTests(unittest.IsolatedAsyncioTestCase):
 
             stream = response.body_iterator
             self.assertIn('"type": "execution_started"', await stream.__anext__())
-            self.assertEqual(await stream.__anext__(), ": heartbeat\n\n")
+            self.assertEqual(await stream.__anext__(), ": keepalive\n\n")
 
             release_executor.set()
             complete_chunk = ""
@@ -754,7 +754,7 @@ class ExecuteWorkflowStreamHeartbeatTests(unittest.IsolatedAsyncioTestCase):
                 if '"type": "execution_complete"' in chunk:
                     complete_chunk = chunk
                     break
-                self.assertEqual(chunk, ": heartbeat\n\n")
+                self.assertEqual(chunk, ": keepalive\n\n")
 
             self.assertIn('"type": "execution_complete"', complete_chunk)
             with self.assertRaises(StopAsyncIteration):

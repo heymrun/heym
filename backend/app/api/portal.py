@@ -69,7 +69,7 @@ from app.services.workflow_executor import (
 router = APIRouter()
 
 _session_ttl_hours = 168
-PORTAL_SSE_HEARTBEAT_SECONDS = 10.0
+PORTAL_SSE_KEEPALIVE_SECONDS = 10.0
 
 
 def _generate_session_token() -> str:
@@ -675,7 +675,7 @@ async def portal_execute_stream(
                 release_task = asyncio.create_task(_release_slot_after(future, execution_id))
                 _SLOT_RELEASE_TASKS.add(release_task)
                 release_task.add_done_callback(_SLOT_RELEASE_TASKS.discard)
-            last_heartbeat_at = loop.time()
+            last_keepalive_at = loop.time()
             yield (
                 "data: "
                 + json.dumps(
@@ -699,7 +699,7 @@ async def portal_execute_stream(
                     if event is None:
                         break
                     event = progress_tracker.observe_event(event)
-                    last_heartbeat_at = loop.time()
+                    last_keepalive_at = loop.time()
                     if (
                         event.get("type") == "execution_complete"
                         and event.get("status") == "pending"
@@ -751,9 +751,9 @@ async def portal_execute_stream(
                         cancel_event.set()
                         break
                     now = loop.time()
-                    if now - last_heartbeat_at >= PORTAL_SSE_HEARTBEAT_SECONDS:
-                        last_heartbeat_at = now
-                        yield ": heartbeat\n\n"
+                    if now - last_keepalive_at >= PORTAL_SSE_KEEPALIVE_SECONDS:
+                        last_keepalive_at = now
+                        yield ": keepalive\n\n"
                         continue
                     if future.done():
                         while not event_queue.empty():
@@ -761,7 +761,7 @@ async def portal_execute_stream(
                             if event is None:
                                 break
                             event = progress_tracker.observe_event(event)
-                            last_heartbeat_at = loop.time()
+                            last_keepalive_at = loop.time()
                             if (
                                 event.get("type") == "execution_complete"
                                 and event.get("status") == "pending"
