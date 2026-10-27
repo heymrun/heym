@@ -63,6 +63,7 @@ When it is on, `heym_chat` appears in `tools/list` alongside your workflow tools
 - Report the run history of one workflow: how many times it ran, status counts, when it ran, and on request the inputs, outputs, and per-node errors of a single run
 - Report what is running right now: how many executions are active, their workflow names, how long each has been running, the node each is currently on, and a link to the live run
 - List boards, create cards, and read card detail on the [Board tab](./board-tab.md)
+- List your dashboards (Heym Work's pages) with the widgets on each, find which dashboard a workflow is on, add a new widget to a dashboard and build its workflow, put an existing workflow on a dashboard as a widget, rename or delete a widget, or tidy a dashboard's layout (see [Dashboard › From Chat and MCP](./dashboard-tab.md#from-chat-and-mcp))
 - List your data tables with their columns, create new ones, and wire them into the workflows it builds
 - Create, edit and run prompt and agent [eval suites](./evals-tab.md#from-chat-and-mcp), including an agent's baseline: reported, built from runs, or stated as numbers. The result lists the Evals link of every suite saved in the call.
 - Create or update your credentials on Heym's own page (see [Credentials](#credentials))

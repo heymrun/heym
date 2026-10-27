@@ -33,7 +33,6 @@ from app.db.models import (
     ActiveWorkflowExecution,
     Credential,
     CredentialType,
-    DashboardWidget,
     ExecutionHistory,
     RunHistory,
     Team,
@@ -175,6 +174,7 @@ from app.services.workflow_save import (
     WorkflowSnapshot,
     add_workflow_version,
     announce_workflow_saved,
+    sync_dashboard_widget,
 )
 from app.services.workflow_status import (
     compute_trigger_status,
@@ -1852,34 +1852,13 @@ async def update_workflow(
 
     # Keep the dashboard widget metadata/cache in sync when its hidden workflow
     # is edited on the canvas (canvas -> dashboard direction).
-    if getattr(workflow, "kind", None) == "dashboard_widget" and (
-        workflow_data.name is not None
-        or workflow_data.description is not None
-        or sanitized_nodes is not None
-        or sanitized_edges is not None
-    ):
-        widget_result = await db.execute(
-            select(DashboardWidget).where(DashboardWidget.workflow_id == workflow_id)
-        )
-        widget = widget_result.scalar_one_or_none()
-        if widget is not None:
-            if workflow_data.name is not None:
-                widget.title = workflow.name
-            if workflow_data.description is not None:
-                widget.description = workflow.description
-            if sanitized_nodes is not None or sanitized_edges is not None:
-                chart_nodes = [
-                    node
-                    for node in (workflow.nodes or [])
-                    if isinstance(node, dict) and node.get("type") == "chartOutput"
-                ]
-                if chart_nodes:
-                    widget.chart_type = (
-                        chart_nodes[-1].get("data", {}).get("chartType", widget.chart_type)
-                    )
-                widget.cached_payload = None
-                widget.cached_at = None
-                widget.cached_workflow_version = None
+    await sync_dashboard_widget(
+        db,
+        workflow,
+        renamed=workflow_data.name is not None,
+        described=workflow_data.description is not None,
+        graph_changed=sanitized_nodes is not None or sanitized_edges is not None,
+    )
 
     if should_create_version:
         await add_workflow_version(

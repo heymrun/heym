@@ -12,6 +12,7 @@ from app.services.workflow_save import (
     WorkflowSnapshot,
     add_workflow_version,
     announce_workflow_saved,
+    sync_dashboard_widget,
 )
 
 
@@ -114,6 +115,66 @@ class AnnounceWorkflowSavedTests(unittest.IsolatedAsyncioTestCase):
 
         request_sync.assert_called_once()
         publish.assert_not_called()
+
+
+class SyncDashboardWidgetTests(unittest.IsolatedAsyncioTestCase):
+    def _widget(self) -> SimpleNamespace:
+        return SimpleNamespace(
+            title="Widget",
+            description=None,
+            chart_type="bar",
+            cached_payload={"rows": []},
+            cached_at=datetime(2026, 10, 6, tzinfo=timezone.utc),
+            cached_workflow_version="v1",
+        )
+
+    def _db(self, widget: SimpleNamespace | None) -> MagicMock:
+        db = MagicMock()
+        db.execute = AsyncMock(
+            return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=widget))
+        )
+        return db
+
+    async def test_a_widget_follows_its_saved_workflow(self) -> None:
+        workflow = _workflow(kind="dashboard_widget")
+        workflow.nodes = [
+            {"id": "c1", "type": "chartOutput", "data": {"chartType": "line"}},
+            {"id": "c2", "type": "chartOutput", "data": {"chartType": "table"}},
+        ]
+        widget = self._widget()
+
+        await sync_dashboard_widget(
+            self._db(widget), workflow, renamed=True, described=True, graph_changed=True
+        )
+
+        self.assertEqual(widget.title, "Lead intake")
+        self.assertEqual(widget.description, "Saves website leads")
+        self.assertEqual(widget.chart_type, "table")
+        self.assertIsNone(widget.cached_payload)
+        self.assertIsNone(widget.cached_at)
+        self.assertIsNone(widget.cached_workflow_version)
+
+    async def test_a_rename_alone_keeps_the_chart_and_its_cache(self) -> None:
+        workflow = _workflow(kind="dashboard_widget")
+        widget = self._widget()
+
+        await sync_dashboard_widget(
+            self._db(widget), workflow, renamed=True, described=False, graph_changed=False
+        )
+
+        self.assertEqual(widget.title, "Lead intake")
+        self.assertIsNone(widget.description)
+        self.assertEqual(widget.chart_type, "bar")
+        self.assertEqual(widget.cached_workflow_version, "v1")
+
+    async def test_an_ordinary_workflow_has_no_widget_to_sync(self) -> None:
+        db = self._db(self._widget())
+
+        await sync_dashboard_widget(
+            db, _workflow(), renamed=True, described=True, graph_changed=True
+        )
+
+        db.execute.assert_not_awaited()
 
 
 if __name__ == "__main__":

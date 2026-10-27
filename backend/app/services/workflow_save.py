@@ -2,8 +2,9 @@
 
 A save that changes the graph stores what it replaced as the workflow's next version, so
 Edit History can restore it; every save then resyncs websocket triggers and publishes the
-platform event. The editor's update endpoint and chat build mode both save through here.
-`audit()` stays with the callers in `app/api/`.
+platform event. A save of a dashboard widget's workflow also carries onto the widget. The
+editor's update endpoint and chat build mode both save through here. `audit()` stays with
+the callers in `app/api/`.
 """
 
 import copy
@@ -15,7 +16,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Workflow, WorkflowVersion
+from app.db.models import DashboardWidget, Workflow, WorkflowVersion
 from app.services.heym_event_service import (
     EVENT_WORKFLOW_CREATED,
     EVENT_WORKFLOW_UPDATED,
@@ -92,6 +93,45 @@ async def add_workflow_version(
         )
     )
     return version_number
+
+
+async def sync_dashboard_widget(
+    db: AsyncSession,
+    workflow: Workflow,
+    *,
+    renamed: bool,
+    described: bool,
+    graph_changed: bool,
+) -> None:
+    """Carry a save of a widget's workflow onto its dashboard widget.
+
+    The widget's title and description follow a renamed or redescribed workflow, and a graph
+    change sets its chart type from the last chartOutput node and drops its cached chart.
+    """
+    if getattr(workflow, "kind", None) != "dashboard_widget":
+        return
+    if not (renamed or described or graph_changed):
+        return
+    widget = (
+        await db.execute(select(DashboardWidget).where(DashboardWidget.workflow_id == workflow.id))
+    ).scalar_one_or_none()
+    if widget is None:
+        return
+    if renamed:
+        widget.title = workflow.name
+    if described:
+        widget.description = workflow.description
+    if graph_changed:
+        chart_nodes = [
+            node
+            for node in (workflow.nodes or [])
+            if isinstance(node, dict) and node.get("type") == "chartOutput"
+        ]
+        if chart_nodes:
+            widget.chart_type = chart_nodes[-1].get("data", {}).get("chartType", widget.chart_type)
+        widget.cached_payload = None
+        widget.cached_at = None
+        widget.cached_workflow_version = None
 
 
 async def announce_workflow_saved(
