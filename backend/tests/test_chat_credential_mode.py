@@ -99,7 +99,7 @@ class MCPChatTurnCredentialModeTests(unittest.IsolatedAsyncioTestCase):
             patch.object(chats, "async_session_maker", fake_session_maker),
             patch.object(
                 chats,
-                "_get_or_create_mcp_conversation",
+                "_get_or_create_agent_conversation",
                 AsyncMock(return_value=(conversation, True)),
             ),
             patch.object(chats, "_run_chat_turn", side_effect=fake_run_chat_turn),
@@ -107,7 +107,7 @@ class MCPChatTurnCredentialModeTests(unittest.IsolatedAsyncioTestCase):
             patch.object(chats.registry, "create_task", AsyncMock()),
             patch.object(chats.registry, "finish", AsyncMock()),
         ):
-            await chats.run_mcp_chat_turn(
+            await chats.run_agent_chat_turn(
                 user_id=user_id,
                 message="list my GitHub repositories",
                 conversation_id=None,

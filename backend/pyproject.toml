@@ -74,5 +74,6 @@ filterwarnings = [
 
 [dependency-groups]
 dev = [
+    "a2a-sdk==1.2.2",
     "pytest>=9.0.3",
 ]

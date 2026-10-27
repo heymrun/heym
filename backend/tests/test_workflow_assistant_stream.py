@@ -11,8 +11,8 @@ from app.services.credential_catalog import CredentialPromptMode
 from app.services.data_table_catalog import DataTablePromptMode
 
 
-class WorkflowAssistantStreamHeartbeatTests(unittest.IsolatedAsyncioTestCase):
-    async def test_emits_hidden_heartbeat_while_waiting_for_model_stream(self) -> None:
+class WorkflowAssistantStreamKeepaliveTests(unittest.IsolatedAsyncioTestCase):
+    async def test_emits_hidden_keepalive_while_waiting_for_model_stream(self) -> None:
         release_stream = Event()
         credential_id = uuid.uuid4()
         user = SimpleNamespace(id=uuid.uuid4())
@@ -38,7 +38,7 @@ class WorkflowAssistantStreamHeartbeatTests(unittest.IsolatedAsyncioTestCase):
                 AsyncMock(return_value=[]),
             ),
             patch("app.api.ai_assistant.stream_llm_response", fake_stream_llm_response),
-            patch("app.api.ai_assistant.WORKFLOW_ASSISTANT_SSE_HEARTBEAT_SECONDS", 0.001),
+            patch("app.api.ai_assistant.WORKFLOW_ASSISTANT_SSE_KEEPALIVE_SECONDS", 0.001),
         ):
             response = await workflow_assistant_stream(
                 http_request=MagicMock(),
@@ -53,25 +53,25 @@ class WorkflowAssistantStreamHeartbeatTests(unittest.IsolatedAsyncioTestCase):
             )
 
             stream = response.body_iterator
-            self.assertEqual(await stream.__anext__(), ": heartbeat\n\n")
+            self.assertEqual(await stream.__anext__(), ": keepalive\n\n")
 
             release_stream.set()
             while True:
                 chunk = await stream.__anext__()
                 if chunk == 'data: {"type": "done"}\n\n':
                     break
-                self.assertEqual(chunk, ": heartbeat\n\n")
+                self.assertEqual(chunk, ": keepalive\n\n")
 
             # Payload and sentinel are two `call_soon_threadsafe` hops, so a keepalive can
-            # land between them; only "nothing but heartbeats, then the end" is guaranteed.
+            # land between them; only "nothing but keepalives, then the end" is guaranteed.
             for _ in range(200):
                 try:
                     trailing = await stream.__anext__()
                 except StopAsyncIteration:
                     break
-                self.assertEqual(trailing, ": heartbeat\n\n")
+                self.assertEqual(trailing, ": keepalive\n\n")
             else:
-                self.fail("the stream kept emitting heartbeats after the source finished")
+                self.fail("the stream kept emitting keepalives after the source finished")
 
 
 class WorkflowAssistantCredentialsTests(unittest.IsolatedAsyncioTestCase):

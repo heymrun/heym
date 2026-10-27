@@ -9,7 +9,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.api import chats
 from app.services.chat_build_mode import BuildRequest
-from app.services.mcp_chat_service import MCPChatResult, format_chat_tool_text
+from app.services.heym_agent.turn import AgentTurnResult
+from app.services.mcp_chat_service import format_chat_tool_text
 
 
 class MCPChatBuildTests(unittest.IsolatedAsyncioTestCase):
@@ -51,7 +52,7 @@ class MCPChatBuildTests(unittest.IsolatedAsyncioTestCase):
             patch.object(chats, "async_session_maker", session_maker),
             patch.object(
                 chats,
-                "_get_or_create_mcp_conversation",
+                "_get_or_create_agent_conversation",
                 AsyncMock(return_value=(conversation, True)),
             ),
             patch.object(chats, "_run_chat_turn", run_turn),
@@ -59,7 +60,7 @@ class MCPChatBuildTests(unittest.IsolatedAsyncioTestCase):
             patch.object(chats.registry, "create_task", AsyncMock()),
             patch.object(chats.registry, "finish", AsyncMock()),
         ):
-            result = await chats.run_mcp_chat_turn(
+            result = await chats.run_agent_chat_turn(
                 user_id=uuid.uuid4(),
                 message="Build a lead intake workflow",
                 conversation_id=None,
@@ -73,18 +74,17 @@ class MCPChatBuildTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.text, "It saves leads.")
 
     def test_the_tool_text_says_when_a_build_is_verified(self) -> None:
-        result = MCPChatResult(
+        result = AgentTurnResult(
             conversation_id=uuid.uuid4(),
             text="It saves leads.",
             tool_names=["save_workflow", "run_workflow_test", "finish"],
-            awaiting_clarification=False,
             verified=True,
         )
 
         self.assertIn("Verified: the latest test run", format_chat_tool_text(result))
         self.assertNotIn(
             "Verified",
-            format_chat_tool_text(MCPChatResult(result.conversation_id, "Hi", [], False)),
+            format_chat_tool_text(AgentTurnResult(result.conversation_id, "Hi", [], False)),
         )
 
 

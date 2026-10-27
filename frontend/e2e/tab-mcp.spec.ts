@@ -14,7 +14,7 @@ test.beforeEach(async ({ page }) => {
 test("shows the MCP connection config and named servers section", async ({ page }) => {
   await page.goto("/?tab=mcp");
   const main = page.getByRole("main");
-  await expect(main.getByRole("heading", { name: "MCP Server", exact: true })).toBeVisible();
+  await expect(main.getByRole("heading", { name: "MCP / A2A", exact: true })).toBeVisible();
   await expect(main.getByRole("heading", { name: "MCP Connection" })).toBeVisible();
   await expect(main.getByRole("heading", { name: "Named MCP Servers" })).toBeVisible();
   await expect(

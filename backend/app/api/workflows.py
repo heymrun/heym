@@ -197,7 +197,7 @@ _SENSITIVE_HEADERS: frozenset[str] = frozenset(
     }
 )
 _INTERNAL_STREAM_TRIGGER_SOURCES: frozenset[str] = frozenset({"Canvas", "Quick Drawer"})
-WORKFLOW_SSE_HEARTBEAT_SECONDS = 10.0
+WORKFLOW_SSE_KEEPALIVE_SECONDS = 10.0
 WORKFLOW_STREAM_QUEUE_POLL_SECONDS = 0.01
 # Observe-stream polls at 0.25s; give a vanished execution 10s to surface its
 # history entry before telling the canvas the run is gone for good.
@@ -1336,7 +1336,7 @@ async def stream_active_workflow_execution(
         stream_mode = "derived"
         event_cursor = 0
         loop = asyncio.get_running_loop()
-        last_heartbeat_at = loop.time()
+        last_keepalive_at = loop.time()
 
         def derived_catch_up_frames(
             running_node_ids: list[str],
@@ -1421,10 +1421,10 @@ async def stream_active_workflow_execution(
 
                 now = loop.time()
                 if emitted_event:
-                    last_heartbeat_at = now
-                elif now - last_heartbeat_at >= WORKFLOW_SSE_HEARTBEAT_SECONDS:
-                    last_heartbeat_at = now
-                    yield ": heartbeat\n\n"
+                    last_keepalive_at = now
+                elif now - last_keepalive_at >= WORKFLOW_SSE_KEEPALIVE_SECONDS:
+                    last_keepalive_at = now
+                    yield ": keepalive\n\n"
                 await asyncio.sleep(0.25)
                 continue
 
@@ -1471,10 +1471,10 @@ async def stream_active_workflow_execution(
                         emitted_event = True
                 now = loop.time()
                 if emitted_event:
-                    last_heartbeat_at = now
-                elif now - last_heartbeat_at >= WORKFLOW_SSE_HEARTBEAT_SECONDS:
-                    last_heartbeat_at = now
-                    yield ": heartbeat\n\n"
+                    last_keepalive_at = now
+                elif now - last_keepalive_at >= WORKFLOW_SSE_KEEPALIVE_SECONDS:
+                    last_keepalive_at = now
+                    yield ": keepalive\n\n"
                 await asyncio.sleep(0.25)
                 continue
 
@@ -3768,7 +3768,7 @@ async def stream_workflow_execution_history_entry(
 
     async def event_generator():
         last_payload = ""
-        heartbeat_tick = 0
+        keepalive_tick = 0
 
         while True:
             if await request.is_disconnected():
@@ -3803,15 +3803,15 @@ async def stream_workflow_execution_history_entry(
                 update_event = {"type": "history_update", "entry": entry_payload}
                 yield f"data: {json.dumps(update_event)}\n\n"
                 last_payload = serialized_payload
-                heartbeat_tick = 0
+                keepalive_tick = 0
 
                 if history.status != "pending":
                     yield f"data: {json.dumps({'type': 'done'})}\n\n"
                     break
             else:
-                heartbeat_tick += 1
-                if heartbeat_tick >= 15:
-                    heartbeat_tick = 0
+                keepalive_tick += 1
+                if keepalive_tick >= 15:
+                    keepalive_tick = 0
                     yield ": keepalive\n\n"
 
             await asyncio.sleep(1)
@@ -4411,7 +4411,7 @@ async def execute_workflow_stream(
         with _non_blocking_thread_pool(max_workers=1) as pool:
             future = loop.run_in_executor(pool, run_executor)
             _spawn_detached_task(finalize_execution(future))
-            last_heartbeat_at = loop.time()
+            last_keepalive_at = loop.time()
             yield (
                 "data: "
                 + json.dumps(
@@ -4423,7 +4423,7 @@ async def execute_workflow_stream(
                 )
                 + "\n\n"
             )
-            last_heartbeat_at = loop.time()
+            last_keepalive_at = loop.time()
 
             while True:
                 if await request.is_disconnected():
@@ -4434,7 +4434,7 @@ async def execute_workflow_stream(
                     event = event_queue.get_nowait()
                     if event is None:
                         break
-                    last_heartbeat_at = loop.time()
+                    last_keepalive_at = loop.time()
                     if (
                         event.get("type") == "execution_complete"
                         and event.get("status") == "pending"
@@ -4497,16 +4497,16 @@ async def execute_workflow_stream(
                         cancel_event.set()
                         break
                     now = loop.time()
-                    if now - last_heartbeat_at >= WORKFLOW_SSE_HEARTBEAT_SECONDS:
-                        last_heartbeat_at = now
-                        yield ": heartbeat\n\n"
+                    if now - last_keepalive_at >= WORKFLOW_SSE_KEEPALIVE_SECONDS:
+                        last_keepalive_at = now
+                        yield ": keepalive\n\n"
                         continue
                     if future.done():
                         while not event_queue.empty():
                             event = event_queue.get_nowait()
                             if event is None:
                                 break
-                            last_heartbeat_at = loop.time()
+                            last_keepalive_at = loop.time()
                             if (
                                 event.get("type") == "execution_complete"
                                 and event.get("status") == "pending"

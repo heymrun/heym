@@ -293,7 +293,7 @@ class StreamUntilDisconnectTests(unittest.IsolatedAsyncioTestCase):
                 source(),
                 is_disconnected=AsyncMock(return_value=False),
                 cancel_event=cancel_event,
-                heartbeat_seconds=5,
+                keepalive_seconds=5,
             )
         ]
 
@@ -314,7 +314,7 @@ class StreamUntilDisconnectTests(unittest.IsolatedAsyncioTestCase):
             source(),
             is_disconnected=AsyncMock(return_value=False),
             cancel_event=Event(),
-            heartbeat_seconds=0.01,
+            keepalive_seconds=0.01,
         )
 
         self.assertEqual(await stream.__anext__(), ": ping\n\n")
@@ -335,7 +335,7 @@ class StreamUntilDisconnectTests(unittest.IsolatedAsyncioTestCase):
                 source(),
                 is_disconnected=AsyncMock(return_value=True),
                 cancel_event=cancel_event,
-                heartbeat_seconds=0.01,
+                keepalive_seconds=0.01,
                 poll_seconds=0.01,
             )
         ]

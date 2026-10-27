@@ -276,17 +276,26 @@ async function toggleServerWorkflow(server: MCPServerItem, workflowId: string): 
   }
 }
 
+function agentToast(update: MCPChatToolUpdate, wasA2A: boolean, serverName?: string): string | null {
+  const where = serverName ? ` on "${serverName}"` : "";
+  if (update.a2a_enabled !== undefined) {
+    return update.a2a_enabled ? `A2A enabled${where}` : `A2A disabled${where}`;
+  }
+  if (update.enabled === undefined) return null;
+  if (!update.enabled && wasA2A) return `Heym Agent and A2A disabled${where}`;
+  return update.enabled ? `Heym Agent enabled${where}` : `Heym Agent disabled${where}`;
+}
+
 async function updateGlobalChatTool(update: MCPChatToolUpdate): Promise<void> {
   if (!config.value) return;
   const previous = config.value.chat_tool;
   try {
     config.value.chat_tool = await mcpApi.updateChatTool(update);
-    if (update.enabled !== undefined) {
-      showToast(update.enabled ? "Heym chat tool enabled" : "Heym chat tool disabled");
-    }
+    const message = agentToast(update, previous.a2a_enabled);
+    if (message) showToast(message);
   } catch {
     config.value.chat_tool = previous;
-    showToast("Failed to update the chat tool", "error");
+    showToast("Failed to update the Heym Agent", "error");
   }
 }
 
@@ -296,18 +305,14 @@ async function updateServerChatTool(
 ): Promise<void> {
   const idx = namedServers.value.findIndex((s) => s.id === server.id);
   if (idx === -1) return;
+  const wasA2A = namedServers.value[idx].chat_tool.a2a_enabled;
   try {
     const chatTool = await mcpServersApi.updateChatTool(server.id, update);
     namedServers.value[idx] = { ...namedServers.value[idx], chat_tool: chatTool };
-    if (update.enabled !== undefined) {
-      showToast(
-        update.enabled
-          ? `Heym chat tool enabled on "${server.name}"`
-          : `Heym chat tool disabled on "${server.name}"`,
-      );
-    }
+    const message = agentToast(update, wasA2A, server.name);
+    if (message) showToast(message);
   } catch {
-    showToast("Failed to update the chat tool", "error");
+    showToast("Failed to update the Heym Agent", "error");
   }
 }
 
@@ -411,10 +416,10 @@ function addToCursor(): void {
     <div class="flex items-center justify-between mb-6">
       <div>
         <h2 class="text-2xl font-bold tracking-tight">
-          MCP Server
+          MCP / A2A
         </h2>
         <p class="text-muted-foreground mt-1">
-          Expose your workflows as MCP tools for AI assistants
+          Expose your workflows as MCP tools and the Heym Agent over MCP and A2A
         </p>
       </div>
     </div>
@@ -714,6 +719,7 @@ function addToCursor(): void {
           :chat-tool="config.chat_tool"
           :credentials="llmCredentials"
           @update="updateGlobalChatTool"
+          @copy="copyToClipboard"
         />
       </div>
 
@@ -1073,8 +1079,10 @@ function addToCursor(): void {
                 <MCPChatToolControls
                   :chat-tool="server.chat_tool"
                   :credentials="llmCredentials"
+                  :server-id="server.id"
                   compact
                   @update="updateServerChatTool(server, $event)"
+                  @copy="copyToClipboard"
                 />
               </div>
 

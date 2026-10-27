@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from "vue-router";
 
+import { DASHBOARD_TAB_ALIASES } from "@/lib/dashboardTabAliases";
 import { useAuthStore } from "@/stores/auth";
 
 function sanitizeRouterBase(raw: unknown): string {
@@ -39,6 +40,11 @@ const dashboardTabRoutes = DASHBOARD_TAB_PATHS.map((tab) => ({
   redirect: { path: "/", query: { tab } },
 }));
 
+const dashboardTabAliasRoutes = Object.entries(DASHBOARD_TAB_ALIASES).map(([alias, tab]) => ({
+  path: `/${alias}`,
+  redirect: { path: "/", query: { tab } },
+}));
+
 const router = createRouter({
   history: createWebHistory(sanitizeRouterBase(import.meta.env.BASE_URL)),
   routes: [
@@ -51,6 +57,7 @@ const router = createRouter({
       redirect: { name: "chats" },
     },
     ...dashboardTabRoutes,
+    ...dashboardTabAliasRoutes,
     {
       path: "/login",
       name: "login",

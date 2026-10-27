@@ -64,8 +64,8 @@ export interface ContextUsage {
 export interface Conversation {
   id: string
   title: string
-  /** Where the conversation started: the Chat tab, or the heym_chat MCP tool. */
-  source: 'chat' | 'mcp'
+  /** Where the conversation started: the Chat tab, the heym_chat MCP tool, or an A2A client. */
+  source: 'chat' | 'mcp' | 'a2a'
   is_pinned: boolean
   is_running: boolean
   has_unread: boolean

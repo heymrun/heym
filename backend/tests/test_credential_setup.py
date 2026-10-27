@@ -22,9 +22,9 @@ from app.services.credential_setup import (
     settle_form_step,
     wait_for_conversation_forms,
 )
+from app.services.heym_agent.settings import AgentSettings
+from app.services.heym_agent.turn import AgentTurnResult
 from app.services.mcp_chat_service import (
-    MCPChatResult,
-    MCPChatSettings,
     build_chat_mcp_tool,
     format_chat_tool_text,
     run_chat_tool,
@@ -406,25 +406,24 @@ class ChatToolFormWaitTests(unittest.IsolatedAsyncioTestCase):
         self, arguments: dict[str, Any], still_open: list[str]
     ) -> tuple[Any, AsyncMock, AsyncMock]:
         resolved = SimpleNamespace(credential=SimpleNamespace(id=uuid.uuid4()), model="gpt-5.5")
-        turn = AsyncMock(
-            return_value=MCPChatResult(
-                uuid.uuid4(), "Created it.", [], awaiting_clarification=False
-            )
-        )
+        turn = AsyncMock(return_value=AgentTurnResult(uuid.uuid4(), "Created it.", []))
         with (
             patch(
-                "app.services.mcp_chat_service.resolve_chat_llm", AsyncMock(return_value=resolved)
+                "app.services.mcp_chat_service.resolve_agent_llm", AsyncMock(return_value=resolved)
+            ),
+            patch(
+                "app.services.heym_agent.turn.resolve_agent_llm", AsyncMock(return_value=resolved)
             ),
             patch(
                 "app.services.mcp_chat_service.wait_for_conversation_forms",
                 AsyncMock(return_value=still_open),
             ) as wait,
-            patch("app.api.chats.run_mcp_chat_turn", turn),
+            patch("app.api.chats.run_agent_chat_turn", turn),
         ):
             result = await run_chat_tool(
                 AsyncMock(),
                 user_id=uuid.uuid4(),
-                settings=MCPChatSettings(enabled=True, credential_id=None, model=None),
+                settings=AgentSettings(enabled=True, credential_id=None, model=None),
                 arguments=arguments,
                 public_base_url=BASE_URL,
             )
@@ -510,12 +509,11 @@ class CredentialFormPromptTests(unittest.TestCase):
 
 
 class MCPResultTextTests(unittest.TestCase):
-    def _result(self, text: str, urls: tuple[str, ...]) -> MCPChatResult:
-        return MCPChatResult(
+    def _result(self, text: str, urls: tuple[str, ...]) -> AgentTurnResult:
+        return AgentTurnResult(
             conversation_id=uuid.uuid4(),
             text=text,
             tool_names=[REQUEST_CREDENTIAL_FORM_TOOL],
-            awaiting_clarification=False,
             credential_form_urls=urls,
         )
 

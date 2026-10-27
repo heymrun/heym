@@ -60,8 +60,11 @@ from app.services.cluster.dispatch import dispatch_workflow
 from app.services.execution_cancellation import clear_execution as clear_active_execution
 from app.services.execution_cancellation import register_execution
 from app.services.global_variables_service import get_global_variables_context
+from app.services.heym_agent import settings as agent_settings
+from app.services.heym_agent.errors import AgentError
 from app.services.hitl_service import build_default_public_base_url
 from app.services.mcp_elicitation import MCPClientChannel
+from app.services.mcp_progress import running_node_message
 from app.services.mcp_session import mcp_session_store, mcp_sse_channels
 from app.services.oauth_tokens import hash_oauth_token
 from app.services.pending_execution import (
@@ -126,6 +129,7 @@ def _server_response(
             enabled=bool(server.chat_enabled),
             credential_id=server.chat_credential_id,
             model=server.chat_model,
+            a2a_enabled=bool(server.a2a_enabled),
         ),
     )
 
@@ -358,17 +362,26 @@ async def update_server_chat_tool(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> MCPChatToolConfig:
-    """Enable/disable the `heym_chat` tool on this named server and set its model."""
+    """Turn the Heym Agent on or off on this named server, its model, and its A2A face."""
     server = await _fetch_server_for_user(db, server_id, current_user.id)
 
     provided = body.model_fields_set
+    try:
+        enabled, a2a_enabled = agent_settings.apply_switches(
+            enabled=bool(server.chat_enabled),
+            a2a_enabled=bool(server.a2a_enabled),
+            update_enabled=body.enabled,
+            update_a2a=body.a2a_enabled,
+        )
+    except AgentError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     if "credential_id" in provided:
         await validate_chat_tool_credential(db, current_user.id, body.credential_id)
         server.chat_credential_id = body.credential_id
     if "model" in provided:
         server.chat_model = body.model
-    if body.enabled is not None:
-        server.chat_enabled = body.enabled
+    server.chat_enabled = enabled
+    server.a2a_enabled = a2a_enabled
 
     await db.commit()
     await db.refresh(server)
@@ -376,6 +389,7 @@ async def update_server_chat_tool(
         enabled=server.chat_enabled,
         credential_id=server.chat_credential_id,
         model=server.chat_model,
+        a2a_enabled=server.a2a_enabled,
     )
 
 
@@ -391,7 +405,7 @@ async def list_named_server_tools(
 ) -> MCPToolsListResponse:
     user, mcp_server = server
     workflows = await _get_server_workflows(db, mcp_server.id)
-    chat_settings = await mcp_chat_service.get_server_chat_settings(db, mcp_server.id, user.id)
+    chat_settings = await agent_settings.get_server_agent_settings(db, mcp_server.id, user.id)
     return MCPToolsListResponse(tools=await build_tools_with_chat(workflows, chat_settings))
 
 
@@ -493,7 +507,7 @@ async def _dispatch_named_server_jsonrpc(
 
     if msg.method == "tools/list":
         workflows = await _get_server_workflows(db, mcp_server.id)
-        chat_settings = await mcp_chat_service.get_server_chat_settings(db, mcp_server.id, user.id)
+        chat_settings = await agent_settings.get_server_agent_settings(db, mcp_server.id, user.id)
         tools = await build_tools_with_chat(workflows, chat_settings)
         return {
             "jsonrpc": "2.0",
@@ -506,7 +520,7 @@ async def _dispatch_named_server_jsonrpc(
         arguments = msg.params.get("arguments", {})
 
         if tool_name == mcp_chat_service.MCP_CHAT_TOOL_NAME:
-            chat_settings = await mcp_chat_service.get_server_chat_settings(
+            chat_settings = await agent_settings.get_server_agent_settings(
                 db, mcp_server.id, user.id
             )
             if not chat_settings.enabled:
@@ -576,6 +590,8 @@ async def _dispatch_named_server_jsonrpc(
             trigger_source="mcp",
             actor_user_id=user.id,
         )
+        if client is not None and client.progress is not None:
+            client.progress.describe = lambda: running_node_message(execution_id, target_workflow)
         try:
             execution_result = await dispatch_workflow(
                 workflow_id=target_workflow.id,

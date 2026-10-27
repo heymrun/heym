@@ -57,7 +57,7 @@ const TABS = [
   { id: "drive", label: "Drive", icon: HardDrive },
   { id: "credentials", label: "Credentials", icon: Key },
   { id: "vectorstores", label: "Vectors", icon: Database },
-  { id: "mcp", label: "MCP", icon: Server },
+  { id: "mcp", label: "MCP / A2A", icon: Server },
   { id: "traces", label: "Traces", icon: Activity },
   { id: "alerts", label: "Alerts", icon: BellRing },
   { id: "analytics", label: "Analytics", icon: BarChart3 },

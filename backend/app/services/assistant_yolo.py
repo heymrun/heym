@@ -357,13 +357,13 @@ async def stream_until_disconnect(
     *,
     is_disconnected: Callable[[], Awaitable[bool]],
     cancel_event: Event,
-    heartbeat_seconds: float,
+    keepalive_seconds: float,
     poll_seconds: float = 0.1,
 ) -> AsyncGenerator[str, None]:
     """Forward SSE lines with keepalives, and cancel the source when the client leaves.
 
     The source runs on the request's event loop, so it may use the request's database
-    session. ``_stream_sse_with_heartbeat`` runs its source on another loop and cannot.
+    session. ``_stream_sse_with_keepalive`` runs its source on another loop and cannot.
     """
     queue: asyncio.Queue[str | Exception | None] = asyncio.Queue()
 
@@ -389,7 +389,7 @@ async def stream_until_disconnect(
     try:
         while True:
             try:
-                item = await asyncio.wait_for(queue.get(), timeout=heartbeat_seconds)
+                item = await asyncio.wait_for(queue.get(), timeout=keepalive_seconds)
             except TimeoutError:
                 if cancel_event.is_set():
                     break

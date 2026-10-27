@@ -35,7 +35,7 @@ const tabs = [
   { id: "schedules", label: "Scheduled", icon: CalendarClock },
   { id: "traces", label: "Traces", icon: Activity },
   { id: "alerts", label: "Alerts", icon: BellRing },
-  { id: "mcp", label: "MCP", icon: Server },
+  { id: "mcp", label: "MCP / A2A", icon: Server },
   { id: "chat", label: "Chat", icon: MessageCircle },
   { id: "analytics", label: "Analytics", icon: BarChart3 },
   { id: "datatable", label: "DataTable", icon: Table2 },

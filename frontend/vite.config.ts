@@ -55,6 +55,7 @@ const apiProxyOptions: ProxyOptions = {
 const proxyConfig: Record<string, ProxyOptions> = {
   "/api": apiProxyOptions,
   "/.well-known/oauth-authorization-server": apiProxyOptions,
+  "/.well-known/agent-card.json": apiProxyOptions,
   "/authorize": apiProxyOptions,
   "/token": apiProxyOptions,
   "/register": {
