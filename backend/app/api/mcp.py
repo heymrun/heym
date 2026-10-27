@@ -70,6 +70,7 @@ from app.services.execution_cancellation import (
 from app.services.global_variables_service import get_global_variables_context
 from app.services.heym_agent import settings as agent_settings
 from app.services.heym_agent.errors import AgentError
+from app.services.heym_agent.progress import AgentProgress
 from app.services.hitl_service import (
     build_default_public_base_url,
     build_public_base_url,
@@ -83,6 +84,12 @@ from app.services.mcp_elicitation import (
     is_client_response,
     negotiate_protocol_version,
     parse_elicitation_reply,
+)
+from app.services.mcp_progress import (
+    AGENT_PROGRESS_MESSAGE,
+    DEFAULT_PROGRESS_MESSAGE,
+    MCPProgress,
+    running_node_message,
 )
 from app.services.mcp_session import mcp_session_store, mcp_sse_channels
 from app.services.oauth_tokens import hash_oauth_token
@@ -186,19 +193,11 @@ def _mcp_progress_token(msg: MCPJSONRPCRequest) -> str | int | None:
     return None
 
 
-def _mcp_progress_notification(
-    progress_token: str | int,
-    sequence: int,
-) -> dict[str, Any]:
-    return {
-        "jsonrpc": "2.0",
-        "method": "notifications/progress",
-        "params": {
-            "progressToken": progress_token,
-            "progress": sequence,
-            "message": "Workflow is still running",
-        },
-    }
+def _progress_message(msg: MCPJSONRPCRequest) -> str:
+    """The first progress line: the agent's for heym_chat, the workflow's otherwise."""
+    if msg.params.get("name") == mcp_chat_service.MCP_CHAT_TOOL_NAME:
+        return AGENT_PROGRESS_MESSAGE
+    return DEFAULT_PROGRESS_MESSAGE
 
 
 def _is_mcp_tool_call_with_response(msg: MCPJSONRPCRequest) -> bool:
@@ -212,17 +211,14 @@ def _format_sse_jsonrpc_message(payload: dict[str, Any]) -> str:
 async def _run_mcp_operation_with_progress(
     operation: Callable[[], Awaitable[dict[str, Any]]],
     *,
-    progress_token: str | int | None,
-    send_progress: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
-    send_heartbeat: Callable[[], Awaitable[None]] | None = None,
+    progress: MCPProgress,
+    send_keepalive: Callable[[], Awaitable[None]] | None = None,
 ) -> dict[str, Any]:
     operation_task = asyncio.create_task(operation())
-    sequence = 0
 
-    if send_heartbeat is not None:
-        await send_heartbeat()
-    if progress_token is not None and send_progress is not None:
-        await send_progress(_mcp_progress_notification(progress_token, sequence))
+    if send_keepalive is not None:
+        await send_keepalive()
+    await progress.report()
 
     try:
         while True:
@@ -232,11 +228,9 @@ async def _run_mcp_operation_with_progress(
                     timeout=_MCP_PROGRESS_INTERVAL_SECONDS,
                 )
             except TimeoutError:
-                sequence += 1
-                if send_heartbeat is not None:
-                    await send_heartbeat()
-                if progress_token is not None and send_progress is not None:
-                    await send_progress(_mcp_progress_notification(progress_token, sequence))
+                if send_keepalive is not None:
+                    await send_keepalive()
+                await progress.report()
     finally:
         if not operation_task.done():
             operation_task.cancel()
@@ -251,13 +245,15 @@ async def _send_legacy_sse_jsonrpc_response(
     async def send_progress(payload: dict[str, Any]) -> None:
         await mcp_sse_channels.send(session_token, json.dumps(payload, ensure_ascii=False))
 
-    client = MCPClientChannel(mcp_sse_channels.elicitation_modes(session_token), send_progress)
+    progress = MCPProgress(_mcp_progress_token(msg), send_progress, message=_progress_message(msg))
+    client = MCPClientChannel(
+        mcp_sse_channels.elicitation_modes(session_token), send_progress, progress=progress
+    )
     async with async_session_maker() as bg_db:
         try:
             response = await _run_mcp_operation_with_progress(
                 lambda: operation_factory(bg_db, client),
-                progress_token=_mcp_progress_token(msg),
-                send_progress=send_progress,
+                progress=progress,
             )
             await bg_db.commit()
         except Exception as exc:
@@ -296,19 +292,21 @@ def _stream_mcp_jsonrpc_response(
         async def send_progress(payload: dict[str, Any]) -> None:
             await queue.put(_format_sse_jsonrpc_message(payload))
 
-        async def send_heartbeat() -> None:
+        async def send_keepalive() -> None:
             await queue.put(_mcp_keepalive_comment())
 
+        progress = MCPProgress(
+            _mcp_progress_token(msg), send_progress, message=_progress_message(msg)
+        )
         # Requests to the client, such as an elicitation, travel on this call's stream.
-        client = MCPClientChannel(client_elicitation_modes, send_progress)
+        client = MCPClientChannel(client_elicitation_modes, send_progress, progress=progress)
 
         async def worker() -> None:
             try:
                 response = await _run_mcp_operation_with_progress(
                     lambda: operation(client),
-                    progress_token=_mcp_progress_token(msg),
-                    send_progress=send_progress,
-                    send_heartbeat=send_heartbeat,
+                    progress=progress,
+                    send_keepalive=send_keepalive,
                 )
             except Exception as exc:
                 if msg.id is None:
@@ -640,6 +638,12 @@ async def dispatch_chat_tool_call(
         if client and client.elicitation_modes
         else "none",
     )
+    progress = client.progress if client is not None else None
+
+    async def on_progress(step: AgentProgress) -> None:
+        if progress is not None:
+            await progress.report(step.message)
+
     try:
         result = await mcp_chat_service.run_chat_tool(
             db,
@@ -648,6 +652,7 @@ async def dispatch_chat_tool_call(
             arguments=arguments,
             public_base_url=build_public_base_url(request),
             client=client,
+            on_progress=on_progress,
         )
     except AgentError as exc:
         return _mcp_tool_result_jsonrpc_response(msg_id, str(exc), is_error=True)
@@ -1416,6 +1421,8 @@ async def _dispatch_mcp_jsonrpc(
             trigger_source="mcp",
             actor_user_id=mcp_user.id,
         )
+        if client is not None and client.progress is not None:
+            client.progress.describe = lambda: running_node_message(execution_id, target_workflow)
         try:
             execution_result = await dispatch_workflow(
                 workflow_id=target_workflow.id,

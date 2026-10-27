@@ -11,13 +11,16 @@ never used for secrets; the spec forbids it.
 import secrets
 import uuid
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
 
 import jwt
 from jwt import InvalidTokenError
 
 from app.config import settings
+
+if TYPE_CHECKING:
+    from app.services.mcp_progress import MCPProgress
 
 LATEST_PROTOCOL_VERSION = "2025-11-25"
 FALLBACK_PROTOCOL_VERSION = "2024-11-05"
@@ -107,6 +110,8 @@ class MCPClientChannel:
 
     elicitation_modes: frozenset[str]
     send: Callable[[dict[str, Any]], Awaitable[None]]
+    # Progress notifications for this call; set by the transports that can deliver them.
+    progress: "MCPProgress | None" = field(default=None, compare=False)
 
     @property
     def supports_url_elicitation(self) -> bool:

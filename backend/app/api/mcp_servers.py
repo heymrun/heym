@@ -64,6 +64,7 @@ from app.services.heym_agent import settings as agent_settings
 from app.services.heym_agent.errors import AgentError
 from app.services.hitl_service import build_default_public_base_url
 from app.services.mcp_elicitation import MCPClientChannel
+from app.services.mcp_progress import running_node_message
 from app.services.mcp_session import mcp_session_store, mcp_sse_channels
 from app.services.oauth_tokens import hash_oauth_token
 from app.services.pending_execution import (
@@ -589,6 +590,8 @@ async def _dispatch_named_server_jsonrpc(
             trigger_source="mcp",
             actor_user_id=user.id,
         )
+        if client is not None and client.progress is not None:
+            client.progress.describe = lambda: running_node_message(execution_id, target_workflow)
         try:
             execution_result = await dispatch_workflow(
                 workflow_id=target_workflow.id,
