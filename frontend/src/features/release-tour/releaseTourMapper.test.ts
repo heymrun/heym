@@ -385,7 +385,6 @@ describe("shipped release registry", () => {
       "chat-evals",
       "concurrency-limit",
       "canvas-collaboration",
-      "node-ai-edit",
     ]);
   });
 

@@ -17,6 +17,53 @@ import type { ReleaseEntry } from "@/features/release-tour/releaseTour.types";
  */
 export const RELEASE_REGISTRY: ReleaseEntry[] = [
   {
+    releaseId: "2026.23",
+    publishedAt: new Date("2026-10-27T12:00:00Z"),
+    headline: "Reach the Heym Agent from other agents over A2A",
+    releaseTour: {
+      label: "New in Heym",
+      introTitle: "New in this release",
+      introDescription:
+        "A quick look at what changed since your last update. Takes about a minute.",
+      tourEnabled: false,
+      sectionOrder: ["a2a-agent"],
+    },
+    sections: [
+      {
+        id: "a2a-agent",
+        title: "The Heym Agent, over MCP and A2A",
+        publishedAt: new Date("2026-10-27T12:00:00Z"),
+        blocks: [
+          {
+            type: "prose",
+            markdown:
+              "The **MCP** tab is now **MCP / A2A**, and the Heym Chat tool is the **Heym Agent**: the same engine as the Chat tab, which MCP clients call as `heym_chat`. Tick **Enable A2A** on the global server or on any named server, and other agents can send it tasks over the Agent2Agent protocol (A2A 1.0). The card shows the Agent Card URL and the JSON-RPC endpoint to copy.",
+          },
+          {
+            type: "prose",
+            markdown:
+              "A task streams what the agent is doing, step by step, and ends with the reply and links to every workflow or eval suite it saved. A clarifying question pauses the task as **input required**; a credential the agent needs opens on Heym's own page and pauses it as **auth required**, so no secret passes through the other agent. Every task is a conversation in the Chat tab, and MCP clients now see the agent's real steps as progress too.",
+          },
+        ],
+        tour: {
+          description:
+            "Tick Enable A2A and other agents can delegate work to the Heym Agent, with the same abilities as Chat.",
+          useCases: [
+            "Let a company assistant built on another platform build and run Heym workflows",
+            "Hand an agent's research results to Heym to turn into a scheduled workflow",
+            "Follow a long build from another agent with streamed progress",
+          ],
+          tourVisual: "a2a-agent",
+          docTarget: {
+            categoryId: "reference",
+            slug: "a2a",
+            title: "A2A",
+          },
+        },
+      },
+    ],
+  },
+  {
     releaseId: "2026.22",
     publishedAt: new Date("2026-10-26T12:00:00Z"),
     headline:
@@ -155,53 +202,6 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
             categoryId: "reference",
             slug: "canvas-collaboration",
             title: "Canvas Collaboration",
-          },
-        },
-      },
-    ],
-  },
-  {
-    releaseId: "2026.21",
-    publishedAt: new Date("2026-10-22T12:00:00Z"),
-    headline: "Change or fix one node with AI",
-    releaseTour: {
-      label: "New in Heym",
-      introTitle: "New in this release",
-      introDescription:
-        "A quick look at what changed since your last update. Takes about a minute.",
-      tourEnabled: true,
-      sectionOrder: ["node-ai-edit"],
-    },
-    sections: [
-      {
-        id: "node-ai-edit",
-        title: "Change or fix one node with AI",
-        publishedAt: new Date("2026-10-22T12:00:00Z"),
-        blocks: [
-          {
-            type: "prose",
-            markdown:
-              "Hover a node on the canvas and click **AI** above it. The AI Assistant opens on that node and offers **Change this node as ...**, **Fix error in this node ...** and **Other**. The assistant changes only that node: the other nodes, the connections and the layout stay as they are.",
-          },
-          {
-            type: "prose",
-            markdown:
-              "The panel shows which node it is changing. Once the node has run, it reads **Modifying Node: (Has Node Output)** and shows the last status and error, and the assistant uses that output, so a fix starts from what went wrong. Close the node focus to edit the whole workflow again.",
-          },
-        ],
-        tour: {
-          description:
-            "Click AI above a node to change or fix that node only. The rest of the workflow stays as it is.",
-          useCases: [
-            "Fix the node that failed in the last run without touching the others",
-            "Change what a condition or an HTTP request checks in one sentence",
-            "Ask about one node in Ask mode",
-          ],
-          tourVisual: "node-ai-edit",
-          docTarget: {
-            categoryId: "reference",
-            slug: "ai-assistant",
-            title: "AI Assistant",
           },
         },
       },
