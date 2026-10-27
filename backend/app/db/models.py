@@ -129,6 +129,8 @@ class User(Base):
         nullable=True,
     )
     mcp_chat_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # Makes the global server's Heym Agent reachable over A2A too. Needs mcp_chat_enabled.
+    mcp_a2a_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -205,6 +207,8 @@ class MCPServer(Base):
         nullable=True,
     )
     chat_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # Makes this server's Heym Agent reachable over A2A too. Needs chat_enabled.
+    a2a_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -2160,7 +2164,8 @@ class DashboardConversation(Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     title: Mapped[str] = mapped_column(String(255), nullable=False, default="New Chat")
-    # Where the conversation originated: "chat" (the Chat tab) or "mcp" (the heym_chat MCP tool).
+    # Where the conversation originated: "chat" (the Chat tab), "mcp" (the heym_chat MCP
+    # tool) or "a2a" (an A2A client).
     source: Mapped[str] = mapped_column(String(20), nullable=False, default="chat")
     is_pinned: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_running: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -2204,11 +2209,50 @@ class DashboardMessage(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     tool_calls: Mapped[list | None] = mapped_column(JSONB, nullable=True, default=None)
+    # Set on the messages of the turns an A2A task ran, so the task can return its history.
+    a2a_task_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("a2a_tasks.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
     conversation: Mapped["DashboardConversation"] = relationship(
         "DashboardConversation",
         back_populates="messages",
         foreign_keys=[conversation_id],
+    )
+
+
+class A2ATask(Base):
+    """One A2A task: a message an A2A client sent the Heym Agent, and the turns it ran."""
+
+    __tablename__ = "a2a_tasks"
+    __table_args__ = (
+        Index("ix_a2a_tasks_user_server_updated", "user_id", "mcp_server_id", "updated_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # Null for the global server.
+    mcp_server_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("mcp_servers.id", ondelete="CASCADE"), nullable=True
+    )
+    context_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("dashboard_conversations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # The ProtoJSON state name, for example TASK_STATE_WORKING.
+    state: Mapped[str] = mapped_column(String(32), nullable=False)
+    status_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    artifacts: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
 
