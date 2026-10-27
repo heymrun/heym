@@ -13,16 +13,21 @@ user can read, continue, and audit everything an MCP client did.
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.schemas import MCPTool, MCPToolInputProperty, MCPToolInputSchema
 from app.services.credential_setup import wait_for_conversation_forms
 from app.services.heym_agent.errors import AgentError
-from app.services.heym_agent.links import WorkflowLink
 from app.services.heym_agent.profile import MCP_TOOL_DESCRIPTION
+from app.services.heym_agent.progress import ProgressCallback
 from app.services.heym_agent.settings import AgentSettings, resolve_agent_llm
+from app.services.heym_agent.turn import (
+    AgentOutcome,
+    AgentTurnRequest,
+    AgentTurnResult,
+    run_agent_turn,
+)
 from app.services.mcp_elicitation import MCPClientChannel
 
 MCP_CHAT_TOOL_NAME = "heym_chat"
@@ -30,22 +35,6 @@ MCP_CHAT_TOOL_NAME = "heym_chat"
 MCP_CHAT_TOOL_DESCRIPTION = MCP_TOOL_DESCRIPTION
 
 _MAX_MCP_CHAT_MESSAGE_LENGTH = 20000
-
-
-@dataclass(frozen=True)
-class MCPChatResult:
-    conversation_id: uuid.UUID
-    text: str
-    tool_names: list[str]
-    awaiting_clarification: bool
-    # True when the turn ended with build mode's finish: the latest test run passed.
-    verified: bool = False
-    # Workflows this turn created or saved that the user can still open.
-    workflow_links: tuple[WorkflowLink, ...] = ()
-    # Eval suites this turn created or changed that the user still owns.
-    eval_suite_links: tuple[WorkflowLink, ...] = ()
-    # Credential form links the user still has to open in a browser.
-    credential_form_urls: tuple[str, ...] = ()
 
 
 def build_chat_mcp_tool() -> MCPTool:
@@ -116,40 +105,46 @@ async def run_chat_tool(
     arguments: dict,
     public_base_url: str,
     client: MCPClientChannel | None = None,
-) -> MCPChatResult:
-    """Run one dashboard-chat turn on behalf of an MCP client.
+    on_progress: ProgressCallback | None = None,
+) -> AgentTurnResult:
+    """Run one Heym Agent turn on behalf of an MCP client.
 
     `db` is only used to read configuration. The turn itself runs on its own
     short-lived sessions so it never interleaves with the caller's transaction.
     """
-    from app.api.chats import run_mcp_chat_turn
+    from app.api.chats import MCP_CONVERSATION_SOURCE
 
     message, conversation_id = normalize_chat_arguments(arguments)
-    resolved = await resolve_agent_llm(db, user_id, settings)
     if conversation_id is not None and wants_form_wait(arguments):
+        # Fail on a broken configuration before waiting minutes for a form.
+        await resolve_agent_llm(db, user_id, settings)
         still_open = await wait_for_conversation_forms(
             user_id=user_id, conversation_id=conversation_id, public_base_url=public_base_url
         )
         if still_open:
-            return MCPChatResult(
+            return AgentTurnResult(
                 conversation_id=conversation_id,
                 text="The user has not saved the credential form yet.",
                 tool_names=[],
-                awaiting_clarification=False,
+                outcome=AgentOutcome.AUTH_REQUIRED,
                 credential_form_urls=tuple(still_open),
             )
-    return await run_mcp_chat_turn(
-        user_id=user_id,
-        message=message,
-        conversation_id=conversation_id,
-        credential_id=resolved.credential.id,
-        model=resolved.model,
-        public_base_url=public_base_url,
-        client=client,
+    return await run_agent_turn(
+        AgentTurnRequest(
+            user_id=user_id,
+            settings=settings,
+            message=message,
+            conversation_id=conversation_id,
+            public_base_url=public_base_url,
+            source=MCP_CONVERSATION_SOURCE,
+            client=client,
+        ),
+        on_progress=on_progress,
+        db=db,
     )
 
 
-def format_chat_tool_text(result: MCPChatResult) -> str:
+def format_chat_tool_text(result: AgentTurnResult) -> str:
     """Render a chat result as the text block an MCP client reads."""
     text = result.text.strip()
     lines = [text or "(The assistant returned no text.)"]
@@ -184,7 +179,7 @@ def format_chat_tool_text(result: MCPChatResult) -> str:
         lines.append(f"heym actions: {', '.join(result.tool_names)}")
     if result.verified:
         lines.append("Verified: the latest test run of the saved workflow passed.")
-    if result.awaiting_clarification:
+    if result.outcome is AgentOutcome.INPUT_REQUIRED:
         lines.append(
             "The assistant is waiting for answers to its clarifying questions. "
             "Reply with the answers using the same conversation_id."

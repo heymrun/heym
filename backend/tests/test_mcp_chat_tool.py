@@ -4,7 +4,7 @@ import unittest
 import uuid
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 from app.api.mcp import (
     build_tools_with_chat,
@@ -19,8 +19,8 @@ from app.services.chat_eval_mode import EVAL_TOOL_NAMES
 from app.services.heym_agent import settings as agent_settings
 from app.services.heym_agent.errors import AgentError
 from app.services.heym_agent.settings import AgentSettings, resolve_agent_llm
+from app.services.heym_agent.turn import AgentOutcome, AgentTurnResult
 from app.services.mcp_chat_service import (
-    MCPChatResult,
     build_chat_mcp_tool,
     format_chat_tool_text,
     normalize_chat_arguments,
@@ -250,11 +250,10 @@ class ChatToolResultFormattingTests(unittest.TestCase):
     def test_result_includes_conversation_id_for_follow_ups(self) -> None:
         conversation_id = uuid.uuid4()
         text = format_chat_tool_text(
-            MCPChatResult(
+            AgentTurnResult(
                 conversation_id=conversation_id,
                 text="Created the workflow.",
                 tool_names=["create_workflow"],
-                awaiting_clarification=False,
             )
         )
 
@@ -265,11 +264,11 @@ class ChatToolResultFormattingTests(unittest.TestCase):
 
     def test_clarification_pause_is_announced(self) -> None:
         text = format_chat_tool_text(
-            MCPChatResult(
+            AgentTurnResult(
                 conversation_id=uuid.uuid4(),
                 text="Which channel?",
                 tool_names=[],
-                awaiting_clarification=True,
+                outcome=AgentOutcome.INPUT_REQUIRED,
             )
         )
 
@@ -298,11 +297,10 @@ class ChatToolDispatchTests(unittest.IsolatedAsyncioTestCase):
     async def test_successful_call_returns_text_content(self) -> None:
         conversation_id = uuid.uuid4()
         run_chat_tool = AsyncMock(
-            return_value=MCPChatResult(
+            return_value=AgentTurnResult(
                 conversation_id=conversation_id,
                 text="12 runs today.",
                 tool_names=["get_analytics_stats"],
-                awaiting_clarification=False,
             )
         )
 
@@ -318,11 +316,10 @@ class ChatToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         user = _make_user()
         settings = AgentSettings(enabled=True, credential_id=credential.id, model="auto")
         reply_conversation_id = uuid.uuid4()
-        result = MCPChatResult(
+        result = AgentTurnResult(
             conversation_id=reply_conversation_id,
             text="12 runs today.",
             tool_names=["get_analytics_stats"],
-            awaiting_clarification=False,
         )
 
         for conversation_id in (None, reply_conversation_id):
@@ -337,7 +334,7 @@ class ChatToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                         f"{MODULE}.get_accessible_credential", AsyncMock(return_value=credential)
                     ) as get_credential,
                     patch(
-                        "app.api.chats.run_mcp_chat_turn", AsyncMock(return_value=result)
+                        "app.api.chats.run_agent_chat_turn", AsyncMock(return_value=result)
                     ) as run_turn,
                     patch("app.api.mcp.build_public_base_url", return_value="https://heym.test"),
                 ):
@@ -362,6 +359,9 @@ class ChatToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                     model="auto",
                     public_base_url="https://heym.test",
                     client=None,
+                    source="mcp",
+                    on_event=ANY,
+                    a2a_task_id=None,
                 )
 
     async def test_config_error_becomes_an_error_result_not_a_500(self) -> None:
@@ -483,20 +483,20 @@ class MCPChatTurnPersistenceTests(unittest.IsolatedAsyncioTestCase):
     """The turn runner must record MCP traffic in the Chat tab history."""
 
     async def test_new_conversation_is_tagged_as_mcp(self) -> None:
-        from app.api.chats import MCP_CONVERSATION_SOURCE, _get_or_create_mcp_conversation
+        from app.api.chats import MCP_CONVERSATION_SOURCE, _get_or_create_agent_conversation
 
         added: list = []
         db = AsyncMock()
         db.add = MagicMock(side_effect=added.append)
 
-        conversation, is_new = await _get_or_create_mcp_conversation(db, uuid.uuid4(), None)
+        conversation, is_new = await _get_or_create_agent_conversation(db, uuid.uuid4(), None)
 
         self.assertTrue(is_new)
         self.assertEqual(conversation.source, MCP_CONVERSATION_SOURCE)
         self.assertEqual(added, [conversation])
 
     async def test_continuing_a_foreign_conversation_is_refused(self) -> None:
-        from app.api.chats import _get_or_create_mcp_conversation
+        from app.api.chats import _get_or_create_agent_conversation
 
         db = AsyncMock()
         db.execute = AsyncMock(
@@ -504,10 +504,10 @@ class MCPChatTurnPersistenceTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with self.assertRaises(AgentError):
-            await _get_or_create_mcp_conversation(db, uuid.uuid4(), uuid.uuid4())
+            await _get_or_create_agent_conversation(db, uuid.uuid4(), uuid.uuid4())
 
     async def test_existing_conversation_is_reused(self) -> None:
-        from app.api.chats import _get_or_create_mcp_conversation
+        from app.api.chats import _get_or_create_agent_conversation
 
         conversation = SimpleNamespace(
             id=uuid.uuid4(),
@@ -520,7 +520,9 @@ class MCPChatTurnPersistenceTests(unittest.IsolatedAsyncioTestCase):
             return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=conversation))
         )
 
-        resolved, is_new = await _get_or_create_mcp_conversation(db, uuid.uuid4(), conversation.id)
+        resolved, is_new = await _get_or_create_agent_conversation(
+            db, uuid.uuid4(), conversation.id
+        )
 
         self.assertFalse(is_new)
         self.assertIs(resolved, conversation)

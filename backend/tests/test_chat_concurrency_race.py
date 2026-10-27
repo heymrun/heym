@@ -2,7 +2,7 @@
 
 Covers Issue #684:
 Ensures Dashboard Chat run claims (normal chat POST messages, queued messages,
-and MCP run_mcp_chat_turn) take row locks with FOR UPDATE on the first load,
+and MCP run_agent_chat_turn) take row locks with FOR UPDATE on the first load,
 preventing duplicate background chat tasks or duplicate run starts.
 """
 
@@ -21,7 +21,7 @@ from app.api.chats import (
     _chat_tasks,
     _dequeue_next_turn,
     _process_chat,
-    run_mcp_chat_turn,
+    run_agent_chat_turn,
     send_message,
 )
 from app.db.models import (
@@ -178,7 +178,7 @@ class DashboardChatConcurrencyRaceTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(conv.is_running)
 
     async def test_concurrent_send_message_and_mcp_chat_turn(self) -> None:
-        """Prove that concurrent send_message and run_mcp_chat_turn for the same
+        """Prove that concurrent send_message and run_agent_chat_turn for the same
 
         conversation cannot both start; one claims and the other either queues
         or raises AgentError.
@@ -224,7 +224,7 @@ class DashboardChatConcurrencyRaceTests(unittest.IsolatedAsyncioTestCase):
                     current_user=self.user,
                     db=s1,
                 )
-                t2 = run_mcp_chat_turn(
+                t2 = run_agent_chat_turn(
                     user_id=self.user_id,
                     message="MCP message",
                     conversation_id=self.conv_id,
@@ -245,7 +245,7 @@ class DashboardChatConcurrencyRaceTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(res2.text, "MCP reply")
 
     async def test_concurrent_mcp_chat_turns_rejects_duplicate(self) -> None:
-        """Prove that two concurrent run_mcp_chat_turn calls for the same conversation
+        """Prove that two concurrent run_agent_chat_turn calls for the same conversation
 
         cannot both claim; exactly one runs and the other raises AgentError.
         """
@@ -273,7 +273,7 @@ class DashboardChatConcurrencyRaceTests(unittest.IsolatedAsyncioTestCase):
             return ChatTurnResult(paused_for_clarification=False, assistant_message_id=msg_id)
 
         with patch("app.api.chats._run_chat_turn", side_effect=_dummy_run_chat_turn):
-            t1 = run_mcp_chat_turn(
+            t1 = run_agent_chat_turn(
                 user_id=self.user_id,
                 message="Turn 1",
                 conversation_id=self.conv_id,
@@ -281,7 +281,7 @@ class DashboardChatConcurrencyRaceTests(unittest.IsolatedAsyncioTestCase):
                 model="gpt-4o",
                 public_base_url="http://localhost:10105",
             )
-            t2 = run_mcp_chat_turn(
+            t2 = run_agent_chat_turn(
                 user_id=self.user_id,
                 message="Turn 2",
                 conversation_id=self.conv_id,
