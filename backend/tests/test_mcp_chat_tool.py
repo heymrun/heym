@@ -16,17 +16,17 @@ from app.db.models import LLM_CREDENTIAL_TYPES, CredentialType
 from app.models.schemas import MCPChatToolUpdate
 from app.services import mcp_chat_service
 from app.services.chat_eval_mode import EVAL_TOOL_NAMES
+from app.services.heym_agent import settings as agent_settings
+from app.services.heym_agent.errors import AgentError
+from app.services.heym_agent.settings import AgentSettings, resolve_agent_llm
 from app.services.mcp_chat_service import (
-    MCPChatError,
     MCPChatResult,
-    MCPChatSettings,
     build_chat_mcp_tool,
     format_chat_tool_text,
     normalize_chat_arguments,
-    resolve_chat_llm,
 )
 
-MODULE = "app.services.mcp_chat_service"
+MODULE = "app.services.heym_agent.settings"
 
 
 def _make_workflow(name: str = "My Workflow") -> SimpleNamespace:
@@ -46,6 +46,7 @@ def _make_user(**overrides: object) -> SimpleNamespace:
         "mcp_chat_enabled": False,
         "mcp_chat_credential_id": None,
         "mcp_chat_model": None,
+        "mcp_a2a_enabled": False,
         "preferred_credential_id": None,
         "preferred_model": None,
     }
@@ -59,7 +60,7 @@ def _make_credential(credential_type: CredentialType = CredentialType.openai) ->
 
 class ChatToolExposureTests(unittest.IsolatedAsyncioTestCase):
     async def test_chat_tool_is_absent_when_disabled(self) -> None:
-        settings = MCPChatSettings(enabled=False, credential_id=None, model=None)
+        settings = AgentSettings(enabled=False, credential_id=None, model=None)
 
         with patch(
             "app.api.mcp.workflow_to_mcp_tool", side_effect=lambda w: SimpleNamespace(name=w.name)
@@ -69,7 +70,7 @@ class ChatToolExposureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([t.name for t in tools], ["My Workflow"])
 
     async def test_chat_tool_is_appended_when_enabled(self) -> None:
-        settings = MCPChatSettings(enabled=True, credential_id=uuid.uuid4(), model="gpt-5")
+        settings = AgentSettings(enabled=True, credential_id=uuid.uuid4(), model="gpt-5")
 
         with patch(
             "app.api.mcp.workflow_to_mcp_tool", side_effect=lambda w: SimpleNamespace(name=w.name)
@@ -83,7 +84,7 @@ class ChatToolExposureTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_eval_tools_stay_inside_heym_chat(self) -> None:
         """The global server and named servers share build_tools_with_chat."""
-        settings = MCPChatSettings(enabled=True, credential_id=uuid.uuid4(), model="gpt-5")
+        settings = AgentSettings(enabled=True, credential_id=uuid.uuid4(), model="gpt-5")
 
         with patch(
             "app.api.mcp.workflow_to_mcp_tool", side_effect=lambda w: SimpleNamespace(name=w.name)
@@ -115,7 +116,7 @@ class ChatToolSettingsLoadingTests(unittest.IsolatedAsyncioTestCase):
             return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=user))
         )
 
-        settings = await mcp_chat_service.get_global_chat_settings(db, user.id)
+        settings = await agent_settings.get_global_agent_settings(db, user.id)
 
         self.assertTrue(settings.enabled)
         self.assertEqual(settings.credential_id, credential_id)
@@ -127,26 +128,26 @@ class ChatToolSettingsLoadingTests(unittest.IsolatedAsyncioTestCase):
             return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None))
         )
 
-        settings = await mcp_chat_service.get_server_chat_settings(db, uuid.uuid4(), uuid.uuid4())
+        settings = await agent_settings.get_server_agent_settings(db, uuid.uuid4(), uuid.uuid4())
 
         self.assertFalse(settings.enabled)
 
 
 class ChatLLMResolutionTests(unittest.IsolatedAsyncioTestCase):
     async def _resolve(
-        self, user: SimpleNamespace, settings: MCPChatSettings, credential: object
+        self, user: SimpleNamespace, settings: AgentSettings, credential: object
     ) -> object:
         db = AsyncMock()
         with (
             patch(f"{MODULE}.load_user", AsyncMock(return_value=user)),
             patch(f"{MODULE}.get_accessible_credential", AsyncMock(return_value=credential)),
         ):
-            return await resolve_chat_llm(db, user.id, settings)
+            return await resolve_agent_llm(db, user.id, settings)
 
     async def test_surface_selection_wins(self) -> None:
         credential = _make_credential()
         user = _make_user(preferred_credential_id=uuid.uuid4(), preferred_model="gpt-4o")
-        settings = MCPChatSettings(enabled=True, credential_id=credential.id, model="gpt-5")
+        settings = AgentSettings(enabled=True, credential_id=credential.id, model="gpt-5")
 
         resolved = await self._resolve(user, settings, credential)
 
@@ -156,7 +157,7 @@ class ChatLLMResolutionTests(unittest.IsolatedAsyncioTestCase):
     async def test_account_preference_fills_in_when_surface_is_unset(self) -> None:
         credential = _make_credential()
         user = _make_user(preferred_credential_id=credential.id, preferred_model="gpt-4o")
-        settings = MCPChatSettings(enabled=True, credential_id=None, model=None)
+        settings = AgentSettings(enabled=True, credential_id=None, model=None)
 
         resolved = await self._resolve(user, settings, credential)
 
@@ -168,7 +169,7 @@ class ChatLLMResolutionTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(credential_type=credential_type):
                 credential = _make_credential(credential_type)
                 model = "auto" if credential_type == CredentialType.model_router else "test-model"
-                settings = MCPChatSettings(enabled=True, credential_id=credential.id, model=model)
+                settings = AgentSettings(enabled=True, credential_id=credential.id, model=model)
 
                 resolved = await self._resolve(_make_user(), settings, credential)
 
@@ -178,7 +179,7 @@ class ChatLLMResolutionTests(unittest.IsolatedAsyncioTestCase):
     async def test_account_preference_can_select_a_model_router(self) -> None:
         credential = _make_credential(CredentialType.model_router)
         user = _make_user(preferred_credential_id=credential.id, preferred_model="auto")
-        settings = MCPChatSettings(enabled=True, credential_id=None, model=None)
+        settings = AgentSettings(enabled=True, credential_id=None, model=None)
 
         resolved = await self._resolve(user, settings, credential)
 
@@ -188,18 +189,18 @@ class ChatLLMResolutionTests(unittest.IsolatedAsyncioTestCase):
     async def test_preferred_model_is_not_reused_for_a_different_credential(self) -> None:
         credential = _make_credential()
         user = _make_user(preferred_credential_id=uuid.uuid4(), preferred_model="gpt-4o")
-        settings = MCPChatSettings(enabled=True, credential_id=credential.id, model=None)
+        settings = AgentSettings(enabled=True, credential_id=credential.id, model=None)
 
-        with self.assertRaises(MCPChatError) as ctx:
+        with self.assertRaises(AgentError) as ctx:
             await self._resolve(user, settings, credential)
 
         self.assertIn("No model is configured", str(ctx.exception))
 
     async def test_missing_credential_raises(self) -> None:
         user = _make_user()
-        settings = MCPChatSettings(enabled=True, credential_id=None, model=None)
+        settings = AgentSettings(enabled=True, credential_id=None, model=None)
 
-        with self.assertRaises(MCPChatError) as ctx:
+        with self.assertRaises(AgentError) as ctx:
             await self._resolve(user, settings, None)
 
         self.assertIn("No LLM credential is configured", str(ctx.exception))
@@ -207,9 +208,9 @@ class ChatLLMResolutionTests(unittest.IsolatedAsyncioTestCase):
     async def test_non_llm_credential_is_rejected(self) -> None:
         credential = _make_credential(CredentialType.slack)
         user = _make_user()
-        settings = MCPChatSettings(enabled=True, credential_id=credential.id, model="gpt-5")
+        settings = AgentSettings(enabled=True, credential_id=credential.id, model="gpt-5")
 
-        with self.assertRaises(MCPChatError) as ctx:
+        with self.assertRaises(AgentError) as ctx:
             await self._resolve(user, settings, credential)
 
         self.assertIn("not an LLM credential", str(ctx.exception))
@@ -217,9 +218,9 @@ class ChatLLMResolutionTests(unittest.IsolatedAsyncioTestCase):
 
 class ChatToolArgumentTests(unittest.TestCase):
     def test_message_is_required(self) -> None:
-        with self.assertRaises(MCPChatError):
+        with self.assertRaises(AgentError):
             normalize_chat_arguments({})
-        with self.assertRaises(MCPChatError):
+        with self.assertRaises(AgentError):
             normalize_chat_arguments({"message": "   "})
 
     def test_conversation_id_is_optional_and_parsed(self) -> None:
@@ -237,11 +238,11 @@ class ChatToolArgumentTests(unittest.TestCase):
         self.assertIsNone(parsed)
 
     def test_invalid_conversation_id_is_rejected(self) -> None:
-        with self.assertRaises(MCPChatError):
+        with self.assertRaises(AgentError):
             normalize_chat_arguments({"message": "hi", "conversation_id": "not-a-uuid"})
 
     def test_overlong_message_is_rejected(self) -> None:
-        with self.assertRaises(MCPChatError):
+        with self.assertRaises(AgentError):
             normalize_chat_arguments({"message": "x" * 20001})
 
 
@@ -278,7 +279,7 @@ class ChatToolResultFormattingTests(unittest.TestCase):
 class ChatToolDispatchTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.request = MagicMock()
-        self.settings = MCPChatSettings(enabled=True, credential_id=uuid.uuid4(), model="gpt-5")
+        self.settings = AgentSettings(enabled=True, credential_id=uuid.uuid4(), model="gpt-5")
 
     async def _dispatch(self, run_chat_tool: AsyncMock) -> dict:
         with (
@@ -315,7 +316,7 @@ class ChatToolDispatchTests(unittest.IsolatedAsyncioTestCase):
     async def test_model_router_dispatch_reaches_the_chat_engine(self) -> None:
         credential = _make_credential(CredentialType.model_router)
         user = _make_user()
-        settings = MCPChatSettings(enabled=True, credential_id=credential.id, model="auto")
+        settings = AgentSettings(enabled=True, credential_id=credential.id, model="auto")
         reply_conversation_id = uuid.uuid4()
         result = MCPChatResult(
             conversation_id=reply_conversation_id,
@@ -364,7 +365,7 @@ class ChatToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                 )
 
     async def test_config_error_becomes_an_error_result_not_a_500(self) -> None:
-        run_chat_tool = AsyncMock(side_effect=MCPChatError("No model is configured."))
+        run_chat_tool = AsyncMock(side_effect=AgentError("No model is configured."))
 
         response = await self._dispatch(run_chat_tool)
 
@@ -502,7 +503,7 @@ class MCPChatTurnPersistenceTests(unittest.IsolatedAsyncioTestCase):
             return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None))
         )
 
-        with self.assertRaises(MCPChatError):
+        with self.assertRaises(AgentError):
             await _get_or_create_mcp_conversation(db, uuid.uuid4(), uuid.uuid4())
 
     async def test_existing_conversation_is_reused(self) -> None:
@@ -525,11 +526,11 @@ class MCPChatTurnPersistenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(resolved, conversation)
 
     def test_hidden_workflow_markers_are_stripped_from_the_reply(self) -> None:
-        from app.api.chats import _strip_hidden_markers
+        from app.services.heym_agent.links import strip_hidden_markers
 
         content = "Done.\n<!-- heym-workflow-id:abc heym-workflow-name:Daily report -->"
 
-        self.assertEqual(_strip_hidden_markers(content), "Done.")
+        self.assertEqual(strip_hidden_markers(content), "Done.")
 
 
 if __name__ == "__main__":

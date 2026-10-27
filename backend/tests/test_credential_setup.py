@@ -22,9 +22,9 @@ from app.services.credential_setup import (
     settle_form_step,
     wait_for_conversation_forms,
 )
+from app.services.heym_agent.settings import AgentSettings
 from app.services.mcp_chat_service import (
     MCPChatResult,
-    MCPChatSettings,
     build_chat_mcp_tool,
     format_chat_tool_text,
     run_chat_tool,
@@ -413,7 +413,7 @@ class ChatToolFormWaitTests(unittest.IsolatedAsyncioTestCase):
         )
         with (
             patch(
-                "app.services.mcp_chat_service.resolve_chat_llm", AsyncMock(return_value=resolved)
+                "app.services.mcp_chat_service.resolve_agent_llm", AsyncMock(return_value=resolved)
             ),
             patch(
                 "app.services.mcp_chat_service.wait_for_conversation_forms",
@@ -424,7 +424,7 @@ class ChatToolFormWaitTests(unittest.IsolatedAsyncioTestCase):
             result = await run_chat_tool(
                 AsyncMock(),
                 user_id=uuid.uuid4(),
-                settings=MCPChatSettings(enabled=True, credential_id=None, model=None),
+                settings=AgentSettings(enabled=True, credential_id=None, model=None),
                 arguments=arguments,
                 public_base_url=BASE_URL,
             )

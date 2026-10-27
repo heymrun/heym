@@ -18,13 +18,9 @@ from starlette.requests import Request
 
 from app.api import chats, mcp
 from app.services import hitl_service
-from app.services.mcp_chat_service import (
-    MCPChatResult,
-    MCPChatSettings,
-    absolutize_workflow_links,
-    format_chat_tool_text,
-    workflow_link,
-)
+from app.services.heym_agent.links import absolutize_workflow_links, workflow_link
+from app.services.heym_agent.settings import AgentSettings
+from app.services.mcp_chat_service import MCPChatResult, format_chat_tool_text
 
 CONFIGURED = "https://heym.example.com"
 SPOOFED_HOST = "evil.tld"
@@ -76,7 +72,7 @@ class HeymChatLinkOriginTests(unittest.IsolatedAsyncioTestCase):
                 db=AsyncMock(),
                 msg_id=1,
                 user_id=uuid.uuid4(),
-                chat_settings=MCPChatSettings(enabled=True, credential_id=None, model=None),
+                chat_settings=AgentSettings(enabled=True, credential_id=None, model=None),
                 arguments={"message": "build it"},
             )
 

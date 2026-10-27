@@ -60,6 +60,7 @@ from app.services.cluster.dispatch import dispatch_workflow
 from app.services.execution_cancellation import clear_execution as clear_active_execution
 from app.services.execution_cancellation import register_execution
 from app.services.global_variables_service import get_global_variables_context
+from app.services.heym_agent import settings as agent_settings
 from app.services.hitl_service import build_default_public_base_url
 from app.services.mcp_elicitation import MCPClientChannel
 from app.services.mcp_session import mcp_session_store, mcp_sse_channels
@@ -391,7 +392,7 @@ async def list_named_server_tools(
 ) -> MCPToolsListResponse:
     user, mcp_server = server
     workflows = await _get_server_workflows(db, mcp_server.id)
-    chat_settings = await mcp_chat_service.get_server_chat_settings(db, mcp_server.id, user.id)
+    chat_settings = await agent_settings.get_server_agent_settings(db, mcp_server.id, user.id)
     return MCPToolsListResponse(tools=await build_tools_with_chat(workflows, chat_settings))
 
 
@@ -493,7 +494,7 @@ async def _dispatch_named_server_jsonrpc(
 
     if msg.method == "tools/list":
         workflows = await _get_server_workflows(db, mcp_server.id)
-        chat_settings = await mcp_chat_service.get_server_chat_settings(db, mcp_server.id, user.id)
+        chat_settings = await agent_settings.get_server_agent_settings(db, mcp_server.id, user.id)
         tools = await build_tools_with_chat(workflows, chat_settings)
         return {
             "jsonrpc": "2.0",
@@ -506,7 +507,7 @@ async def _dispatch_named_server_jsonrpc(
         arguments = msg.params.get("arguments", {})
 
         if tool_name == mcp_chat_service.MCP_CHAT_TOOL_NAME:
-            chat_settings = await mcp_chat_service.get_server_chat_settings(
+            chat_settings = await agent_settings.get_server_agent_settings(
                 db, mcp_server.id, user.id
             )
             if not chat_settings.enabled:

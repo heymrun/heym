@@ -68,6 +68,8 @@ from app.services.execution_cancellation import (
     register_execution,
 )
 from app.services.global_variables_service import get_global_variables_context
+from app.services.heym_agent import settings as agent_settings
+from app.services.heym_agent.errors import AgentError
 from app.services.hitl_service import (
     build_default_public_base_url,
     build_public_base_url,
@@ -610,7 +612,7 @@ def workflow_to_mcp_tool(workflow: Workflow) -> MCPTool:
 
 async def build_tools_with_chat(
     workflows: list[Workflow],
-    chat_settings: mcp_chat_service.MCPChatSettings,
+    chat_settings: agent_settings.AgentSettings,
 ) -> list[MCPTool]:
     """Workflow tools for an MCP surface, plus `heym_chat` when it is enabled."""
     tools = [workflow_to_mcp_tool(w) for w in workflows]
@@ -627,7 +629,7 @@ async def dispatch_chat_tool_call(
     db: AsyncSession,
     msg_id: int | str,
     user_id: uuid.UUID,
-    chat_settings: mcp_chat_service.MCPChatSettings,
+    chat_settings: agent_settings.AgentSettings,
     arguments: dict[str, Any],
     client: MCPClientChannel | None = None,
 ) -> dict[str, Any]:
@@ -647,7 +649,7 @@ async def dispatch_chat_tool_call(
             public_base_url=build_public_base_url(request),
             client=client,
         )
-    except mcp_chat_service.MCPChatError as exc:
+    except AgentError as exc:
         return _mcp_tool_result_jsonrpc_response(msg_id, str(exc), is_error=True)
     except Exception as exc:  # noqa: BLE001 - surface engine failures to the MCP client
         return _mcp_tool_result_jsonrpc_response(msg_id, f"Heym chat failed: {exc}", is_error=True)
@@ -992,7 +994,7 @@ async def list_mcp_tools(
     db: AsyncSession = Depends(get_db),
 ) -> MCPToolsListResponse:
     workflows = await get_user_mcp_workflows(db, mcp_user.id)
-    chat_settings = await mcp_chat_service.get_global_chat_settings(db, mcp_user.id)
+    chat_settings = await agent_settings.get_global_agent_settings(db, mcp_user.id)
     return MCPToolsListResponse(tools=await build_tools_with_chat(workflows, chat_settings))
 
 
@@ -1078,7 +1080,7 @@ async def call_mcp_tool(
     arguments = body.get("arguments", {})
 
     if tool_name == mcp_chat_service.MCP_CHAT_TOOL_NAME:
-        chat_settings = await mcp_chat_service.get_global_chat_settings(db, mcp_user.id)
+        chat_settings = await agent_settings.get_global_agent_settings(db, mcp_user.id)
         if not chat_settings.enabled:
             return MCPToolResult(
                 content=[MCPTextContent(text=f"Tool not found: {tool_name}")],
@@ -1316,7 +1318,7 @@ async def _dispatch_mcp_jsonrpc(
 
     if msg.method == "tools/list":
         workflows = await get_user_mcp_workflows(db, mcp_user.id)
-        chat_settings = await mcp_chat_service.get_global_chat_settings(db, mcp_user.id)
+        chat_settings = await agent_settings.get_global_agent_settings(db, mcp_user.id)
         tools = await build_tools_with_chat(workflows, chat_settings)
         return {
             "jsonrpc": "2.0",
@@ -1329,7 +1331,7 @@ async def _dispatch_mcp_jsonrpc(
         arguments = msg.params.get("arguments", {})
 
         if tool_name == mcp_chat_service.MCP_CHAT_TOOL_NAME:
-            chat_settings = await mcp_chat_service.get_global_chat_settings(db, mcp_user.id)
+            chat_settings = await agent_settings.get_global_agent_settings(db, mcp_user.id)
             if not chat_settings.enabled:
                 return {
                     "jsonrpc": "2.0",

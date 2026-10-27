@@ -34,7 +34,7 @@ from app.db.models import (
 )
 from app.db.session import async_session_maker, engine
 from app.models.chat_schemas import MessageCreate
-from app.services.mcp_chat_service import MCPChatError
+from app.services.heym_agent.errors import AgentError
 
 
 def _make_dummy_http_request() -> MagicMock:
@@ -181,7 +181,7 @@ class DashboardChatConcurrencyRaceTests(unittest.IsolatedAsyncioTestCase):
         """Prove that concurrent send_message and run_mcp_chat_turn for the same
 
         conversation cannot both start; one claims and the other either queues
-        or raises MCPChatError.
+        or raises AgentError.
         """
         assistant_msg_id = uuid.uuid4()
 
@@ -234,10 +234,10 @@ class DashboardChatConcurrencyRaceTests(unittest.IsolatedAsyncioTestCase):
                 )
                 res1, res2 = await asyncio.gather(t1, t2, return_exceptions=True)
 
-        # Either send_message claimed (started) and MCP failed with MCPChatError,
+        # Either send_message claimed (started) and MCP failed with AgentError,
         # OR MCP claimed (succeeded) and send_message queued.
         if isinstance(res2, Exception):
-            self.assertIsInstance(res2, MCPChatError)
+            self.assertIsInstance(res2, AgentError)
             self.assertIn("already running", str(res2))
             self.assertEqual(res1.status, "started")
         else:
@@ -247,7 +247,7 @@ class DashboardChatConcurrencyRaceTests(unittest.IsolatedAsyncioTestCase):
     async def test_concurrent_mcp_chat_turns_rejects_duplicate(self) -> None:
         """Prove that two concurrent run_mcp_chat_turn calls for the same conversation
 
-        cannot both claim; exactly one runs and the other raises MCPChatError.
+        cannot both claim; exactly one runs and the other raises AgentError.
         """
         assistant_msg_id1 = uuid.uuid4()
         assistant_msg_id2 = uuid.uuid4()
@@ -296,7 +296,7 @@ class DashboardChatConcurrencyRaceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(successes), 1)
         self.assertEqual(len(errors), 1)
-        self.assertIsInstance(errors[0], MCPChatError)
+        self.assertIsInstance(errors[0], AgentError)
         self.assertIn("already running", str(errors[0]))
 
     async def test_queued_branch_starts_queue_worker_when_conversation_becomes_idle(self) -> None:

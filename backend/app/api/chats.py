@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
 import uuid
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, replace
@@ -64,16 +63,17 @@ from app.services.credential_access import get_accessible_credential
 from app.services.credential_catalog import CredentialPromptMode, build_credentials_prompt
 from app.services.credential_setup import CredentialFormTool
 from app.services.encryption import decrypt_config
-from app.services.hitl_service import build_public_base_url
-from app.services.llm_trace import LLMTraceContext
-from app.services.mcp_chat_service import (
-    MCPChatError,
-    MCPChatResult,
+from app.services.heym_agent.errors import AgentError
+from app.services.heym_agent.links import (
     WorkflowLink,
     absolutize_workflow_links,
     eval_suite_link,
+    strip_hidden_markers,
     workflow_link,
 )
+from app.services.hitl_service import build_public_base_url
+from app.services.llm_trace import LLMTraceContext
+from app.services.mcp_chat_service import MCPChatResult
 from app.services.mcp_elicitation import MCPClientChannel
 from app.services.prompt_suite_service import owned_suite_name
 from app.services.workflow_access import user_can_write_workflow
@@ -831,7 +831,7 @@ async def _get_or_create_mcp_conversation(
         result = await db.execute(query)
         conversation = result.scalar_one_or_none()
         if conversation is None:
-            raise MCPChatError("conversation_id does not match a conversation you can access.")
+            raise AgentError("conversation_id does not match a conversation you can access.")
         return conversation, False
 
     conversation = DashboardConversation(
@@ -865,7 +865,7 @@ async def run_mcp_chat_turn(
             db, user_id, conversation_id, for_update=True
         )
         if conversation.is_running:
-            raise MCPChatError(
+            raise AgentError(
                 "This conversation is already running. Wait for it to finish, or omit "
                 "conversation_id to start a new one."
             )
@@ -928,7 +928,7 @@ async def run_mcp_chat_turn(
         )
 
     if assistant_message is None:
-        raise MCPChatError("The assistant did not produce a reply. Try again.")
+        raise AgentError("The assistant did not produce a reply. Try again.")
 
     tool_calls = assistant_message.tool_calls or []
     tool_names = [str(call.get("name") or "") for call in tool_calls if call.get("name")]
@@ -938,7 +938,7 @@ async def run_mcp_chat_turn(
     return MCPChatResult(
         conversation_id=conv_uuid,
         text=absolutize_workflow_links(
-            _strip_hidden_markers(assistant_message.content), public_base_url
+            strip_hidden_markers(assistant_message.content), public_base_url
         ),
         tool_names=tool_names,
         awaiting_clarification=result.paused_for_clarification,
@@ -985,11 +985,6 @@ async def _saved_workflow_links(
         if workflow is not None:
             links.append(workflow_link(public_base_url, workflow.id, workflow.name))
     return tuple(links)
-
-
-def _strip_hidden_markers(content: str) -> str:
-    """Drop the hidden HTML comment markers the Chat UI uses for workflow and suite context."""
-    return re.sub(r"<!--\s*heym-(?:workflow|eval-suite)-id:.*?-->", "", content).strip()
 
 
 @router.get("", response_model=ConversationListResponse)

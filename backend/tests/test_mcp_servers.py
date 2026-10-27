@@ -14,7 +14,7 @@ from app.api.mcp_servers import (
     toggle_server_workflow,
 )
 from app.models.schemas import MCPServerCreate, MCPServerWorkflowToggleRequest
-from app.services.mcp_chat_service import MCPChatSettings
+from app.services.heym_agent.settings import AgentSettings
 
 
 def _make_server(user_id: uuid.UUID) -> SimpleNamespace:
@@ -27,6 +27,7 @@ def _make_server(user_id: uuid.UUID) -> SimpleNamespace:
         chat_enabled=False,
         chat_credential_id=None,
         chat_model=None,
+        a2a_enabled=False,
     )
 
 
@@ -193,9 +194,9 @@ class MCPServerToolsListTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch("app.api.mcp_servers._get_server_workflows", AsyncMock(return_value=[workflow])),
             patch(
-                "app.api.mcp_servers.mcp_chat_service.get_server_chat_settings",
+                "app.api.mcp_servers.agent_settings.get_server_agent_settings",
                 AsyncMock(
-                    return_value=MCPChatSettings(enabled=False, credential_id=None, model=None)
+                    return_value=AgentSettings(enabled=False, credential_id=None, model=None)
                 ),
             ),
         ):
@@ -213,9 +214,9 @@ class MCPServerToolsListTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch("app.api.mcp_servers._get_server_workflows", AsyncMock(return_value=[])),
             patch(
-                "app.api.mcp_servers.mcp_chat_service.get_server_chat_settings",
+                "app.api.mcp_servers.agent_settings.get_server_agent_settings",
                 AsyncMock(
-                    return_value=MCPChatSettings(
+                    return_value=AgentSettings(
                         enabled=True, credential_id=uuid.uuid4(), model="gpt-5"
                     )
                 ),
