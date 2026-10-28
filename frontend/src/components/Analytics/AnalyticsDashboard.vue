@@ -14,6 +14,7 @@ import type {
 import type { WorkflowListItem } from "@/types/workflow";
 import Button from "@/components/ui/Button.vue";
 import Card from "@/components/ui/Card.vue";
+import AnalyticsKpiCard from "@/components/Analytics/AnalyticsKpiCard.vue";
 import Select from "@/components/ui/Select.vue";
 import { analyticsApi, workflowApi } from "@/services/api";
 
@@ -762,90 +763,41 @@ function goToWorkflow(): void {
         data-testid="analytics-kpi-cards"
         class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5"
       >
-        <Card class="p-4">
-          <div class="flex items-center justify-between">
-            <div>
-              <p class="text-sm text-muted-foreground">
-                Total Executions
-              </p>
-              <p class="text-2xl font-bold">
-                {{ formatNumber(stats.total_executions) }}
-              </p>
-              <p class="text-xs text-muted-foreground mt-1">
-                {{ selectedRangeLabel ?? `Last 24h: ${formatNumber(stats.total_executions_24h)}` }}
-              </p>
-            </div>
-            <BarChart3 class="h-8 w-8 text-muted-foreground" />
-          </div>
-        </Card>
-
-        <Card class="p-4">
-          <div class="flex items-center justify-between">
-            <div>
-              <p class="text-sm text-muted-foreground">
-                Success Rate
-              </p>
-              <p class="text-2xl font-bold">
-                {{ stats.success_rate.toFixed(1) }}%
-              </p>
-              <p class="text-xs text-muted-foreground mt-1">
-                {{ formatNumber(stats.success_count) }} / {{ formatNumber(stats.total_executions) }}
-              </p>
-            </div>
-            <TrendingUp class="h-8 w-8 text-green-500" />
-          </div>
-        </Card>
-
-        <Card class="p-4">
-          <div class="flex items-center justify-between">
-            <div>
-              <p class="text-sm text-muted-foreground">
-                Error Rate
-              </p>
-              <p class="text-2xl font-bold">
-                {{ stats.error_rate.toFixed(1) }}%
-              </p>
-              <p class="text-xs text-muted-foreground mt-1">
-                {{ formatNumber(stats.error_count) }} errors
-              </p>
-            </div>
-            <TrendingDown class="h-8 w-8 text-red-500" />
-          </div>
-        </Card>
-
-        <Card class="p-4">
-          <div class="flex items-center justify-between">
-            <div>
-              <p class="text-sm text-muted-foreground">
-                Avg Latency
-              </p>
-              <p class="text-2xl font-bold">
-                {{ formatLatency(stats.avg_latency_ms) }}
-              </p>
-              <p class="text-xs text-muted-foreground mt-1">
-                P95: {{ formatLatency(stats.p95_latency_ms) }}
-              </p>
-            </div>
-            <Zap class="h-8 w-8 text-yellow-500" />
-          </div>
-        </Card>
-
-        <Card class="p-4">
-          <div class="flex items-center justify-between">
-            <div>
-              <p class="text-sm text-muted-foreground">
-                Time Saved
-              </p>
-              <p class="text-2xl font-bold">
-                {{ formatTimeSaved(stats.time_saved_minutes) }}
-              </p>
-              <p class="text-xs text-muted-foreground mt-1">
-                Based on per-workflow estimates
-              </p>
-            </div>
-            <Clock class="h-8 w-8 text-blue-500" />
-          </div>
-        </Card>
+        <AnalyticsKpiCard
+          label="Total Executions"
+          :value="formatNumber(stats.total_executions)"
+          :caption="selectedRangeLabel ?? `Last 24h: ${formatNumber(stats.total_executions_24h)}`"
+          :icon="BarChart3"
+          icon-class="text-muted-foreground"
+        />
+        <AnalyticsKpiCard
+          label="Success Rate"
+          :value="`${stats.success_rate.toFixed(1)}%`"
+          :caption="`${formatNumber(stats.success_count)} / ${formatNumber(stats.total_executions)}`"
+          :icon="TrendingUp"
+          icon-class="text-green-500"
+        />
+        <AnalyticsKpiCard
+          label="Error Rate"
+          :value="`${stats.error_rate.toFixed(1)}%`"
+          :caption="`${formatNumber(stats.error_count)} errors`"
+          :icon="TrendingDown"
+          icon-class="text-red-500"
+        />
+        <AnalyticsKpiCard
+          label="Avg Latency"
+          :value="formatLatency(stats.avg_latency_ms)"
+          :caption="`P95: ${formatLatency(stats.p95_latency_ms)}`"
+          :icon="Zap"
+          icon-class="text-yellow-500"
+        />
+        <AnalyticsKpiCard
+          label="Time Saved"
+          :value="formatTimeSaved(stats.time_saved_minutes)"
+          caption="Based on per-workflow estimates"
+          :icon="Clock"
+          icon-class="text-blue-500"
+        />
       </div>
 
       <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
