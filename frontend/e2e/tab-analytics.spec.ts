@@ -36,3 +36,39 @@ test("changes the time range and refetches metrics", async ({ page }) => {
   expect((await metricsPromise).ok()).toBeTruthy();
   await expect(page.getByText("Base window: 30d")).toBeVisible();
 });
+
+test("keeps the KPI captions on one line with the icon on the value row", async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await page.goto("/?tab=analytics");
+  const kpiCards = page.getByTestId("analytics-kpi-cards");
+  const caption = kpiCards.getByText("Based on per-workflow estimates");
+  await expect(caption).toBeVisible();
+  expect(await caption.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
+    true,
+  );
+
+  const timeSaved = kpiCards.getByTestId("analytics-kpi-card").filter({ hasText: "Time Saved" });
+  const valueBox = await timeSaved.getByTestId("analytics-kpi-value").boundingBox();
+  const iconBox = await timeSaved.getByTestId("analytics-kpi-icon").boundingBox();
+  if (!valueBox || !iconBox) throw new Error("The Time Saved value or icon did not render");
+  const valueCenter = valueBox.y + valueBox.height / 2;
+  const iconCenter = iconBox.y + iconBox.height / 2;
+  expect(Math.abs(valueCenter - iconCenter)).toBeLessThan(4);
+});
+
+test("renders the node type charts", async ({ page }) => {
+  const nodesResponse = page.waitForResponse(
+    (response) =>
+      response.request().method() === "GET" &&
+      new URL(response.url()).pathname === "/api/analytics/nodes",
+  );
+  await page.goto("/?tab=analytics");
+  expect((await nodesResponse).ok()).toBeTruthy();
+
+  const section = page.getByTestId("analytics-node-types");
+  await expect(section.getByRole("heading", { name: "Node Types" })).toBeVisible();
+  await expect(section.getByText("Average Node Duration Over Time")).toBeVisible();
+  for (const metric of ["duration", "errors", "calls"]) {
+    await expect(section.getByTestId(`analytics-node-chart-${metric}`)).toBeVisible();
+  }
+});
