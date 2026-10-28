@@ -42,6 +42,16 @@ Two tables show workflow usage: **Most Used** (wider) and **Most Failed**.
 - **Selection mode** – Selected ranges refresh the summary cards, charts, and workflow tables without changing the base preset
 - **Clear Selection** – Return to the preset time window when you are done drilling in
 
+## Node Types
+
+Below the latency percentiles, three charts show where node time and failures go, grouped by node type (Agent, HTTP Request, Code, and so on) across the workflows in view:
+
+- **Average Node Duration Over Time** – The 10 node types with the most total execution time, plotted as average duration per call. The header names the leader with its average and its total time.
+- **Node Errors Over Time** – The 10 node types with the most errors (error or timeout), stacked per time bucket.
+- **Node Calls Over Time** – The 10 node types that ran the most, stacked per time bucket. Skipped nodes are not counted.
+
+The charts follow the workflow filter, the time range, and any range you drag on a chart. Node analytics are recorded for runs from the release that added them, and a finished run shows up within about a minute. Older runs are not counted.
+
 ## Auto Refresh
 
 - Enable auto refresh to keep metrics updated without manual reload
