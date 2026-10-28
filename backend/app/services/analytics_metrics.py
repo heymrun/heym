@@ -140,6 +140,16 @@ def bucket_by_size(dt: datetime, bucket_delta: timedelta) -> datetime:
     return dt_utc.replace(minute=0, second=0, microsecond=0)
 
 
+def bucket_keys(since: datetime, until: datetime, bucket_delta: timedelta) -> list[str]:
+    """ISO starts of every bucket in ``[since, until)``, as the Analytics series use them."""
+    keys: list[str] = []
+    current = bucket_by_size(since, bucket_delta)
+    while current < until:
+        keys.append(current.isoformat())
+        current += bucket_delta
+    return keys
+
+
 def time_range_start(time_range: str, *, now: datetime | None = None) -> datetime:
     """Start of a named window (24h, 7d, 30d, all); unknown names mean 7d."""
     current_time = now or datetime.now(timezone.utc)
@@ -482,17 +492,16 @@ async def compute_metrics_series(
         )
     ).all()
 
-    buckets: dict[str, dict] = {}
-    current = bucket_by_size(since, bucket_delta)
-    while current < until:
-        buckets[current.isoformat()] = {
+    buckets: dict[str, dict] = {
+        key: {
             "executions": 0,
             "successes": 0,
             "errors": 0,
             "latency_total_ms": 0.0,
             "latency_samples": 0,
         }
-        current += bucket_delta
+        for key in bucket_keys(since, until, bucket_delta)
+    }
 
     if rows:
         for row in rows:
