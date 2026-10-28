@@ -4,6 +4,8 @@ import { computed } from "vue";
 import type { NodeTypeAnalytics } from "@/types/analytics";
 import Card from "@/components/ui/Card.vue";
 import {
+  AXIS_TICKS,
+  axisMax,
   buildNodeTypeChart,
   formatDurationMs,
   NODE_TYPE_CHART_COLORS,
@@ -67,6 +69,9 @@ function optionsFor(model: NodeTypeChartModel): Record<string, unknown> {
     yaxis: {
       ...props.baseOptions.yaxis,
       min: 0,
+      // Room above the highest visible line; ApexCharts asks again when the legend hides one.
+      max: (max: number) => axisMax(model.metric, max),
+      tickAmount: AXIS_TICKS,
       labels: { formatter: (value: number) => formatValue(model, value) },
     },
   };

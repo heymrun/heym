@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { prepareAuthenticatedPage } from "./support";
+import { createWorkflow, deleteWorkflow, prepareAuthenticatedPage } from "./support";
 
 test.beforeEach(async ({ page }) => {
   await prepareAuthenticatedPage(page);
@@ -64,6 +64,38 @@ test("shows a loading badge after a range change until the data arrives", async 
   releaseNodes();
   await expect(loading).toBeHidden();
   await expect(page.getByText("Base window: 6h")).toBeVisible();
+});
+
+test("a click on a chart is not a range, a drag over two points is", async ({ page }) => {
+  // The series only render once the user can see a workflow.
+  const workflow = await createWorkflow(page, `Analytics Selection ${Date.now()}`);
+  await page.goto("/?tab=analytics");
+  await page.locator('select:has(option[value="3h"])').selectOption("3h");
+  await expect(page.getByText("Base window: 3h")).toBeVisible();
+
+  const volume = page
+    .locator("div.p-4")
+    .filter({ has: page.locator(".apexcharts-title-text", { hasText: "Execution Volume Over Time" }) })
+    .last();
+  const grid = await volume.locator(".apexcharts-grid").boundingBox();
+  if (!grid) throw new Error("The execution volume chart did not render");
+
+  // 3h has four hourly points across the chart: a short drag between two of them selects none.
+  const drag = async (from: number, to: number): Promise<void> => {
+    await page.mouse.move(grid.x + grid.width * from, grid.y + grid.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(grid.x + grid.width * to, grid.y + grid.height / 2 + 15, { steps: 6 });
+    await page.mouse.up();
+  };
+
+  await drag(0.1, 0.2);
+  await page.waitForTimeout(500);
+  await expect(page.getByText("Chart selection is ready")).toBeVisible();
+
+  await drag(0.05, 0.72);
+  await expect(page.getByText("Selection mode is active")).toBeVisible();
+
+  await deleteWorkflow(page, workflow.id);
 });
 
 test("keeps the KPI captions on one line with the icon on the value row", async ({ page }) => {

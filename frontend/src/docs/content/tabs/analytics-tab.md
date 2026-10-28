@@ -39,7 +39,7 @@ Two tables show workflow usage: **Most Used** (wider) and **Most Failed**.
 - **Execution Volume Over Time** – Line chart of executions per time bucket
 - **Success vs Error Rate** – Area chart comparing healthy and failed runs
 - **Average Latency Over Time** – Line chart showing response-time changes
-- **Drag to select** – Click and drag on any chart to focus a custom date range
+- **Drag to select** – Click and drag on any chart to focus a custom date range. A selection must cover at least two points on the chart; a plain click does not select anything
 - **Selection mode** – Selected ranges refresh the summary cards, charts, and workflow tables without changing the base preset
 - **Clear Selection** – Return to the preset time window when you are done drilling in
 
@@ -51,7 +51,7 @@ Below the latency percentiles, three charts show where node time and failures go
 - **Most Failed Node Types** – The 10 node types with the most errors (error or timeout), each at its own error count per time bucket.
 - **Most Called Node Types** – The 10 node types that ran the most, each at its own call count per time bucket. Skipped nodes are not counted.
 
-Hover a chart to see the node type under the pointer, next to the pointer. The charts follow the workflow filter, the time range, and any range you drag on a chart. Node analytics are recorded for runs from the release that added them, and a finished run shows up within about a minute. Older runs are not counted.
+Hover a chart to see the node type under the pointer, next to the pointer. A node type too small to see next to the largest one on a chart (under 1% of it) is left out of that chart and its legend. The charts follow the workflow filter, the time range, and any range you drag on a chart. Node analytics are recorded for runs from the release that added them, and a finished run shows up within about a minute. Older runs are not counted.
 
 ## Auto Refresh
 

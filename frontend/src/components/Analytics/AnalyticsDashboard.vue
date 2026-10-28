@@ -107,12 +107,6 @@ function getBucketSizeMs(bucketSize: BucketSize): number {
   return HOUR_IN_MS;
 }
 
-function findClosestBucket(target: number, buckets: number[]): number {
-  return buckets.reduce((closest, current) => {
-    return Math.abs(current - target) < Math.abs(closest - target) ? current : closest;
-  }, buckets[0]);
-}
-
 function buildSelectedDateRange(min: number, max: number): AnalyticsDateRange | null {
   if (!metrics.value) {
     return null;
@@ -128,12 +122,14 @@ function buildSelectedDateRange(min: number, max: number): AnalyticsDateRange | 
   const lowerBound = Math.min(min, max);
   const upperBound = Math.max(min, max);
   const selectedBuckets = buckets.filter((bucket) => bucket >= lowerBound && bucket <= upperBound);
-  const alignedBuckets = selectedBuckets.length > 0
-    ? selectedBuckets
-    : [findClosestBucket(lowerBound, buckets), findClosestBucket(upperBound, buckets)];
+  // A click, or a drag that covers fewer than two points, is not a range: snapping it to the
+  // nearest point filtered the whole page to a single bucket.
+  if (selectedBuckets.length < 2) {
+    return null;
+  }
 
-  const startMs = Math.min(...alignedBuckets);
-  const endMs = Math.max(...alignedBuckets) + getBucketSizeMs(activeBucketSize.value);
+  const startMs = Math.min(...selectedBuckets);
+  const endMs = Math.max(...selectedBuckets) + getBucketSizeMs(activeBucketSize.value);
   if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
     return null;
   }
