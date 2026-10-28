@@ -28,7 +28,8 @@ describe("buildNodeTypeChart", () => {
   it("plots average duration unstacked, ranked by total time", () => {
     const chart = buildNodeTypeChart("duration", analytics, labelFor);
 
-    expect(chart.title).toBe("Average Node Duration Over Time");
+    expect(chart.title).toBe("Most Time-Consuming Node Types");
+    expect(chart.subtitle).toBe("Average duration per call");
     expect(chart.stacked).toBe(false);
     expect(chart.series.map((series) => series.name)).toEqual(["Agent", "HTTP Request"]);
     expect(chart.series[0].data).toEqual([

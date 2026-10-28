@@ -27,6 +27,8 @@ test("changes the time range and refetches metrics", async ({ page }) => {
   await expect(page.getByText("Base window: 7d")).toBeVisible();
   const timeRange = page.locator('select:has(option[value="30d"])');
   await expect(timeRange.locator('option[value="1h"]')).toHaveText("Last Hour");
+  await expect(timeRange.locator('option[value="3h"]')).toHaveText("Last 3 Hours");
+  await expect(timeRange.locator('option[value="6h"]')).toHaveText("Last 6 Hours");
 
   // Switching the preset updates the window and refetches metrics.
   const metricsPromise = page.waitForResponse(
@@ -37,6 +39,31 @@ test("changes the time range and refetches metrics", async ({ page }) => {
   await page.locator('select:has(option[value="30d"])').selectOption("30d");
   expect((await metricsPromise).ok()).toBeTruthy();
   await expect(page.getByText("Base window: 30d")).toBeVisible();
+});
+
+test("shows a loading badge after a range change until the data arrives", async ({ page }) => {
+  await page.goto("/?tab=analytics");
+  await expect(page.getByTestId("analytics-kpi-cards")).toBeVisible();
+  const loading = page.getByTestId("analytics-loading");
+  await expect(loading).toBeHidden();
+
+  // Hold the node rankings back so the reload is still in flight when we look.
+  let releaseNodes: () => void = () => {};
+  const nodesHeld = new Promise<void>((resolve) => {
+    releaseNodes = resolve;
+  });
+  await page.route("**/api/analytics/nodes**", async (route) => {
+    await nodesHeld;
+    await route.continue();
+  });
+
+  await page.locator('select:has(option[value="6h"])').selectOption("6h");
+  await expect(loading).toBeVisible();
+  await expect(loading).toContainText("Loading analytics...");
+
+  releaseNodes();
+  await expect(loading).toBeHidden();
+  await expect(page.getByText("Base window: 6h")).toBeVisible();
 });
 
 test("keeps the KPI captions on one line with the icon on the value row", async ({ page }) => {
@@ -68,8 +95,14 @@ test("renders the node type charts", async ({ page }) => {
   expect((await nodesResponse).ok()).toBeTruthy();
 
   const section = page.getByTestId("analytics-node-types");
-  await expect(section.getByRole("heading", { name: "Node Types" })).toBeVisible();
-  await expect(section.getByText("Average Node Duration Over Time")).toBeVisible();
+  await expect(section.getByRole("heading", { name: "Node Types", exact: true })).toBeVisible();
+  for (const title of [
+    "Most Time-Consuming Node Types",
+    "Most Failed Node Types",
+    "Most Called Node Types",
+  ]) {
+    await expect(section.getByRole("heading", { name: title })).toBeVisible();
+  }
   for (const metric of ["duration", "errors", "calls"]) {
     await expect(section.getByTestId(`analytics-node-chart-${metric}`)).toBeVisible();
   }

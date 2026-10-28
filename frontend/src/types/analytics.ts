@@ -23,7 +23,7 @@ export interface TimeSeriesMetrics {
   avg_latency_ms: number[];
 }
 
-export type TimeRange = "1h" | "24h" | "7d" | "30d" | "all";
+export type TimeRange = "1h" | "3h" | "6h" | "24h" | "7d" | "30d" | "all";
 export type BucketSize = "1h" | "6h" | "1d";
 
 export interface AnalyticsDateRange {

@@ -51,11 +51,13 @@ function optionsFor(model: NodeTypeChartModel): Record<string, unknown> {
     fill: { type: "solid", opacity: model.stacked ? 0.45 : 0.15 },
     legend: { position: "bottom" },
     markers: { size: 0, hover: { size: 5 }, discrete: model.markers },
-    // Ten series are too many to list at once: the tooltip shows the one under the cursor.
+    // Ten series are too many to list at once: the tooltip shows the one under the pointer,
+    // next to the pointer.
     tooltip: {
       ...props.baseOptions.tooltip,
       shared: false,
       intersect: false,
+      followCursor: true,
       y: { formatter: (value: number, point: TooltipPoint) => formatPoint(model, value, point) },
     },
     yaxis: {

@@ -62,6 +62,18 @@ class AnalyticsTimeWindowTests(unittest.TestCase):
             datetime(2026, 10, 28, 14, 0, tzinfo=timezone.utc),
         )
 
+    def test_three_and_six_hours_also_start_on_the_hour(self) -> None:
+        now = datetime(2026, 10, 28, 15, 20, tzinfo=timezone.utc)
+
+        self.assertEqual(
+            time_range_start("3h", now=now),
+            datetime(2026, 10, 28, 12, 0, tzinfo=timezone.utc),
+        )
+        self.assertEqual(
+            time_range_start("6h", now=now),
+            datetime(2026, 10, 28, 9, 0, tzinfo=timezone.utc),
+        )
+
     def test_resolve_time_window_requires_both_bounds(self) -> None:
         with self.assertRaises(ValueError):
             _resolve_time_window(

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { ArrowDown, ArrowUp, ArrowUpDown, BarChart3, Clock, ExternalLink, TrendingDown, TrendingUp, Zap } from "lucide-vue-next";
+import { ArrowDown, ArrowUp, ArrowUpDown, BarChart3, Clock, ExternalLink, Loader2, TrendingDown, TrendingUp, Zap } from "lucide-vue-next";
 import type {
   AnalyticsDateRange,
   AnalyticsQueryOptions,
@@ -27,6 +27,10 @@ const emit = defineEmits<{
 const stats = ref<AnalyticsStats | null>(null);
 const metrics = ref<TimeSeriesMetrics | null>(null);
 const loading = ref(true);
+// A reload the user asked for (filter, range, selection, Refresh): the current data is
+// dimmed under a loading badge until the new data arrives. Auto refresh stays silent.
+const reloading = ref(false);
+let loadSequence = 0;
 const error = ref<string | null>(null);
 const timeRange = ref<TimeRange>("7d");
 const selectedDateRange = ref<AnalyticsDateRange | null>(null);
@@ -482,9 +486,18 @@ const mostFailedWorkflows = computed<WorkflowBreakdownItem[]>(() => {
   );
 });
 
-async function loadData(): Promise<void> {
+interface LoadOptions {
+  silent?: boolean;
+}
+
+async function loadData(options: LoadOptions = {}): Promise<void> {
+  // Only the latest request may write: a slow answer for an older range must not win.
+  const sequence = ++loadSequence;
   try {
     loading.value = true;
+    if (!options.silent) {
+      reloading.value = true;
+    }
     error.value = null;
     const baseRequests = [
       analyticsApi.getStats(workflowId.value, activeAnalyticsQuery.value),
@@ -500,14 +513,19 @@ async function loadData(): Promise<void> {
       breakdownRequest,
       analyticsApi.getNodeTypeAnalytics(workflowId.value, activeAnalyticsQuery.value),
     ]);
+    if (sequence !== loadSequence) return;
     stats.value = statsData;
     metrics.value = metricsData;
     workflowBreakdown.value = breakdownData;
     nodeTypeAnalytics.value = nodeTypeData;
   } catch (err) {
+    if (sequence !== loadSequence) return;
     error.value = err instanceof Error ? err.message : "Failed to load analytics";
   } finally {
-    loading.value = false;
+    if (sequence === loadSequence) {
+      loading.value = false;
+      reloading.value = false;
+    }
   }
 }
 
@@ -569,7 +587,7 @@ watch(
 watch(autoRefresh, (enabled) => {
   if (enabled) {
     refreshInterval.value = window.setInterval(() => {
-      void loadData();
+      void loadData({ silent: true });
     }, 30000);
   } else if (refreshInterval.value !== null) {
     clearInterval(refreshInterval.value);
@@ -681,6 +699,8 @@ function goToWorkflow(): void {
           v-model="timeRange"
           :options="[
             { value: '1h', label: 'Last Hour' },
+            { value: '3h', label: 'Last 3 Hours' },
+            { value: '6h', label: 'Last 6 Hours' },
             { value: '24h', label: 'Last 24 Hours' },
             { value: '7d', label: 'Last 7 Days' },
             { value: '30d', label: 'Last 30 Days' },
@@ -702,7 +722,7 @@ function goToWorkflow(): void {
             variant="outline"
             size="sm"
             :disabled="loading"
-            @click="loadData"
+            @click="loadData()"
           >
             Refresh
           </Button>
@@ -763,8 +783,19 @@ function goToWorkflow(): void {
 
     <div
       v-else-if="stats"
-      class="space-y-6"
+      class="relative space-y-6"
+      :aria-busy="reloading"
     >
+      <div
+        v-if="reloading"
+        class="absolute inset-0 z-10 flex justify-center rounded-lg bg-background/60"
+        data-testid="analytics-loading"
+      >
+        <div class="sticky top-24 flex h-fit items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm text-muted-foreground shadow-sm">
+          <Loader2 class="h-4 w-4 animate-spin" />
+          Loading analytics...
+        </div>
+      </div>
       <div
         data-testid="analytics-kpi-cards"
         class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5"

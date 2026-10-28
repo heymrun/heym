@@ -63,13 +63,11 @@ interface ChartCopy {
   subtitle: string;
 }
 
+// Named like the workflow tables below them: Most Used and Most Failed Workflows.
 const CHART_COPY: Record<NodeTypeMetric, ChartCopy> = {
-  duration: {
-    title: "Average Node Duration Over Time",
-    subtitle: "Top 10 node types by total time",
-  },
-  errors: { title: "Node Errors Over Time", subtitle: "Top 10 node types by errors" },
-  calls: { title: "Node Calls Over Time", subtitle: "Top 10 node types by calls" },
+  duration: { title: "Most Time-Consuming Node Types", subtitle: "Average duration per call" },
+  errors: { title: "Most Failed Node Types", subtitle: "Errors over time" },
+  calls: { title: "Most Called Node Types", subtitle: "Calls over time" },
 };
 
 export function formatDurationMs(ms: number): string {
