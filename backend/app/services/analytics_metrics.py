@@ -151,9 +151,14 @@ def bucket_keys(since: datetime, until: datetime, bucket_delta: timedelta) -> li
 
 
 def time_range_start(time_range: str, *, now: datetime | None = None) -> datetime:
-    """Start of a named window (24h, 7d, 30d, all); unknown names mean 7d."""
+    """Start of a named window (1h, 24h, 7d, 30d, all); unknown names mean 7d.
+
+    The rollups are hourly, so 1h starts at the top of the previous hour: the hour the window
+    starts in is counted whole instead of being dropped.
+    """
     current_time = now or datetime.now(timezone.utc)
     time_ranges = {
+        "1h": normalize_bucket_start(current_time - timedelta(hours=1)),
         "24h": current_time - timedelta(hours=24),
         "7d": current_time - timedelta(days=7),
         "30d": current_time - timedelta(days=30),

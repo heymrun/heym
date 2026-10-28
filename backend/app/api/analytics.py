@@ -268,7 +268,7 @@ async def compute_analytics_breakdown(
 @router.get("/stats", response_model=AnalyticsStatsResponse)
 async def get_analytics_stats(
     workflow_id: Optional[uuid.UUID] = Query(None, description="Filter by workflow ID"),
-    time_range: str = Query("7d", description="Time range: 24h, 7d, 30d, all"),
+    time_range: str = Query("7d", description="Time range: 1h, 24h, 7d, 30d, all"),
     start_at: datetime | None = Query(None, description="Custom range start in ISO 8601"),
     end_at: datetime | None = Query(None, description="Custom range end in ISO 8601"),
     current_user: User = Depends(get_current_user),
@@ -300,7 +300,7 @@ async def get_analytics_stats(
 @router.get("/stats/{workflow_id}", response_model=AnalyticsStatsResponse)
 async def get_workflow_analytics_stats(
     workflow_id: uuid.UUID,
-    time_range: str = Query("7d", description="Time range: 24h, 7d, 30d, all"),
+    time_range: str = Query("7d", description="Time range: 1h, 24h, 7d, 30d, all"),
     start_at: datetime | None = Query(None, description="Custom range start in ISO 8601"),
     end_at: datetime | None = Query(None, description="Custom range end in ISO 8601"),
     current_user: User = Depends(get_current_user),
@@ -331,7 +331,7 @@ async def get_workflow_analytics_stats(
 @router.get("/metrics", response_model=TimeSeriesMetricsResponse)
 async def get_analytics_metrics(
     workflow_id: Optional[uuid.UUID] = Query(None, description="Filter by workflow ID"),
-    time_range: str = Query("7d", description="Time range: 24h, 7d, 30d, all"),
+    time_range: str = Query("7d", description="Time range: 1h, 24h, 7d, 30d, all"),
     bucket_size: str = Query("1h", description="Bucket size: 1h, 6h, 1d"),
     start_at: datetime | None = Query(None, description="Custom range start in ISO 8601"),
     end_at: datetime | None = Query(None, description="Custom range end in ISO 8601"),
@@ -389,7 +389,7 @@ async def get_analytics_metrics(
 @router.get("/metrics/{workflow_id}", response_model=TimeSeriesMetricsResponse)
 async def get_workflow_analytics_metrics(
     workflow_id: uuid.UUID,
-    time_range: str = Query("7d", description="Time range: 24h, 7d, 30d, all"),
+    time_range: str = Query("7d", description="Time range: 1h, 24h, 7d, 30d, all"),
     bucket_size: str = Query("1h", description="Bucket size: 1h, 6h, 1d"),
     start_at: datetime | None = Query(None, description="Custom range start in ISO 8601"),
     end_at: datetime | None = Query(None, description="Custom range end in ISO 8601"),
@@ -409,7 +409,7 @@ async def get_workflow_analytics_metrics(
 
 @router.get("/workflows", response_model=WorkflowBreakdownResponse)
 async def get_workflow_breakdown(
-    time_range: str = Query("7d", description="Time range: 24h, 7d, 30d, all"),
+    time_range: str = Query("7d", description="Time range: 1h, 24h, 7d, 30d, all"),
     start_at: datetime | None = Query(None, description="Custom range start in ISO 8601"),
     end_at: datetime | None = Query(None, description="Custom range end in ISO 8601"),
     limit: int = Query(10, ge=1, le=100, description="Maximum number of workflows to return"),
@@ -447,7 +447,7 @@ async def get_workflow_breakdown(
 @router.get("/nodes", response_model=NodeTypeAnalyticsResponse)
 async def get_node_type_analytics(
     workflow_id: Optional[uuid.UUID] = Query(None, description="Filter by workflow ID"),
-    time_range: str = Query("7d", description="Time range: 24h, 7d, 30d, all"),
+    time_range: str = Query("7d", description="Time range: 1h, 24h, 7d, 30d, all"),
     bucket_size: str = Query("1h", description="Bucket size: 1h, 6h, 1d"),
     start_at: datetime | None = Query(None, description="Custom range start in ISO 8601"),
     end_at: datetime | None = Query(None, description="Custom range end in ISO 8601"),
