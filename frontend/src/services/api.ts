@@ -98,6 +98,7 @@ import type {
 import type {
   AnalyticsQueryOptions,
   AnalyticsStats,
+  NodeTypeAnalytics,
   TimeSeriesMetrics,
   WorkflowBreakdownItem,
   WorkflowBreakdownResponse,
@@ -3262,6 +3263,18 @@ export const analyticsApi = {
       params,
     });
     return response.data.items;
+  },
+
+  getNodeTypeAnalytics: async (
+    workflowId?: string,
+    options: AnalyticsQueryOptions = {},
+  ): Promise<NodeTypeAnalytics> => {
+    const params: Record<string, string> = buildAnalyticsQueryParams(options);
+    if (workflowId) {
+      params.workflow_id = workflowId;
+    }
+    const response = await api.get<NodeTypeAnalytics>("/analytics/nodes", { params });
+    return response.data;
   },
 };
 

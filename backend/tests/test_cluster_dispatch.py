@@ -714,6 +714,8 @@ class RunHistoryLastWriterWinsTests(unittest.IsolatedAsyncioTestCase):
         statement = db.execute.await_args.args[0]
         compiled = str(statement.compile(dialect=postgresql.dialect())).upper()
         self.assertIn("ON CONFLICT (ID) DO UPDATE", compiled)
+        # A late real result replaces the queue's empty failure row; its nodes get counted.
+        self.assertIn("NODE_ANALYTICS_PENDING", compiled.split("DO UPDATE SET")[1])
 
 
 class DispatchHandoffLifecycleTests(unittest.IsolatedAsyncioTestCase):

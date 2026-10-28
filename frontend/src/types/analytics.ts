@@ -23,7 +23,7 @@ export interface TimeSeriesMetrics {
   avg_latency_ms: number[];
 }
 
-export type TimeRange = "24h" | "7d" | "30d" | "all";
+export type TimeRange = "1h" | "3h" | "6h" | "24h" | "7d" | "30d" | "all";
 export type BucketSize = "1h" | "6h" | "1d";
 
 export interface AnalyticsDateRange {
@@ -51,4 +51,18 @@ export interface WorkflowBreakdownItem {
 
 export interface WorkflowBreakdownResponse {
   items: WorkflowBreakdownItem[];
+}
+
+export interface NodeTypeSeriesItem {
+  node_type: string;
+  total: number;
+  average: number | null;
+  values: (number | null)[];
+}
+
+export interface NodeTypeAnalytics {
+  time_buckets: string[];
+  most_duration: NodeTypeSeriesItem[];
+  most_errors: NodeTypeSeriesItem[];
+  most_calls: NodeTypeSeriesItem[];
 }

@@ -31,40 +31,35 @@ const caption = computed<string>(() => {
       </span>
     </div>
 
-    <div class="flex items-center gap-2 rounded-md border border-border bg-background px-2.5 py-1.5 text-[11px] leading-4">
-      <span
-        class="flex h-3.5 w-3.5 items-center justify-center rounded-sm border transition-colors duration-500"
-        :class="enabled ? 'border-primary bg-primary text-primary-foreground' : 'border-border'"
-      >
+    <!-- Every row keeps its slot and fades in, so the rows fill the stage at each step. -->
+    <div class="flex min-h-0 flex-1 flex-col gap-2.5">
+      <div class="flex flex-1 items-center gap-2 rounded-md border border-border bg-background px-2.5 py-1.5 text-[11px] leading-4">
         <span
-          v-if="enabled"
-          class="text-[9px] leading-none"
-        >✓</span>
-      </span>
-      <Network class="h-3 w-3 text-primary" />
-      <span class="text-foreground">Enable A2A</span>
-    </div>
-
-    <Transition
-      enter-active-class="transition-opacity duration-500"
-      enter-from-class="opacity-0"
-    >
-      <div
-        v-if="enabled"
-        class="truncate rounded-md bg-muted/50 px-2.5 py-1.5 font-mono text-[10px] leading-4 text-muted-foreground"
-      >
-        /.well-known/agent-card.json
+          class="flex h-3.5 w-3.5 items-center justify-center rounded-sm border transition-colors duration-500"
+          :class="enabled ? 'border-primary bg-primary text-primary-foreground' : 'border-border'"
+        >
+          <span
+            v-if="enabled"
+            class="text-[9px] leading-none"
+          >✓</span>
+        </span>
+        <Network class="h-3 w-3 text-primary" />
+        <span class="text-foreground">Enable A2A</span>
       </div>
-    </Transition>
 
-    <Transition
-      enter-active-class="transition-opacity duration-500"
-      enter-from-class="opacity-0"
-    >
       <div
-        v-if="taskState"
-        class="flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-[11px] leading-4 transition-colors duration-500"
-        :class="step === 2 ? 'border-primary/50 bg-primary/10' : 'border-border bg-background'"
+        class="flex flex-1 items-center rounded-md bg-muted/50 px-2.5 py-1.5 font-mono text-[10px] leading-4 text-muted-foreground transition-opacity duration-500"
+        :class="enabled ? 'opacity-100' : 'opacity-0'"
+      >
+        <span class="truncate">/.well-known/agent-card.json</span>
+      </div>
+
+      <div
+        class="flex flex-1 items-center gap-2 rounded-md border px-2.5 py-1.5 text-[11px] leading-4 transition-all duration-500"
+        :class="[
+          taskState ? 'opacity-100' : 'opacity-0',
+          step === 2 ? 'border-primary/50 bg-primary/10' : 'border-border bg-background',
+        ]"
       >
         <Loader2
           v-if="step === 2"
@@ -77,9 +72,9 @@ const caption = computed<string>(() => {
         <span class="text-foreground">SendMessage</span>
         <span class="ml-auto font-mono text-[10px] text-muted-foreground">{{ taskState }}</span>
       </div>
-    </Transition>
+    </div>
 
-    <p class="mt-auto text-[10px] leading-4 text-muted-foreground">
+    <p class="text-[10px] leading-4 text-muted-foreground">
       {{ caption }}
     </p>
   </div>

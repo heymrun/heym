@@ -15,6 +15,7 @@ The **Analytics** tab shows execution metrics and trends for your workflows. Mon
 
 ## Time Range
 
+- **1h**, **3h**, **6h** – Last hour, 3 hours, or 6 hours. Analytics are kept per hour, so these count the hour the window starts in whole: Last Hour at 15:20 covers 14:00 until now
 - **24h** – Last 24 hours
 - **7d** – Last 7 days
 - **30d** – Last 30 days
@@ -38,9 +39,19 @@ Two tables show workflow usage: **Most Used** (wider) and **Most Failed**.
 - **Execution Volume Over Time** – Line chart of executions per time bucket
 - **Success vs Error Rate** – Area chart comparing healthy and failed runs
 - **Average Latency Over Time** – Line chart showing response-time changes
-- **Drag to select** – Click and drag on any chart to focus a custom date range
+- **Drag to select** – Click and drag on any chart to focus a custom date range. A selection must cover at least two points on the chart; a plain click does not select anything
 - **Selection mode** – Selected ranges refresh the summary cards, charts, and workflow tables without changing the base preset
 - **Clear Selection** – Return to the preset time window when you are done drilling in
+
+## Node Types
+
+Below the latency percentiles, three charts show where node time and failures go, grouped by node type (Agent, HTTP Request, Code, and so on) across the workflows in view:
+
+- **Most Time Taken Nodes** – The 10 node types with the most total execution time, plotted as average duration per call. An hour without calls of a type shows **No calls** in the tooltip.
+- **Most Failed Node Types** – The 10 node types with the most errors (error or timeout), each at its own error count per time bucket.
+- **Most Called Node Types** – The 10 node types that ran the most, each at its own call count per time bucket. Skipped nodes are not counted.
+
+Hover a chart to see the node type under the pointer, next to the pointer. A node type too small to see next to the largest one on a chart (under 1% of it) is left out of that chart and its legend. The charts follow the workflow filter, the time range, and any range you drag on a chart. Node analytics are recorded for runs from the release that added them, and a finished run shows up within about a minute. Older runs are not counted.
 
 ## Auto Refresh
 

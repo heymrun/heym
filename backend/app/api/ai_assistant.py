@@ -6,7 +6,7 @@ import logging
 import re
 import time
 import uuid
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Event, Thread
@@ -20,7 +20,11 @@ from pydantic import BaseModel, ValidationError
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.analytics import compute_analytics_stats, upsert_workflow_analytics_snapshot
+from app.api.analytics import (
+    compute_analytics_breakdown,
+    compute_analytics_stats,
+    upsert_workflow_analytics_snapshot,
+)
 from app.api.boards import create_card as create_board_card
 from app.api.chat_dashboards import (
     DASHBOARD_TOOL_NAMES,
@@ -137,6 +141,7 @@ from app.services.model_router import (
     build_router_for_credential,
     load_option_credential,
 )
+from app.services.node_analytics_rollup import pending_on_first_write
 from app.services.openai_client import create_guarded_openai_client, create_openai_client
 from app.services.pending_execution import persist_pending_execution
 from app.services.run_history import record_run_history
@@ -529,6 +534,7 @@ DASHBOARD_CHAT_SYSTEM_PROMPT = """You are an assistant that helps the user with 
 3. Execute a workflow by ID with given inputs only when the user clearly wants to run one or when the answer cannot be given from workflow metadata or content alone (e.g. "send WhatsApp message to X saying Y", "run the birthday workflow", "when is the next birthday?").
 4. When the user only asks what workflows exist, what they do, or what inputs they need, use list_workflows and answer from that information—do not execute. Only call execute_workflow when the user explicitly wants to run something or when you need the runtime result (e.g. next birthday date) to answer.
 5. When the user asks about execution or analytics statistics (e.g. how many requests today, how many runs in the last 24 hours, error rate), use get_analytics_stats with the appropriate time_range (24h for today, 7d for last week, 30d, or all). You may pass an optional workflow_id to filter by one workflow (get id from list_workflows). Summarize the result in the user's language.
+5a. When the user asks where workflows fail, which workflow or node fails most, why workflows are slow, what takes the most time, or which workflows ran and how many distinct ones, use get_analytics_breakdown with the same time_range rules (default 7d) and an optional workflow_id. It returns the workflows that ran most (most_run_workflows), failed most (most_failed_workflows, with error_count and error_rate) and are slowest (slowest_workflows, by avg_latency_ms), and the node types (agent, httpRequest, code and so on) that take the most time (node_types_by_time, with avg_duration_ms per call and total_duration_ms), fail most (node_types_by_errors) and run most (node_types_by_calls). Explain slowness from avg_duration_ms and total_duration_ms and failures from error_count and error_rate, naming the workflows and node types. Node types are only counted for runs since node analytics were added: when note is set, say that node-level data is not available for this window yet. For the reason behind one failed run, follow up with get_workflow_run_history. For plain totals use get_analytics_stats; for what is running right now use get_active_executions.
 6. When the user asks for details of what ran or what came in (e.g. what ran, show details, list recent runs), use get_recent_executions with the appropriate time_range and optionally limit. Summarize the list (workflow name, time, status, brief output) in the user's language.
 6e. When the user asks about the runs of one specific workflow (how many times it ran, whether it failed, when it last ran, what its last status was, why a run failed), use list_workflows to find the workflow_id, then get_workflow_run_history(workflow_id) for metadata: total_runs, status_counts, first_run_at, last_run_at, last_run, avg_execution_time_ms and a page of runs. Answer from that metadata first. Only if the user wants the content of a run, or the reason for a failure, call get_workflow_run_history again with the execution_id of the relevant run (from runs or last_run) to read its inputs, outputs and per-node trace; look at nodes with status error. Use the status argument to list only failed runs, and offset when has_more is true. Do not use get_recent_executions for a question about one named workflow: it only returns the latest runs across all workflows, so the workflow may be missing.
 6a. When the user asks about scheduled cron runs, the calendar, or when workflows will run (today, this week, this month, upcoming times), use get_schedule_events with view_window day, week, or month, optional reference_date (YYYY-MM-DD), include_shared false for owned-only or true to include shared workflows, or start_iso/end_iso for a custom range. Summarize events (workflow name and time) in the user's language.
@@ -554,7 +560,7 @@ Respond in the same language the user uses. Be concise and helpful. When you run
 
 If a tool returns an error or no relevant data, do not invent an answer. Say clearly that you do not have that information (e.g. "I don't have this information"). Base your answers only on data from the tools (workflows, analytics, execution results); when you do not know something, say so.
 
-When the user asks for something you cannot do with your tools (e.g. console logs, server logs) AND no workflow matches, say clearly that you do not have access to that, then offer what you can do in a short numbered list. Always include: (1) I can show recent runs, (2) I can show what is running right now (with elapsed time and current node), (3) I can show analytics stats, (4) I can show scheduled cron times (day/week/month), (5) I can run a workflow and show its result, (6) I can list workflows and you can talk about them or ask me to run one, (7) I can list your teams, (8) I can list your data tables and their columns, (9) I can list your dashboards and the widgets on each, and add, rename, delete or tidy widgets. End with something like: Which would you like?
+When the user asks for something you cannot do with your tools (e.g. console logs, server logs) AND no workflow matches, say clearly that you do not have access to that, then offer what you can do in a short numbered list. Always include: (1) I can show recent runs, (2) I can show what is running right now (with elapsed time and current node), (3) I can show analytics stats and where workflows fail or slow down, (4) I can show scheduled cron times (day/week/month), (5) I can run a workflow and show its result, (6) I can list workflows and you can talk about them or ask me to run one, (7) I can list your teams, (8) I can list your data tables and their columns, (9) I can list your dashboards and the widgets on each, and add, rename, delete or tidy widgets. End with something like: Which would you like?
 
 11. When the user asks about teams (e.g. "my teams", "which teams am I in?", "who is in team X?"), use get_teams. Optionally pass team_name to filter by name.
 12. When the user asks about Heym features, nodes, expressions, workflows, or how to use the platform, use search_documentation. Call search_documentation at most 2 times per user message. Use one comprehensive query first (e.g. "canvas features", "portal"). Only call again with a different query if the first returns no relevant docs. In your response, cite the documentation with markdown links: [Document Title](/docs/category/slug). Example: [LLM Node](/docs/nodes/llm-node). When the documentation contains a video tag (e.g. `<video src="/features/showcase/..."`), include it in your response so the user can watch a demo directly in chat. Respond in the user's language.
@@ -780,6 +786,28 @@ DASHBOARD_CHAT_TOOLS = [
                     "time_range": {
                         "type": "string",
                         "description": "Time range: 24h (last 24 hours / today), 7d, 30d, or all",
+                        "enum": ["24h", "7d", "30d", "all"],
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_analytics_breakdown",
+            "description": "Explain where workflows fail and why they are slow: the workflows that ran most, failed most and are slowest, and the node types (agent, httpRequest, code, ...) with the most time (average per call and total), errors and calls. Use for 'where do my workflows fail?', 'why are workflows slow?', 'which node takes the longest?', 'which workflows ran today?'. Node types cover runs since node analytics were added. Optional workflow_id to focus on one workflow (get id from list_workflows).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "workflow_id": {
+                        "type": "string",
+                        "description": "Optional UUID of the workflow to break down; omit for all workflows",
+                    },
+                    "time_range": {
+                        "type": "string",
+                        "description": "Time range: 24h (last 24 hours / today), 7d (default), 30d, or all",
                         "enum": ["24h", "7d", "30d", "all"],
                     },
                 },
@@ -2636,6 +2664,7 @@ async def run_execute_workflow_tool(
                 status=execution_result.status,
                 execution_time_ms=execution_result.execution_time_ms,
                 trigger_source=trigger_source,
+                node_analytics_pending=pending_on_first_write(execution_result),
             )
             db.add(history_entry)
             if execution_result.allow_downstream_pending:
@@ -3470,6 +3499,16 @@ def _summarize_tool_result(tool_name: str, result_json: str) -> str:
         total = data.get("total_executions", 0) or 0
         rate = data.get("success_rate", 0) or 0
         return f"Analytics: {total} executions, {rate:.0f}% success"
+    if tool_name == "get_analytics_breakdown":
+        if not isinstance(data, dict):
+            return str(data)[:200]
+        ran = data.get("workflows_run", 0) or 0
+        failed = len(data.get("most_failed_workflows") or [])
+        summary = f"Breakdown: {ran} workflow(s) ran, {failed} with errors"
+        by_time = data.get("node_types_by_time") or []
+        if by_time and isinstance(by_time[0], dict) and by_time[0].get("node_type"):
+            summary += f", most time in {by_time[0]['node_type']} nodes"
+        return summary
     if tool_name == "get_recent_executions":
         if isinstance(data, list):
             return f"{len(data)} recent execution(s) listed"
@@ -4759,16 +4798,21 @@ async def stream_dashboard_chat(
                         run_steps[-1]["execution_time_ms"],
                         status=_chat_tool_lifecycle_status(name, result),
                     )
-                elif name == "get_analytics_stats":
+                elif name in ("get_analytics_stats", "get_analytics_breakdown"):
+                    is_breakdown = name == "get_analytics_breakdown"
                     workflow_id_str = args.get("workflow_id") or ""
-                    time_range = args.get("time_range") or "24h"
+                    time_range = args.get("time_range") or ("7d" if is_breakdown else "24h")
                     wid: uuid.UUID | None = None
                     if workflow_id_str:
                         try:
                             wid = uuid.UUID(workflow_id_str)
                         except (ValueError, TypeError):
                             wid = None
-                    step_label = "Fetching analytics..."
+                    step_label = (
+                        "Finding where workflows fail and slow down..."
+                        if is_breakdown
+                        else "Fetching analytics..."
+                    )
                     yield (
                         "data: "
                         + json.dumps(
@@ -4783,8 +4827,12 @@ async def stream_dashboard_chat(
                         + "\n\n"
                     )
                     step_start = time.time()
-                    stats = await compute_analytics_stats(db, user_id, wid, time_range)
-                    result = json.dumps(stats.model_dump(), default=str)
+                    if is_breakdown:
+                        breakdown = await compute_analytics_breakdown(db, user_id, wid, time_range)
+                        result = json.dumps(asdict(breakdown), default=str)
+                    else:
+                        stats = await compute_analytics_stats(db, user_id, wid, time_range)
+                        result = json.dumps(stats.model_dump(), default=str)
                     step_ms = round((time.time() - step_start) * 1000, 2)
                     run_steps.append(
                         {

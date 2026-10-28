@@ -1561,6 +1561,20 @@ class WorkflowBreakdownResponse(BaseModel):
     items: list[WorkflowBreakdownItem] = Field(default_factory=list)
 
 
+class NodeTypeSeriesItem(BaseModel):
+    node_type: str
+    total: float
+    average: float | None = None
+    values: list[float | None]
+
+
+class NodeTypeAnalyticsResponse(BaseModel):
+    time_buckets: list[str] = Field(default_factory=list)
+    most_duration: list[NodeTypeSeriesItem] = Field(default_factory=list)
+    most_errors: list[NodeTypeSeriesItem] = Field(default_factory=list)
+    most_calls: list[NodeTypeSeriesItem] = Field(default_factory=list)
+
+
 # ── Templates ────────────────────────────────────────────────────────────────
 
 

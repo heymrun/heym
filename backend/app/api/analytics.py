@@ -19,11 +19,13 @@ from app.db.models import (
 from app.db.session import get_db
 from app.models.schemas import (
     AnalyticsStatsResponse,
+    NodeTypeAnalyticsResponse,
     TimeSeriesMetricsResponse,
     WorkflowBreakdownItem,
     WorkflowBreakdownResponse,
 )
-from app.services import analytics_metrics
+from app.services import analytics_metrics, node_analytics_metrics
+from app.services.analytics_breakdown import AnalyticsBreakdown, build_analytics_breakdown
 from app.services.analytics_metrics import (
     BUCKET_SIZES,
     calculate_percentile,
@@ -39,6 +41,7 @@ from app.services.workflow_access import explicit_workflow_share_ids
 
 __all__ = [
     "calculate_percentile",
+    "compute_analytics_breakdown",
     "compute_analytics_stats",
     "compute_time_saved_minutes",
     "get_accessible_workflow_ids",
@@ -223,10 +226,49 @@ async def compute_analytics_stats(
     return AnalyticsStatsResponse(**asdict(stats))
 
 
+async def compute_analytics_breakdown(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    workflow_id: Optional[uuid.UUID],
+    time_range: str,
+    limit: int = 5,
+) -> AnalyticsBreakdown:
+    """Where runs fail and why they are slow, by workflow and by node type.
+
+    Used by the dashboard chat tool, and so by heym_chat over MCP and the Heym Agent over A2A.
+    Empty when the user has no workflows or ``workflow_id`` is not accessible.
+    """
+    accessible_workflow_ids = await get_accessible_workflow_ids(db, user_id)
+    if not accessible_workflow_ids or (
+        workflow_id is not None and workflow_id not in accessible_workflow_ids
+    ):
+        return AnalyticsBreakdown(time_range=time_range)
+
+    since, until = _resolve_time_window(time_range)
+    workflows = await analytics_metrics.compute_workflow_breakdown(
+        db,
+        user_id=user_id,
+        accessible_workflow_ids=accessible_workflow_ids,
+        since=since,
+        until=until,
+        limit=100,
+    )
+    if workflow_id is not None:
+        workflows = [row for row in workflows if row.workflow_id == workflow_id]
+    node_types = await node_analytics_metrics.compute_node_type_totals(
+        db,
+        accessible_workflow_ids=accessible_workflow_ids,
+        workflow_id=workflow_id,
+        since=since,
+        until=until,
+    )
+    return build_analytics_breakdown(time_range, workflows, node_types, limit=limit)
+
+
 @router.get("/stats", response_model=AnalyticsStatsResponse)
 async def get_analytics_stats(
     workflow_id: Optional[uuid.UUID] = Query(None, description="Filter by workflow ID"),
-    time_range: str = Query("7d", description="Time range: 24h, 7d, 30d, all"),
+    time_range: str = Query("7d", description="Time range: 1h, 3h, 6h, 24h, 7d, 30d, all"),
     start_at: datetime | None = Query(None, description="Custom range start in ISO 8601"),
     end_at: datetime | None = Query(None, description="Custom range end in ISO 8601"),
     current_user: User = Depends(get_current_user),
@@ -258,7 +300,7 @@ async def get_analytics_stats(
 @router.get("/stats/{workflow_id}", response_model=AnalyticsStatsResponse)
 async def get_workflow_analytics_stats(
     workflow_id: uuid.UUID,
-    time_range: str = Query("7d", description="Time range: 24h, 7d, 30d, all"),
+    time_range: str = Query("7d", description="Time range: 1h, 3h, 6h, 24h, 7d, 30d, all"),
     start_at: datetime | None = Query(None, description="Custom range start in ISO 8601"),
     end_at: datetime | None = Query(None, description="Custom range end in ISO 8601"),
     current_user: User = Depends(get_current_user),
@@ -289,7 +331,7 @@ async def get_workflow_analytics_stats(
 @router.get("/metrics", response_model=TimeSeriesMetricsResponse)
 async def get_analytics_metrics(
     workflow_id: Optional[uuid.UUID] = Query(None, description="Filter by workflow ID"),
-    time_range: str = Query("7d", description="Time range: 24h, 7d, 30d, all"),
+    time_range: str = Query("7d", description="Time range: 1h, 3h, 6h, 24h, 7d, 30d, all"),
     bucket_size: str = Query("1h", description="Bucket size: 1h, 6h, 1d"),
     start_at: datetime | None = Query(None, description="Custom range start in ISO 8601"),
     end_at: datetime | None = Query(None, description="Custom range end in ISO 8601"),
@@ -347,7 +389,7 @@ async def get_analytics_metrics(
 @router.get("/metrics/{workflow_id}", response_model=TimeSeriesMetricsResponse)
 async def get_workflow_analytics_metrics(
     workflow_id: uuid.UUID,
-    time_range: str = Query("7d", description="Time range: 24h, 7d, 30d, all"),
+    time_range: str = Query("7d", description="Time range: 1h, 3h, 6h, 24h, 7d, 30d, all"),
     bucket_size: str = Query("1h", description="Bucket size: 1h, 6h, 1d"),
     start_at: datetime | None = Query(None, description="Custom range start in ISO 8601"),
     end_at: datetime | None = Query(None, description="Custom range end in ISO 8601"),
@@ -367,7 +409,7 @@ async def get_workflow_analytics_metrics(
 
 @router.get("/workflows", response_model=WorkflowBreakdownResponse)
 async def get_workflow_breakdown(
-    time_range: str = Query("7d", description="Time range: 24h, 7d, 30d, all"),
+    time_range: str = Query("7d", description="Time range: 1h, 3h, 6h, 24h, 7d, 30d, all"),
     start_at: datetime | None = Query(None, description="Custom range start in ISO 8601"),
     end_at: datetime | None = Query(None, description="Custom range end in ISO 8601"),
     limit: int = Query(10, ge=1, le=100, description="Maximum number of workflows to return"),
@@ -400,3 +442,57 @@ async def get_workflow_breakdown(
         limit=limit,
     )
     return WorkflowBreakdownResponse(items=[WorkflowBreakdownItem(**asdict(row)) for row in rows])
+
+
+@router.get("/nodes", response_model=NodeTypeAnalyticsResponse)
+async def get_node_type_analytics(
+    workflow_id: Optional[uuid.UUID] = Query(None, description="Filter by workflow ID"),
+    time_range: str = Query("7d", description="Time range: 1h, 3h, 6h, 24h, 7d, 30d, all"),
+    bucket_size: str = Query("1h", description="Bucket size: 1h, 6h, 1d"),
+    start_at: datetime | None = Query(None, description="Custom range start in ISO 8601"),
+    end_at: datetime | None = Query(None, description="Custom range end in ISO 8601"),
+    limit: int = Query(10, ge=1, le=20, description="Node types per ranking"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> NodeTypeAnalyticsResponse:
+    """Top node types by total duration, errors and calls, each with a per-bucket series.
+
+    Reads only the node analytics rollup, which counts runs written since migration 148.
+    """
+    accessible_workflow_ids = await get_accessible_workflow_ids(db, current_user.id)
+    if workflow_id is not None and workflow_id not in accessible_workflow_ids:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Workflow not accessible",
+        )
+    if not accessible_workflow_ids:
+        return NodeTypeAnalyticsResponse()
+
+    try:
+        since, resolved_end = await analytics_metrics.resolve_metrics_window(
+            db,
+            user_id=current_user.id,
+            accessible_workflow_ids=accessible_workflow_ids,
+            workflow_id=workflow_id,
+            time_range=time_range,
+            start_at=start_at,
+            end_at=end_at,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+
+    result = await node_analytics_metrics.compute_node_type_analytics(
+        db,
+        accessible_workflow_ids=accessible_workflow_ids,
+        workflow_id=workflow_id,
+        since=since,
+        until=resolved_end,
+        bucket_delta=BUCKET_SIZES.get(
+            bucket_size, _default_bucket_delta_for_window(since, resolved_end)
+        ),
+        limit=limit,
+    )
+    return NodeTypeAnalyticsResponse(**asdict(result))

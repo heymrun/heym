@@ -14,7 +14,8 @@ AGENT_CAPABILITIES = (
     "list, inspect and run workflows; build a new workflow or change one it built earlier in "
     "the conversation, test-run it with sample inputs (at most 5 test runs per message) and "
     "fix it until a run passes; create, edit and run prompt and agent eval suites, including "
-    "an agent's baseline; report analytics, recent executions, the run history of one "
+    "an agent's baseline; report analytics, where workflows fail and why they are slow (by "
+    "workflow and by node type), recent executions, the run history of one "
     "workflow (how many times it ran, statuses, when, and the details of a single run), and "
     "which executions are running right now (with elapsed time, current node, and a link to "
     "each live run); read and resolve human-in-the-loop reviews; list and act on agentic "
@@ -87,9 +88,13 @@ AGENT_SKILLS: tuple[AgentSkillInfo, ...] = (
     AgentSkillInfo(
         "observability",
         "Runs and analytics",
-        "Report analytics, recent executions, a workflow's run history and the runs in progress.",
+        "Report analytics, where workflows fail and why they are slow (by workflow and node "
+        "type), recent executions, a workflow's run history and the runs in progress.",
         ("analytics", "executions", "observability"),
-        ("How many times did the lead scorer fail this week?",),
+        (
+            "How many times did the lead scorer fail this week?",
+            "Why are my workflows slow today?",
+        ),
     ),
     AgentSkillInfo(
         "human-review",

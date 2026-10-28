@@ -12,6 +12,7 @@ from app.api.analytics import (
     get_analytics_metrics,
     get_analytics_stats,
 )
+from app.services.analytics_metrics import time_range_start
 
 
 class _ScalarSequenceResult:
@@ -51,6 +52,26 @@ class AnalyticsTimeWindowTests(unittest.TestCase):
         self.assertEqual(
             resolved_end,
             datetime(2026, 4, 13, 16, 0, tzinfo=timezone.utc),
+        )
+
+    def test_last_hour_counts_the_hour_it_starts_in_whole(self) -> None:
+        now = datetime(2026, 10, 28, 15, 20, tzinfo=timezone.utc)
+
+        self.assertEqual(
+            time_range_start("1h", now=now),
+            datetime(2026, 10, 28, 14, 0, tzinfo=timezone.utc),
+        )
+
+    def test_three_and_six_hours_also_start_on_the_hour(self) -> None:
+        now = datetime(2026, 10, 28, 15, 20, tzinfo=timezone.utc)
+
+        self.assertEqual(
+            time_range_start("3h", now=now),
+            datetime(2026, 10, 28, 12, 0, tzinfo=timezone.utc),
+        )
+        self.assertEqual(
+            time_range_start("6h", now=now),
+            datetime(2026, 10, 28, 9, 0, tzinfo=timezone.utc),
         )
 
     def test_resolve_time_window_requires_both_bounds(self) -> None:

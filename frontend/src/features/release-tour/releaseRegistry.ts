@@ -25,7 +25,7 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
       introTitle: "New in this release",
       introDescription:
         "A quick look at what changed since your last update. Takes about a minute.",
-      tourEnabled: false,
+      tourEnabled: true,
       sectionOrder: ["a2a-agent"],
     },
     sections: [
