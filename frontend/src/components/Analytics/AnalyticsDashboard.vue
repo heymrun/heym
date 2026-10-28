@@ -7,6 +7,7 @@ import type {
   AnalyticsQueryOptions,
   AnalyticsStats,
   BucketSize,
+  NodeTypeAnalytics,
   TimeSeriesMetrics,
   TimeRange,
   WorkflowBreakdownItem,
@@ -15,6 +16,7 @@ import type { WorkflowListItem } from "@/types/workflow";
 import Button from "@/components/ui/Button.vue";
 import Card from "@/components/ui/Card.vue";
 import AnalyticsKpiCard from "@/components/Analytics/AnalyticsKpiCard.vue";
+import NodeTypeCharts from "@/components/Analytics/NodeTypeCharts.vue";
 import Select from "@/components/ui/Select.vue";
 import { analyticsApi, workflowApi } from "@/services/api";
 
@@ -33,6 +35,7 @@ const workflows = ref<WorkflowListItem[]>([]);
 const autoRefresh = ref(false);
 const refreshInterval = ref<number | null>(null);
 const workflowBreakdown = ref<WorkflowBreakdownItem[] | null>(null);
+const nodeTypeAnalytics = ref<NodeTypeAnalytics | null>(null);
 const route = useRoute();
 const router = useRouter();
 const SELECTION_START_QUERY_KEY = "selectionStart";
@@ -492,13 +495,15 @@ async function loadData(): Promise<void> {
         ? analyticsApi.getWorkflowBreakdown(activeAnalyticsQuery.value, 10)
         : Promise.resolve<WorkflowBreakdownItem[] | null>(null);
 
-    const [statsData, metricsData, breakdownData] = await Promise.all([
+    const [statsData, metricsData, breakdownData, nodeTypeData] = await Promise.all([
       ...baseRequests,
       breakdownRequest,
+      analyticsApi.getNodeTypeAnalytics(workflowId.value, activeAnalyticsQuery.value),
     ]);
     stats.value = statsData;
     metrics.value = metricsData;
     workflowBreakdown.value = breakdownData;
+    nodeTypeAnalytics.value = nodeTypeData;
   } catch (err) {
     error.value = err instanceof Error ? err.message : "Failed to load analytics";
   } finally {
@@ -884,6 +889,12 @@ function goToWorkflow(): void {
           </div>
         </div>
       </Card>
+
+      <NodeTypeCharts
+        :analytics="nodeTypeAnalytics"
+        :base-options="chartOptions"
+        :scope-key="chartScopeKey"
+      />
 
       <div
         v-if="!workflowId && workflowBreakdown && workflowBreakdown.length > 0"
