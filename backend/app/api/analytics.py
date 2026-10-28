@@ -25,6 +25,7 @@ from app.models.schemas import (
     WorkflowBreakdownResponse,
 )
 from app.services import analytics_metrics, node_analytics_metrics
+from app.services.analytics_breakdown import AnalyticsBreakdown, build_analytics_breakdown
 from app.services.analytics_metrics import (
     BUCKET_SIZES,
     calculate_percentile,
@@ -40,6 +41,7 @@ from app.services.workflow_access import explicit_workflow_share_ids
 
 __all__ = [
     "calculate_percentile",
+    "compute_analytics_breakdown",
     "compute_analytics_stats",
     "compute_time_saved_minutes",
     "get_accessible_workflow_ids",
@@ -222,6 +224,45 @@ async def compute_analytics_stats(
         end_at=end_at,
     )
     return AnalyticsStatsResponse(**asdict(stats))
+
+
+async def compute_analytics_breakdown(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    workflow_id: Optional[uuid.UUID],
+    time_range: str,
+    limit: int = 5,
+) -> AnalyticsBreakdown:
+    """Where runs fail and why they are slow, by workflow and by node type.
+
+    Used by the dashboard chat tool, and so by heym_chat over MCP and the Heym Agent over A2A.
+    Empty when the user has no workflows or ``workflow_id`` is not accessible.
+    """
+    accessible_workflow_ids = await get_accessible_workflow_ids(db, user_id)
+    if not accessible_workflow_ids or (
+        workflow_id is not None and workflow_id not in accessible_workflow_ids
+    ):
+        return AnalyticsBreakdown(time_range=time_range)
+
+    since, until = _resolve_time_window(time_range)
+    workflows = await analytics_metrics.compute_workflow_breakdown(
+        db,
+        user_id=user_id,
+        accessible_workflow_ids=accessible_workflow_ids,
+        since=since,
+        until=until,
+        limit=100,
+    )
+    if workflow_id is not None:
+        workflows = [row for row in workflows if row.workflow_id == workflow_id]
+    node_types = await node_analytics_metrics.compute_node_type_totals(
+        db,
+        accessible_workflow_ids=accessible_workflow_ids,
+        workflow_id=workflow_id,
+        since=since,
+        until=until,
+    )
+    return build_analytics_breakdown(time_range, workflows, node_types, limit=limit)
 
 
 @router.get("/stats", response_model=AnalyticsStatsResponse)

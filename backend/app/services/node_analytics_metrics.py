@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Protocol
 
-from sqlalchemy import func, select
+from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import NodeAnalyticsSnapshot
@@ -35,6 +35,16 @@ class NodeTypeAnalytics:
     most_duration: list[NodeTypeSeries] = field(default_factory=list)
     most_errors: list[NodeTypeSeries] = field(default_factory=list)
     most_calls: list[NodeTypeSeries] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class NodeTypeTotals:
+    """One node type's totals over a whole window."""
+
+    node_type: str
+    call_count: int
+    error_count: int
+    total_duration_ms: float
 
 
 class NodeTypeBucketRow(Protocol):
@@ -124,6 +134,58 @@ def rank_node_types(
     )
 
 
+def _scope(
+    accessible_workflow_ids: list[uuid.UUID], workflow_id: uuid.UUID | None
+) -> ColumnElement[bool] | None:
+    """The rows a user may read: one workflow or every accessible one; None reads nothing."""
+    if not accessible_workflow_ids:
+        return None
+    if workflow_id is not None:
+        if workflow_id not in accessible_workflow_ids:
+            return None
+        return NodeAnalyticsSnapshot.workflow_id == workflow_id
+    return NodeAnalyticsSnapshot.workflow_id.in_(accessible_workflow_ids)
+
+
+async def compute_node_type_totals(
+    db: AsyncSession,
+    *,
+    accessible_workflow_ids: list[uuid.UUID],
+    workflow_id: uuid.UUID | None,
+    since: datetime,
+    until: datetime,
+) -> list[NodeTypeTotals]:
+    """Calls, errors and total duration per node type over ``[since, until)``."""
+    scope = _scope(accessible_workflow_ids, workflow_id)
+    if scope is None:
+        return []
+    rows = (
+        await db.execute(
+            select(
+                NodeAnalyticsSnapshot.node_type,
+                func.sum(NodeAnalyticsSnapshot.call_count).label("call_count"),
+                func.sum(NodeAnalyticsSnapshot.error_count).label("error_count"),
+                func.sum(NodeAnalyticsSnapshot.total_duration_ms).label("total_duration_ms"),
+            )
+            .where(
+                scope,
+                NodeAnalyticsSnapshot.bucket_start >= since,
+                NodeAnalyticsSnapshot.bucket_start < until,
+            )
+            .group_by(NodeAnalyticsSnapshot.node_type)
+        )
+    ).all()
+    return [
+        NodeTypeTotals(
+            node_type=row.node_type,
+            call_count=int(row.call_count or 0),
+            error_count=int(row.error_count or 0),
+            total_duration_ms=float(row.total_duration_ms or 0.0),
+        )
+        for row in rows
+    ]
+
+
 async def compute_node_type_analytics(
     db: AsyncSession,
     *,
@@ -136,16 +198,9 @@ async def compute_node_type_analytics(
 ) -> NodeTypeAnalytics:
     """Top node types by total duration, errors and calls over ``[since, until)``."""
     time_buckets = bucket_keys(since, until, bucket_delta)
-    if not accessible_workflow_ids:
+    scope = _scope(accessible_workflow_ids, workflow_id)
+    if scope is None:
         return NodeTypeAnalytics(time_buckets=time_buckets)
-    if workflow_id is not None and workflow_id not in accessible_workflow_ids:
-        return NodeTypeAnalytics(time_buckets=time_buckets)
-
-    scope = (
-        NodeAnalyticsSnapshot.workflow_id == workflow_id
-        if workflow_id is not None
-        else NodeAnalyticsSnapshot.workflow_id.in_(accessible_workflow_ids)
-    )
     rows = (
         await db.execute(
             select(
