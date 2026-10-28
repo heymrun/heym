@@ -252,6 +252,8 @@ const chartOptions = computed(() => ({
   chart: {
     type: "line",
     height: 300,
+    // ApexCharts adds 15px under every chart by default; the card's padding is enough.
+    parentHeightOffset: 0,
     toolbar: {
       show: false,
       autoSelected: "selection",
@@ -375,7 +377,8 @@ const successErrorChart = computed(() => {
     ],
     options: {
       ...chartOptions.value,
-      chart: { ...chartOptions.value.chart, type: "area", stacked: true },
+      // Unstacked so each line shows its own count and the y axis fits the larger one.
+      chart: { ...chartOptions.value.chart, type: "area", stacked: false },
       colors: ["#10b981", "#ef4444"],
       title: {
         text: "Success vs Error Rate",

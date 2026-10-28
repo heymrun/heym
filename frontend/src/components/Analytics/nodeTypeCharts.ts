@@ -41,21 +41,11 @@ export interface NodeTypeChartSeries {
   data: NodeTypeChartPoint[];
 }
 
-export interface NodeTypeChartMarker {
-  seriesIndex: number;
-  dataPointIndex: number;
-  fillColor: string;
-  strokeColor: string;
-  size: number;
-}
-
 export interface NodeTypeChartModel {
   metric: NodeTypeMetric;
   title: string;
   subtitle: string;
-  stacked: boolean;
   series: NodeTypeChartSeries[];
-  markers: NodeTypeChartMarker[];
 }
 
 interface ChartCopy {
@@ -65,7 +55,7 @@ interface ChartCopy {
 
 // Named like the workflow tables below them: Most Used and Most Failed Workflows.
 const CHART_COPY: Record<NodeTypeMetric, ChartCopy> = {
-  duration: { title: "Most Time-Consuming Node Types", subtitle: "Average duration per call" },
+  duration: { title: "Most Time Taken Nodes", subtitle: "Average duration per call" },
   errors: { title: "Most Failed Node Types", subtitle: "Errors over time" },
   calls: { title: "Most Called Node Types", subtitle: "Calls over time" },
 };
@@ -86,25 +76,7 @@ function rankedItems(metric: NodeTypeMetric, analytics: NodeTypeAnalytics): Node
   return analytics.most_calls;
 }
 
-function hasValue(point: NodeTypeChartPoint | undefined): boolean {
-  return point !== undefined && !point.empty && point.y > 0;
-}
-
-/** Dots for points with no neighbor to draw a line to: an area chart leaves them invisible. */
-export function isolatedPointMarkers(series: NodeTypeChartSeries[]): NodeTypeChartMarker[] {
-  const markers: NodeTypeChartMarker[] = [];
-  series.forEach((item, seriesIndex) => {
-    const color = NODE_TYPE_CHART_COLORS[seriesIndex % NODE_TYPE_CHART_COLORS.length];
-    item.data.forEach((point, dataPointIndex) => {
-      if (!hasValue(point)) return;
-      if (hasValue(item.data[dataPointIndex - 1]) || hasValue(item.data[dataPointIndex + 1])) return;
-      markers.push({ seriesIndex, dataPointIndex, fillColor: color, strokeColor: color, size: 4 });
-    });
-  });
-  return markers;
-}
-
-/** One chart's series; averages are not stacked because they do not add up. */
+/** One chart's series. Each series is drawn at its own value, never stacked on another. */
 export function buildNodeTypeChart(
   metric: NodeTypeMetric,
   analytics: NodeTypeAnalytics | null,
@@ -119,11 +91,5 @@ export function buildNodeTypeChart(
       return { x, y: value === null ? 0 : Math.round(value), empty: value === null };
     }),
   }));
-  return {
-    metric,
-    ...CHART_COPY[metric],
-    stacked: metric !== "duration",
-    series,
-    markers: isolatedPointMarkers(series),
-  };
+  return { metric, ...CHART_COPY[metric], series };
 }

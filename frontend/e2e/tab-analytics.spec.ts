@@ -97,7 +97,7 @@ test("renders the node type charts", async ({ page }) => {
   const section = page.getByTestId("analytics-node-types");
   await expect(section.getByRole("heading", { name: "Node Types", exact: true })).toBeVisible();
   for (const title of [
-    "Most Time-Consuming Node Types",
+    "Most Time Taken Nodes",
     "Most Failed Node Types",
     "Most Called Node Types",
   ]) {

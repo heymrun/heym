@@ -45,12 +45,16 @@ function formatPoint(model: NodeTypeChartModel, value: number, point: TooltipPoi
 function optionsFor(model: NodeTypeChartModel): Record<string, unknown> {
   return {
     ...props.baseOptions,
-    chart: { ...props.baseOptions.chart, type: "area", stacked: model.stacked },
+    // Unstacked: a type with 5 calls sits at 5, not on top of the type before it.
+    chart: { ...props.baseOptions.chart, type: "area", stacked: false },
     colors: NODE_TYPE_CHART_COLORS,
     dataLabels: { enabled: false },
-    fill: { type: "solid", opacity: model.stacked ? 0.45 : 0.15 },
+    fill: { type: "solid", opacity: 0.15 },
     legend: { position: "bottom" },
-    markers: { size: 0, hover: { size: 5 }, discrete: model.markers },
+    // Hover points only. Discrete markers stop ApexCharts from moving a non-shared tooltip.
+    markers: { size: 0, hover: { size: 5 } },
+    // Smooth without overshooting: a curve between two hours never dips below 0.
+    stroke: { curve: "monotoneCubic", width: 2 },
     // Ten series are too many to list at once: the tooltip shows the one under the pointer,
     // next to the pointer.
     tooltip: {
