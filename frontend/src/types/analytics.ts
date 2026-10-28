@@ -52,3 +52,17 @@ export interface WorkflowBreakdownItem {
 export interface WorkflowBreakdownResponse {
   items: WorkflowBreakdownItem[];
 }
+
+export interface NodeTypeSeriesItem {
+  node_type: string;
+  total: number;
+  average: number | null;
+  values: (number | null)[];
+}
+
+export interface NodeTypeAnalytics {
+  time_buckets: string[];
+  most_duration: NodeTypeSeriesItem[];
+  most_errors: NodeTypeSeriesItem[];
+  most_calls: NodeTypeSeriesItem[];
+}
