@@ -533,7 +533,7 @@ DASHBOARD_CHAT_SYSTEM_PROMPT = """You are an assistant that helps the user with 
 2. Answer questions about what is inside a workflow (e.g. "what is in the backlog?", "what do the sticky notes say?", "what tasks are in workflow X?") without running it: use list_workflows to find the workflow by name, then get_workflow_definition(workflow_id) to get its content (nodes, sticky notes, labels), and answer from that. Do not execute in these cases.
 3. Execute a workflow by ID with given inputs only when the user clearly wants to run one or when the answer cannot be given from workflow metadata or content alone (e.g. "send WhatsApp message to X saying Y", "run the birthday workflow", "when is the next birthday?").
 4. When the user only asks what workflows exist, what they do, or what inputs they need, use list_workflows and answer from that information—do not execute. Only call execute_workflow when the user explicitly wants to run something or when you need the runtime result (e.g. next birthday date) to answer.
-5. When the user asks about execution or analytics statistics (e.g. how many requests today, how many runs in the last 24 hours, error rate), use get_analytics_stats with the appropriate time_range (24h for today, 7d for last week, 30d, or all). You may pass an optional workflow_id to filter by one workflow (get id from list_workflows). Summarize the result in the user's language.
+5. When the user asks about execution or analytics statistics (e.g. how many requests today, how many runs in the last 24 hours, error rate), use get_analytics_stats with the appropriate time_range (1h, 3h or 6h for the last hours, 24h for today, 7d for last week, 30d, or all). The hour windows of the analytics tools start at the top of the hour, so 1h asked at 15:20 covers 14:00 until now: say so when the user asks for an exact number of minutes. You may pass an optional workflow_id to filter by one workflow (get id from list_workflows). Summarize the result in the user's language.
 5a. When the user asks where workflows fail, which workflow or node fails most, why workflows are slow, what takes the most time, or which workflows ran and how many distinct ones, use get_analytics_breakdown with the same time_range rules (default 7d) and an optional workflow_id. It returns the workflows that ran most (most_run_workflows), failed most (most_failed_workflows, with error_count and error_rate) and are slowest (slowest_workflows, by avg_latency_ms), and the node types (agent, httpRequest, code and so on) that take the most time (node_types_by_time, with avg_duration_ms per call and total_duration_ms), fail most (node_types_by_errors) and run most (node_types_by_calls). Explain slowness from avg_duration_ms and total_duration_ms and failures from error_count and error_rate, naming the workflows and node types. Node types are only counted for runs since node analytics were added: when note is set, say that node-level data is not available for this window yet. For the reason behind one failed run, follow up with get_workflow_run_history. For plain totals use get_analytics_stats; for what is running right now use get_active_executions.
 6. When the user asks for details of what ran or what came in (e.g. what ran, show details, list recent runs), use get_recent_executions with the appropriate time_range and optionally limit. Summarize the list (workflow name, time, status, brief output) in the user's language.
 6e. When the user asks about the runs of one specific workflow (how many times it ran, whether it failed, when it last ran, what its last status was, why a run failed), use list_workflows to find the workflow_id, then get_workflow_run_history(workflow_id) for metadata: total_runs, status_counts, first_run_at, last_run_at, last_run, avg_execution_time_ms and a page of runs. Answer from that metadata first. Only if the user wants the content of a run, or the reason for a failure, call get_workflow_run_history again with the execution_id of the relevant run (from runs or last_run) to read its inputs, outputs and per-node trace; look at nodes with status error. Use the status argument to list only failed runs, and offset when has_more is true. Do not use get_recent_executions for a question about one named workflow: it only returns the latest runs across all workflows, so the workflow may be missing.
@@ -608,6 +608,18 @@ _DATA_TABLE_CHOICES_SCHEMA: dict[str, Any] = {
         },
         "required": ["table_id"],
     },
+}
+
+# The hour windows start on the hour, like the Analytics tab.
+CHAT_TIME_RANGES = ["1h", "3h", "6h", "24h", "7d", "30d", "all"]
+RECENT_EXECUTIONS_SINCE_HOURS: dict[str, int | None] = {
+    "1h": 1,
+    "3h": 3,
+    "6h": 6,
+    "24h": 24,
+    "7d": 168,
+    "30d": 720,
+    "all": None,
 }
 
 DASHBOARD_CHAT_TOOLS = [
@@ -775,7 +787,7 @@ DASHBOARD_CHAT_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_analytics_stats",
-            "description": "Get execution/analytics statistics (total runs, success/error counts and rates, latencies). Use when the user asks about execution stats (e.g. 'how many requests today?', 'how many runs in the last 24 hours?', 'error rate?'). For 'today' use time_range 24h. Optional workflow_id to filter by one workflow (get id from list_workflows).",
+            "description": "Get execution/analytics statistics (total runs, success/error counts and rates, latencies). Use when the user asks about execution stats (e.g. 'how many requests today?', 'how many runs in the last 24 hours?', 'error rate?'). For 'today' use time_range 24h, for the last hour or the last few hours use 1h, 3h or 6h. Optional workflow_id to filter by one workflow (get id from list_workflows).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -785,8 +797,8 @@ DASHBOARD_CHAT_TOOLS = [
                     },
                     "time_range": {
                         "type": "string",
-                        "description": "Time range: 24h (last 24 hours / today), 7d, 30d, or all",
-                        "enum": ["24h", "7d", "30d", "all"],
+                        "description": "Time range: 1h, 3h or 6h (the last hours), 24h (last 24 hours / today), 7d, 30d, or all",
+                        "enum": list(CHAT_TIME_RANGES),
                     },
                 },
                 "required": [],
@@ -807,8 +819,8 @@ DASHBOARD_CHAT_TOOLS = [
                     },
                     "time_range": {
                         "type": "string",
-                        "description": "Time range: 24h (last 24 hours / today), 7d (default), 30d, or all",
-                        "enum": ["24h", "7d", "30d", "all"],
+                        "description": "Time range: 1h, 3h or 6h (the last hours), 24h (last 24 hours / today), 7d (default), 30d, or all",
+                        "enum": list(CHAT_TIME_RANGES),
                     },
                 },
                 "required": [],
@@ -825,8 +837,8 @@ DASHBOARD_CHAT_TOOLS = [
                 "properties": {
                     "time_range": {
                         "type": "string",
-                        "description": "Time window: 24h, 7d, 30d, or all",
-                        "enum": ["24h", "7d", "30d", "all"],
+                        "description": "Time window: 1h, 3h, 6h, 24h, 7d, 30d, or all",
+                        "enum": list(CHAT_TIME_RANGES),
                     },
                     "limit": {
                         "type": "integer",
@@ -855,8 +867,8 @@ DASHBOARD_CHAT_TOOLS = [
                     },
                     "time_range": {
                         "type": "string",
-                        "description": "Window for metadata: 24h, 7d, 30d, or all. Default all.",
-                        "enum": ["24h", "7d", "30d", "all"],
+                        "description": "Window for metadata: 1h, 3h, 6h, 24h, 7d, 30d, or all. Default all.",
+                        "enum": list(CHAT_TIME_RANGES),
                     },
                     "status": {
                         "type": "string",
@@ -4900,8 +4912,7 @@ async def stream_dashboard_chat(
                     limit = 30
                     if isinstance(limit_raw, int) and 1 <= limit_raw <= 50:
                         limit = limit_raw
-                    since_hours_map = {"24h": 24, "7d": 168, "30d": 720, "all": None}
-                    since_hours = since_hours_map.get(time_range, 24)
+                    since_hours = RECENT_EXECUTIONS_SINCE_HOURS.get(time_range, 24)
                     step_label = "Listing recent executions..."
                     yield (
                         "data: "

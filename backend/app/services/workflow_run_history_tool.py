@@ -29,7 +29,15 @@ from app.services.workflow_access import get_accessible_workflow
 DEFAULT_RUN_LIMIT = 20
 MAX_RUN_LIMIT = 50
 
-_TIME_RANGE_HOURS: dict[str, int | None] = {"24h": 24, "7d": 168, "30d": 720, "all": None}
+_TIME_RANGE_HOURS: dict[str, int | None] = {
+    "1h": 1,
+    "3h": 3,
+    "6h": 6,
+    "24h": 24,
+    "7d": 168,
+    "30d": 720,
+    "all": None,
+}
 
 # The chat layer replaces any tool result over ~96k characters with a short summary,
 # so the detail view stays well below that: 40 nodes * ~1.2k + inputs/outputs.
@@ -273,7 +281,7 @@ async def get_workflow_run_history(
 
     time_range = str(args.get("time_range") or "all").strip().lower()
     if time_range not in _TIME_RANGE_HOURS:
-        return {"error": "time_range must be one of 24h, 7d, 30d, all"}
+        return {"error": "time_range must be one of 1h, 3h, 6h, 24h, 7d, 30d, all"}
 
     raw_status = args.get("status")
     status_filter = str(raw_status).strip().lower() if raw_status else None

@@ -202,7 +202,8 @@ class AnalyticsBreakdownChatToolTests(unittest.TestCase):
         parameters = self._tool()["function"]["parameters"]
         self.assertEqual(parameters["required"], [])
         self.assertEqual(
-            parameters["properties"]["time_range"]["enum"], ["24h", "7d", "30d", "all"]
+            parameters["properties"]["time_range"]["enum"],
+            ["1h", "3h", "6h", "24h", "7d", "30d", "all"],
         )
         self.assertIn("workflow_id", parameters["properties"])
 
