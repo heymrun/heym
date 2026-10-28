@@ -137,6 +137,7 @@ from app.services.model_router import (
     build_router_for_credential,
     load_option_credential,
 )
+from app.services.node_analytics_rollup import pending_on_first_write
 from app.services.openai_client import create_guarded_openai_client, create_openai_client
 from app.services.pending_execution import persist_pending_execution
 from app.services.run_history import record_run_history
@@ -2636,6 +2637,7 @@ async def run_execute_workflow_tool(
                 status=execution_result.status,
                 execution_time_ms=execution_result.execution_time_ms,
                 trigger_source=trigger_source,
+                node_analytics_pending=pending_on_first_write(execution_result),
             )
             db.add(history_entry)
             if execution_result.allow_downstream_pending:

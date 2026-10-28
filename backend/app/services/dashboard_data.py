@@ -18,6 +18,7 @@ from app.services.cluster.dispatch import dispatch_workflow
 from app.services.dashboard_widget_policy import dashboard_widget_blocked_nodes_error
 from app.services.highlight.highlight_builder import build_highlight_payload
 from app.services.hitl_widget_filter import filter_payload, hitl_widget_filter
+from app.services.node_analytics_rollup import pending_on_first_write
 from app.services.page_params import page_inputs
 from app.services.workflow_executor import (
     WorkflowCancelledError,
@@ -106,6 +107,7 @@ async def _record_widget_execution(
             status=result.status,
             execution_time_ms=result.execution_time_ms,
             trigger_source="dashboard",
+            node_analytics_pending=pending_on_first_write(result),
         )
         db.add(history_entry)
         await upsert_workflow_analytics_snapshot(
@@ -306,6 +308,7 @@ async def _finalize_widget_allow_downstream(
                     history_entry.node_results = _to_json_compatible(result.node_results)
                     history_entry.status = result.status
                     history_entry.execution_time_ms = result.execution_time_ms
+                    history_entry.node_analytics_pending = True
                     flag_modified(history_entry, "outputs")
                     flag_modified(history_entry, "node_results")
 

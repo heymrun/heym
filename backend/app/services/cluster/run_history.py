@@ -99,6 +99,8 @@ async def persist_run_history(
             "started_at": execution_started_at(
                 execution_id, result.node_results, result.execution_time_ms
             ),
+            # A late real result replaces the queue's empty failure row: count its nodes.
+            "node_analytics_pending": True,
             **attribution_fields(),
         }
         await db.execute(

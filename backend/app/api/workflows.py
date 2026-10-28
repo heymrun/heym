@@ -131,6 +131,7 @@ from app.services.hitl_service import (
 from app.services.hitl_widget_service import ensure_saved_filter_allowed
 from app.services.html_response import build_html_response, find_sole_html_terminal
 from app.services.instance_admin import is_instance_admin
+from app.services.node_analytics_rollup import pending_on_first_write
 from app.services.pending_execution import needs_local_pending_persist
 from app.services.pending_review_cancel import cancel_pending_review_execution
 from app.services.queued_run_stream import queued_run_events
@@ -648,6 +649,8 @@ async def _finalize_allow_downstream_history(
             )
             history_entry.status = execution_result.status
             history_entry.execution_time_ms = execution_result.execution_time_ms
+            # The full node list is in now; let the node analytics rollup count it.
+            history_entry.node_analytics_pending = True
             flag_modified(history_entry, "outputs")
             flag_modified(history_entry, "node_results")
 
@@ -3561,6 +3564,7 @@ async def execute_workflow_endpoint(
             status=execution_result.status,
             execution_time_ms=execution_result.execution_time_ms,
             trigger_source=trigger_source,
+            node_analytics_pending=pending_on_first_write(execution_result),
         )
         db.add(history_entry)
         if not execution_result.allow_downstream_pending:

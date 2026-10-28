@@ -405,6 +405,14 @@ class RunExecuteWorkflowToolRobustnessTests(unittest.IsolatedAsyncioTestCase):
         # Synchronous in-line global var persist is skipped (deferred to background finalizer)
         mock_sync_persist.assert_not_called()
 
+        # The response-time row has partial node results; the finalizer releases it.
+        added_history = [
+            call.args[0]
+            for call in db.add.call_args_list
+            if isinstance(call.args[0], ExecutionHistory)
+        ]
+        self.assertIs(added_history[0].node_analytics_pending, False)
+
 
 class GlobalVariableOwnershipMatrixTests(unittest.IsolatedAsyncioTestCase):
     """Test the complete authorization & isolation matrix for global variables."""
@@ -1873,6 +1881,55 @@ class PostgresAllowDownstreamSeparateSessionsTests(unittest.IsolatedAsyncioTestC
                 analytics_row,
                 "No analytics snapshot must be created when parent history is missing",
             )
+
+    async def test_finalizer_releases_the_node_analytics_marker_postgres(self) -> None:
+        from app.api.workflows import _finalize_allow_downstream_history
+
+        history_id = uuid.uuid4()
+        async with async_session_maker() as init_session:
+            init_session.add(
+                ExecutionHistory(
+                    id=history_id,
+                    workflow_id=self.workflow_id,
+                    inputs={},
+                    outputs={"initial": "res"},
+                    node_results=[{"node_id": "n1", "status": "success", "metadata": {}}],
+                    status="success",
+                    execution_time_ms=20.0,
+                    started_at=datetime.now(timezone.utc),
+                    node_analytics_pending=False,
+                )
+            )
+            await init_session.commit()
+
+        exec_res = ExecutionResult(
+            workflow_id=self.workflow_id,
+            status="success",
+            outputs={"initial": "res"},
+            node_results=[{"node_id": "n1", "status": "success", "metadata": {}}],
+            execution_time_ms=20.0,
+        )
+        exec_res._allow_downstream_pending = [MagicMock()]
+        exec_res.join_allow_downstream = lambda: None
+
+        await _finalize_allow_downstream_history(
+            history_entry_id=history_id,
+            execution_result=exec_res,
+            credentials_owner_id=self.user_id,
+            workflow_nodes=[],
+            workflow_cache={},
+            workflow_id=self.workflow_id,
+            owner_id=self.user_id,
+            workflow_name="Marker WF",
+        )
+
+        async with async_session_maker() as verify_session:
+            row = (
+                await verify_session.execute(
+                    select(ExecutionHistory).where(ExecutionHistory.id == history_id)
+                )
+            ).scalar_one()
+        self.assertTrue(row.node_analytics_pending)
 
     async def test_finalizer_second_run_afterward_skips_idempotently(
         self,
