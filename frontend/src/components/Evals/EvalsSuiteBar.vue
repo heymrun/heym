@@ -48,17 +48,19 @@ function create(type: EvalSuiteType): void {
 </script>
 
 <template>
-  <div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-    <div class="flex min-w-[12rem] items-center gap-2">
-      <SearchableSelect
-        :model-value="selectedSuiteId ?? undefined"
-        :options="options"
-        placeholder="Select suite"
-        search-placeholder="Search suites..."
-        class="min-w-[16rem]"
-        data-testid="eval-suite-select"
-        @update:model-value="(v) => emit('select', v ?? null)"
-      />
+  <div class="flex items-center justify-between gap-2 sm:gap-4">
+    <div class="flex min-w-0 flex-1 items-center gap-2 sm:min-w-[12rem] sm:flex-none">
+      <div class="min-w-0 flex-1 sm:contents">
+        <SearchableSelect
+          :model-value="selectedSuiteId ?? undefined"
+          :options="options"
+          placeholder="Select suite"
+          search-placeholder="Search suites..."
+          class="sm:min-w-[16rem]"
+          data-testid="eval-suite-select"
+          @update:model-value="(v) => emit('select', v ?? null)"
+        />
+      </div>
       <Button
         v-if="selectedSuiteId"
         variant="ghost"
@@ -70,15 +72,16 @@ function create(type: EvalSuiteType): void {
         <Trash2 class="h-4 w-4" />
       </Button>
     </div>
-    <div class="flex gap-2">
+    <div class="flex shrink-0 gap-2">
       <Button
         v-if="showEditButton"
         variant="outline"
-        class="min-h-[44px] shrink-0 gap-2"
+        class="min-h-[44px] shrink-0 gap-2 !px-3 sm:!px-5"
+        title="Edit"
         @click="emit('edit')"
       >
         <Pencil class="h-4 w-4" />
-        Edit
+        <span class="sr-only sm:not-sr-only">Edit</span>
       </Button>
       <div
         ref="menuRef"
@@ -86,17 +89,18 @@ function create(type: EvalSuiteType): void {
       >
         <Button
           variant="gradient"
-          class="min-h-[44px] shrink-0 gap-2"
+          class="min-h-[44px] shrink-0 gap-2 !px-3 sm:!px-5"
+          title="New suite"
           data-testid="eval-new-suite"
           @click="menuOpen = !menuOpen"
         >
           <Plus class="h-4 w-4" />
-          New Suite
+          <span class="sr-only sm:not-sr-only">New Suite</span>
           <ChevronDown class="h-4 w-4" />
         </Button>
         <div
           v-if="menuOpen"
-          class="absolute right-0 top-full z-20 mt-1 w-64 rounded-xl border border-border bg-popover p-1 shadow-lg"
+          class="absolute right-0 top-full z-20 mt-1 w-64 max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-popover p-1 shadow-lg"
         >
           <button
             type="button"

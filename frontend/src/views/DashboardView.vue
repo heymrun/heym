@@ -1856,6 +1856,26 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                   >
                     {{ workflowCountLabel }}
                   </span>
+                  <div class="ml-auto flex items-center gap-1.5 sm:hidden">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      class="min-h-[36px] min-w-[36px]"
+                      title="New folder"
+                      @click="openCreateFolderDialog(null)"
+                    >
+                      <FolderPlus class="w-3.5 h-3.5" />
+                    </Button>
+                    <Button
+                      variant="gradient"
+                      size="sm"
+                      data-testid="new-workflow-button-mobile"
+                      @click="showCreateDialog = true; pushOverlayState()"
+                    >
+                      <Plus class="w-3.5 h-3.5" />
+                      New
+                    </Button>
+                  </div>
                 </div>
                 <p class="text-muted-foreground mt-0.5 text-sm">
                   Create, orchestrate and run your modular autonomous agents
@@ -1876,7 +1896,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                 </Button>
                 <div
                   v-if="!loading && (workflows.length > 0 || folderStore.folderTree.length > 0)"
-                  class="relative order-4 w-full min-w-[220px] sm:order-none sm:w-72 md:w-80"
+                  class="relative order-2 min-w-[9rem] flex-1 sm:order-none sm:w-72 sm:min-w-[220px] sm:flex-none md:w-80"
                 >
                   <Search class="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                   <input
@@ -1899,20 +1919,15 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                     <X class="h-4 w-4" />
                   </button>
                 </div>
-                <WorkflowStatusFilter
+                <div
                   v-if="!loading && workflows.length > 0"
-                  v-model="statusFilter"
-                  :counts="workflowStatusCounts"
-                  class="order-4 sm:order-none"
-                />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  class="order-2 sm:hidden min-h-[36px] min-w-[36px]"
-                  @click="openCreateFolderDialog(null)"
+                  class="order-1 sm:order-none"
                 >
-                  <FolderPlus class="w-3.5 h-3.5" />
-                </Button>
+                  <WorkflowStatusFilter
+                    v-model="statusFilter"
+                    :counts="workflowStatusCounts"
+                  />
+                </div>
                 <Button
                   variant="outline"
                   size="sm"
@@ -1925,13 +1940,12 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                 <Button
                   variant="gradient"
                   size="sm"
-                  class="order-3 sm:order-none"
+                  class="hidden sm:inline-flex"
                   data-testid="new-workflow-button"
                   @click="showCreateDialog = true; pushOverlayState()"
                 >
                   <Plus class="w-3.5 h-3.5" />
-                  <span class="hidden sm:inline">New Workflow</span>
-                  <span class="sm:hidden">New</span>
+                  New Workflow
                 </Button>
               </div>
             </div>

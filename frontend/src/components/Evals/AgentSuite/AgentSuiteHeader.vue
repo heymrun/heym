@@ -28,10 +28,10 @@ const VIEWS: { value: AgentSuiteView; label: string }[] = [
 </script>
 
 <template>
-  <div class="flex flex-wrap items-center gap-3 border-b border-border/40 px-4 py-3">
+  <div class="flex flex-wrap items-center gap-x-2 gap-y-3 border-b border-border/40 px-4 py-3 sm:gap-x-3">
     <!-- Keeps Esc for clearing the field instead of the global overlay dismiss. -->
     <div
-      class="group relative w-full max-w-sm"
+      class="group relative min-w-0 flex-1 sm:w-full sm:max-w-sm sm:flex-none"
       data-heym-inline-edit
     >
       <Input
@@ -57,13 +57,13 @@ const VIEWS: { value: AgentSuiteView; label: string }[] = [
     </div>
     <div
       v-if="view"
-      class="ml-auto inline-flex rounded-lg border border-border bg-muted/40 p-0.5"
+      class="order-3 flex w-full rounded-lg border border-border bg-muted/40 p-0.5 sm:order-none sm:ml-auto sm:inline-flex sm:w-auto"
     >
       <button
         v-for="item in VIEWS"
         :key="item.value"
         type="button"
-        class="rounded-md px-3 py-1.5 text-sm transition-colors"
+        class="flex-1 whitespace-nowrap rounded-md px-2.5 py-1.5 text-[13px] transition-colors sm:flex-none"
         :class="view === item.value
           ? 'bg-background text-foreground shadow-sm'
           : 'text-muted-foreground hover:text-foreground'"
@@ -78,12 +78,13 @@ const VIEWS: { value: AgentSuiteView; label: string }[] = [
       v-if="workflowId"
       :to="{ name: 'editor', params: { id: workflowId } }"
       target="_blank"
-      class="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-border px-3 text-sm text-foreground transition-colors hover:bg-muted"
-      :class="view ? '' : 'ml-auto'"
+      class="order-2 inline-flex min-h-[36px] min-w-[36px] shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border border-border px-2.5 text-[13px] text-foreground transition-colors hover:bg-muted sm:order-none"
+      :class="view ? '' : 'sm:ml-auto'"
+      title="Go to workflow"
       data-testid="agent-suite-go-to-workflow"
     >
       <ExternalLink class="h-3.5 w-3.5" />
-      Go to workflow
+      <span class="sr-only sm:not-sr-only">Go to workflow</span>
     </RouterLink>
   </div>
 </template>

@@ -60,6 +60,16 @@ const badgeAriaLabel = computed((): string => {
 const hasPendingOnly = computed(
   (): boolean => pendingReviewCount.value > 0 && runningCount.value === 0,
 );
+const hasMixed = computed(
+  (): boolean => pendingReviewCount.value > 0 && runningCount.value > 0,
+);
+const pendingShare = computed(
+  (): number => (pendingReviewCount.value / activeWorkflowCount.value) * 100,
+);
+const runningShare = computed((): number => 100 - pendingShare.value);
+const mixedFillStyle = computed(() => ({
+  background: `conic-gradient(from 180deg, rgb(16 185 129 / 0.14) 0 ${runningShare.value}%, rgb(245 158 11 / 0.16) ${runningShare.value}% 100%)`,
+}));
 
 async function refreshActiveWorkflows(): Promise<void> {
   if (!isDesktop.value || requestInFlight) return;
@@ -189,12 +199,47 @@ onUnmounted(() => {
           class="active-workflows-badge group relative flex items-center justify-center text-xs font-bold tabular-nums shadow-sm outline-none transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           :class="hasPendingOnly
             ? 'border border-amber-500/40 bg-amber-500/12 text-amber-700 shadow-amber-500/10 hover:border-amber-500/55 hover:bg-amber-500/18 focus-visible:ring-amber-500/45 dark:text-amber-300'
-            : 'border border-emerald-500/35 bg-emerald-500/12 text-emerald-700 shadow-emerald-500/10 hover:border-emerald-500/55 hover:bg-emerald-500/18 focus-visible:ring-emerald-500/45 dark:text-emerald-300'"
+            : hasMixed
+              ? 'text-emerald-700 shadow-emerald-500/10 focus-visible:ring-emerald-500/45 dark:text-emerald-300'
+              : 'border border-emerald-500/35 bg-emerald-500/12 text-emerald-700 shadow-emerald-500/10 hover:border-emerald-500/55 hover:bg-emerald-500/18 focus-visible:ring-emerald-500/45 dark:text-emerald-300'"
           :aria-label="badgeAriaLabel"
           :title="badgeTitle"
           data-testid="active-workflows-badge"
         >
-          {{ activeWorkflowCount }}
+          <template v-if="hasMixed">
+            <span
+              class="absolute inset-0 rounded-full"
+              :style="mixedFillStyle"
+              data-testid="active-workflows-badge-fill"
+            />
+            <svg
+              class="pointer-events-none absolute inset-0 h-full w-full rotate-90"
+              viewBox="0 0 36 36"
+              fill="none"
+              aria-hidden="true"
+            >
+              <circle
+                cx="18"
+                cy="18"
+                r="17.25"
+                pathLength="100"
+                stroke-width="1.5"
+                class="stroke-emerald-500/60"
+                :stroke-dasharray="`${runningShare} ${pendingShare}`"
+              />
+              <circle
+                cx="18"
+                cy="18"
+                r="17.25"
+                pathLength="100"
+                stroke-width="1.5"
+                class="stroke-amber-500/65"
+                :stroke-dasharray="`${pendingShare} ${runningShare}`"
+                :stroke-dashoffset="-runningShare"
+              />
+            </svg>
+          </template>
+          <span class="relative">{{ activeWorkflowCount }}</span>
           <span class="absolute -right-0.5 -top-0.5 flex h-2.5 w-2.5">
             <span
               class="absolute inline-flex h-full w-full animate-ping rounded-full opacity-60 motion-reduce:animate-none"
