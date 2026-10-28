@@ -60,6 +60,7 @@ When it is on, `heym_chat` appears in `tools/list` alongside your workflow tools
 - Build a workflow, test-run it with sample inputs, fix it, and finish when a run passes (see [Build mode](#build-mode))
 - Inspect and run your existing workflows
 - Report analytics, recent executions, and upcoming cron schedules
+- Explain where workflows fail and why they are slow: the workflows that ran most, failed most and are slowest, and the node types with the most time, errors and calls
 - Report the run history of one workflow: how many times it ran, status counts, when it ran, and on request the inputs, outputs, and per-node errors of a single run
 - Report what is running right now: how many executions are active, their workflow names, how long each has been running, the node each is currently on, and a link to the live run
 - List boards, create cards, and read card detail on the [Board tab](./board-tab.md)
