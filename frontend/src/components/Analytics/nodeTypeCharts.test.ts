@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import type { NodeTypeAnalytics } from "@/types/analytics";
-import { buildNodeTypeChart, formatDurationMs } from "@/components/Analytics/nodeTypeCharts";
+import {
+  buildNodeTypeChart,
+  formatDurationMs,
+  isolatedPointMarkers,
+  NODE_TYPE_CHART_COLORS,
+} from "@/components/Analytics/nodeTypeCharts";
 
 const LABELS: Record<string, string> = { agent: "Agent", httpRequest: "HTTP Request", set: "Set" };
 
@@ -20,34 +25,63 @@ const analytics: NodeTypeAnalytics = {
 };
 
 describe("buildNodeTypeChart", () => {
-  it("plots average duration unstacked and names the leader by total time", () => {
+  it("plots average duration unstacked, ranked by total time", () => {
     const chart = buildNodeTypeChart("duration", analytics, labelFor);
 
     expect(chart.title).toBe("Average Node Duration Over Time");
     expect(chart.stacked).toBe(false);
     expect(chart.series.map((series) => series.name)).toEqual(["Agent", "HTTP Request"]);
     expect(chart.series[0].data).toEqual([
-      { x: Date.parse("2026-10-27T00:00:00+00:00"), y: 8_100 },
-      { x: Date.parse("2026-10-27T01:00:00+00:00"), y: null },
+      { x: Date.parse("2026-10-27T00:00:00+00:00"), y: 8_100, empty: false },
+      { x: Date.parse("2026-10-27T01:00:00+00:00"), y: 0, empty: true },
     ]);
-    expect(chart.leader).toBe("#1 Agent · avg 8.1s · 4h 12m total");
   });
 
-  it("stacks errors and calls and counts them in the leader", () => {
-    const errors = buildNodeTypeChart("errors", analytics, labelFor);
-    const calls = buildNodeTypeChart("calls", analytics, labelFor);
-
-    expect(errors.stacked).toBe(true);
-    expect(errors.leader).toBe("#1 HTTP Request · 42 errors");
-    expect(calls.stacked).toBe(true);
-    expect(calls.leader).toBe("#1 Set · 1 call");
+  it("stacks errors and calls", () => {
+    expect(buildNodeTypeChart("errors", analytics, labelFor).stacked).toBe(true);
+    expect(buildNodeTypeChart("calls", analytics, labelFor).stacked).toBe(true);
   });
 
-  it("has no series and no leader before any data arrives", () => {
+  it("marks a point that has no neighbor to draw a line to", () => {
+    const chart = buildNodeTypeChart("duration", analytics, labelFor);
+
+    expect(chart.markers).toEqual([
+      {
+        seriesIndex: 0,
+        dataPointIndex: 0,
+        fillColor: NODE_TYPE_CHART_COLORS[0],
+        strokeColor: NODE_TYPE_CHART_COLORS[0],
+        size: 4,
+      },
+    ]);
+  });
+
+  it("has no series and no markers before any data arrives", () => {
     const chart = buildNodeTypeChart("calls", null, labelFor);
 
     expect(chart.series).toEqual([]);
-    expect(chart.leader).toBeNull();
+    expect(chart.markers).toEqual([]);
+  });
+});
+
+describe("isolatedPointMarkers", () => {
+  it("leaves points on a drawn line alone and marks the lonely ones", () => {
+    const markers = isolatedPointMarkers([
+      {
+        name: "Set",
+        data: [
+          { x: 1, y: 0, empty: false },
+          { x: 2, y: 5, empty: false },
+          { x: 3, y: 0, empty: false },
+          { x: 4, y: 2, empty: false },
+          { x: 5, y: 3, empty: false },
+          { x: 6, y: 0, empty: true },
+          { x: 7, y: 9, empty: false },
+        ],
+      },
+    ]);
+
+    expect(markers.map((marker) => marker.dataPointIndex)).toEqual([1, 6]);
   });
 });
 

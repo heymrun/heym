@@ -28,9 +28,18 @@ const charts = computed<NodeTypeChartModel[]>(() =>
   NODE_TYPE_METRICS.map((metric) => buildNodeTypeChart(metric, props.analytics, labelFor)),
 );
 
-function formatValue(model: NodeTypeChartModel, value: number | null): string {
-  if (value === null) return "No calls";
+interface TooltipPoint {
+  seriesIndex: number;
+  dataPointIndex: number;
+}
+
+function formatValue(model: NodeTypeChartModel, value: number): string {
   return model.metric === "duration" ? formatDurationMs(value) : Math.round(value).toString();
+}
+
+function formatPoint(model: NodeTypeChartModel, value: number, point: TooltipPoint): string {
+  if (model.series[point.seriesIndex]?.data[point.dataPointIndex]?.empty) return "No calls";
+  return formatValue(model, value);
 }
 
 function optionsFor(model: NodeTypeChartModel): Record<string, unknown> {
@@ -41,9 +50,13 @@ function optionsFor(model: NodeTypeChartModel): Record<string, unknown> {
     dataLabels: { enabled: false },
     fill: { type: "solid", opacity: model.stacked ? 0.45 : 0.15 },
     legend: { position: "bottom" },
+    markers: { size: 0, hover: { size: 5 }, discrete: model.markers },
+    // Ten series are too many to list at once: the tooltip shows the one under the cursor.
     tooltip: {
       ...props.baseOptions.tooltip,
-      y: { formatter: (value: number | null) => formatValue(model, value) },
+      shared: false,
+      intersect: false,
+      y: { formatter: (value: number, point: TooltipPoint) => formatPoint(model, value, point) },
     },
     yaxis: {
       ...props.baseOptions.yaxis,
@@ -74,18 +87,9 @@ function optionsFor(model: NodeTypeChartModel): Record<string, unknown> {
           <h4 class="text-base font-semibold">
             {{ chart.title }}
           </h4>
-          <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-            <p class="text-xs text-muted-foreground">
-              {{ chart.subtitle }}
-            </p>
-            <p
-              v-if="chart.leader"
-              class="truncate text-sm font-medium"
-              :title="chart.leader"
-            >
-              {{ chart.leader }}
-            </p>
-          </div>
+          <p class="text-xs text-muted-foreground">
+            {{ chart.subtitle }}
+          </p>
         </div>
         <div
           v-if="chart.series.length === 0"

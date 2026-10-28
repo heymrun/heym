@@ -30,7 +30,10 @@ export interface ChartBaseOptions {
 
 export interface NodeTypeChartPoint {
   x: number;
-  y: number | null;
+  y: number;
+  /** No calls in this bucket. ApexCharts cannot draw a lone point between gaps, so the
+   * duration chart draws 0 here and its tooltip says "No calls" instead. */
+  empty: boolean;
 }
 
 export interface NodeTypeChartSeries {
@@ -38,13 +41,21 @@ export interface NodeTypeChartSeries {
   data: NodeTypeChartPoint[];
 }
 
+export interface NodeTypeChartMarker {
+  seriesIndex: number;
+  dataPointIndex: number;
+  fillColor: string;
+  strokeColor: string;
+  size: number;
+}
+
 export interface NodeTypeChartModel {
   metric: NodeTypeMetric;
   title: string;
   subtitle: string;
-  leader: string | null;
   stacked: boolean;
   series: NodeTypeChartSeries[];
+  markers: NodeTypeChartMarker[];
 }
 
 interface ChartCopy {
@@ -71,27 +82,31 @@ export function formatDurationMs(ms: number): string {
   return `${hours.toLocaleString("en-US")}h ${totalMinutes % 60}m`;
 }
 
-function formatCount(value: number, singular: string, plural: string): string {
-  const count = new Intl.NumberFormat("en-US").format(Math.round(value));
-  return `${count} ${value === 1 ? singular : plural}`;
-}
-
 function rankedItems(metric: NodeTypeMetric, analytics: NodeTypeAnalytics): NodeTypeSeriesItem[] {
   if (metric === "duration") return analytics.most_duration;
   if (metric === "errors") return analytics.most_errors;
   return analytics.most_calls;
 }
 
-function leaderText(metric: NodeTypeMetric, item: NodeTypeSeriesItem, label: string): string {
-  if (metric === "duration") {
-    const average = item.average === null ? "" : ` · avg ${formatDurationMs(item.average)}`;
-    return `#1 ${label}${average} · ${formatDurationMs(item.total)} total`;
-  }
-  if (metric === "errors") return `#1 ${label} · ${formatCount(item.total, "error", "errors")}`;
-  return `#1 ${label} · ${formatCount(item.total, "call", "calls")}`;
+function hasValue(point: NodeTypeChartPoint | undefined): boolean {
+  return point !== undefined && !point.empty && point.y > 0;
 }
 
-/** One chart's series and header; averages are not stacked because they do not add up. */
+/** Dots for points with no neighbor to draw a line to: an area chart leaves them invisible. */
+export function isolatedPointMarkers(series: NodeTypeChartSeries[]): NodeTypeChartMarker[] {
+  const markers: NodeTypeChartMarker[] = [];
+  series.forEach((item, seriesIndex) => {
+    const color = NODE_TYPE_CHART_COLORS[seriesIndex % NODE_TYPE_CHART_COLORS.length];
+    item.data.forEach((point, dataPointIndex) => {
+      if (!hasValue(point)) return;
+      if (hasValue(item.data[dataPointIndex - 1]) || hasValue(item.data[dataPointIndex + 1])) return;
+      markers.push({ seriesIndex, dataPointIndex, fillColor: color, strokeColor: color, size: 4 });
+    });
+  });
+  return markers;
+}
+
+/** One chart's series; averages are not stacked because they do not add up. */
 export function buildNodeTypeChart(
   metric: NodeTypeMetric,
   analytics: NodeTypeAnalytics | null,
@@ -99,18 +114,18 @@ export function buildNodeTypeChart(
 ): NodeTypeChartModel {
   const items = analytics ? rankedItems(metric, analytics) : [];
   const times = analytics ? analytics.time_buckets.map((bucket) => Date.parse(bucket)) : [];
-  const first = items[0];
+  const series = items.map((item) => ({
+    name: labelFor(item.node_type),
+    data: times.map((x, index) => {
+      const value = item.values[index] ?? null;
+      return { x, y: value === null ? 0 : Math.round(value), empty: value === null };
+    }),
+  }));
   return {
     metric,
     ...CHART_COPY[metric],
-    leader: first ? leaderText(metric, first, labelFor(first.node_type)) : null,
     stacked: metric !== "duration",
-    series: items.map((item) => ({
-      name: labelFor(item.node_type),
-      data: times.map((x, index) => {
-        const value = item.values[index] ?? null;
-        return { x, y: value === null ? null : Math.round(value) };
-      }),
-    })),
+    series,
+    markers: isolatedPointMarkers(series),
   };
 }

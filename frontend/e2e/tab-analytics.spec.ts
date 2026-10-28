@@ -25,6 +25,8 @@ test("changes the time range and refetches metrics", async ({ page }) => {
 
   // The base window reflects the default 7d preset.
   await expect(page.getByText("Base window: 7d")).toBeVisible();
+  const timeRange = page.locator('select:has(option[value="30d"])');
+  await expect(timeRange.locator('option[value="1h"]')).toHaveText("Last Hour");
 
   // Switching the preset updates the window and refetches metrics.
   const metricsPromise = page.waitForResponse(

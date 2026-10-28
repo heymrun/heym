@@ -15,6 +15,7 @@ The **Analytics** tab shows execution metrics and trends for your workflows. Mon
 
 ## Time Range
 
+- **1h** – Last hour. Analytics are kept per hour, so it counts the hour the window starts in whole: from the top of the previous hour until now
 - **24h** – Last 24 hours
 - **7d** – Last 7 days
 - **30d** – Last 30 days
@@ -46,11 +47,11 @@ Two tables show workflow usage: **Most Used** (wider) and **Most Failed**.
 
 Below the latency percentiles, three charts show where node time and failures go, grouped by node type (Agent, HTTP Request, Code, and so on) across the workflows in view:
 
-- **Average Node Duration Over Time** – The 10 node types with the most total execution time, plotted as average duration per call. The header names the leader with its average and its total time.
+- **Average Node Duration Over Time** – The 10 node types with the most total execution time, plotted as average duration per call. An hour without calls of a type shows **No calls** in the tooltip.
 - **Node Errors Over Time** – The 10 node types with the most errors (error or timeout), stacked per time bucket.
 - **Node Calls Over Time** – The 10 node types that ran the most, stacked per time bucket. Skipped nodes are not counted.
 
-The charts follow the workflow filter, the time range, and any range you drag on a chart. Node analytics are recorded for runs from the release that added them, and a finished run shows up within about a minute. Older runs are not counted.
+Hover a chart to see the node type under the cursor. The charts follow the workflow filter, the time range, and any range you drag on a chart. Node analytics are recorded for runs from the release that added them, and a finished run shows up within about a minute. Older runs are not counted.
 
 ## Auto Refresh
 
