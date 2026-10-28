@@ -1,3 +1,4 @@
+import inspect
 import threading
 import unittest
 import uuid
@@ -587,3 +588,27 @@ class CronOffloadedRunTests(unittest.IsolatedAsyncioTestCase):
         called = await self._dispatch_kwargs(from_summary({"status": "error", "outputs": {}}))
         snapshot: AsyncMock = called["snapshot"]
         snapshot.assert_not_awaited()
+
+
+class CronSchedulerNodeAnalyticsRollupTests(unittest.IsolatedAsyncioTestCase):
+    async def test_the_hook_runs_the_rollup(self) -> None:
+        scheduler = CronScheduler()
+        with patch(
+            "app.services.cron_scheduler.roll_up_node_analytics", AsyncMock(return_value=3)
+        ) as rollup:
+            await scheduler._check_node_analytics_rollup()
+
+        rollup.assert_awaited_once()
+
+    async def test_a_rollup_failure_never_leaves_the_hook(self) -> None:
+        scheduler = CronScheduler()
+        with patch(
+            "app.services.cron_scheduler.roll_up_node_analytics",
+            AsyncMock(side_effect=RuntimeError("database went away")),
+        ):
+            await scheduler._check_node_analytics_rollup()
+
+    def test_the_leader_loop_calls_the_hook(self) -> None:
+        self.assertIn(
+            "self._check_node_analytics_rollup()", inspect.getsource(CronScheduler._run_loop)
+        )

@@ -34,6 +34,7 @@ from app.services.distributed_lock import lock_service
 from app.services.execution_history_maintenance import reclaim_execution_history_toast
 from app.services.global_variables_service import get_global_variables_context
 from app.services.hitl_service import build_default_public_base_url, persist_pending_hitl_execution
+from app.services.node_analytics_rollup import roll_up_node_analytics
 from app.services.timezone_utils import get_configured_timezone
 from app.services.workflow_executor import (
     WorkflowCancelledError,
@@ -89,6 +90,7 @@ class CronScheduler:
                 await self._maintain_run_queue()
                 await self._apply_automatic_weighting()
                 await self._check_alerts()
+                await self._check_node_analytics_rollup()
                 await self._check_alert_event_cleanup()
                 await self._check_scheduled_deletion_cleanup()
                 await self._check_portal_session_cleanup()
@@ -375,6 +377,15 @@ class CronScheduler:
                 logger.info("Alert evaluation pass fired %s alert(s)", fired)
         except Exception as e:
             logger.exception("Error in alert evaluation pass: %s", e)
+
+    async def _check_node_analytics_rollup(self) -> None:
+        """Count finished runs' nodes into the Analytics node charts. Never stops the loop."""
+        try:
+            counted = await roll_up_node_analytics()
+            if counted:
+                logger.debug("Node analytics rollup counted %s run(s)", counted)
+        except Exception as e:
+            logger.exception("Error in node analytics rollup: %s", e)
 
     async def _check_alert_event_cleanup(self) -> None:
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
