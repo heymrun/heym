@@ -149,6 +149,7 @@ class PortalPlainExecuteWaitsTests(unittest.IsolatedAsyncioTestCase):
         workflow = SimpleNamespace(
             id=uuid.uuid4(),
             owner_id=uuid.uuid4(),
+            name="Portal Workflow",
             nodes=[{"id": "o", "type": "output", "data": {}}],
             edges=[],
             concurrency_limit=1,

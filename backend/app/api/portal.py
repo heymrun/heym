@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.analytics import upsert_workflow_analytics_snapshot
 from app.api.deps import get_client_ip, get_current_user
+from app.api.workflow_run_audit import audit_workflow_run
 from app.api.workflows import (
     _persist_global_variables_from_execution,
     _sanitize_headers,
@@ -374,6 +375,14 @@ async def portal_execute(
         waited = await wait_for_result(
             execution_id, timeout_seconds=workflow.workflow_timeout_seconds
         )
+        audit_workflow_run(
+            workflow_id=workflow.id,
+            workflow_name=workflow.name,
+            status=waited.status,
+            execution_time_ms=waited.execution_time_ms,
+            trigger_source="portal",
+            execution_id=execution_id,
+        )
         return WorkflowExecuteResponse(
             workflow_id=workflow.id,
             status=waited.status,
@@ -417,6 +426,15 @@ async def portal_execute(
         if holds_slot:
             with contextlib.suppress(Exception):
                 await workflow_concurrency.release(execution_id)
+
+    audit_workflow_run(
+        workflow_id=workflow.id,
+        workflow_name=workflow.name,
+        status=execution_result.status,
+        execution_time_ms=execution_result.execution_time_ms,
+        trigger_source="portal",
+        execution_id=execution_id,
+    )
 
     if execution_result.status == "pending":
         if is_codex_pending_execution(execution_result):
@@ -821,6 +839,14 @@ async def portal_execute_stream(
                     cancel_event.set()
                     break
 
+            audit_workflow_run(
+                workflow_id=workflow.id,
+                workflow_name=workflow.name,
+                status="cancelled" if was_cancelled else str(final_result.get("status") or "error"),
+                execution_time_ms=final_result.get("execution_time_ms"),
+                trigger_source="portal",
+                execution_id=execution_id,
+            )
             if was_cancelled and not final_result:
                 # Without this row the run simply disappears: canvases observing it
                 # (live view in another tab) never receive a terminal event.

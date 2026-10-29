@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.analytics import upsert_workflow_analytics_snapshot
 from app.api.deps import get_current_user
+from app.api.workflow_run_audit import RunActor, audit_workflow_run
 from app.api.workflows import (
     _persist_global_variables_from_execution,
     collect_referenced_workflows,
@@ -1193,7 +1194,27 @@ async def call_mcp_tool(
         )
         if isinstance(execution_result, workflow_concurrency.Admission):
             text, is_error = mcp_execution_status.admission_tool_text(execution_result)
+            if not is_error:
+                audit_workflow_run(
+                    workflow_id=target_workflow.id,
+                    workflow_name=target_workflow.name,
+                    status="queued",
+                    execution_time_ms=0,
+                    trigger_source="MCP",
+                    execution_id=execution_id,
+                    actor=RunActor.of(mcp_user),
+                )
             return MCPToolResult(content=[MCPTextContent(text=text)], isError=is_error)
+
+        audit_workflow_run(
+            workflow_id=target_workflow.id,
+            workflow_name=target_workflow.name,
+            status=execution_result.status,
+            execution_time_ms=execution_result.execution_time_ms,
+            trigger_source="MCP",
+            execution_id=execution_id,
+            actor=RunActor.of(mcp_user),
+        )
 
         if needs_local_pending_persist(execution_result):
             history_entry, _ = await persist_pending_execution(
@@ -1444,7 +1465,27 @@ async def _dispatch_mcp_jsonrpc(
             )
             if isinstance(execution_result, workflow_concurrency.Admission):
                 text, is_error = mcp_execution_status.admission_tool_text(execution_result)
+                if not is_error:
+                    audit_workflow_run(
+                        workflow_id=target_workflow.id,
+                        workflow_name=target_workflow.name,
+                        status="queued",
+                        execution_time_ms=0,
+                        trigger_source="MCP",
+                        execution_id=execution_id,
+                        actor=RunActor.of(mcp_user),
+                    )
                 return _mcp_tool_result_jsonrpc_response(msg.id, text, is_error=is_error)
+
+            audit_workflow_run(
+                workflow_id=target_workflow.id,
+                workflow_name=target_workflow.name,
+                status=execution_result.status,
+                execution_time_ms=execution_result.execution_time_ms,
+                trigger_source="MCP",
+                execution_id=execution_id,
+                actor=RunActor.of(mcp_user),
+            )
 
             if needs_local_pending_persist(execution_result):
                 history_entry, _ = await persist_pending_execution(
