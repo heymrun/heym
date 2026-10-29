@@ -29,6 +29,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app.api.analytics import upsert_workflow_analytics_snapshot
 from app.api.deps import get_client_ip, get_current_user, get_current_user_optional
+from app.api.workflow_run_audit import RunActor, audit_workflow_run
 from app.db.models import (
     ActiveWorkflowExecution,
     Credential,
@@ -3440,6 +3441,16 @@ async def execute_workflow_endpoint(
             mint_status_token=getattr(workflow, "auth_type", None) == WorkflowAuthType.anonymous,
         )
     except WorkflowCancelledError:
+        audit_workflow_run(
+            workflow_id=workflow.id,
+            workflow_name=workflow.name,
+            status="cancelled",
+            execution_time_ms=0,
+            trigger_source=trigger_source,
+            execution_id=execution_id,
+            actor=RunActor.of(current_user),
+            test_run=test_run,
+        )
         if not test_run:
             history_entry = ExecutionHistory(
                 id=execution_id,
@@ -3480,11 +3491,32 @@ async def execute_workflow_endpoint(
         queued = workflow_concurrency.queued_body(
             execution_result, workflow_id=workflow.id, base_url=build_public_base_url(request)
         )
+        audit_workflow_run(
+            workflow_id=workflow.id,
+            workflow_name=workflow.name,
+            status="queued",
+            execution_time_ms=0,
+            trigger_source=trigger_source,
+            execution_id=execution_id,
+            actor=RunActor.of(current_user),
+            test_run=test_run,
+        )
         return JSONResponse(
             status_code=status.HTTP_202_ACCEPTED,
             content=queued,
             headers={"Location": queued["status_url"], "Retry-After": "5"},
         )
+
+    audit_workflow_run(
+        workflow_id=workflow.id,
+        workflow_name=workflow.name,
+        status=execution_result.status,
+        execution_time_ms=execution_result.execution_time_ms,
+        trigger_source=trigger_source,
+        execution_id=execution_id,
+        actor=RunActor.of(current_user),
+        test_run=test_run,
+    )
 
     if needs_local_pending_persist(execution_result):
         if is_codex_pending_execution(execution_result):
@@ -3842,14 +3874,21 @@ async def get_execution_history(
     trigger_source: str | None = Query(default=None),
     instance_id: str | None = Query(default=None),
     execution_status: str | None = Query(default=None, alias="status"),
+    latest_only: bool = False,
 ) -> HistoryListResponse:
-    """List workflow execution history (lightweight, paginated)."""
+    """List workflow execution history (lightweight, paginated).
+
+    ``latest_only`` is for a status badge: it returns the newest run, ignores ``limit``,
+    ``offset`` and ``search``, and is not audited because it opens no history view.
+    """
     workflow = await get_workflow_for_user(db, workflow_id, current_user.id)
     if workflow is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Workflow not found",
         )
+    if latest_only:
+        limit, offset, search = 1, 0, None
     status_clause = history_status_clause(ExecutionHistory.status, execution_status)
     total_query = (
         select(func.count())
@@ -3911,16 +3950,17 @@ async def get_execution_history(
         )
         for h in history
     ]
-    audit(
-        action="workflow.history_view",
-        actor=current_user,
-        target_type="workflow",
-        target_id=workflow_id,
-        target_name=workflow.name,
-        owned=workflow.owner_id == current_user.id,
-        returned=len(items),
-        total=total,
-    )
+    if not latest_only:
+        audit(
+            action="workflow.history_view",
+            actor=current_user,
+            target_type="workflow",
+            target_id=workflow_id,
+            target_name=workflow.name,
+            owned=workflow.owner_id == current_user.id,
+            returned=len(items),
+            total=total,
+        )
     return HistoryListResponse(total=total, items=items)
 
 
@@ -4170,6 +4210,9 @@ async def execute_workflow_stream(
     trace_user_id = current_user.id if current_user else workflow.owner_id
     global_variables_context = await get_global_variables_context(db, credentials_owner_id)
     public_base_url = build_public_base_url(request)
+    # Read now: finalize_execution audits the run after this request's session is gone.
+    run_actor = RunActor.of(current_user)
+    run_workflow_name = workflow.name
 
     execution_id = uuid.uuid4()
     # Only the editor's own test runs skip the queue; ?test_run=true alone does not.
@@ -4399,6 +4442,16 @@ async def execute_workflow_stream(
             await run_future
         except Exception:
             logger.exception("Streaming execution %s failed", execution_id)
+        audit_workflow_run(
+            workflow_id=workflow_id,
+            workflow_name=run_workflow_name,
+            status="cancelled" if was_cancelled else str(final_result.get("status") or "error"),
+            execution_time_ms=final_result.get("execution_time_ms"),
+            trigger_source=trigger_source,
+            execution_id=execution_id,
+            actor=run_actor,
+            test_run=test_run,
+        )
         try:
             await persist_terminal_result()
         except Exception:

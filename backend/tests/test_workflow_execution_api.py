@@ -849,6 +849,7 @@ class ExecuteWorkflowStreamAvailabilityTests(unittest.IsolatedAsyncioTestCase):
         workflow = SimpleNamespace(
             id=uuid.uuid4(),
             owner_id=uuid.uuid4(),
+            name="Quick Drawer Workflow",
             sse_enabled=False,
             nodes=[{"id": "node-1", "type": "textInput", "data": {"label": "Input"}}],
             edges=[],
@@ -881,6 +882,7 @@ class ExecuteWorkflowStreamAvailabilityTests(unittest.IsolatedAsyncioTestCase):
         workflow = SimpleNamespace(
             id=uuid.uuid4(),
             owner_id=uuid.uuid4(),
+            name="Canvas Workflow",
             sse_enabled=False,
             nodes=[{"id": "node-1", "type": "textInput", "data": {"label": "Input"}}],
             edges=[],
@@ -2413,7 +2415,7 @@ class ExecuteWorkflowApiDownstreamFailureTests(unittest.IsolatedAsyncioTestCase)
         background_tasks = BackgroundTasks()
 
         with (
-            patch("app.api.workflows.validate_workflow_auth", AsyncMock(return_value=workflow)),
+            patch("app.api.workflows.validate_workflow_auth", AsyncMock(return_value=None)),
             patch("app.api.workflows.enforce_workflow_http_method"),
             patch("app.api.workflows.collect_referenced_workflows", AsyncMock(return_value={})),
             patch("app.api.workflows.get_credentials_context", AsyncMock(return_value={})),

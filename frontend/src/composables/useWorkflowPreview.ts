@@ -42,7 +42,7 @@ export function useWorkflowPreview(selectedId: Ref<string | null>): WorkflowPrev
 
     const [detailResult, historyResult] = await Promise.allSettled([
       workflowApi.get(id),
-      workflowApi.getHistory(id, 1, 0),
+      workflowApi.getLatestRun(id),
     ]);
 
     if (generation !== requestGeneration) return;
@@ -54,8 +54,7 @@ export function useWorkflowPreview(selectedId: Ref<string | null>): WorkflowPrev
       error.value = "Could not load this workflow's details.";
     }
 
-    lastRun.value =
-      historyResult.status === "fulfilled" ? (historyResult.value.items[0] ?? null) : null;
+    lastRun.value = historyResult.status === "fulfilled" ? historyResult.value : null;
 
     loading.value = false;
   }

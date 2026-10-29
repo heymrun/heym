@@ -722,6 +722,14 @@ export const workflowApi = {
     );
     return response.data;
   },
+  /** Newest run for a status badge. The server does not audit it as a history view. */
+  getLatestRun: async (id: string): Promise<AllExecutionHistoryEntryLight | null> => {
+    const response = await api.get<HistoryListResponse<AllExecutionHistoryEntryLight>>(
+      `/workflows/${id}/history`,
+      { params: { latest_only: true } },
+    );
+    return response.data.items[0] ?? null;
+  },
   getWorkflowHistoryEntry: async (
     workflowId: string,
     entryId: string,

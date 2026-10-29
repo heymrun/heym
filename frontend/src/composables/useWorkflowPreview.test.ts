@@ -3,11 +3,7 @@ import { nextTick, ref } from "vue";
 
 import { useWorkflowPreview } from "./useWorkflowPreview";
 import { workflowApi } from "@/services/api";
-import type {
-  AllExecutionHistoryEntryLight,
-  HistoryListResponse,
-  Workflow,
-} from "@/types/workflow";
+import type { AllExecutionHistoryEntryLight, Workflow } from "@/types/workflow";
 
 // Unlike useWorkflowRowStatus/useOverlayBackHandler, this composable has NO
 // onMounted/onUnmounted - it only uses ref/watch, which work fine called
@@ -16,7 +12,7 @@ import type {
 
 // `watch(selectedId, () => void load(), { immediate: true })` means the
 // initial load fires SYNCHRONOUSLY on calling useWorkflowPreview - but the
-// load() function itself is async (awaits workflowApi.get/getHistory), so
+// load() function itself is async (awaits workflowApi.get/getLatestRun), so
 // the *results* land on a later microtask. You'll need to await something
 // after creating the composable before asserting on detail/lastRun/loading -
 // `await vi.waitFor(() => expect(loading.value).toBe(false))` is a reliable
@@ -70,12 +66,6 @@ function buildHistoryEntry(
   };
 }
 
-function buildHistoryResponse(
-  items: AllExecutionHistoryEntryLight[] = [],
-): HistoryListResponse<AllExecutionHistoryEntryLight> {
-  return { total: items.length, items };
-}
-
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((res) => {
@@ -86,9 +76,7 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
 
 beforeEach(() => {
   vi.spyOn(workflowApi, "get").mockResolvedValue(buildWorkflow());
-  vi.spyOn(workflowApi, "getHistory").mockResolvedValue(
-    buildHistoryResponse([buildHistoryEntry()]),
-  );
+  vi.spyOn(workflowApi, "getLatestRun").mockResolvedValue(buildHistoryEntry());
 });
 
 afterEach(() => {
@@ -105,7 +93,7 @@ describe("useWorkflowPreview - no selection", () => {
     expect(loading.value).toBe(false);
     expect(error.value).toBeNull();
     expect(workflowApi.get).not.toHaveBeenCalled();
-    expect(workflowApi.getHistory).not.toHaveBeenCalled();
+    expect(workflowApi.getLatestRun).not.toHaveBeenCalled();
   });
 });
 
@@ -113,7 +101,7 @@ describe("useWorkflowPreview - loading a selection", () => {
   it("loads the workflow detail and most recent run for the selected id", async () => {
     const entry = buildHistoryEntry({ id: "exec-9" });
     vi.mocked(workflowApi.get).mockResolvedValue(buildWorkflow({ id: "wf-1" }));
-    vi.mocked(workflowApi.getHistory).mockResolvedValue(buildHistoryResponse([entry]));
+    vi.mocked(workflowApi.getLatestRun).mockResolvedValue(entry);
 
     const selectedId = ref<string | null>("wf-1");
     const { detail, lastRun, loading, error } = useWorkflowPreview(selectedId);
@@ -125,7 +113,7 @@ describe("useWorkflowPreview - loading a selection", () => {
   });
 
   it("lastRun is null when the workflow has no execution history yet", async () => {
-    vi.mocked(workflowApi.getHistory).mockResolvedValue(buildHistoryResponse([]));
+    vi.mocked(workflowApi.getLatestRun).mockResolvedValue(null);
 
     const selectedId = ref<string | null>("wf-1");
     const { detail, lastRun, loading } = useWorkflowPreview(selectedId);
@@ -147,7 +135,7 @@ describe("useWorkflowPreview - partial/full failure", () => {
   it("a failed workflow fetch does not prevent the history fetch from populating lastRun", async () => {
     const entry = buildHistoryEntry({ id: "exec-9" });
     vi.mocked(workflowApi.get).mockRejectedValue(new Error("not found"));
-    vi.mocked(workflowApi.getHistory).mockResolvedValue(buildHistoryResponse([entry]));
+    vi.mocked(workflowApi.getLatestRun).mockResolvedValue(entry);
 
     const selectedId = ref<string | null>("wf-1");
     const { detail, lastRun, loading, error } = useWorkflowPreview(selectedId);
@@ -160,7 +148,7 @@ describe("useWorkflowPreview - partial/full failure", () => {
 
   it("a failed history fetch does not block the workflow detail from populating", async () => {
     vi.mocked(workflowApi.get).mockResolvedValue(buildWorkflow({ id: "wf-1" }));
-    vi.mocked(workflowApi.getHistory).mockRejectedValue(new Error("history unavailable"));
+    vi.mocked(workflowApi.getLatestRun).mockRejectedValue(new Error("history unavailable"));
 
     const selectedId = ref<string | null>("wf-1");
     const { detail, lastRun, loading, error } = useWorkflowPreview(selectedId);
@@ -175,15 +163,15 @@ describe("useWorkflowPreview - partial/full failure", () => {
 describe("useWorkflowPreview - stale response discarding", () => {
   it("a late-resolving response from a previous selection is discarded", async () => {
     const firstDetail = deferred<Workflow>();
-    const firstHistory = deferred<HistoryListResponse<AllExecutionHistoryEntryLight>>();
+    const firstHistory = deferred<AllExecutionHistoryEntryLight | null>();
     const secondWorkflow = buildWorkflow({ id: "wf-2" });
     const secondEntry = buildHistoryEntry({ id: "exec-2", workflow_id: "wf-2" });
 
     vi.mocked(workflowApi.get).mockImplementation((id: string) =>
       id === "wf-1" ? firstDetail.promise : Promise.resolve(secondWorkflow),
     );
-    vi.mocked(workflowApi.getHistory).mockImplementation((id: string) =>
-      id === "wf-1" ? firstHistory.promise : Promise.resolve(buildHistoryResponse([secondEntry])),
+    vi.mocked(workflowApi.getLatestRun).mockImplementation((id: string) =>
+      id === "wf-1" ? firstHistory.promise : Promise.resolve(secondEntry),
     );
 
     const selectedId = ref<string | null>("wf-1");
@@ -195,7 +183,7 @@ describe("useWorkflowPreview - stale response discarding", () => {
 
     // Generation 1 (wf-1) resolves AFTER generation 2 (wf-2) already settled.
     firstDetail.resolve(buildWorkflow({ id: "wf-1" }));
-    firstHistory.resolve(buildHistoryResponse([buildHistoryEntry({ id: "exec-1" })]));
+    firstHistory.resolve(buildHistoryEntry({ id: "exec-1" }));
     await Promise.resolve();
     await Promise.resolve();
 
