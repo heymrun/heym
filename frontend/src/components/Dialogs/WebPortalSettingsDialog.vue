@@ -169,7 +169,7 @@ async function deleteUser(userId: string): Promise<void> {
   deletingUserId.value = userId;
   error.value = "";
   try {
-    await portalApi.deleteUser(workflowStore.currentWorkflow.id, userId);
+    await portalApi.deleteUser(workflowStore.currentWorkflow.id, userId, warning !== null);
     users.value = users.value.filter((u) => u.id !== userId);
   } catch {
     error.value = "Failed to delete user";

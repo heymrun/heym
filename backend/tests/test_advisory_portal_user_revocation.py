@@ -63,7 +63,7 @@ class PortalUserRevocationMockTests(unittest.IsolatedAsyncioTestCase):
         workflow_id = uuid.uuid4()
         user_id = uuid.uuid4()
         owner = SimpleNamespace(id=uuid.uuid4())
-        workflow = SimpleNamespace(owner_id=owner.id)
+        workflow = SimpleNamespace(owner_id=owner.id, portal_enabled=False)
         portal_user = SimpleNamespace(id=user_id, username="alice", workflow_id=workflow_id)
         captured: list[object] = []
 

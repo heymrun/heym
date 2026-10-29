@@ -3155,8 +3155,14 @@ export const portalApi = {
     return response.data;
   },
 
-  deleteUser: async (workflowId: string, userId: string): Promise<void> => {
-    await api.delete(`/workflows/${workflowId}/portal/users/${userId}`);
+  deleteUser: async (
+    workflowId: string,
+    userId: string,
+    confirmPublic = false,
+  ): Promise<void> => {
+    await api.delete(`/workflows/${workflowId}/portal/users/${userId}`, {
+      params: confirmPublic ? { confirm_public: true } : undefined,
+    });
   },
 };
 

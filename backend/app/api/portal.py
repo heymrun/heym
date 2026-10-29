@@ -9,7 +9,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy import and_, delete, select
+from sqlalchemy import and_, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.analytics import upsert_workflow_analytics_snapshot
@@ -1150,6 +1150,7 @@ async def create_portal_user(
 async def delete_portal_user(
     workflow_id: uuid.UUID,
     user_id: uuid.UUID,
+    confirm_public: bool = False,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
@@ -1179,6 +1180,24 @@ async def delete_portal_user(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found",
         )
+
+    # A public portal is a supported configuration, so this does not block the
+    # delete. It only refuses to publish an enabled portal as a side effect of
+    # deleting its last user without the caller saying so.
+    if workflow.portal_enabled and not confirm_public:
+        user_count_result = await db.execute(
+            select(func.count())
+            .select_from(WorkflowPortalUser)
+            .where(WorkflowPortalUser.workflow_id == workflow_id)
+        )
+        if user_count_result.scalar_one() <= 1:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Deleting the last portal user makes this portal public. "
+                    "Pass confirm_public=true to continue."
+                ),
+            )
 
     # PortalSession.username has no foreign key to cascade from, so revoke the
     # user's live bearer sessions explicitly at the same moment the row goes.
