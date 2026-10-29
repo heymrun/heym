@@ -3500,6 +3500,17 @@ export const evalsApi = {
   },
 };
 
+export const auditApi = {
+  /** Best effort: a page view that cannot be recorded must never disturb navigation. */
+  recordPageView: async (path: string): Promise<void> => {
+    try {
+      await api.post("/audit/page-view", { path });
+    } catch {
+      // Dropped on purpose: the audit trail is not worth a toast or a retry.
+    }
+  },
+};
+
 export const logsApi = {
   getDockerLogs: async (
     containerName: string,

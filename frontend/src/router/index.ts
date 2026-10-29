@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from "vue-router";
 
 import { DASHBOARD_TAB_ALIASES } from "@/lib/dashboardTabAliases";
+import { auditApi } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
 
 function sanitizeRouterBase(raw: unknown): string {
@@ -166,6 +167,13 @@ router.beforeEach(async (to, _from, next) => {
   } else {
     next();
   }
+});
+
+router.afterEach((to, _from, failure): void => {
+  if (failure || !useAuthStore().isAuthenticated) {
+    return;
+  }
+  void auditApi.recordPageView(to.fullPath);
 });
 
 export default router;

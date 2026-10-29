@@ -55,6 +55,7 @@ from app.api import (
     notion_oauth,
     oauth,
     opencode_go,
+    page_views,
     playwright,
     plugins,
     portal,
@@ -411,6 +412,7 @@ app.include_router(alerts.router, prefix="/api/alerts", tags=["Alerts"])
 app.include_router(dashboards.router, prefix="/api/dashboards", tags=["Dashboards"])
 app.include_router(boards.router, prefix="/api/boards", tags=["Boards"])
 app.include_router(logs.router, prefix="/api/logs", tags=["Logs"])
+app.include_router(page_views.router, prefix="/api/audit", tags=["Audit"])
 app.include_router(plugins.router, prefix="/api/plugins", tags=["Plugins"])
 app.include_router(evals.router, prefix="/api/evals", tags=["Evals"])
 app.include_router(agent_suites.router, prefix="/api/evals", tags=["Evals"])

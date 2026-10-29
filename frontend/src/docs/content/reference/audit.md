@@ -47,7 +47,7 @@ In the app, the **Logs** tab reads the same container output. It is gated by `DO
 
 ## What Is Logged
 
-Every state change is logged. Reads are logged only where reading is itself the sensitive act — viewing a workflow's run history, opening a credential, downloading a file. Ordinary list and detail reads are not audited; the access log already records that a request happened, and auditing every `GET` would bury the lines that matter.
+Every state change is logged. Reads are logged only where reading is itself the sensitive act — viewing a workflow's run history, opening a credential, downloading a file. Ordinary list and detail reads are not audited; the access log already records that a request happened, and auditing every `GET` would bury the lines that matter. The one exception is [page views](#page-views), which record where a signed-in user went in the app.
 
 ### Authentication
 
@@ -61,6 +61,18 @@ Every state change is logged. Reads are logged only where reading is itself the 
 | `auth.sso_login` | Single sign-on. `outcome=failure` carries the reason the provider response was rejected; `denied` carries `email_not_verified`, `domain_not_allowed`, or `provisioning_disabled`. |
 | `sso_settings.update` | An administrator changed the [SSO](./sso.md) configuration. Records `enabled` and `password_login_disabled`, never the client secret. |
 | `sso_settings.test` | An administrator ran the SSO connection test. |
+
+### Page Views
+
+`page.view` is written each time a signed-in user opens a page in the web app, with the URL path in a `path` field:
+
+```
+2026-10-29 09:14:02 INFO [winston.audit] audit action=page.view outcome=success actor_id=8f2c1b04-3d5a-4f21-9c7e-1a2b3c4d5e6f actor_email=alex@example.com path="/?tab=traces"
+```
+
+The path is the in-app route. Dashboard tabs are part of it (`/?tab=traces`), and so are the ids that name what is open, such as `/workflows/<id>`. Only a short list of query parameters that identify the page is kept (`tab`, `dashboard`, `board`, `suite`, `workflowId`, `traceId`); everything else in the query string and the whole fragment is dropped. Pages whose link carries a secret, such as `/review/<token>`, are logged with the placeholder `:token` instead of the secret.
+
+The browser reports the path, so a `page.view` line shows where a user says they went. It does not prove that the server returned that page. Visits to the sign-in page and to links opened while signed out are not recorded, because no user is attached to them.
 
 ### Workflows
 

@@ -28,6 +28,7 @@ COVERED_RESOURCES = {
     "drive",
     "team",
     "folder",
+    "page",
 }
 
 
