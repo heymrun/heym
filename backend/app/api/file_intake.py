@@ -178,8 +178,11 @@ async def upload_to_slot(
         source_node_id=slot.trigger_node_id,
         source_node_label=slot.trigger_node_label,
     )
-    # The run reads the file on its own connection (a thread): a Converter or Drive node only
-    # finds it once its row is committed. The slot is already consumed, so this keeps it used.
+    # Link the file before execution: a cleanup node may delete it during the run, and
+    # ON DELETE SET NULL then clears this reference. Reassigning it after the run would
+    # violate the foreign key and roll back the execution history.
+    slot.uploaded_file_id = stored.id
+    # The run reads the file on its own connection (a thread), so commit both rows first.
     await db.commit()
 
     base = build_public_base_url(request)
@@ -236,7 +239,6 @@ async def upload_to_slot(
     db.add(history)
     await db.flush()
 
-    slot.uploaded_file_id = stored.id
     slot.run_id = str(history.id)
     await file_intake_service.write_audit(
         db,
