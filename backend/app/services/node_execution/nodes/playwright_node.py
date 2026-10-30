@@ -147,13 +147,13 @@ def _resolve_step_templates(
                 and not executor._is_single_dollar_expression(value)
             ):
                 resolved[field] = ResolvedStepValue(
-                    executor._resolve_template(value, inputs, node_id)
+                    executor.evaluate_message_template(value, inputs, node_id)
                 )
         for field in _STEP_LITERAL_FIELDS:
             value = resolved.get(field)
             if isinstance(value, str) and "$" in value:
                 resolved[field] = ResolvedStepValue(
-                    executor._resolve_template(value, inputs, node_id)
+                    executor.evaluate_message_template(value, inputs, node_id)
                 )
         resolved_steps.append(resolved)
     return resolved_steps

@@ -262,6 +262,18 @@ class LegitimateTemplateTests(unittest.TestCase):
         )
         self.assertIn("q=agents", _string_constants(script))
 
+    def test_a_reference_led_template_without_spaces_resolves(self) -> None:
+        # A value that starts with a reference and has no space, such as
+        # $src.base?q=$src.q, used to be read as one expression, fail, and resolve
+        # to "", so the navigate step fell back to the generator default
+        # https://example.com. Each embedded reference must resolve instead.
+        script = _run_and_capture(
+            {"playwrightSteps": [{"action": "navigate", "url": "$src.base?q=$src.q"}]},
+            {"src": {"base": "https://heym.run/search", "q": "agents"}},
+        )
+        self.assertIn("https://heym.run/search?q=agents", _string_constants(script))
+        self.assertNotIn("https://example.com", _string_constants(script))
+
     def test_a_whole_field_reference_keeps_its_runtime_lookup(self) -> None:
         script = _run_and_capture(
             {"playwrightSteps": [{"action": "navigate", "url": "$global.page"}]},
