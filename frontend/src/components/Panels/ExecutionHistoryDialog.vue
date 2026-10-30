@@ -47,6 +47,7 @@ import {
   formatExecutionLogToolCallTitle,
   type DisplayNodeResult,
 } from "@/lib/executionLog";
+import { isOpenInNewTab } from "@/lib/paletteNavigate";
 import { cn } from "@/lib/utils";
 import { followedSignals, localFollowSignals } from "@/features/collab/followSignals";
 import { workflowApi } from "@/services/api";
@@ -341,6 +342,35 @@ async function selectEntry(entryId: string): Promise<void> {
   selectedId.value = entryId;
   expandedNodes.value = new Set();
   await workflowStore.fetchExecutionHistoryEntry(entryId);
+}
+
+/**
+ * Row click: Ctrl/Cmd+click opens this run's deep link in a new tab and leaves
+ * the dialog alone; a plain click still selects the run.
+ *
+ * `window.open` stays synchronous so the browser counts it as a user gesture;
+ * awaiting `selectEntry` first would get it popup-blocked.
+ */
+function handleEntryClick(event: MouseEvent, entryId: string): void {
+  const workflowId = workflowStore.currentWorkflow?.id;
+  if (workflowId && event.detail === 1 && isOpenInNewTab(event)) {
+    const href = router.resolve({
+      name: "editor",
+      params: { id: workflowId, executionId: entryId },
+    }).href;
+    window.open(href, "_blank", "noopener");
+    return;
+  }
+  void selectEntry(entryId);
+}
+
+/**
+ * Ctrl/Cmd+double-click is still a modified gesture. The first click already
+ * opened a tab, so do not bring the run onto this tab's canvas as well.
+ */
+function handleEntryDoubleClick(event: MouseEvent, entryId: string): void {
+  if (isOpenInNewTab(event)) return;
+  void openEntryOnCanvas(entryId);
 }
 
 watch(selectedId, (id): void => {
@@ -962,10 +992,10 @@ function bringToCanvas(): void {
             :key="entry.id"
             class="w-full text-left p-2.5 rounded-md border bg-muted/20 hover:bg-muted/40 transition-colors"
             :class="cn(selectedEntry?.id === entry.id && 'border-primary/60 bg-primary/10')"
-            title="Double-click to bring this run to the canvas"
+            title="Double-click to bring this run to the canvas, Ctrl/Cmd+click to open it in a new tab"
             :data-testid="`execution-history-entry-${entry.id}`"
-            @click="selectEntry(entry.id)"
-            @dblclick="openEntryOnCanvas(entry.id)"
+            @click="handleEntryClick($event, entry.id)"
+            @dblclick="handleEntryDoubleClick($event, entry.id)"
           >
             <div class="flex items-center gap-1.5 min-w-0">
               <component

@@ -51,6 +51,8 @@ Click the **History** button (clock icon) to open the dialog.
 
 Opening a workflow at `/workflows/{workflowId}/{executionId}` automatically brings that execution onto the canvas — the same as selecting the run and choosing **Bring to Canvas**. This makes a specific past run shareable as a URL. If the execution can't be found (wrong or deleted id), the editor falls back to loading the plain workflow.
 
+Ctrl/Cmd+click a run in either history list to open that deep link in a new browser tab. The current tab and the open dialog stay as they are. Chat and assistant runs have no workflow, so the shortcut only selects them, like a plain click.
+
 ### Use cases
 
 - Re-run a workflow with the same inputs

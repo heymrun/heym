@@ -51,6 +51,7 @@ import {
 } from "@/lib/executionHistoryStatus";
 import { collectRunImageSrcs, getOutputImageSrcs } from "@/lib/executionImages";
 import { buildDisplayNodeResults, type DisplayNodeResult } from "@/lib/executionLog";
+import { isOpenInNewTab } from "@/lib/paletteNavigate";
 import { cn } from "@/lib/utils";
 import { workflowApi } from "@/services/api";
 import { useWorkflowStore } from "@/stores/workflow";
@@ -510,10 +511,52 @@ function formatTime(value: string): string {
   return new Date(value).toLocaleString();
 }
 
+function isChatEntry(entry: AllExecutionHistoryEntryLight): boolean {
+  return entry.run_type === "dashboard_chat" || entry.run_type === "workflow_assistant";
+}
+
+/** Workflow runs can be opened on their canvas; chat and assistant runs cannot. */
+function entryTitle(entry: AllExecutionHistoryEntryLight): string {
+  return isChatEntry(entry)
+    ? "Click to select this run"
+    : "Double-click to bring this run to the canvas, Ctrl/Cmd+click to open it in a new tab";
+}
+
 async function selectEntry(entryId: string): Promise<void> {
   selectedId.value = entryId;
   expandedNodes.value = new Set();
   await ensureEntryLoaded(entryId);
+}
+
+/**
+ * Row click: Ctrl/Cmd+click opens the run's deep link in a new tab and leaves
+ * the dialog alone; a plain click still selects the run. Chat and assistant
+ * runs have no workflow, so they fall back to a plain select.
+ *
+ * `window.open` stays synchronous so the browser counts it as a user gesture;
+ * awaiting `selectEntry` first would get it popup-blocked.
+ */
+function handleEntryClick(event: MouseEvent, entry: AllExecutionHistoryEntryLight): void {
+  const runType = entry.run_type ?? "workflow";
+  const workflowId = runType === "workflow" ? entry.workflow_id : null;
+  if (workflowId && event.detail === 1 && isOpenInNewTab(event)) {
+    const href = router.resolve({
+      name: "editor",
+      params: { id: workflowId, executionId: entry.id },
+    }).href;
+    window.open(href, "_blank", "noopener");
+    return;
+  }
+  void selectEntry(entry.id);
+}
+
+/**
+ * Ctrl/Cmd+double-click is still a modified gesture. The first click already
+ * opened a tab, so do not bring the run onto this tab's canvas as well.
+ */
+function handleEntryDoubleClick(event: MouseEvent, entry: AllExecutionHistoryEntryLight): void {
+  if (isOpenInNewTab(event)) return;
+  void openEntryOnCanvas(entry.id);
 }
 
 async function refreshHistory(): Promise<void> {
@@ -1181,11 +1224,11 @@ function bringToCanvas(): void {
             :key="entry.id"
             class="w-full text-left p-3 rounded-md border bg-muted/20 hover:bg-muted/40 transition-colors"
             :class="cn(selectedEntry?.id === entry.id && 'border-primary/60 bg-primary/10')"
-            title="Double-click to bring this run to the canvas"
+            :title="entryTitle(entry)"
             :data-execution-id="entry.id"
             :data-testid="`all-execution-history-entry-${entry.id}`"
-            @click="selectEntry(entry.id)"
-            @dblclick="openEntryOnCanvas(entry.id)"
+            @click="handleEntryClick($event, entry)"
+            @dblclick="handleEntryDoubleClick($event, entry)"
           >
             <div class="flex items-center justify-between gap-2">
               <div class="flex items-center gap-2 min-w-0 flex-1">
