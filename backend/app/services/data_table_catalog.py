@@ -158,7 +158,7 @@ async def load_data_table_catalog(db: AsyncSession, user_id: uuid.UUID) -> list[
 
 
 _INTRO = (
-    "You never see table rows. Below are the Heym DataTables the user can use, with their "
+    "This catalog contains no table rows. Below are the Heym DataTables the user can use, with their "
     "id, access and columns. This section overrides the `datatable-uuid` placeholder: put a "
     "listed table's id in `dataTableId`."
 )

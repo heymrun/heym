@@ -598,12 +598,14 @@ async def update_data_table(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> DataTableResponse:
-    result = await db.execute(
-        select(DataTable).where(DataTable.id == table_id, DataTable.owner_id == current_user.id)
-    )
-    table = result.scalar_one_or_none()
-    if table is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Data table not found")
+    table = await _get_data_table_with_access(table_id, current_user.id, db, require_write=True)
+    if table.owner_id != current_user.id and (
+        data.name is not None or data.description is not None
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the owner can rename a data table or change its description",
+        )
 
     if data.name is not None:
         existing = await db.execute(

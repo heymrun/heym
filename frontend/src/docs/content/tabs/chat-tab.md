@@ -24,7 +24,7 @@ You can also start a conversation from the chat box on the [Workflows tab](./wor
 - **Planning pauses** – When Chat needs planning details, it asks clarification questions and pauses queued follow-ups until you answer. After the planning answer finishes, queued messages resume
 - **Credentials** – When a workflow Chat creates or edits needs a credential, Chat asks which one to use, offers to create a new one in the conversation, or lets you continue without. You can also ask Chat to create a credential or to update one you own; it opens the credential form in the conversation. The model sees the credential's name and type, never its values, for credentials you own and ones shared with you. LLM and Agent nodes Chat adds run on the credential and model selected for the chat, shared credentials included; when Chat edits a workflow, its existing LLM and Agent nodes keep their credential and model. See [AI Assistant › Credentials](../reference/ai-assistant.md#credentials)
 - **Dashboards** – Ask which [dashboards](./dashboard-tab.md) you have, what is on one, or which dashboard a workflow is on, ask Chat to add a new widget to a dashboard (it puts an empty widget there, then builds and tests its workflow), put an existing workflow on a dashboard as a widget, rename or delete a widget, or tidy a dashboard's layout. Heym Work shows these dashboards as its pages. See [Dashboard › From Chat and MCP](./dashboard-tab.md#from-chat-and-mcp)
-- **Data tables** – When a workflow Chat creates or edits stores records, Chat asks which [data table](./datatable-tab.md) to use or offers to create one with the columns the workflow needs. It can also list your tables and their columns. It never reads or writes rows. See [AI Assistant › Data tables](../reference/ai-assistant.md#data-tables)
+- **Data tables** – When a workflow Chat creates or edits stores records, Chat asks which [data table](./datatable-tab.md) to use or offers to create one with the columns the workflow needs. It can also inspect rows, add or remove columns, and insert, update or delete rows directly on tables you own or can write. Give it a table name or DataTable link. Column removal and clearing all rows ask for confirmation; adding columns preserves existing data. See [AI Assistant › Data tables](../reference/ai-assistant.md#data-tables)
 - **Streaming responses** – See the model's output as it streams
 - **Stop response** – Interrupt the current streaming answer at any time; stopping also clears queued messages for that conversation
 - **Markdown rendering** – Responses support markdown formatting, including inline images
@@ -46,7 +46,7 @@ Those conversations land in this tab's history, marked with a plug icon in the c
 
 Over MCP, Chat asks which credential a workflow should use as a question in the result. To create or update a credential it opens Heym's credential form on a Heym page in your browser, so the value never passes through the MCP client. See [MCP tab › Credentials](./mcp-tab.md#credentials).
 
-Data tables work over MCP too: Chat lists your tables, creates new ones and wires them into the workflows it builds. Its table question arrives as text in the result, so answer it with the same `conversation_id`.
+Data tables work over MCP too: Chat can edit columns and rows directly, create tables and wire them into workflows. Table questions and deletion confirmations arrive as text in the result; answer with the same `conversation_id`.
 
 ## Context Limit
 

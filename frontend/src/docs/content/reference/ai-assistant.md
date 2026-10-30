@@ -175,7 +175,7 @@ When a workflow saves, stores or looks up records and you have not named another
 
 Pick the new table and press **Submit answers**: the card creates the table, and the assistant puts its id on the node and uses its exact column names. You can also ask for a table on its own, for example "create a table for my leads".
 
-The assistant sees table names, descriptions and columns, never rows. It never changes the columns of an existing table: if a table lacks a column the workflow needs, it names the column and offers a new table instead. Add columns in the [DataTable tab](../tabs/datatable-tab.md).
+The canvas assistant sees table names, descriptions and columns, never rows. It configures workflow nodes from that metadata; add columns in the [DataTable tab](../tabs/datatable-tab.md) or ask [Chat](../tabs/chat-tab.md). Chat and `heym_chat` can inspect rows and directly add or remove columns and insert, update or delete rows on tables you own or have write access to, including team shares. Removing columns and clearing all rows ask for confirmation before deleting data.
 
 ## Related
 

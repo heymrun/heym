@@ -65,7 +65,7 @@ When it is on, `heym_chat` appears in `tools/list` alongside your workflow tools
 - Report what is running right now: how many executions are active, their workflow names, how long each has been running, the node each is currently on, and a link to the live run
 - List boards, create cards, and read card detail on the [Board tab](./board-tab.md)
 - List your dashboards (Heym Work's pages) with the widgets on each, find which dashboard a workflow is on, add a new widget to a dashboard and build its workflow, put an existing workflow on a dashboard as a widget, rename or delete a widget, or tidy a dashboard's layout (see [Dashboard › From Chat and MCP](./dashboard-tab.md#from-chat-and-mcp))
-- List your data tables with their columns, create new ones, and wire them into the workflows it builds
+- Inspect data tables and rows, create tables, add or remove columns, insert, update or delete rows, and wire tables into workflows
 - Create, edit and run prompt and agent [eval suites](./evals-tab.md#from-chat-and-mcp), including an agent's baseline: reported, built from runs, or stated as numbers. The result lists the Evals link of every suite saved in the call.
 - Create or update your credentials on Heym's own page (see [Credentials](#credentials))
 - Read teams and global variables, and search the documentation
@@ -86,7 +86,9 @@ When a call creates or edits a workflow, the reply lists each one with its full 
 - To change a workflow it built earlier, continue the thread with the same `conversation_id`. The assistant updates that workflow instead of creating a new one, and it only changes workflows you can edit.
 - When the five test runs are used up, the assistant stops and explains what still fails.
 
-A table holds no secret, so `heym_chat` can list your tables, ask which one a workflow should use, and create a new one with its columns. It never reads or writes rows.
+`heym_chat` can inspect your tables and rows, create tables, add or remove columns, and insert, update or delete rows. Give it a table name, UUID or DataTable link, for example: “Add two string columns, name and surname, to https://heym.example/?tab=datatable/<table-id>.” It changes the table directly and preserves existing columns and values when adding columns.
+
+Writes require ownership or **write** access through a direct or team share. Read-only access allows inspection. Row writes use the DataTable tab's type, default, required and unique checks; partial imports report rejected rows. Removing columns deletes their values from every row. As in the DataTable tab, column removal and clearing all rows ask for confirmation first; reply with the same `conversation_id` to confirm. Deleting a selected row needs no extra confirmation.
 
 ### Credentials
 
