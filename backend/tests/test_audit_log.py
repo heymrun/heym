@@ -127,6 +127,11 @@ class AuditLineFormatTests(unittest.TestCase):
 
         self.assertNotIn("\n", line)
 
+    def test_control_characters_cannot_forge_another_line(self) -> None:
+        line = self._emit(action="workflow.update", target_name="one\rtwo\nthree\x1b[31m")
+
+        self.assertFalse(any(ord(char) < 32 or ord(char) == 127 for char in line))
+
     def test_booleans_render_as_words_not_python_repr(self) -> None:
         line = self._emit(action="workflow.update", actor=_fake_user(), owned=True)
 
@@ -167,6 +172,7 @@ class AuditRedactionTests(unittest.TestCase):
             "cookie",
             "private_key",
             "passphrase",
+            "license_key",
         ):
             with self.subTest(key=key):
                 line = self._emit(action="credential.create", **{key: secret})

@@ -9,6 +9,7 @@ from pathlib import Path
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 _MODULES = (
     "app.db.models",
+    "app.services.audit_format",
     "app.services.workflow_access",
     "app.services.credential_access",
     "app.services.credential_catalog",

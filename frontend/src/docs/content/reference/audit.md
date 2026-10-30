@@ -120,6 +120,38 @@ Two things enforce this. Call sites are written to pass only safe fields, and th
 
 Where a secret is genuinely relevant to the record, only its shape is logged. A file share records `password_protected=true`, never the password.
 
+## Heym Work
+
+Heym Work also writes audit lines to its own stdout under `winston.audit`, using the
+same formatting, outcomes, truncation and secret redaction as Heym. Local audit logging
+is always on and needs no additional configuration.
+
+Work records every `/api/` request as `work.request`, including its authenticated actor,
+route template, operation, UUID resource identifiers, HTTP status and duration. This
+covers Work-only actions such as flow changes, preferences, pins, widget layouts and
+demo content, as well as permission refusals, validation errors and server failures.
+Health checks and static assets are excluded.
+
+Calls Work makes to Heym are recorded independently as `work.heym_request`. Streamed
+responses pass through immediately; an interrupted stream is a failure even if its
+HTTP headers were already successful. These lines describe Work's HTTP operation,
+not a workflow's final execution result. Request and response bodies, headers, raw
+capability paths and query strings are never included.
+
+Work's own scheduled activity records `work.license_sync`, `work.heym_info_refresh`,
+`work.compat_check` and `work.survey_delivery`, including successful repetitions and
+failures. Unexpected background failures produce `work.background_job`.
+
+These additional records are produced locally. Work does not copy or consume Heym's
+audit records, and they add no audit calls to Heym. The existing forwarding of Work's
+privileged `work.*` events remains unchanged. Heym's workflow schedules and triggers
+continue to execute and retain their histories in Heym.
+
+```bash
+# Work's own local audit output
+docker logs heym-work 2>&1 | grep '\[winston.audit\]'
+```
+
 ## Retention
 
 **Audit lines live only as long as the container's log output.** They are not written to the database. Recreating the backend container discards its logs.
