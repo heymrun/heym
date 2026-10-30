@@ -264,9 +264,16 @@ class UploadHappyPathTests(unittest.IsolatedAsyncioTestCase):
             id=uuid.uuid4(), filename="rec.mp3", mime_type="audio/mpeg", size_bytes=3
         )
         commits_at_run: list[int] = []
+        file_links_at_commit: list[uuid.UUID | None] = []
+
+        async def commit() -> None:
+            file_links_at_commit.append(slot.uploaded_file_id)
+
+        db.commit.side_effect = commit
 
         def execute(**_kwargs: object) -> SimpleNamespace:
             commits_at_run.append(db.commit.await_count)
+            self.assertEqual(file_links_at_commit, [stored.id])
             return SimpleNamespace(
                 outputs={}, node_results=[], status="success", execution_time_ms=1.0
             )
