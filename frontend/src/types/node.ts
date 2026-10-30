@@ -1254,6 +1254,8 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
         | "gauge"
         | "scatter"
         | "proportion"
+        | "gantt"
+        | "erDiagram"
         | "barGauge"
         | "text"
         | "hitl",

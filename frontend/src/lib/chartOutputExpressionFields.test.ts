@@ -7,6 +7,11 @@ function keys(chartType: Parameters<typeof getChartOutputExpressionFields>[0]): 
 }
 
 describe("getChartOutputExpressionFields", () => {
+  it("offers the structured data path, title and URL for both diagrams", () => {
+    expect(keys("gantt")).toEqual(["dataPath", "title", "url"]);
+    expect(keys("erDiagram")).toEqual(["dataPath", "title", "url"]);
+  });
+
   it("offers the status column and the link button for tables", () => {
     expect(keys("table")).toEqual([
       "dataPath",

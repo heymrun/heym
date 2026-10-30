@@ -42,6 +42,8 @@ _CHART_PAYLOAD_TYPES = frozenset(
         "gauge",
         "scatter",
         "proportion",
+        "gantt",
+        "erDiagram",
         "barGauge",
         "text",
         "hitl",

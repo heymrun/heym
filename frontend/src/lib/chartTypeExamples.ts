@@ -123,6 +123,32 @@ export const CHART_TYPE_EXAMPLES: ChartTypeExample[] = [
     },
   },
   {
+    value: "gantt",
+    label: "Gantt",
+    hint: "Plan tasks over time, with start/end dates, progress and dependencies.",
+    payload: {
+      type: "gantt",
+      tasks: [
+        { id: "design", label: "Design", start: "2026-10-01", end: "2026-10-05", progress: 100 },
+        { id: "build", label: "Build", start: "2026-10-05", end: "2026-10-14", progress: 55, dependencies: ["design"] },
+        { id: "launch", label: "Launch", start: "2026-10-14", end: "2026-10-18", progress: 0, dependencies: ["build"] },
+      ],
+    },
+  },
+  {
+    value: "erDiagram",
+    label: "Entity relationships (DB)",
+    hint: "Map database entities, their fields and primary/foreign key relationships.",
+    payload: {
+      type: "erDiagram",
+      entities: [
+        { id: "customers", label: "Customers", fields: [{ name: "id", type: "uuid", key: "PK" }, { name: "name", type: "text" }] },
+        { id: "orders", label: "Orders", fields: [{ name: "id", type: "uuid", key: "PK" }, { name: "customer_id", type: "uuid", key: "FK" }] },
+      ],
+      relations: [{ source: "customers", target: "orders", sourceField: "id", targetField: "customer_id", cardinality: "one-to-many" }],
+    },
+  },
+  {
     value: "text",
     label: "Text",
     hint: "A markdown message. Task lists become checkboxes.",

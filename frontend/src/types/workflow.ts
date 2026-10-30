@@ -1121,6 +1121,8 @@ export interface NodeData {
     | "gauge"
     | "scatter"
     | "proportion"
+    | "gantt"
+    | "erDiagram"
     | "barGauge"
     | "text"
     | "hitl";

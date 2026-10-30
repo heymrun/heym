@@ -3878,12 +3878,25 @@ Access the saved file downstream: `$saveAudio.id`, `$saveAudio.download_url`
 ### 34. chartOutput (Dashboard Widget Chart) - TERMINAL NODE FOR DASHBOARD WIDGETS
 - **Purpose**: Terminal node that turns upstream rows into a chart for a dashboard widget.
 - **Inputs**: 1 | **Outputs**: 0 (it is the LAST node in a dashboard-widget workflow)
-- **WHEN TO USE**: Only in dashboard-widget workflows. The node before it must produce an array of
-  row objects (e.g. a `set`/`variable`/`http`/`bigquery` node yielding rows like
+- **WHEN TO USE**: Only in dashboard-widget workflows. The node before it must produce a graph object for `erDiagram`, or an array of
+  row objects for other data-driven charts (e.g. a `set`/`variable`/`http`/`bigquery` node yielding rows like
   `[{"month": "Jan", "revenue": 120}, ...]`).
 - **Data fields**:
   - `label`: Node identifier (camelCase)
-  - `chartType`: `"pie"` | `"bar"` | `"line"` | `"area"` | `"table"` | `"numeric"` | `"gauge"` | `"scatter"` | `"proportion"` | `"barGauge"` | `"text"` | `"hitl"` (required)
+  - `chartType`: `"pie"` | `"bar"` | `"line"` | `"area"` | `"table"` | `"numeric"` | `"gauge"` | `"scatter"` | `"proportion"` | `"barGauge"` | `"gantt"` | `"erDiagram"` | `"text"` | `"hitl"` (required)
+  - `gantt`: `dataPath` selects task rows (no labelField/valueField mapping). Each row has
+    `id`, `label`, `start`, `end` (ISO dates or datetimes; timezone-free values mean UTC),
+    optional `progress` (0-100) and `dependencies` (existing predecessor task ids).
+    Example upstream: {"tasks":[{"id":"design","label":"Design","start":"2026-10-01","end":"2026-10-05","progress":60}]}
+    with `chartType: "gantt", dataPath: "tasks"`. Task ids must be unique; end >= start.
+  - `erDiagram`: `dataPath` selects a graph OBJECT (not an array), with `entities` and
+    `relations`. Entities: `{id,label,fields:[{name,type,key}]}`, where key is `PK`, `FK`,
+    `PK/FK` or empty. Relations: `{source,target,sourceField,targetField,cardinality,label}`;
+    source/target reference entity ids, optional sourceField/targetField reference field names,
+    and cardinality is `one-to-one`, `one-to-many`, `many-to-one` or `many-to-many`.
+    Example upstream: {"graph":{"entities":[{"id":"users","label":"Users","fields":[{"name":"id","type":"uuid","key":"PK"}]},{"id":"orders","label":"Orders","fields":[{"name":"user_id","type":"uuid","key":"FK"}]}],"relations":[{"source":"users","target":"orders","sourceField":"id","targetField":"user_id","cardinality":"one-to-many"}]}}
+    with `chartType: "erDiagram", dataPath: "graph"`. Entity ids and per-entity field names
+    must be unique. Construct nested objects using dict(...) and arrays using array(...).
   - `orientation`: `"horizontal"` | `"vertical"` (bar only, default `"vertical"`)
   - `dataPath`: optional dot path to the rows array inside the upstream output (e.g. `"data"` or `"result.items"`)
   - Rows straight from a `dataTable` node (`{id, data, created_at}`) are read with their columns at
@@ -3917,8 +3930,9 @@ Access the saved file downstream: `$saveAudio.id`, `$saveAudio.download_url`
 
 #### ⚠️ HOW TO PRODUCE THE UPSTREAM ROWS (CRITICAL — read this)
 
-The node BEFORE `chartOutput` must output an **array of row objects**. When the user asks for a
-chart with example/sample data (and there is no real data source), produce the rows with a `set`
+The node BEFORE `chartOutput` must output an **array of row objects**, except `erDiagram`,
+which takes a graph object built with `$dict(entities=array(...), relations=array(...))`.
+When the user asks for a chart with example/sample data (and there is no real data source), produce the rows with a `set`
 node using `$array(dict(...), dict(...))`.
 
 - ✅ CORRECT: `$array(dict(month="Jan", revenue=12000), dict(month="Feb", revenue=15000))`

@@ -10,7 +10,7 @@ The **Chart Output** node is the terminal node of a [dashboard widget](../tabs/d
 | Outputs | 0 (terminal) |
 | Output | Standardized chart payload |
 
-Place this node **last** in a dashboard-widget workflow. The node before it should produce an array of row objects, for example:
+Place this node **last** in a dashboard-widget workflow. For entity relationships, the node before it produces a graph object (see [Entity relationships](#entity-relationships-db)). Other data-driven charts use an array of row objects, for example:
 
 ```json
 [
@@ -26,9 +26,9 @@ When you only have example/sample data (no real source), produce these rows with
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `label` | string | Node identifier (camelCase) |
-| `chartType` | string | `pie`, `bar`, `line`, `area`, `table`, `numeric`, `gauge`, `scatter`, `proportion`, `barGauge`, `text`, or `hitl` |
+| `chartType` | string | `pie`, `bar`, `line`, `area`, `table`, `numeric`, `gauge`, `scatter`, `proportion`, `barGauge`, `gantt`, `erDiagram`, `text`, or `hitl` |
 | `orientation` | string | `vertical` or `horizontal` (bar charts only) |
-| `dataPath` | string | Dot path to the rows array inside the upstream output (e.g. `data` or `result.items`). Leave empty to auto-detect. |
+| `dataPath` | string | Dot path to the rows array (or graph object for `erDiagram`) inside the upstream output (e.g. `data` or `result.items`). Leave empty to auto-detect. |
 | `labelField` | string | Row key used as the category label (pie/bar/line) |
 | `valueField` | string | Row key used as the numeric value (pie/bar/line/numeric/gauge) |
 | `series` | array | Optional multi-series definition `[{ "name": "Sent", "field": "sent" }]` for bar/line (overrides `valueField`) |
@@ -54,8 +54,51 @@ When you only have example/sample data (no real source), produce these rows with
 - **scatter** — X/Y points from `xField` and `yField` for correlation plots.
 - **proportion** — a single horizontal bar split into shares with a percentage legend (e.g. a language breakdown). Uses `labelField` + `valueField`.
 - **barGauge** — one horizontal gauge per row with a red→green gradient and a value (e.g. free disk space). Uses `labelField` + `valueField`, optional `unit` and `max` (defaults to the largest row value).
+- **gantt** — task schedules with dates, progress and dependencies; see [Gantt schedules](#gantt-schedules).
+- **erDiagram** — database entities, fields, keys and relationships; see [Entity relationships](#entity-relationships-db).
 - **text** — a markdown message (e.g. a status note like "Last execution at 19:47"). Put the markdown in `text` for a static message, or leave `text` empty and set `valueField` to render a string produced upstream. Supports headings, bold/italic, [lists](../nodes/chart-output-node.md#interactive-task-lists), links, and inline code.
 - **hitl** — a carousel of your pending human reviews. The header shows `1/n pending`; the left arrow is disabled on the first card and the right arrow on the last. The workflow name opens that run on the canvas. **Approve**, **Request changes**, and **Reject** resolve it, and the history icon beside the widget title opens that run in the history dialog on the same page. This chart type ignores upstream rows, so the widget workflow is only the Chart Output node. Each signed-in person sees the reviews on workflows they own. Pick a **Workflow** (and **Select agent** when it has several review steps) in the node's properties or the widget's Settings to show that workflow's reviews instead, to everyone who can open it; see [HITL widgets](../tabs/dashboard-tab.md#hitl-widgets).
+
+### Gantt schedules
+
+Choose **Gantt** (`gantt`) for project schedules and task timelines. Set `dataPath` to the task array, such as `tasks`. Rows use fixed field names:
+
+```json
+{
+  "tasks": [
+    { "id": "design", "label": "Design", "start": "2026-10-01", "end": "2026-10-05", "progress": 100 },
+    { "id": "build", "label": "Build", "start": "2026-10-05", "end": "2026-10-14", "progress": 40, "dependencies": ["design"] }
+  ]
+}
+```
+
+`start` and `end` accept ISO dates or datetimes. Values without a timezone use UTC; timezone offsets are converted to UTC. `end` must be on or after `start`. `progress` is optional (0–100, default 0); `dependencies` contains existing task ids. Ids must be unique. Hover a task to read its full dates, progress and dependencies. Large charts scroll inside the widget. At most 500 tasks are accepted.
+
+For sample data, a Set mapping named `tasks` can use `$array(dict(id="design", label="Design", start="2026-10-01", end="2026-10-05", progress=60))`. Connect it to Chart Output with `chartType: "gantt"` and `dataPath: "tasks"`. Map source columns into these fixed names with a Set node; `labelField` and `valueField` are not used.
+
+### Entity relationships (DB)
+
+Choose **Entity relationships (DB)** (`erDiagram`) for database schemas and entity connections. Set `dataPath` to a graph **object**, such as `graph`, containing both arrays:
+
+```json
+{
+  "graph": {
+    "entities": [
+      { "id": "customers", "label": "Customers", "fields": [{ "name": "id", "type": "uuid", "key": "PK" }] },
+      { "id": "orders", "label": "Orders", "fields": [{ "name": "customer_id", "type": "uuid", "key": "FK" }] }
+    ],
+    "relations": [
+      { "source": "customers", "target": "orders", "sourceField": "id", "targetField": "customer_id", "cardinality": "one-to-many", "label": "places" }
+    ]
+  }
+}
+```
+
+Fields have a `name`, optional `type`, and optional `key` (`PK`, `FK`, `PK/FK`, or empty). Relations reference existing entity ids; optional `sourceField` and `targetField` anchor the connection to named fields. `cardinality` accepts `one-to-one`, `one-to-many` (default), `many-to-one`, or `many-to-many`. Entity ids and field names within each entity must be unique. At most 100 entities, 100 fields per entity and 500 relations are accepted.
+
+With a Set node, construct `graph` with `$dict(entities=array(dict(...)), relations=array(dict(...)))`; use `chartType: "erDiagram"` and `dataPath: "graph"`. This is a visualization of the schema you supply; it does not inspect a live database automatically.
+
+Both types appear in **Add widget** with a preview and in the canvas node's chart type selector. Heym Work can propose these types when you describe a schedule or database schema, drawing the proposed tasks or entities before you build the page.
 
 ### Interactive task lists
 

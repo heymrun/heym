@@ -385,7 +385,6 @@ describe("shipped release registry", () => {
       "agent-suite",
       "chat-evals",
       "concurrency-limit",
-      "canvas-collaboration",
     ]);
   });
 
@@ -399,7 +398,7 @@ describe("shipped release registry", () => {
     );
 
     expect(tours.map((tour) => tour.tourVisual)).toContain("concurrency-limit");
-    expect(tours.map((tour) => tour.tourVisual)).toContain("canvas-collaboration");
+    expect(tours.map((tour) => tour.tourVisual)).toContain("planning-widgets");
     expect(tours.map((tour) => tour.tourVisual)).toContain("agent-suite");
     expect(tours.map((tour) => tour.tourVisual)).toContain("chat-evals");
     for (const tour of tours) {
