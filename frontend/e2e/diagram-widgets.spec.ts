@@ -77,22 +77,22 @@ test("Gantt and entity relationship widgets run and render on desktop and narrow
     }
     await expect(page.getByRole("img", { name: CASES[1].aria, exact: true })).toContainText("1 : N");
     await expectRelationshipCaptionsClear(page.getByRole("img", { name: CASES[1].aria, exact: true }));
-    await page.screenshot({ path: testInfo.outputPath("diagrams-desktop.png"), fullPage: true });
+    await page.screenshot({ path: testInfo.outputPath("diagrams-desktop.png"), fullPage: true, animations: "disabled" });
     await page.getByRole("button", { name: "Add widget", exact: true }).click();
     const dialog = page.getByTestId("add-widget-dialog");
     for (const example of CASES) {
       await dialog.getByTestId("add-widget-type").locator("select").selectOption(example.type);
       await expect(dialog.getByRole("img", { name: example.aria, exact: true })).toBeVisible();
       await expectDiagramFits(dialog.getByRole("img", { name: example.aria, exact: true }));
-      await page.screenshot({ path: testInfo.outputPath(`${example.type}-preview.png`), fullPage: true });
+      await page.screenshot({ path: testInfo.outputPath(`${example.type}-preview.png`), fullPage: true, animations: "disabled" });
     }
-    await page.screenshot({ path: testInfo.outputPath("entity-preview.png"), fullPage: true });
+    await page.screenshot({ path: testInfo.outputPath("entity-preview.png"), fullPage: true, animations: "disabled" });
     await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
     await expectOk(await page.request.patch(`/api/dashboards/widgets/${widgetIds[0]}`, { data: { layout: { x: 0, y: 0, w: 4, h: 7 } } }));
     await expectOk(await page.request.patch(`/api/dashboards/widgets/${widgetIds[1]}`, { data: { layout: { x: 4, y: 0, w: 8, h: 5 } } }));
     await page.reload();
     for (const example of CASES) await expectDiagramFits(page.getByRole("img", { name: example.aria, exact: true }));
-    await page.screenshot({ path: testInfo.outputPath("diagrams-resized.png"), fullPage: true });
+    await page.screenshot({ path: testInfo.outputPath("diagrams-resized.png"), fullPage: true, animations: "disabled" });
     await page.setViewportSize({ width: 900, height: 800 });
     for (const example of CASES) await expectDiagramFits(page.getByRole("img", { name: example.aria, exact: true }));
     await expectOk(await page.request.patch(`/api/dashboards/widgets/${widgetIds[0]}`, { data: { layout: { x: 0, y: 0, w: 12, h: 5 } } }));
@@ -103,7 +103,7 @@ test("Gantt and entity relationship widgets run and render on desktop and narrow
       await expect(page.getByRole("img", { name: example.aria, exact: true })).toBeVisible();
       await expectDiagramFits(page.getByRole("img", { name: example.aria, exact: true }));
     }
-    await page.screenshot({ path: testInfo.outputPath("diagrams-mobile.png"), fullPage: true });
+    await page.screenshot({ path: testInfo.outputPath("diagrams-mobile.png"), fullPage: true, animations: "disabled" });
   } finally {
     await expectOk(await page.request.delete(`/api/dashboards/${dashboard.id}`));
   }

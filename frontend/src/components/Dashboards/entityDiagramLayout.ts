@@ -161,10 +161,14 @@ function placeCaptions(paths: RelationPath[], entities: PositionedEntity[]): Rel
           : a.y > box.top && a.y < box.bottom && Math.max(a.x, b.x) > box.left && Math.min(a.x, b.x) < box.right);
     };
     const offsets = [0, ...Array.from({ length: 20 }, (_, index) => [-(index + 1) * 14, (index + 1) * 14]).flat()];
-    const offset = offsets.find((value) => !intersects(path.y + value));
-    const y = offset === undefined
+    const candidates = [path.y,
+      Math.max(...path.points.map((point) => point.y)) + path.labelHeight / 2 + 10,
+      Math.min(...path.points.map((point) => point.y)) - path.labelHeight / 2 - 10,
+      ...offsets.map((offset) => path.y + offset)];
+    const position = candidates.find((value) => !intersects(value));
+    const y = position === undefined
       ? Math.min(0, ...occupied.map((rect) => rect.top), ...segments.flatMap(({ a, b }) => [a.y, b.y])) - path.labelHeight / 2 - 12
-      : path.y + offset;
+      : position;
     occupied.push(captionRect(path, y));
     return { ...path, y };
   });
