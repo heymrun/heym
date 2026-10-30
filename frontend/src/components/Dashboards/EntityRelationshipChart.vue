@@ -2,26 +2,30 @@
 import { computed, useId } from "vue";
 
 import type { DiagramEntity, DiagramRelation } from "@/types/dashboard";
-import { entityLayout, relationPath } from "@/components/Dashboards/diagramLayout";
+import { entityScene, truncateDiagramText } from "@/components/Dashboards/diagramLayout";
+import { useDiagramViewport } from "@/components/Dashboards/useDiagramViewport";
 
 const markerId = `entity-arrow-${useId().replace(/:/g, "")}`;
 const props = defineProps<{ entities: DiagramEntity[]; relations: DiagramRelation[] }>();
-const entities = computed(() => entityLayout(props.entities, props.relations));
-const paths = computed(() => props.relations.map((relation) => relationPath(relation, entities.value)).filter((path) => path !== null));
-const width = computed((): number => Math.max(360, ...entities.value.map((entity) => entity.x + 350)));
-const height = computed((): number => Math.max(160, ...entities.value.map((entity) => entity.y + entity.height + 52)));
+const { container, size } = useDiagramViewport();
+const scene = computed(() => entityScene(props.entities, props.relations, size.value));
+const viewBox = computed((): string => {
+  const width = Math.max(scene.value.width, size.value.width / 1.2);
+  const height = Math.max(scene.value.height, size.value.height / 1.2);
+  return `${-(width - scene.value.width) / 2} ${-(height - scene.value.height) / 2} ${width} ${height}`;
+});
 </script>
 
 <template>
   <div
-    class="h-full w-full overflow-auto"
-    tabindex="0"
-    aria-label="Entity relationship diagram, scroll to explore tables"
+    ref="container"
+    class="h-full min-h-0 w-full min-w-0 overflow-hidden"
+    aria-label="Entity relationship diagram"
   >
     <svg
-      :viewBox="`0 0 ${width} ${height}`"
-      :style="{ maxWidth: `${width}px` }"
-      class="h-auto w-full min-w-[320px] text-foreground"
+      :viewBox="viewBox"
+      class="block h-full w-full text-foreground"
+      preserveAspectRatio="xMidYMid meet"
       role="img"
       aria-label="Database entities, fields and relationships"
     >
@@ -30,7 +34,7 @@ const height = computed((): number => Math.max(160, ...entities.value.map((entit
           :id="markerId"
           markerWidth="6"
           markerHeight="6"
-          refX="5"
+          refX="6"
           refY="3"
           orient="auto"
         >
@@ -41,39 +45,25 @@ const height = computed((): number => Math.max(160, ...entities.value.map((entit
           />
         </marker>
       </defs>
-      <g
-        v-for="(path, index) in paths"
+      <path
+        v-for="(path, index) in scene.relations"
         :key="index"
-      >
-        <path
-          :d="path.path"
-          :marker-end="`url(#${markerId})`"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.5"
-          class="text-primary"
-        />
-        <text
-          :x="path.x"
-          :y="path.y"
-          text-anchor="middle"
-          fill="currentColor"
-          class="text-[15px] text-muted-foreground"
-          paint-order="stroke"
-          stroke="hsl(var(--background))"
-          stroke-width="4"
-        >
-          {{ path.label }}
-        </text>
-      </g>
+        :d="path.path"
+        :marker-end="`url(#${markerId})`"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        class="text-primary"
+      />
       <g
-        v-for="entity in entities"
+        v-for="entity in scene.entities"
         :key="entity.id"
+        data-diagram-entity
         :transform="`translate(${entity.x}, ${entity.y})`"
       >
         <title>{{ entity.label }}: {{ entity.fields?.map(field => `${field.name} ${field.type || ''} ${field.key || ''}`).join(', ') }}</title>
         <rect
-          width="260"
+          :width="entity.width"
           :height="entity.height"
           rx="8"
           fill="hsl(var(--card))"
@@ -82,42 +72,75 @@ const height = computed((): number => Math.max(160, ...entities.value.map((entit
         <rect
           x="1"
           y="1"
-          width="258"
-          height="36"
+          :width="entity.width - 2"
+          height="35"
           rx="7"
           fill="currentColor"
           class="text-primary/10"
         />
         <text
-          x="14"
+          x="12"
           y="24"
           fill="currentColor"
-          class="text-xl font-semibold"
-        >{{ entity.label.length > 23 ? entity.label.slice(0, 22) + '…' : entity.label }}</text>
+          class="font-semibold"
+          :font-size="entity.width < 220 ? 14 : 15"
+        >{{ truncateDiagramText(entity.label, entity.width - 24, 15) }}</text>
         <g
           v-for="(field, index) in entity.fields"
           :key="field.name"
         >
+          <title>{{ field.name }} {{ field.type }} {{ field.key }}</title>
           <text
             x="12"
-            :y="62 + index * 28"
+            :y="52 + index * 26"
             fill="currentColor"
-            class="text-sm font-semibold text-primary"
+            class="font-semibold text-primary"
+            :font-size="entity.width < 220 ? 10 : 12"
           >{{ field.key }}</text>
           <text
-            x="52"
-            :y="62 + index * 28"
+            :x="entity.width < 220 ? 36 : 48"
+            :y="52 + index * 26"
             fill="currentColor"
-            class="text-base"
-          >{{ field.name.length > 13 ? field.name.slice(0, 10) + '…' : field.name }}</text>
+            :font-size="entity.width < 220 ? 12 : 14"
+          >{{ truncateDiagramText(field.name, entity.width - (entity.width < 220 ? 98 : 140), entity.width < 220 ? 12 : 14) }}</text>
           <text
-            x="248"
-            :y="62 + index * 28"
+            :x="entity.width - 12"
+            :y="52 + index * 26"
             text-anchor="end"
             fill="currentColor"
-            class="text-sm text-muted-foreground"
-          >{{ (field.type || '').slice(0, 10) }}</text>
+            class="text-muted-foreground"
+            :font-size="entity.width < 220 ? 10 : 12"
+          >{{ truncateDiagramText(field.type || '', entity.width < 220 ? 48 : 66, entity.width < 220 ? 10 : 12) }}</text>
         </g>
+      </g>
+      <!-- Captions render above the cards, in the reserved gutters, with bounded wrapping. -->
+      <g
+        v-for="(path, index) in scene.relations"
+        :key="index"
+        data-diagram-relation-label
+      >
+        <title>{{ path.label }}</title>
+        <rect
+          :x="path.x - path.labelWidth / 2"
+          :y="path.y - path.labelHeight / 2"
+          :width="path.labelWidth"
+          :height="path.labelHeight"
+          rx="4"
+          fill="hsl(var(--card))"
+        />
+        <text
+          :x="path.x"
+          text-anchor="middle"
+          fill="currentColor"
+          class="text-xs text-muted-foreground"
+        >
+          <tspan
+            v-for="(line, lineIndex) in path.lines"
+            :key="lineIndex"
+            :x="path.x"
+            :y="path.y - path.labelHeight / 2 + 14 + lineIndex * 14"
+          >{{ line }}</tspan>
+        </text>
       </g>
     </svg>
   </div>

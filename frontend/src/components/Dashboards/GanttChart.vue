@@ -2,24 +2,28 @@
 import { computed, useId } from "vue";
 
 import type { GanttTask } from "@/types/dashboard";
-import { dependencyPaths, ganttLayout, TASK_HEIGHT } from "@/components/Dashboards/diagramLayout";
+import { dependencyPaths, ganttLayout } from "@/components/Dashboards/diagramLayout";
+import { useDiagramViewport } from "@/components/Dashboards/useDiagramViewport";
 
 const props = defineProps<{ tasks: GanttTask[] }>();
-const layout = computed(() => ganttLayout(props.tasks));
+const { container, size } = useDiagramViewport();
+const layout = computed(() => ganttLayout(props.tasks, size.value));
 const paths = computed(() => dependencyPaths(layout.value.tasks));
-const height = computed((): number => Math.max(160, 72 + layout.value.tasks.length * TASK_HEIGHT));
 const markerId = `gantt-arrow-${useId().replace(/:/g, "")}`;
 </script>
 
 <template>
   <div
-    class="h-full w-full overflow-auto"
+    ref="container"
+    class="h-full min-h-0 w-full min-w-0 overflow-auto"
     tabindex="0"
     aria-label="Gantt chart, scroll to explore tasks"
   >
     <svg
-      :viewBox="`0 0 840 ${height}`"
-      class="h-auto w-full min-w-[320px] max-w-[840px] text-foreground"
+      :viewBox="`0 0 ${layout.width} ${layout.height}`"
+      :width="layout.width"
+      :height="layout.height"
+      class="block text-foreground"
       role="img"
       aria-label="Task schedule with progress and dependencies"
     >
@@ -28,7 +32,7 @@ const markerId = `gantt-arrow-${useId().replace(/:/g, "")}`;
           :id="markerId"
           markerWidth="6"
           markerHeight="6"
-          refX="5"
+          refX="6"
           refY="3"
           orient="auto"
         >
@@ -46,39 +50,31 @@ const markerId = `gantt-arrow-${useId().replace(/:/g, "")}`;
         <line
           :x1="tick.x"
           :x2="tick.x"
-          y1="40"
-          :y2="height - 12"
+          :y1="layout.gridTop"
+          :y2="layout.gridBottom"
           stroke="currentColor"
           class="text-border"
         />
         <text
           :x="tick.x"
-          y="24"
+          :y="layout.axisY"
           text-anchor="middle"
           fill="currentColor"
-          class="text-[15px] text-muted-foreground"
+          class="text-[11px] text-muted-foreground"
         >{{ tick.label }}</text>
       </g>
-      <path
-        v-for="path in paths"
-        :key="path.key"
-        :d="path.path"
-        fill="none"
-        stroke="currentColor"
-        class="text-muted-foreground"
-        :marker-end="`url(#${markerId})`"
-      />
       <g
         v-for="task in layout.tasks"
         :key="task.id"
+        data-diagram-task
       >
         <title>{{ task.label }}: {{ task.start }} – {{ task.end }} · {{ task.completion }}% complete{{ task.dependencies?.length ? ` · Depends on: ${task.dependencies.join(', ')}` : '' }}</title>
         <text
           x="8"
           :y="task.y + 16"
           fill="currentColor"
-          class="text-base"
-        >{{ task.label.length > 17 ? task.label.slice(0, 16) + '…' : task.label }}</text>
+          class="text-xs"
+        >{{ task.displayLabel }}</text>
         <rect
           :x="task.x"
           :y="task.y"
@@ -98,14 +94,24 @@ const markerId = `gantt-arrow-${useId().replace(/:/g, "")}`;
           class="text-primary"
         />
         <text
-          v-if="task.width > 60"
+          v-if="task.width > 40"
           :x="task.x + task.width - 6"
           :y="task.y + 17"
           text-anchor="end"
           fill="currentColor"
-          class="text-sm"
+          class="text-[11px]"
+          :class="task.completion > 95 ? 'text-primary-foreground' : 'text-foreground'"
         >{{ task.completion }}%</text>
       </g>
+      <path
+        v-for="path in paths"
+        :key="path.key"
+        :d="path.path"
+        fill="none"
+        stroke="currentColor"
+        class="text-muted-foreground"
+        :marker-end="`url(#${markerId})`"
+      />
     </svg>
   </div>
 </template>

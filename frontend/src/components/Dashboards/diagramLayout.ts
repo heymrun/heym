@@ -1,14 +1,27 @@
-import type { DiagramEntity, DiagramRelation, GanttTask } from "@/types/dashboard";
+import type { GanttTask } from "@/types/dashboard";
 
-export const TASK_HEIGHT = 44;
-export const TIMELINE_LEFT = 160;
-export const TIMELINE_WIDTH = 640;
+export { entityLayout, entityScene, relationPath } from "./entityDiagramLayout";
+export type { PositionedEntity, RelationPath } from "./entityDiagramLayout";
+
+export interface DiagramSize {
+  width: number;
+  height: number;
+}
 
 export interface ScheduledTask extends GanttTask {
   x: number;
   y: number;
   width: number;
   completion: number;
+  displayLabel: string;
+}
+
+export interface GanttLayout extends DiagramSize {
+  tasks: ScheduledTask[];
+  ticks: { x: number; label: string }[];
+  axisY: number;
+  gridTop: number;
+  gridBottom: number;
 }
 
 /** UTC parsing also keeps date-only previews consistent with the backend. */
@@ -17,107 +30,73 @@ export function taskTime(value: string): number {
   return Date.parse(value.length === 10 ? `${value}T00:00:00Z` : zoned ? value : `${value}Z`);
 }
 
-export function ganttLayout(tasks: GanttTask[]): {
-  tasks: ScheduledTask[];
-  ticks: { x: number; label: string }[];
-} {
+export function truncateDiagramText(value: string, width: number, fontSize = 12): string {
+  const limit = Math.max(1, Math.floor(width / (fontSize * 0.62)));
+  return value.length > limit ? `${value.slice(0, Math.max(1, limit - 1))}…` : value;
+}
+
+/** Recompute pixel geometry for both dimensions; long schedules scroll at a readable row size. */
+export function ganttLayout(tasks: GanttTask[], viewport: DiagramSize = { width: 840, height: 240 }): GanttLayout {
+  const width = Math.max(240, viewport.width);
   const valid = tasks.filter((task) => Number.isFinite(taskTime(task.start)) &&
     Number.isFinite(taskTime(task.end)) && taskTime(task.end) >= taskTime(task.start));
-  if (!valid.length) return { tasks: [], ticks: [] };
+  const rowHeight = Math.max(32, Math.min(56, (viewport.height - 48) / Math.max(1, valid.length)));
+  const height = Math.max(viewport.height, 48 + rowHeight * valid.length);
+  const top = Math.max(8, (height - (40 + rowHeight * valid.length)) / 2);
+  const labelWidth = Math.max(72, Math.min(160, width * 0.24));
+  const timelineLeft = labelWidth + 16;
+  const timelineWidth = Math.max(80, width - timelineLeft - 32);
+  const base: GanttLayout = { width, height, tasks: [], ticks: [], axisY: top + 12, gridTop: top + 24, gridBottom: height - top };
+  if (!valid.length) return base;
   const start = Math.min(...valid.map((task) => taskTime(task.start)));
   const end = Math.max(...valid.map((task) => taskTime(task.end)));
   const span = Math.max(end - start, 86400000);
-  const formatter = new Intl.DateTimeFormat("en", { month: "short", day: "numeric", year: "2-digit", timeZone: "UTC" });
+  const tickCount = Math.max(2, Math.min(6, Math.floor(timelineWidth / 95) + 1));
+  const formatter = new Intl.DateTimeFormat("en", { month: "short", day: "numeric", timeZone: "UTC" });
   return {
+    ...base,
     tasks: valid.map((task, index) => ({
       ...task,
-      x: TIMELINE_LEFT + (taskTime(task.start) - start) / span * TIMELINE_WIDTH,
-      y: 56 + index * TASK_HEIGHT,
-      width: Math.max(4, (taskTime(task.end) - taskTime(task.start)) / span * TIMELINE_WIDTH),
+      x: timelineLeft + (taskTime(task.start) - start) / span * timelineWidth,
+      y: top + 32 + index * rowHeight + (rowHeight - 24) / 2,
+      width: Math.max(4, (taskTime(task.end) - taskTime(task.start)) / span * timelineWidth),
       completion: Math.max(0, Math.min(100, task.progress ?? 0)),
+      displayLabel: truncateDiagramText(task.label, labelWidth - 12),
     })),
-    ticks: Array.from({ length: 5 }, (_, index) => ({
-      x: TIMELINE_LEFT + index / 4 * TIMELINE_WIDTH,
-      label: formatter.format(new Date(start + index / 4 * span)),
+    ticks: Array.from({ length: tickCount }, (_, index) => ({
+      x: timelineLeft + index / (tickCount - 1) * timelineWidth,
+      label: formatter.format(new Date(start + index / (tickCount - 1) * span)),
     })),
   };
 }
 
-export function dependencyPaths(tasks: ScheduledTask[]): { key: string; path: string }[] {
+export interface DependencyPath {
+  key: string;
+  path: string;
+  points: { x: number; y: number }[];
+}
+
+/** Approach every successor from the left, routing overlapping dates around the task rows. */
+export function dependencyPaths(tasks: ScheduledTask[]): DependencyPath[] {
   const byId = new Map(tasks.map((task) => [task.id, task]));
-  return tasks.flatMap((task) => (task.dependencies ?? []).flatMap((id) => {
+  const right = Math.max(0, ...tasks.map((task) => task.x + task.width));
+  return tasks.flatMap((task) => [...new Set(task.dependencies ?? [])].flatMap((id) => {
     const source = byId.get(id);
     if (!source || source === task) return [];
     const x = source.x + source.width;
-    return [{ key: `${id}-${task.id}`, path: `M ${x} ${source.y + 12} H ${x + 12} V ${task.y + 12} H ${task.x}` }];
-  }));
-}
-
-export interface PositionedEntity extends DiagramEntity {
-  x: number;
-  y: number;
-  height: number;
-}
-
-/** Connected entities occupy adjacent columns; disconnected tables start a new row. */
-export function entityLayout(entities: DiagramEntity[], relations: DiagramRelation[]): PositionedEntity[] {
-  const ordered: DiagramEntity[] = [];
-  const byId = new Map(entities.map((entity) => [entity.id, entity]));
-  const seen = new Set<string>();
-  for (const entity of entities) {
-    const queue = [entity.id];
-    while (queue.length) {
-      const id = queue.shift()!;
-      const next = byId.get(id);
-      if (seen.has(id) || !next) continue;
-      seen.add(id);
-      ordered.push(next);
-      for (const relation of relations) {
-        if (relation.source === id && !seen.has(relation.target)) queue.push(relation.target);
-        if (relation.target === id && !seen.has(relation.source)) queue.push(relation.source);
-      }
+    const points = [{ x, y: source.y + 12 }];
+    if (x + 12 <= task.x && Math.abs(task.y - source.y) <= 56) {
+      const lane = (x + task.x) / 2;
+      points.push({ x: lane, y: source.y + 12 }, { x: lane, y: task.y + 12 });
+    } else {
+      const lane = Math.abs(task.y - source.y) <= 56.1 ? x + 8 : right + 10;
+      const rowGap = task.y > source.y ? task.y - 4 : task.y + 28;
+      points.push({ x: lane, y: source.y + 12 }, { x: lane, y: rowGap },
+        { x: task.x - 8, y: rowGap }, { x: task.x - 8, y: task.y + 12 });
     }
-  }
-  const columns = Math.max(1, Math.min(3, ordered.length));
-  const result: PositionedEntity[] = [];
-  let y = 36;
-  for (let index = 0; index < ordered.length; index += columns) {
-    const row = ordered.slice(index, index + columns);
-    const height = Math.max(...row.map((entity) => 52 + (entity.fields?.length ?? 0) * 28));
-    row.forEach((entity, column) => result.push({ ...entity, x: 36 + column * 360, y, height: 52 + (entity.fields?.length ?? 0) * 28 }));
-    y += height + 100;
-  }
-  return result;
-}
-
-export interface RelationPath {
-  path: string;
-  x: number;
-  y: number;
-  label: string;
-}
-
-export function relationPath(relation: DiagramRelation, entities: PositionedEntity[]): RelationPath | null {
-  const source = entities.find((entity) => entity.id === relation.source);
-  const target = entities.find((entity) => entity.id === relation.target);
-  if (!source || !target) return null;
-  const anchorY = (entity: PositionedEntity, field?: string | null): number => {
-    const index = entity.fields?.findIndex((item) => item.name === field) ?? -1;
-    return entity.y + (index < 0 ? 24 : 58 + index * 28);
-  };
-  const forward = target.x > source.x;
-  const x1 = source.x + (forward || source === target ? 260 : 0);
-  const x2 = target.x + (forward ? 0 : 260);
-  const y1 = anchorY(source, relation.sourceField);
-  const y2 = anchorY(target, relation.targetField);
-  const bend = source === target ? x1 + 60 : source.y === target.y ? (x1 + x2) / 2 : Math.max(x1, x2) + 40;
-  const cardinality = { "one-to-one": "1 : 1", "one-to-many": "1 : N", "many-to-one": "N : 1", "many-to-many": "N : N" }[relation.cardinality ?? "one-to-many"];
-  return {
-    path: source === target && y1 === y2
-      ? `M ${x1} ${y1} H ${bend} V ${y1 - 24} H ${x1}`
-      : `M ${x1} ${y1} H ${bend} V ${y2} H ${x2}`,
-    x: bend,
-    y: (y1 + y2) / 2 - 8,
-    label: relation.label ? `${relation.label} (${cardinality})` : cardinality,
-  };
+    points.push({ x: task.x, y: task.y + 12 });
+    return [{ key: `${id}-${task.id}`, points,
+      path: points.map((point, index) => `${index ? "L" : "M"} ${point.x} ${point.y}`).join(" "),
+    }];
+  }));
 }

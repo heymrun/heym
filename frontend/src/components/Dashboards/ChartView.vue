@@ -99,7 +99,7 @@ const apexOptions = computed(() =>
 <template>
   <div
     ref="containerRef"
-    class="h-full w-full text-foreground"
+    class="h-full min-h-0 w-full min-w-0 text-foreground"
   >
     <div
       v-if="isEmpty"
