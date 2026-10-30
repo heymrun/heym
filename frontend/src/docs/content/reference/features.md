@@ -505,7 +505,7 @@ Turn on **YOLO mode** (Agent mode, off by default) and the assistant tests what 
 
 Click **AI** above any node on the canvas to change or fix just that node. The panel shows the node it is changing (with its last result once it has run) and offers **Change this node as ...**, **Fix error in this node ...** and **Other**. Only that node is updated; the rest of the workflow and the layout stay as they are. See [AI Assistant › Changing One Node](./ai-assistant.md#changing-one-node).
 
-When a workflow stores records, the assistant asks which [data table](../tabs/datatable-tab.md) to use, or creates one with the columns the workflow needs. See [AI Assistant › Data tables](./ai-assistant.md#data-tables).
+When a workflow stores records, the assistant asks which [data table](../tabs/datatable-tab.md) to use, or creates one with the columns the workflow needs. Chat and MCP `heym_chat` can also edit columns and rows directly using owner or write access, with confirmation before column removal or clearing all rows. See [AI Assistant › Data tables](./ai-assistant.md#data-tables).
 
 When the current workflow contains [Agent Node](../nodes/agent-node.md) skills, the assistant sends only each skill's `SKILL.md` into the workflow context. Attached `.py` files and binary skill assets are excluded before the request so large skill bundles do not overflow the model context window.
 

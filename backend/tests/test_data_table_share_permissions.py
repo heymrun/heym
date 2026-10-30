@@ -4,12 +4,13 @@ import datetime
 import unittest
 import uuid
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
 
 from app.api import data_tables as dt_api
 from app.db.models import DataTable
+from app.models.schemas import DataTableColumnDef, DataTableUpdate
 
 
 def _table(owner_id: uuid.UUID) -> DataTable:
@@ -123,6 +124,23 @@ class GetDataTableWithAccessTests(unittest.IsolatedAsyncioTestCase):
             await dt_api._get_data_table_with_access(table.id, uuid.uuid4(), db)
 
         self.assertEqual(ctx.exception.status_code, 404)
+
+    async def test_column_updates_use_the_strongest_direct_or_team_grant(self) -> None:
+        for direct, teams in [(["write"], []), ([], ["write"]), (["read"], ["write"])]:
+            with self.subTest(direct=direct, teams=teams):
+                table = _table(uuid.uuid4())
+                db = _access_db(table, direct, teams)
+                with (
+                    patch.object(dt_api, "_prune_rows_to_columns", AsyncMock()),
+                    patch.object(dt_api, "_row_count", AsyncMock(return_value=0)),
+                ):
+                    result = await dt_api.update_data_table(
+                        table.id,
+                        DataTableUpdate(columns=[DataTableColumnDef(name="surname")]),
+                        current_user=SimpleNamespace(id=uuid.uuid4(), email="writer@example.com"),
+                        db=db,
+                    )
+                self.assertEqual(result.columns[0]["name"], "surname")
 
 
 def _list_db(

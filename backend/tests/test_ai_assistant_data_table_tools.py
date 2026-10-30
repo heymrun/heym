@@ -20,10 +20,13 @@ def _tool(name: str) -> dict:
 
 class DataTableToolsRegisteredTests(unittest.TestCase):
     def test_tools_are_offered_to_the_chat(self) -> None:
+        from app.api.chat_data_tables import DATA_TABLE_TOOL_NAMES
+
         names = {item["function"]["name"] for item in ai_assistant.DASHBOARD_CHAT_TOOLS}
 
         self.assertIn("list_data_tables", names)
         self.assertIn("create_data_table", names)
+        self.assertTrue(DATA_TABLE_TOOL_NAMES <= names)
 
     def test_create_tool_takes_a_name_and_typed_columns(self) -> None:
         parameters = _tool("create_data_table")["function"]["parameters"]
@@ -34,14 +37,16 @@ class DataTableToolsRegisteredTests(unittest.TestCase):
             column["properties"]["type"]["enum"], ["string", "number", "boolean", "date", "json"]
         )
 
-    def test_prompt_lists_tables_asks_when_ambiguous_and_never_touches_rows(self) -> None:
+    def test_prompt_lists_tables_and_offers_direct_table_actions(self) -> None:
         prompt = ai_assistant.DASHBOARD_CHAT_SYSTEM_PROMPT
 
         self.assertIn("Call list_data_tables when", prompt)
-        self.assertIn("Never read or write rows yourself", prompt)
+        self.assertIn("use the DataTable tools directly", prompt)
+        self.assertNotIn("Never read or write rows yourself", prompt)
+        self.assertIn("Only after the user confirms in a follow-up", prompt)
         self.assertIn("one createTable option", prompt)
         self.assertIn('`Created data table "<name>" (id <id>)` means the table exists', prompt)
-        self.assertIn("(8) I can list your data tables and their columns", prompt)
+        self.assertIn("(8) I can inspect your data tables", prompt)
 
 
 class ListDataTablesForChatTests(unittest.IsolatedAsyncioTestCase):
@@ -207,6 +212,21 @@ class DataTableToolDispatchTests(unittest.IsolatedAsyncioTestCase):
 
         handler.assert_awaited_once()
         self.assertTrue(any("2 data table(s) listed" in chunk for chunk in chunks))
+
+    async def test_direct_table_actions_run_in_the_chat_loop(self) -> None:
+        from app.api.chat_data_tables import DATA_TABLE_TOOL_NAMES
+
+        for name in DATA_TABLE_TOOL_NAMES:
+            with self.subTest(tool=name):
+                arguments = {"table_id": str(uuid.uuid4())}
+                handler, chunks = await self._stream(
+                    name,
+                    arguments,
+                    "app.api.ai_assistant.call_data_table_tool",
+                    {"updated": True},
+                )
+                self.assertEqual(handler.await_args.args[2:], (name, arguments))
+                self.assertTrue(any('"type": "tool_end"' in chunk for chunk in chunks))
 
 
 if __name__ == "__main__":
