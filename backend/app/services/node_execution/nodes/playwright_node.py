@@ -104,10 +104,70 @@ def _scrubbed_playwright_subprocess_env() -> dict[str, str]:
     return env
 
 
+# Step string fields the generator compiles into the script. A whole-field reference
+# (the field is one ``$`` expression, as the executor classifies it) stays a lookup
+# against ``inputs``. Any other template is resolved here, before code generation, and
+# then written once as a literal.
+_STEP_RUNTIME_LOOKUP_FIELDS = (
+    "url",
+    "selector",
+    "text",
+    "value",
+    "instructions",
+    "credentialId",
+    "model",
+)
+# Fields the generator always writes as a plain literal, so a reference in them is
+# resolved here in full.
+_STEP_LITERAL_FIELDS = ("attribute", "outputKey")
+
+
+def _resolve_step_templates(
+    executor: WorkflowExecutor, steps: list[dict], inputs: dict, node_id: str
+) -> list[dict]:
+    """Resolve embedded ``$`` templates in step fields before code generation.
+
+    Resolved values are passed to the generator as plain data, which writes each one
+    once as a Python literal. They are never substituted into the generated source,
+    so a value cannot change the code around it. Disabled steps are left untouched.
+    """
+    from app.services.playwright_code_generator import ResolvedStepValue, is_step_disabled
+
+    resolved_steps: list[dict] = []
+    for step in steps:
+        if not isinstance(step, dict) or is_step_disabled(step):
+            resolved_steps.append(step)
+            continue
+        resolved = dict(step)
+        for field in _STEP_RUNTIME_LOOKUP_FIELDS:
+            value = resolved.get(field)
+            if (
+                isinstance(value, str)
+                and "$" in value
+                and not executor._is_single_dollar_expression(value)
+            ):
+                resolved[field] = ResolvedStepValue(
+                    executor.evaluate_message_template(value, inputs, node_id)
+                )
+        for field in _STEP_LITERAL_FIELDS:
+            value = resolved.get(field)
+            if isinstance(value, str) and "$" in value:
+                resolved[field] = ResolvedStepValue(
+                    executor.evaluate_message_template(value, inputs, node_id)
+                )
+        resolved_steps.append(resolved)
+    return resolved_steps
+
+
 def _resolve_expressions_in_code(
     executor: WorkflowExecutor, code: str, inputs: dict, node_id: str
 ) -> str:
-    """Replace Heym expressions ($node.field) in Python code with resolved values."""
+    """Replace Heym expressions ($node.field) in custom Playwright code with resolved values.
+
+    Only for user-written custom code, which is arbitrary Python by design. Step-based
+    code never goes through this pass: step values are resolved before generation by
+    ``_resolve_step_templates``.
+    """
     import re
 
     def replace_expr(match: re.Match) -> str:
@@ -234,6 +294,8 @@ def _execute_playwright_node(
             node_id,
         )
 
+    playwright_inputs = _playwright_subprocess_inputs(executor, inputs)
+
     is_custom_code = False
     if use_custom_code:
         # Custom code path: `playwrightCode` is attacker-controllable Python. Fail closed
@@ -260,13 +322,15 @@ def _execute_playwright_node(
         # The generator drops disabled steps itself and keeps the stored index,
         # which is the key a run reports back in output["saveSteps"].
         playwright_code = generate_playwright_code(
-            configured_steps,
+            _resolve_step_templates(executor, configured_steps, playwright_inputs, node_id),
             capture_network=capture_network,
             auth_enabled=auth_enabled,
             auth_state=auth_state,
             auth_check_selector=auth_check_selector,
             auth_check_timeout=auth_check_timeout,
-            auth_fallback_steps=configured_fallback_steps,
+            auth_fallback_steps=_resolve_step_templates(
+                executor, configured_fallback_steps, playwright_inputs, node_id
+            ),
             stealth=node_data.get("playwrightStealth", False),
         )
     elif configured_steps:
@@ -302,10 +366,14 @@ def _execute_playwright_node(
 
     from app.services import playwright_sandbox
 
-    playwright_inputs = _playwright_subprocess_inputs(executor, inputs)
-    resolved_code = _resolve_expressions_in_code(
-        executor, playwright_code, playwright_inputs, node_id
-    )
+    # Only custom code gets the expression pass. Step values were resolved before code
+    # generation, and substituting into the generated source would let a value rewrite it.
+    if is_custom_code:
+        resolved_code = _resolve_expressions_in_code(
+            executor, playwright_code, playwright_inputs, node_id
+        )
+    else:
+        resolved_code = playwright_code
     script_content = _build_playwright_script(
         resolved_code,
         playwright_inputs,
