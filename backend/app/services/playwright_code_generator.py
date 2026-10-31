@@ -42,12 +42,20 @@ def _heym_urlopen_json(req: object, timeout: float) -> object:
         raise RuntimeError(http_error_message(err.code, str(err.reason), body)) from None
 
 
+class ResolvedStepValue(str):
+    """A step field value whose templates were already resolved by the executor.
+
+    It is always written to the generated script as a plain string literal, even when
+    the resolved text starts with ``$``, so data can never turn into a lookup or code.
+    """
+
+
 def _expr_to_python(expr: str, default: str = '""') -> str:
     """Convert Heym expression like $userInput.body.url to Python that reads from inputs."""
     if not expr or not str(expr).strip():
         return default
     s = str(expr).strip()
-    if not s.startswith("$"):
+    if isinstance(expr, ResolvedStepValue) or not s.startswith("$"):
         return repr(s)
     path = s[1:].split(".")
     if not path:

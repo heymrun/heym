@@ -124,3 +124,7 @@ vulnerabilities in Heym:
   credential exfiltration via the error workflow setting, where a collaborator
   could point a shared workflow's error workflow at a workflow of their own,
   which then ran with the owner's credentials (GHSA-c3f4-2mrj-jfqr).
+- [@maluyckx](https://github.com/maluyckx) for backend code execution through
+  Playwright step fields, where a `$` reference embedded in a step value was
+  spliced into the generated script, and for contributing the remediation
+  (GHSA-7qrv-28q7-w8rj).
