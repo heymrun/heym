@@ -93,8 +93,10 @@ test("Gantt and entity relationship widgets run and render on desktop and narrow
     await page.reload();
     for (const example of CASES) await expectDiagramFits(page.getByRole("img", { name: example.aria, exact: true }));
     await page.screenshot({ path: testInfo.outputPath("diagrams-resized.png"), fullPage: true, animations: "disabled" });
-    await page.setViewportSize({ width: 900, height: 800 });
-    for (const example of CASES) await expectDiagramFits(page.getByRole("img", { name: example.aria, exact: true }));
+    for (const width of [900, 820]) {
+      await page.setViewportSize({ width, height: 800 });
+      for (const example of CASES) await expectDiagramFits(page.getByRole("img", { name: example.aria, exact: true }));
+    }
     await expectOk(await page.request.patch(`/api/dashboards/widgets/${widgetIds[0]}`, { data: { layout: { x: 0, y: 0, w: 12, h: 5 } } }));
     await expectOk(await page.request.patch(`/api/dashboards/widgets/${widgetIds[1]}`, { data: { layout: { x: 0, y: 5, w: 12, h: 5 } } }));
     await page.setViewportSize({ width: 390, height: 844 });

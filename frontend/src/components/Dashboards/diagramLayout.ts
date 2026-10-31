@@ -37,21 +37,21 @@ export function truncateDiagramText(value: string, width: number, fontSize = 12)
 
 /** Recompute pixel geometry for both dimensions; long schedules scroll at a readable row size. */
 export function ganttLayout(tasks: GanttTask[], viewport: DiagramSize = { width: 840, height: 240 }): GanttLayout {
-  const width = Math.max(240, viewport.width);
+  const width = Math.max(1, viewport.width);
   const valid = tasks.filter((task) => Number.isFinite(taskTime(task.start)) &&
     Number.isFinite(taskTime(task.end)) && taskTime(task.end) >= taskTime(task.start));
   const rowHeight = Math.max(32, Math.min(56, (viewport.height - 48) / Math.max(1, valid.length)));
   const height = Math.max(viewport.height, 48 + rowHeight * valid.length);
   const top = Math.max(8, (height - (40 + rowHeight * valid.length)) / 2);
-  const labelWidth = Math.max(72, Math.min(160, width * 0.24));
-  const timelineLeft = labelWidth + 16;
-  const timelineWidth = Math.max(80, width - timelineLeft - 32);
+  const labelWidth = Math.min(160, Math.max(72, width * 0.24), width * 0.45);
+  const timelineLeft = labelWidth + Math.min(16, width * 0.07);
+  const timelineWidth = Math.max(1, width - timelineLeft - Math.min(32, Math.max(16, width * 0.12)));
   const base: GanttLayout = { width, height, tasks: [], ticks: [], axisY: top + 12, gridTop: top + 24, gridBottom: height - top };
   if (!valid.length) return base;
   const start = Math.min(...valid.map((task) => taskTime(task.start)));
   const end = Math.max(...valid.map((task) => taskTime(task.end)));
   const span = Math.max(end - start, 86400000);
-  const tickCount = Math.max(2, Math.min(6, Math.floor(timelineWidth / 95) + 1));
+  const tickCount = Math.max(1, Math.min(6, Math.floor(timelineWidth / 95) + 1));
   const formatter = new Intl.DateTimeFormat("en", { month: "short", day: "numeric", timeZone: "UTC" });
   return {
     ...base,
@@ -59,13 +59,13 @@ export function ganttLayout(tasks: GanttTask[], viewport: DiagramSize = { width:
       ...task,
       x: timelineLeft + (taskTime(task.start) - start) / span * timelineWidth,
       y: top + 32 + index * rowHeight + (rowHeight - 24) / 2,
-      width: Math.max(4, (taskTime(task.end) - taskTime(task.start)) / span * timelineWidth),
+      width: Math.max(Math.min(4, timelineWidth), (taskTime(task.end) - taskTime(task.start)) / span * timelineWidth),
       completion: Math.max(0, Math.min(100, task.progress ?? 0)),
       displayLabel: truncateDiagramText(task.label, labelWidth - 12),
     })),
     ticks: Array.from({ length: tickCount }, (_, index) => ({
-      x: timelineLeft + index / (tickCount - 1) * timelineWidth,
-      label: formatter.format(new Date(start + index / (tickCount - 1) * span)),
+      x: timelineLeft + index / Math.max(1, tickCount - 1) * timelineWidth,
+      label: formatter.format(new Date(start + index / Math.max(1, tickCount - 1) * span)),
     })),
   };
 }

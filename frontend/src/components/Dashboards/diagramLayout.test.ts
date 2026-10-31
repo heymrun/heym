@@ -91,6 +91,27 @@ describe("diagram layouts", () => {
     expect(busy.tasks[1].y - busy.tasks[0].y).toBeGreaterThanOrEqual(32);
   });
 
+  it("fits sub-240px Gantt cards without overflowing or overlapping date ticks", () => {
+    const tasks = chartTypeExample("gantt").payload.tasks!;
+    for (const width of [236, 220, 180, 120]) {
+      const layout = ganttLayout(tasks, { width, height: 300 });
+      expect(layout.width).toBe(width);
+      for (const task of layout.tasks) {
+        expect(task.x).toBeGreaterThanOrEqual(0);
+        expect(task.x + task.width).toBeLessThanOrEqual(width);
+      }
+      const points = [...layout.ticks, ...dependencyPaths(layout.tasks).flatMap((path) => path.points)];
+      for (const point of points) {
+        expect(Number.isFinite(point.x)).toBe(true);
+        expect(point.x).toBeGreaterThanOrEqual(0);
+        expect(point.x).toBeLessThan(width);
+      }
+      for (let index = 1; index < layout.ticks.length; index++) {
+        expect(layout.ticks[index].x - layout.ticks[index - 1].x).toBeGreaterThanOrEqual(90);
+      }
+    }
+  });
+
   it("uses a different entity arrangement for tall and wide widgets", () => {
     const entities = Array.from({ length: 4 }, (_, i) => ({ id: String(i), label: `Table ${i}`, fields: [{ name: "id" }] }));
     const wide = entityScene(entities, [], { width: 1000, height: 200 });
