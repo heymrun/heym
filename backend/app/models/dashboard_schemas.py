@@ -5,6 +5,7 @@ from typing import Annotated, Any, Literal
 from pydantic import AfterValidator, BaseModel, Field, StringConstraints
 
 from app.models.schemas import HighlightPayloadSchema
+from app.services.diagram_payload import Entity, EntityRelation, GanttTask
 from app.services.page_params import RecordFormat
 
 SharePermission = Literal["read", "write"]
@@ -249,10 +250,15 @@ class AiPlanRequest(BaseModel):
 
 
 class WidgetExampleResponse(BaseModel):
-    """A proposal's preview: one value per label."""
+    """A proposal's numeric, schedule or entity relationship preview."""
 
     labels: list[str]
     values: list[float]
+    tasks: list[GanttTask] | None = Field(default=None, exclude_if=lambda value: value is None)
+    entities: list[Entity] | None = Field(default=None, exclude_if=lambda value: value is None)
+    relations: list[EntityRelation] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class WidgetProposalResponse(BaseModel):

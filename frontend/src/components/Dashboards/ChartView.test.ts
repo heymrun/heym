@@ -3,6 +3,7 @@ import { renderToString } from "vue/server-renderer";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ChartPayload } from "@/types/dashboard";
+import { chartTypeExample } from "@/lib/chartTypeExamples";
 import ChartView from "@/components/Dashboards/ChartView.vue";
 import type { TableRowLink } from "@/components/Dashboards/chartTable";
 import { hitlPortKey, type HitlPort } from "@/ports";
@@ -24,6 +25,25 @@ async function render(
 }
 
 describe("ChartView", () => {
+  it("renders Gantt tasks, progress and dependency links without ApexCharts", async () => {
+    const html = await render(chartTypeExample("gantt").payload);
+    expect(html).toContain("Task schedule with progress and dependencies");
+    expect(html).toContain("Design");
+    expect(html).toContain("55% complete");
+    expect(html).toContain("marker-end");
+    expect(await render({ type: "gantt", tasks: [] })).toContain("No data");
+  });
+
+  it("renders entity fields, key badges and relationship cardinality", async () => {
+    const html = await render(chartTypeExample("erDiagram").payload);
+    expect(html).toContain("Database entities, fields and relationships");
+    expect(html).toContain("Customers");
+    expect(html).toContain("customer_id");
+    expect(html).toContain("1 : N");
+    expect(html).toContain("FK");
+    expect(await render({ type: "erDiagram", entities: [] })).toContain("No data");
+  });
+
   it("renders a numeric chart", async () => {
     const html = await render({ type: "numeric", value: 3.14159, decimals: 2, unit: "ms" });
 

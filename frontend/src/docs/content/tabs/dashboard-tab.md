@@ -23,6 +23,8 @@ A widget is a single chart on the grid. Supported chart types:
 - **Gauge** (a single value against a min–max range, e.g. a percentage)
 - **Scatter** (X/Y points for correlation plots)
 - **Proportion** (one bar split into shares with a percentage legend, e.g. a language breakdown)
+- **Gantt** (task dates, completion and dependencies)
+- **Entity relationships (DB)** (tables, fields, PK/FK keys and connections)
 - **Bar gauge** (one horizontal gauge per row with a red→green gradient and a value, e.g. free disk space)
 - **Text** (a markdown message, e.g. a status note like "Last execution at 19:47"; supports [interactive checkboxes](../nodes/chart-output-node.md#interactive-task-lists) when the markdown is static, and [explicit numbered lists](../nodes/chart-output-node.md#numbered-lists) for custom or descending numbering)
 - **HITL** (your pending human reviews. The header shows `1/n pending`. The workflow name opens that run on the canvas. **Approve**, **Request changes**, and **Reject** resolve it. The history icon beside the widget title opens that run in the history dialog on this page. The widget does not use upstream rows, and each person sees their own queue. It can show one workflow's reviews instead, for everyone who can open that workflow; see [HITL widgets](#hitl-widgets))
@@ -142,3 +144,7 @@ Removing a share, or lowering it from write to read, takes effect immediately.
 
 - [Chart Output node](../nodes/chart-output-node.md)
 - [Analytics tab](analytics-tab.md) — built-in execution metrics (distinct from user-built dashboards)
+
+## Schedules and database diagrams
+
+Choose **Gantt** in Add widget to show tasks over time with completion and dependency links, or **Entity relationships (DB)** to map tables, fields and their relationships. Both types use the [Chart Output node](../nodes/chart-output-node.md#gantt-schedules), and are also available on Heym Work pages. When Work suggests widgets for a schedule or database schema, it draws previews from the proposed tasks or entities.

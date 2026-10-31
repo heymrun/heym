@@ -6,6 +6,7 @@ Keep this side-effect free so it stays trivially unit-testable.
 
 from typing import Any
 
+from app.services.diagram_payload import build_diagram_data
 from app.services.hitl_widget_filter import filter_from_chart_data, filter_payload
 from app.services.markdown_task_list import has_task_items
 from app.services.status_tones import resolve_status_tones
@@ -137,6 +138,24 @@ def build_chart_payload(config: dict, data: Any) -> dict:
         text_meta = resolve_text_payload(config, data)
         payload["text"] = text_meta["text"]
         payload["text_interactive"] = text_meta["text_interactive"]
+        return payload
+
+    if chart_type == "gantt":
+        payload.update(build_diagram_data(chart_type, {"tasks": rows}))
+        return payload
+
+    if chart_type == "erDiagram":
+        graph = data
+        if config.get("dataPath"):
+            for part in config["dataPath"].split("."):
+                graph = graph.get(part) if isinstance(graph, dict) else None
+        elif isinstance(graph, dict) and "entities" not in graph:
+            candidates = [
+                value for value in graph.values() if isinstance(value, dict) and "entities" in value
+            ]
+            if len(candidates) == 1:
+                graph = candidates[0]
+        payload.update(build_diagram_data(chart_type, graph if graph is not None else {}))
         return payload
 
     if chart_type == "table":

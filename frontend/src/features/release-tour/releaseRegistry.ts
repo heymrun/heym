@@ -17,6 +17,33 @@ import type { ReleaseEntry } from "@/features/release-tour/releaseTour.types";
  */
 export const RELEASE_REGISTRY: ReleaseEntry[] = [
   {
+    releaseId: "2026.24",
+    publishedAt: new Date("2026-10-30T12:00:00Z"),
+    headline: "Plan schedules and map database relationships with new widgets",
+    releaseTour: {
+      label: "New in Heym",
+      introTitle: "New in this release",
+      introDescription: "Gantt schedules and entity relationships, in Heym and Heym Work.",
+      tourEnabled: false,
+      sectionOrder: ["planning-widgets"],
+    },
+    sections: [{
+      id: "planning-widgets",
+      title: "Gantt schedules and database relationship diagrams",
+      publishedAt: new Date("2026-10-30T12:00:00Z"),
+      blocks: [{
+        type: "prose",
+        markdown: "Add a **Gantt** widget for tasks with start and end dates, completion percentages and dependencies. Choose **Entity relationships (DB)** to show tables, their fields, primary and foreign keys, and the relationships between them. Both types are available in Add widget and the Chart Output node. Heym Work can propose either view and draw a preview using the page’s own plan before you build it.",
+      }],
+      tour: {
+        description: "See project schedules and database relationships on your dashboards and Work pages.",
+        useCases: ["Track a delivery plan with task progress and dependencies", "Document a database with primary and foreign keys", "Preview a proposed timeline or schema in Heym Work"],
+        tourVisual: "planning-widgets",
+        docTarget: { categoryId: "nodes", slug: "chart-output-node", title: "Chart Output" },
+      },
+    }],
+  },
+  {
     releaseId: "2026.23",
     publishedAt: new Date("2026-10-27T12:00:00Z"),
     headline: "Reach the Heym Agent from other agents over A2A",
@@ -74,7 +101,7 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
       introDescription:
         "A quick look at what changed since your last update. Takes about a minute.",
       tourEnabled: true,
-      sectionOrder: ["agent-suite", "chat-evals", "concurrency-limit", "canvas-collaboration"],
+      sectionOrder: ["agent-suite", "chat-evals", "concurrency-limit"],
     },
     sections: [
       {
@@ -170,38 +197,6 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
             categoryId: "reference",
             slug: "webhooks",
             title: "Webhooks",
-          },
-        },
-      },
-      {
-        id: "canvas-collaboration",
-        title: "Work on a canvas together",
-        publishedAt: new Date("2026-10-25T12:00:00Z"),
-        blocks: [
-          {
-            type: "prose",
-            markdown:
-              "Everyone who opens a workflow now shows as an avatar at the top left of the canvas. Edits reach every open canvas as they happen, and each person's pointer moves in their own color. Anyone with edit access can save the shared draft, and **Ctrl+Z** undoes only your own changes.",
-          },
-          {
-            type: "prose",
-            markdown:
-              "Click an avatar to **follow** that person: your editor shows what they look at, where they point, the dialogs and AI Assistant they open and the runs they start, with your own access. Press **Esc** to stop. Turn on the **microphone** next to the avatars to talk with everyone on the canvas.",
-          },
-        ],
-        tour: {
-          description:
-            "See who is on the canvas, edit together live, follow someone's view and talk with the microphone.",
-          useCases: [
-            "Build a workflow with a teammate without taking turns",
-            "Walk someone through a run by letting them follow you",
-            "Review a workflow together while talking it through",
-          ],
-          tourVisual: "canvas-collaboration",
-          docTarget: {
-            categoryId: "reference",
-            slug: "canvas-collaboration",
-            title: "Canvas Collaboration",
           },
         },
       },

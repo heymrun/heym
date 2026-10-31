@@ -7,6 +7,7 @@ dashboard owner, and always runs as that owner, whoever is looking.
 import copy
 import json
 import uuid
+from dataclasses import asdict
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
@@ -134,12 +135,18 @@ TABLE_WIDGET_ROW_LIMIT = 500
 _AI_WIDGET_SUFFIX = (
     " The workflow MUST end with a single chartOutput node that produces the chart. "
     "Choose an appropriate chartType (pie, bar, line, area, table, numeric, gauge, scatter, "
-    "proportion, barGauge, text, or hitl) and set "
+    "proportion, barGauge, gantt, erDiagram, text, or hitl) and set "
     "labelField/valueField (or series for multi-series line/area, or xField/yField for scatter, "
     "or min/max for gauge, or text for a markdown message) on the "
     "chartOutput node so it renders the requested metric. When the user only describes example or "
     "sample data, produce the upstream rows with a set node using "
     "$array(dict(key=value, ...), ...) — never use ${...} or bare {...} object literals. "
+    "For gantt, upstream rows are tasks with id, label, start and end (ISO dates), optional "
+    "progress (0-100) and dependencies (task ids). For erDiagram, dataPath selects an object "
+    "with entities [{id,label,fields:[{name,type,key}]}] and relations "
+    "[{source,target,sourceField,targetField,cardinality,label}]. key is PK, FK or PK/FK; "
+    "cardinality is one-to-one, one-to-many, many-to-one or many-to-many. Build the graph "
+    "object with $dict(entities=array(dict(...)), relations=array(dict(...))), not task rows. "
     "For markdown checklists / task lists, use chartType text and put GFM task list lines "
     "(- [ ] / - [x]) directly in chartOutput text (not only in upstream rows). "
     "For numbered markdown lines (especially descending lists), prefix each line with the "
@@ -366,7 +373,17 @@ def _seed_widget_nodes(chart_type: str) -> tuple[list, list]:
     # source (http, bigquery, rag, ...) when building the widget.
     src_id = str(uuid.uuid4())
     chart_id = str(uuid.uuid4())
-    chart_data: dict = {"label": "chart", "chartType": chart_type, "dataPath": "rows"}
+    data_key = (
+        "tasks" if chart_type == "gantt" else "graph" if chart_type == "erDiagram" else "rows"
+    )
+    seed_value = (
+        "$dict(entities=array(), relations=array())"
+        if chart_type == "erDiagram"
+        else "$array()"
+        if chart_type == "gantt"
+        else ""
+    )
+    chart_data: dict = {"label": "chart", "chartType": chart_type, "dataPath": data_key}
     if chart_type == "text":
         chart_data["valueField"] = "text"
     elif chart_type == "scatter":
@@ -376,7 +393,7 @@ def _seed_widget_nodes(chart_type: str) -> tuple[list, list]:
         chart_data["valueField"] = "value"
         chart_data["min"] = 0
         chart_data["max"] = 100
-    elif chart_type not in ("table",):
+    elif chart_type not in ("table", "gantt", "erDiagram"):
         chart_data["labelField"] = "label"
         chart_data["valueField"] = "value"
     nodes = [
@@ -384,7 +401,7 @@ def _seed_widget_nodes(chart_type: str) -> tuple[list, list]:
             "id": src_id,
             "type": "set",
             "position": {"x": 0, "y": 0},
-            "data": {"label": "data", "mappings": [{"key": "rows", "value": ""}]},
+            "data": {"label": "data", "mappings": [{"key": data_key, "value": seed_value}]},
         },
         {
             "id": chart_id,
@@ -1342,9 +1359,7 @@ def _proposal_response(proposal: WidgetProposal) -> WidgetProposalResponse:
         title=proposal.title,
         chart_type=proposal.chart_type,
         prompt=proposal.prompt,
-        example=(
-            WidgetExampleResponse(labels=example.labels, values=example.values) if example else None
-        ),
+        example=(WidgetExampleResponse(**asdict(example)) if example else None),
         detail=(
             DetailPageProposalResponse(
                 title=detail.title,

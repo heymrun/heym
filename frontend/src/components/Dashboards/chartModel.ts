@@ -26,6 +26,8 @@ const CHART_TYPES = new Set<ChartPayload["type"]>([
   "gauge",
   "scatter",
   "proportion",
+  "gantt",
+  "erDiagram",
   "barGauge",
   "text",
   "hitl",
@@ -118,6 +120,8 @@ export function toBarGaugeRows(p: ChartPayload | null): BarGaugeRow[] {
 
 export function isChartEmpty(p: ChartPayload | null): boolean {
   if (!p) return true;
+  if (p.type === "gantt") return !p.tasks?.length;
+  if (p.type === "erDiagram") return !p.entities?.length;
   if (p.type === "table") return !p.rows || p.rows.length === 0;
   if (p.type === "numeric") return p.value === null || p.value === undefined;
   if (p.type === "gauge") return p.value === null || p.value === undefined;

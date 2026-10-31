@@ -41,7 +41,34 @@ export interface HitlSource {
 /** Tone of a status chip in a table widget's status column. */
 export type StatusTone = "success" | "attention" | "failure" | "waiting" | "neutral";
 
+export interface GanttTask {
+  id: string;
+  label: string;
+  start: string;
+  end: string;
+  progress?: number;
+  dependencies?: string[];
+}
+
+export interface DiagramEntity {
+  id: string;
+  label: string;
+  fields?: { name: string; type?: string; key?: "PK" | "FK" | "PK/FK" | "" }[];
+}
+
+export interface DiagramRelation {
+  source: string;
+  target: string;
+  sourceField?: string | null;
+  targetField?: string | null;
+  label?: string;
+  cardinality?: "one-to-one" | "one-to-many" | "many-to-one" | "many-to-many";
+}
+
 export interface ChartPayload {
+  tasks?: GanttTask[];
+  entities?: DiagramEntity[];
+  relations?: DiagramRelation[];
   type:
     | "pie"
     | "bar"
@@ -52,6 +79,8 @@ export interface ChartPayload {
     | "gauge"
     | "scatter"
     | "proportion"
+    | "gantt"
+    | "erDiagram"
     | "barGauge"
     | "text"
     | "hitl";

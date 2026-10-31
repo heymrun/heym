@@ -9,10 +9,19 @@ page's widgets, which read the clicked row's record as ``$page.record``.
 import json
 import re
 import uuid
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Any
 
+from pydantic import ValidationError
+
 from app.db.models import User
+from app.services.diagram_payload import (
+    Entity,
+    EntityDiagramData,
+    EntityRelation,
+    GanttData,
+    GanttTask,
+)
 from app.services.encryption import decrypt_config
 from app.services.llm_provider import is_reasoning_model
 from app.services.llm_service import execute_llm
@@ -36,6 +45,8 @@ WIDGET_CHART_TYPES = (
     "gauge",
     "scatter",
     "proportion",
+    "gantt",
+    "erDiagram",
     "barGauge",
     "text",
     "hitl",
@@ -59,12 +70,24 @@ Answer with JSON only, no prose:
 - chartType: one of {", ".join(WIDGET_CHART_TYPES)}. Use numeric for one headline number,
   table for a list of records, text for notes or checklists, hitl for pending human reviews
   (when the description names the workflow whose reviews it shows, keep that name in prompt).
+  Use gantt for schedules, project plans and task timelines. Use erDiagram for database
+  schemas and entity relationships. Prefer these when the description asks for them.
 - prompt: one or two sentences for the builder: what the widget shows, which data it uses,
   how it is grouped or filtered, and the chart type. When the description names no data
   source, say the widget uses sample data.
 - example: a preview of what the widget will show, {{"labels": [...], "values": [...]}} with
   at most {MAX_EXAMPLE_POINTS} labels and one number per label (one label and one value for
   numeric). Omit it for table, text and hitl.
+  For gantt, instead return {{"tasks":[{{"id":"design","label":"Design",
+  "start":"2026-10-01","end":"2026-10-05","progress":60,"dependencies":[]}}]}}.
+  Include at most {MAX_EXAMPLE_POINTS} tasks, with unique ids and dependencies on those ids.
+  For erDiagram, instead return {{"entities":[{{"id":"users","label":"Users",
+  "fields":[{{"name":"id","type":"uuid","key":"PK"}}]}},{{"id":"orders",
+  "label":"Orders","fields":[{{"name":"user_id","type":"uuid","key":"FK"}}]}}],
+  "relations":[{{"source":"users","target":"orders","sourceField":"id",
+  "targetField":"user_id","cardinality":"one-to-many"}}]}}.
+  Include at most {MAX_EXAMPLE_POINTS} entities and relations, and use the real table and
+  column names when given. Only draw relationships supported by the supplied data.
 
 Always propose exactly one table whose rows a viewer clicks to open a detail page about that
 row's record, with "detail" set. Choose the records that matter most for the description (an
@@ -96,10 +119,13 @@ _FENCED = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
 
 @dataclass(frozen=True)
 class WidgetExample:
-    """A widget's preview: one value per label."""
+    """A numeric sketch, task schedule, or entity graph for a proposed widget."""
 
-    labels: list[str]
-    values: list[float]
+    labels: list[str] = field(default_factory=list)
+    values: list[float] = field(default_factory=list)
+    tasks: list[GanttTask] | None = None
+    entities: list[Entity] | None = None
+    relations: list[EntityRelation] | None = None
 
 
 @dataclass(frozen=True)
@@ -136,10 +162,29 @@ def _json_object(text: str) -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
-def parse_widget_example(value: Any) -> WidgetExample | None:
-    """A preview with as many numbers as labels, at most eight, or None."""
+def parse_widget_example(value: Any, chart_type: str = "") -> WidgetExample | None:
+    """Validate a bounded numeric or structured preview, or return None."""
     if not isinstance(value, dict):
         return None
+    if chart_type in ("gantt", "erDiagram"):
+        keys = ("tasks",) if chart_type == "gantt" else ("entities", "relations")
+        if any(
+            not isinstance(value.get(key, []), list) or len(value.get(key, [])) > MAX_EXAMPLE_POINTS
+            for key in keys
+        ):
+            return None
+        try:
+            if chart_type == "gantt":
+                data = GanttData.model_validate(value)
+                return WidgetExample(tasks=data.tasks) if data.tasks else None
+            graph = EntityDiagramData.model_validate(value)
+            return (
+                WidgetExample(entities=graph.entities, relations=graph.relations)
+                if graph.entities
+                else None
+            )
+        except ValidationError:
+            return None
     labels, values = value.get("labels"), value.get("values")
     if not isinstance(labels, list) or not isinstance(values, list) or not labels:
         return None
@@ -172,7 +217,7 @@ def _parse_proposal(item: Any) -> WidgetProposal | None:
         title=title,
         chart_type=chart_type if chart_type in WIDGET_CHART_TYPES else "bar",
         prompt=prompt,
-        example=parse_widget_example(item.get("example")),
+        example=parse_widget_example(item.get("example"), chart_type),
     )
 
 

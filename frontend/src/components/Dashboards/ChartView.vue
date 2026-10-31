@@ -4,6 +4,8 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import type { ChartPayload } from "@/types/dashboard";
 import ChartMarkdown from "@/components/Dashboards/ChartMarkdown.vue";
 import ChartTable from "@/components/Dashboards/ChartTable.vue";
+import EntityRelationshipChart from "@/components/Dashboards/EntityRelationshipChart.vue";
+import GanttChart from "@/components/Dashboards/GanttChart.vue";
 import HitlCarousel from "@/components/Dashboards/HitlCarousel.vue";
 import MarkdownTextContent from "@/components/Dashboards/MarkdownTextContent.vue";
 import {
@@ -97,7 +99,7 @@ const apexOptions = computed(() =>
 <template>
   <div
     ref="containerRef"
-    class="h-full w-full text-foreground"
+    class="h-full min-h-0 w-full min-w-0 text-foreground"
   >
     <div
       v-if="isEmpty"
@@ -105,6 +107,16 @@ const apexOptions = computed(() =>
     >
       No data
     </div>
+
+    <GanttChart
+      v-else-if="chartPayload?.type === 'gantt'"
+      :tasks="chartPayload.tasks ?? []"
+    />
+    <EntityRelationshipChart
+      v-else-if="chartPayload?.type === 'erDiagram'"
+      :entities="chartPayload.entities ?? []"
+      :relations="chartPayload.relations ?? []"
+    />
 
     <HitlCarousel
       v-else-if="chartPayload && chartPayload.type === 'hitl'"
