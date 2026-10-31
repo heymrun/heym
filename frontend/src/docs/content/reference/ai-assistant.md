@@ -48,6 +48,7 @@ In Agent mode, the **YOLO mode** box under the message field makes the assistant
 - Type your request in the input (e.g. "Create a workflow that takes user input and sends it to an LLM")
 - Press **Enter** to send (Shift+Enter for newline)
 - The AI streams its response. In **Agent** mode, if the response includes a workflow in a \`\`\`json code block, it is automatically parsed and applied to the canvas. In **Ask** mode the canvas is never modified.
+- While the workflow JSON streams in, a line under the reply names the workflow and the nodes written so far, for example `Writing "Lead intake" · 3 nodes (start, Qualify, Save lead)`.
 - Use **Clear** to reset the conversation
 - Hover a message and click its copy icon to copy the text it shows, including any workflow JSON
 - Drag the line above the message box to make the box taller. The input area can grow to 60% of the panel, and it returns to its default height when the page reloads

@@ -84,6 +84,13 @@ function prettyArgs(args: Record<string, unknown>): string {
         class="text-[10px] opacity-70 tabular-nums shrink-0"
       >{{ formatDuration(toolCall.elapsed_ms) }}</span>
     </button>
+    <p
+      v-if="toolCall.status === 'running' && toolCall.progress"
+      class="-mt-1 truncate pb-2 pl-14 pr-3 text-[11px] text-muted-foreground"
+      data-testid="chat-tool-call-progress"
+    >
+      {{ toolCall.progress }}
+    </p>
     <div
       v-if="isOpen"
       class="border-t border-border/30 px-3 py-2 space-y-2"

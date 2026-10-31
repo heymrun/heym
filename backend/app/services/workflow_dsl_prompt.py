@@ -5674,6 +5674,14 @@ def is_dashboard_widget_workflow(workflow: dict | None) -> bool:
     return False
 
 
+def workflow_dsl_reference() -> str:
+    """The AI Builder prompt's fixed part: the DSL and its rules, the same on every request."""
+    from app.constants import RESERVED_VARIABLE_NAMES
+
+    reserved_names_str = ", ".join(f"`{name}`" for name in RESERVED_VARIABLE_NAMES)
+    return WORKFLOW_DSL_SYSTEM_PROMPT.replace("{RESERVED_VARIABLE_NAMES_LIST}", reserved_names_str)
+
+
 def build_assistant_prompt(
     current_workflow: dict | None = None,
     available_workflows: list[dict] | None = None,
@@ -5682,15 +5690,13 @@ def build_assistant_prompt(
     installed_plugins: list[dict] | None = None,
     credentials_prompt: str = "",
     data_tables_prompt: str = "",
+    *,
+    include_reference: bool = True,
 ) -> str:
+    """The AI Builder prompt; without `include_reference`, only the parts that vary per user."""
     import json
 
-    from app.constants import RESERVED_VARIABLE_NAMES
-
-    reserved_names_str = ", ".join(f"`{name}`" for name in RESERVED_VARIABLE_NAMES)
-    prompt = WORKFLOW_DSL_SYSTEM_PROMPT.replace(
-        "{RESERVED_VARIABLE_NAMES_LIST}", reserved_names_str
-    )
+    prompt = workflow_dsl_reference() if include_reference else ""
 
     if user_rules and user_rules.strip():
         prompt += "\n\n## User Custom Rules\n\n"

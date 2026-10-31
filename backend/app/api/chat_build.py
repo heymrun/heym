@@ -48,6 +48,7 @@ from app.services.chat_build_mode import (
     tool_error,
 )
 from app.services.chat_eval_mode import eval_instructions
+from app.services.chat_progress import ToolProgress
 from app.services.collab.saves import queue_collab_saved
 from app.services.credential_access import load_accessible_credential_ids
 from app.services.credential_catalog import (
@@ -87,7 +88,7 @@ from app.services.skill_apply import (
 )
 from app.services.skill_archive import SkillBundle, decode_zip_payload, read_zip
 from app.services.workflow_access import user_can_write_workflow
-from app.services.workflow_dsl_prompt import build_assistant_prompt
+from app.services.workflow_dsl_prompt import build_assistant_prompt, workflow_dsl_reference
 from app.services.workflow_save import (
     WorkflowSnapshot,
     add_workflow_version,
@@ -272,8 +273,17 @@ class ChatBuildSession:
     def builder_mode(self) -> CredentialPromptMode:
         return _builder_credential_mode(self.credential_mode)
 
-    async def prompt(self) -> str:
-        """The build mode instructions and the Workflow DSL reference for this user."""
+    def reference(self) -> str:
+        """The Workflow DSL reference, the same on every request, so it goes early and caches."""
+        if self.request.skill_only:
+            return ""
+        return f"\n\n## Workflow DSL reference\n\n{workflow_dsl_reference()}"
+
+    async def prompt(self, workflows: list[dict[str, Any]] | None = None) -> str:
+        """The build mode instructions and this user's part of the AI Builder prompt.
+
+        `workflows` is the user's workflow list when the caller already has it.
+        """
         target = await self._target_workflow()
         skill_block = skill_write_instructions(
             target.name if target is not None else None,
@@ -292,12 +302,14 @@ class ChatBuildSession:
             if target is not None
             else None
         )
+        if workflows is None:
+            workflows = await get_workflows_for_user_with_inputs(self.db, self.user.id)
         templates = await template_service.list_node_templates(self.db, self.user, None)
         catalog = await load_credential_catalog(self.db, self.user.id)
         table_catalog = await load_data_table_catalog(self.db, self.user.id)
-        reference = build_assistant_prompt(
+        user_context = build_assistant_prompt(
             current_workflow,
-            await get_workflows_for_user_with_inputs(self.db, self.user.id),
+            workflows,
             None,
             available_node_templates=[
                 {
@@ -315,15 +327,13 @@ class ChatBuildSession:
             data_tables_prompt=format_data_tables_prompt(
                 table_catalog, DataTablePromptMode.APPLY_CHOICES
             ),
+            include_reference=False,
         )
         instructions = build_mode_instructions(
             target.name if target is not None else None,
             target.id if target is not None else None,
         )
-        return (
-            f"{instructions}\n{eval_instructions()}\n{skill_block}\n"
-            f"## Workflow DSL reference\n\n{reference}"
-        )
+        return f"{instructions}\n{eval_instructions()}\n{skill_block}{user_context}"
 
     def tools(self, base_tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """The chat's own tools without the AI Builder, plus what build mode allows now."""
@@ -392,7 +402,10 @@ class ChatBuildSession:
             return f"Testing the workflow · attempt {attempt}/{MAX_BUILD_TEST_RUNS}..."
         return "Finishing..."
 
-    async def call(self, name: str, args: dict[str, Any]) -> BuildToolOutcome:
+    async def call(
+        self, name: str, args: dict[str, Any], *, progress: ToolProgress | None = None
+    ) -> BuildToolOutcome:
+        """Run one build tool; a test run describes its running node on `progress`."""
         if name == REQUEST_CREDENTIAL_FORM_TOOL and self.credential_form is not None:
             form = await self.credential_form.call(args, cancel_event=self.cancel_event)
             return BuildToolOutcome(result=form.result, summary=form.summary, status=form.status)
@@ -405,7 +418,7 @@ class ChatBuildSession:
         if name == SAVE_WORKFLOW_TOOL:
             return await self._save(args)
         if name == RUN_WORKFLOW_TEST_TOOL:
-            return await self._run_test(args)
+            return await self._run_test(args, progress)
         return await self._finish(args)
 
     async def _target_workflow(self) -> Workflow | None:
@@ -749,7 +762,9 @@ class ChatBuildSession:
             return tool_error(f"This turn changes workflow {target}; pass that id or none.")
         return requested
 
-    async def _run_test(self, args: dict[str, Any]) -> BuildToolOutcome:
+    async def _run_test(
+        self, args: dict[str, Any], progress: ToolProgress | None = None
+    ) -> BuildToolOutcome:
         if self.progress.budget_spent:
             return BuildToolOutcome(
                 result=json.dumps({"status": "refused", "error": BUDGET_SPENT_MESSAGE}),
@@ -775,6 +790,7 @@ class ChatBuildSession:
             self.public_base_url,
             self.cancel_event,
             llm_session_id=self.llm_session_id,
+            progress=progress,
         )
         try:
             result = json.loads(raw)

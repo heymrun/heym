@@ -155,6 +155,9 @@ class _RegistryCommand:
 
 _ACTIVE_EXECUTIONS: dict[uuid.UUID, ExecutionCancellationHandle] = {}
 _COMPLETED_EXECUTIONS: dict[uuid.UUID, CompletedExecutionResult] = {}
+# Running nodes of runs kept out of the registry, such as a workflow Chat runs as a tool,
+# tracked only while something shows their progress.
+_NODE_WATCHES: dict[uuid.UUID, tuple[uuid.UUID, set[str]]] = {}
 _LOCK = threading.Lock()
 
 
@@ -336,9 +339,26 @@ def get_active_execution_progress(
     """Return a thread-safe copy of one local execution's live node progress."""
     with _LOCK:
         handle = _ACTIVE_EXECUTIONS.get(execution_id)
-        if handle is None or handle.workflow_id != workflow_id or handle.event.is_set():
+        if handle is None:
+            watch = _NODE_WATCHES.get(execution_id)
+            if watch is None or watch[0] != workflow_id:
+                return None
+            return sorted(watch[1]), []
+        if handle.workflow_id != workflow_id or handle.event.is_set():
             return None
         return sorted(handle.running_node_ids), list(handle.node_results)
+
+
+@contextlib.contextmanager
+def watch_execution_nodes(*, workflow_id: uuid.UUID, execution_id: uuid.UUID) -> Iterator[None]:
+    """Track which nodes of an unregistered run are running, for `get_active_execution_progress`."""
+    with _LOCK:
+        _NODE_WATCHES[execution_id] = (workflow_id, set())
+    try:
+        yield
+    finally:
+        with _LOCK:
+            _NODE_WATCHES.pop(execution_id, None)
 
 
 def get_active_execution_inputs(
@@ -376,6 +396,9 @@ def record_execution_node_started(
     with _LOCK:
         handle = _ACTIVE_EXECUTIONS.get(parsed_execution_id)
         if handle is None:
+            watch = _NODE_WATCHES.get(parsed_execution_id)
+            if watch is not None:
+                watch[1].add(str(node_id))
             return
         normalized_node_id = str(node_id)
         if normalized_node_id not in handle.running_node_ids:
@@ -401,6 +424,9 @@ def record_execution_node_completed(
     with _LOCK:
         handle = _ACTIVE_EXECUTIONS.get(parsed_execution_id)
         if handle is None:
+            watch = _NODE_WATCHES.get(parsed_execution_id)
+            if watch is not None:
+                watch[1].discard(str(node_id))
             return
         handle.running_node_ids.discard(str(node_id))
         handle.running_node_started_at_ms.pop(str(node_id), None)

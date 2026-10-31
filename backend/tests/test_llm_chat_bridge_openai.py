@@ -121,6 +121,26 @@ def _responses_payload(output: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _as_sse(response: httpx.Response) -> httpx.Response:
+    """A Chat Completions answer as the event stream OpenAI sends for `stream: true`."""
+    payload = json.loads(response.content)
+    if response.status_code != 200 or payload.get("object") != "chat.completion":
+        return response
+    message = payload["choices"][0]["message"]
+    delta: dict[str, Any] = {"role": "assistant", "content": message.get("content")}
+    if message.get("tool_calls"):
+        delta["tool_calls"] = [
+            {"index": index, **call} for index, call in enumerate(message["tool_calls"])
+        ]
+    base = {"id": payload["id"], "object": "chat.completion.chunk", "created": 0}
+    chunks = [
+        {**base, "model": payload["model"], "choices": [{"index": 0, "delta": delta}]},
+        {**base, "model": payload["model"], "choices": [], "usage": payload["usage"]},
+    ]
+    text = "".join(f"data: {json.dumps(chunk)}\n\n" for chunk in chunks) + "data: [DONE]\n\n"
+    return httpx.Response(200, text=text, headers={"content-type": "text/event-stream"})
+
+
 class _Recorder:
     """A fake api.openai.com that answers Chat Completions and Responses separately."""
 
@@ -132,9 +152,11 @@ class _Recorder:
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         self.paths.append(request.url.path)
-        self.bodies.append(json.loads(request.content))
+        body = json.loads(request.content)
+        self.bodies.append(body)
         queue = self.chat if request.url.path.endswith("/chat/completions") else self.responses
-        return queue.pop(0) if len(queue) > 1 else queue[0]
+        response = queue.pop(0) if len(queue) > 1 else queue[0]
+        return _as_sse(response) if body.get("stream") else response
 
     def client(self, base_url: str = OPENAI) -> Any:
         http_client = httpx.Client(transport=httpx.MockTransport(self))

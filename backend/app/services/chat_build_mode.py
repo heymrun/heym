@@ -168,7 +168,7 @@ def build_run_report(
 
 
 def build_mode_instructions(target_name: str | None, target_id: uuid.UUID | None) -> str:
-    """The build mode section of the system prompt; the DSL reference follows it."""
+    """The build mode section of the system prompt; this user's workflow context follows it."""
     lines = [
         "",
         "## Build mode",
@@ -179,7 +179,7 @@ def build_mode_instructions(target_name: str | None, target_id: uuid.UUID | None
         "",
         "Tools:",
         "- save_workflow: pass the complete workflow (name, description, every node and edge) "
-        "in the format of the Workflow DSL reference below. It creates a workflow, or updates "
+        "in the format of the Workflow DSL reference. It creates a workflow, or updates "
         "the target workflow when the turn has one. That format is the tool's `workflow` "
         "argument: never paste workflow JSON in your reply. To change a workflow saved earlier "
         "in this conversation, pass its workflow_id instead of creating a second one.",
@@ -209,6 +209,6 @@ def build_mode_instructions(target_name: str | None, target_id: uuid.UUID | None
             "",
             f'The target workflow for this turn is "{target_name or "Untitled"}" ({target_id}). '
             "save_workflow updates it; never create a second workflow for this request. Its "
-            "current definition is under Current Workflow Context in the reference below.",
+            "current definition is under Current Workflow Context below.",
         ]
     return "\n".join(lines) + "\n"
