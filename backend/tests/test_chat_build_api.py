@@ -213,7 +213,11 @@ class RunChatTurnBuildTests(unittest.IsolatedAsyncioTestCase):
             def __init__(self, **kwargs: Any) -> None:
                 sessions.append(kwargs)
 
-            async def prompt(self) -> str:
+            def reference(self) -> str:
+                return "\n## Workflow DSL reference\n"
+
+            async def prompt(self, workflows: list[dict[str, Any]] | None = None) -> str:
+                sessions[-1]["workflows"] = workflows
                 return "\n## Build mode\n"
 
         stream_kwargs: dict[str, Any] = {}
@@ -241,7 +245,9 @@ class RunChatTurnBuildTests(unittest.IsolatedAsyncioTestCase):
             patch.object(chats, "async_session_maker", _fake_session_maker(db)),
             patch.object(chats, "get_accessible_credential", AsyncMock(return_value=credential)),
             patch.object(chats, "decrypt_config", return_value={}),
-            patch.object(chats, "_assemble_system_prompt_parts", AsyncMock(return_value=parts)),
+            patch.object(
+                chats, "_assemble_system_prompt_parts", AsyncMock(return_value=parts)
+            ) as assemble,
             patch.object(
                 chats,
                 "resolve_model_binding",
@@ -258,6 +264,11 @@ class RunChatTurnBuildTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(stream_kwargs["build"], FakeSession)
         self.assertTrue(stream_kwargs["system_prompt"].endswith("## Build mode\n"))
         self.assertEqual(stream_kwargs["system_prompt_parts"].build_block, "\n## Build mode\n")
+        assemble.assert_awaited_once()
+        self.assertEqual(
+            assemble.await_args.kwargs["build_reference"], "\n## Workflow DSL reference\n"
+        )
+        self.assertEqual(sessions[0]["workflows"], [])
 
     async def test_saved_eval_suites_are_collected_like_saved_workflows(self) -> None:
         conv_id = str(uuid.uuid4())

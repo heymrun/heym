@@ -56,6 +56,7 @@ import { useFileAttachment } from "@/composables/useFileAttachment";
 import type { AttachedFile } from "@/composables/useFileAttachment";
 import { useQuickPrompts } from "@/composables/useQuickPrompts";
 import { useThinkingWord } from "@/composables/useThinkingWord";
+import { visibleDraft } from "@/lib/chatLive";
 import {
   consumeShowcaseChatDraft,
   SHOWCASE_CHAT_DRAFT_EVENT,
@@ -251,6 +252,7 @@ const canSendMessage = computed(() => isShowingConversation.value && !isConversa
 const streamState = computed(() => chatStore.getStreamState(props.conversationId));
 const isThisConvStreaming = computed(() => streamState.value.isStreaming);
 const thinkingWord = useThinkingWord(computed(() => isThisConvStreaming.value && !streamState.value.content));
+const liveDraft = computed((): string => visibleDraft(streamState.value.draft));
 const draftTokens = computed(() => estimateTokens(input.value));
 const contextUsageForBadge = computed(() => {
   const live = streamState.value.contextUsage;
@@ -306,7 +308,7 @@ watch(messages, () => {
 });
 
 watch(
-  () => streamState.value.content,
+  () => [streamState.value.content, streamState.value.draft, streamState.value.progress],
   () => {
     if (!isThisConvStreaming.value) return;
     nextTick(() => {
@@ -1172,12 +1174,23 @@ onUnmounted(() => {
               @click="handleMarkdownImageClick"
               v-html="renderMarkdown(streamState.content)"
             />
+            <div
+              v-else-if="liveDraft"
+              class="chat-markdown"
+              data-testid="chat-stream-draft"
+              v-html="renderMarkdown(liveDraft)"
+            />
             <!-- eslint-enable vue/no-v-html -->
             <div
-              v-if="!streamState.content && streamState.images.length === 0"
+              v-if="!streamState.content && streamState.images.length === 0 && (!liveDraft || streamState.progress)"
               class="flex items-center gap-2 text-muted-foreground"
             >
-              <span v-if="streamState.toolCalls.length > 0">Preparing response...</span>
+              <span
+                v-if="streamState.progress"
+                class="min-w-0 truncate"
+                data-testid="chat-stream-progress"
+              >{{ streamState.progress }}...</span>
+              <span v-else-if="streamState.toolCalls.length > 0">Preparing response...</span>
               <Transition
                 v-else
                 mode="out-in"

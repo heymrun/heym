@@ -28,7 +28,15 @@ export interface ToolCall {
   response_summary?: string
   elapsed_ms?: number
   status: ToolCallStatus
+  /** What the step is doing now, while it runs, e.g. the node a workflow run is on. */
+  progress?: string
 }
+
+/** Live events of a running chat turn; none of them is stored with the message. */
+export type ChatLiveEvent =
+  | { type: 'draft'; round: number; text: string }
+  | { type: 'progress'; round: number; message: string }
+  | { type: 'tool_progress'; id: string; message: string }
 
 /** A tool step starting in a streamed assistant turn. */
 export interface AssistantToolStartEvent {

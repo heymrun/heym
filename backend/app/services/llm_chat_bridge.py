@@ -164,6 +164,35 @@ def completion_caller(client: Any, model: str) -> Callable[..., Any]:
     return client.chat.completions.create
 
 
+def open_chat_round(client: Any, **kwargs: Any) -> Any:
+    """A streamed Chat Completions answer, or the whole answer where the model cannot stream.
+
+    Models OpenCode serves on another API, and requests OpenAI only takes on Responses, still
+    answer in one piece. Tell the two apart with `is_completion`.
+    """
+    model = str(kwargs.get("model") or "")
+    whole = {**kwargs, "stream": False}
+    protocol = gateway_protocol(client, model)
+    if protocol is not None:
+        return _complete(client, protocol, **whole)
+    streamed = {**kwargs, "stream": True, "stream_options": {"include_usage": True}}
+    if not is_native_openai(client):
+        return client.chat.completions.create(**streamed)
+    route = (model, bool(kwargs.get("tools")), bool(kwargs.get("reasoning_effort")))
+    if route not in _openai_responses_routes:
+        try:
+            return client.chat.completions.create(**streamed)
+        except Exception as exc:
+            if not _learn_responses_route(route, exc):
+                raise
+    return _complete(client, "responses", **whole)
+
+
+def is_completion(response: Any) -> bool:
+    """True for a whole answer; a stream of chunks has no `choices` of its own."""
+    return getattr(response, "choices", None) is not None
+
+
 def forget_openai_responses_routes() -> None:
     """Drop every learned Responses route; tests start from a clean slate."""
     _openai_responses_routes.clear()

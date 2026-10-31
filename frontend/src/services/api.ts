@@ -186,6 +186,7 @@ import type {
 import type {
   AssistantToolEndEvent,
   AssistantToolStartEvent,
+  ChatLiveEvent,
   Conversation,
   ConversationCreate,
   ConversationDetail,
@@ -3993,6 +3994,7 @@ export const chatApi = {
     onQueuedMessageStarted?: (payload: { queuedMessageId: string; userMessage: Message }) => void,
     onEvalSuiteSaved?: (suite: EvalSuitePreview, messageId?: string) => void,
     signal?: AbortSignal,
+    onLive?: (event: ChatLiveEvent) => void,
   ): Promise<void> => {
     const base = import.meta.env.VITE_API_URL || "";
     const url = `${base}/api/chats/${id}/stream`;
@@ -4033,6 +4035,19 @@ export const chatApi = {
             });
           }
           else if (parsed.type === "done") { onDone(); reading = false; break; }
+          else if (parsed.type === "draft" && typeof parsed.text === "string") {
+            onLive?.({ type: "draft", round: Number(parsed.round) || 0, text: parsed.text });
+          }
+          else if (parsed.type === "progress" && typeof parsed.message === "string") {
+            onLive?.({ type: "progress", round: Number(parsed.round) || 0, message: parsed.message });
+          }
+          else if (
+            parsed.type === "tool_progress" &&
+            typeof parsed.id === "string" &&
+            typeof parsed.message === "string"
+          ) {
+            onLive?.({ type: "tool_progress", id: parsed.id, message: parsed.message });
+          }
           else if (parsed.type === "assistant_done") {
             onAssistantDone?.({
               messageId,

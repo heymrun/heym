@@ -6,6 +6,7 @@ import logging
 import re
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -87,6 +88,14 @@ from app.services.assistant_yolo import (
     stream_until_disconnect,
     stream_yolo_assistant_turn,
 )
+from app.services.chat_progress import ToolProgress, follow_tool, workflow_draft_message
+from app.services.chat_round_stream import (
+    RoundAnswer,
+    RoundDraft,
+    RoundProgress,
+    complete_round,
+    stream_round,
+)
 from app.services.codex_followup_service import get_codex_followup_by_token
 from app.services.credential_access import (
     get_accessible_credential,
@@ -111,6 +120,7 @@ from app.services.data_table_catalog import (
 )
 from app.services.doc_index import read_node_doc
 from app.services.encryption import decrypt_config
+from app.services.execution_cancellation import watch_execution_nodes
 from app.services.generated_credentials import (
     CredentialChoice,
     CredentialPassResult,
@@ -143,6 +153,7 @@ from app.services.hitl_service import (
 from app.services.llm_chat_bridge import completion_caller, gateway_protocol, skip_compression
 from app.services.llm_provider import is_reasoning_model
 from app.services.llm_trace import LLMTraceContext, record_llm_trace
+from app.services.mcp_progress import running_node_message
 from app.services.model_router import (
     RouteDecision,
     build_router_for_credential,
@@ -2278,6 +2289,18 @@ def _saved_workflow_extra(
     return extra or None
 
 
+def _report_workflow_draft(progress: ToolProgress | None) -> Callable[[str], None] | None:
+    """Tell `progress` which workflow and nodes the AI Builder has written so far."""
+    if progress is None:
+        return None
+    target = progress
+
+    def report(text: str) -> None:
+        target.message = workflow_draft_message(text)
+
+    return report
+
+
 async def create_and_run_generated_workflow_tool(
     *,
     db: AsyncSession,
@@ -2295,6 +2318,7 @@ async def create_and_run_generated_workflow_tool(
     credential_choices: list[CredentialChoice] | None = None,
     credential_mode: CredentialPromptMode = CredentialPromptMode.ASK_AND_CREATE,
     data_table_choices: list[DataTableChoice] | None = None,
+    progress: ToolProgress | None = None,
 ) -> str:
     """Generate a workflow with the AI Builder prompt and save it (no execution)."""
     if cancel_event is not None and cancel_event.is_set():
@@ -2349,7 +2373,9 @@ async def create_and_run_generated_workflow_tool(
         }
         if not is_reasoning_model(model):
             builder_kwargs["temperature"] = WORKFLOW_BUILDER_TEMPERATURE
-        builder_response = await _await_chat_completions(client, cancel_event, **builder_kwargs)
+        builder_response = await complete_round(
+            client, cancel_event, on_text=_report_workflow_draft(progress), **builder_kwargs
+        )
         if builder_response is None:
             return json.dumps({"status": "cancelled", "error": "Execution cancelled"})
         builder_choice = builder_response.choices[0] if builder_response.choices else None
@@ -2431,6 +2457,7 @@ async def edit_and_run_generated_workflow_tool(
     credential_choices: list[CredentialChoice] | None = None,
     credential_mode: CredentialPromptMode = CredentialPromptMode.ASK_AND_CREATE,
     data_table_choices: list[DataTableChoice] | None = None,
+    progress: ToolProgress | None = None,
 ) -> str:
     """Edit a saved workflow with the AI Builder prompt and save it (no execution)."""
     if cancel_event is not None and cancel_event.is_set():
@@ -2508,7 +2535,9 @@ async def edit_and_run_generated_workflow_tool(
         }
         if not is_reasoning_model(model):
             builder_kwargs["temperature"] = WORKFLOW_BUILDER_TEMPERATURE
-        builder_response = await _await_chat_completions(client, cancel_event, **builder_kwargs)
+        builder_response = await complete_round(
+            client, cancel_event, on_text=_report_workflow_draft(progress), **builder_kwargs
+        )
         if builder_response is None:
             return json.dumps({"status": "cancelled", "error": "Execution cancelled"})
         builder_choice = builder_response.choices[0] if builder_response.choices else None
@@ -2607,8 +2636,12 @@ async def run_execute_workflow_tool(
     cancel_event: Event | None = None,
     llm_session_id: str | None = None,
     trigger_source: str = "dashboard_chat",
+    progress: ToolProgress | None = None,
 ) -> str:
-    """Execute a workflow and return JSON string result for tool. Raises no exception; errors are returned in the result."""
+    """Execute a workflow and return JSON string result for tool. Raises no exception; errors are returned in the result.
+
+    With `progress`, the running node is described while the run lasts.
+    """
     if cancel_event is not None and cancel_event.is_set():
         return json.dumps({"status": "cancelled", "error": "Execution cancelled"})
 
@@ -2635,21 +2668,32 @@ async def run_execute_workflow_tool(
     }
 
     try:
-        execution_result = await asyncio.to_thread(
-            execute_workflow,
-            workflow_id=workflow.id,
-            nodes=workflow.nodes,
-            edges=workflow.edges or [],
-            inputs=enriched_inputs,
-            workflow_cache=workflow_cache,
-            test_run=False,
-            credentials_context=credentials_context,
-            global_variables_context=global_variables_context,
-            trace_user_id=user_id,
-            actor_user_id=user_id,
-            cancel_event=cancel_event,
-            llm_session_id=llm_session_id,
-        )
+        run_kwargs: dict[str, Any] = {}
+        watch: contextlib.AbstractContextManager[None] = contextlib.nullcontext()
+        if progress is not None:
+            execution_id = uuid.uuid4()
+            run_kwargs["execution_id"] = str(execution_id)
+            watch = watch_execution_nodes(workflow_id=workflow.id, execution_id=execution_id)
+            progress.describe = lambda: running_node_message(execution_id, workflow)
+        with watch:
+            execution_result = await asyncio.to_thread(
+                execute_workflow,
+                workflow_id=workflow.id,
+                nodes=workflow.nodes,
+                edges=workflow.edges or [],
+                inputs=enriched_inputs,
+                workflow_cache=workflow_cache,
+                test_run=False,
+                credentials_context=credentials_context,
+                global_variables_context=global_variables_context,
+                trace_user_id=user_id,
+                actor_user_id=user_id,
+                cancel_event=cancel_event,
+                llm_session_id=llm_session_id,
+                **run_kwargs,
+            )
+        if progress is not None:
+            progress.describe = None
 
         history_entry_id: str | None = None
         if execution_result.status == "pending":
@@ -3739,6 +3783,15 @@ def _cancelled_tool_end_yield(
     return _tool_end_yield(tc_id, summary, step_ms, status="cancelled")
 
 
+def _round_event(event: RoundDraft | RoundProgress, round_number: int) -> str:
+    """A streamed round's draft text or tool-writing line as a chat stream event."""
+    if isinstance(event, RoundDraft):
+        payload: dict[str, Any] = {"type": "draft", "round": round_number, "text": event.text}
+    else:
+        payload = {"type": "progress", "round": round_number, "message": event.message}
+    return "data: " + json.dumps(payload) + "\n\n"
+
+
 def _context_breakdown(
     base_system_prompt: str,
     agents_md: str,
@@ -3837,6 +3890,7 @@ async def stream_dashboard_chat(
         else:
             breakdown = _context_breakdown(
                 base_system_prompt=system_prompt_parts.base_system_prompt
+                + getattr(system_prompt_parts, "build_reference", "")
                 + getattr(system_prompt_parts, "credentials_block", "")
                 + getattr(system_prompt_parts, "build_block", ""),
                 agents_md=system_prompt_parts.agents_md,
@@ -4028,7 +4082,12 @@ async def stream_dashboard_chat(
             round_start = time.time()
             llm_call_started = round_start
             try:
-                response = await _await_chat_completions(client, cancel_event, **kwargs)
+                response = None
+                async for event in stream_round(client, cancel_event, **kwargs):
+                    if isinstance(event, RoundAnswer):
+                        response = event.completion
+                    else:
+                        yield _round_event(event, rounds)
                 if response is None:
                     elapsed_ms = (time.time() - start_time) * 1000
                     _record_dashboard_run("cancelled", round(elapsed_ms, 2))
@@ -4053,7 +4112,12 @@ async def stream_dashboard_chat(
                 kwargs = _call_kwargs()
                 round_start = time.time()
                 llm_call_started = round_start
-                response = await _await_chat_completions(client, cancel_event, **kwargs)
+                response = None
+                async for event in stream_round(client, cancel_event, **kwargs):
+                    if isinstance(event, RoundAnswer):
+                        response = event.completion
+                    else:
+                        yield _round_event(event, rounds)
                 if response is None:
                     elapsed_ms = (time.time() - start_time) * 1000
                     _record_dashboard_run("cancelled", round(elapsed_ms, 2))
@@ -4158,7 +4222,13 @@ async def stream_dashboard_chat(
                         + "\n\n"
                     )
                     step_start = time.time()
-                    outcome = await build.call(name, args)
+                    tool_progress = ToolProgress()
+                    build_task = asyncio.ensure_future(
+                        build.call(name, args, progress=tool_progress)
+                    )
+                    async for event in follow_tool(build_task, tc.id, tool_progress):
+                        yield event
+                    outcome = build_task.result()
                     result = outcome.result
                     args = display_args
                     if cancel_event is not None and cancel_event.is_set():
@@ -4261,15 +4331,22 @@ async def stream_dashboard_chat(
                         inject_key = _find_injection_field(field_keys, attachment.kind)
                         if inject_key:
                             inputs[inject_key] = attachment.content
-                    result = await run_execute_workflow_tool(
-                        db,
-                        user_id,
-                        workflow_id_str,
-                        inputs,
-                        public_base_url,
-                        cancel_event,
-                        llm_session_id=trace_context.session_id if trace_context else None,
+                    tool_progress = ToolProgress()
+                    run_task = asyncio.ensure_future(
+                        run_execute_workflow_tool(
+                            db,
+                            user_id,
+                            workflow_id_str,
+                            inputs,
+                            public_base_url,
+                            cancel_event,
+                            llm_session_id=trace_context.session_id if trace_context else None,
+                            progress=tool_progress,
+                        )
                     )
+                    async for event in follow_tool(run_task, tc.id, tool_progress):
+                        yield event
+                    result = run_task.result()
                     tool_request = {
                         "workflow_id": workflow_id_str,
                         "inputs": args.get("inputs") or {},
@@ -4410,23 +4487,30 @@ async def stream_dashboard_chat(
                         )
                         step_start = time.time()
                         workflows = await get_workflows_for_user_with_inputs(db, user_id)
-                        result = await create_and_run_generated_workflow_tool(
-                            db=db,
-                            user=user,
-                            client=client,
-                            model=model,
-                            selected_credential=selected_credential,
-                            selected_model=model,
-                            goal=goal,
-                            inputs=dict(inputs),
-                            available_workflows=workflows,
-                            public_base_url=public_base_url,
-                            attachment=attachment,
-                            cancel_event=cancel_event,
-                            credential_choices=choices,
-                            credential_mode=credential_mode,
-                            data_table_choices=table_choices,
+                        tool_progress = ToolProgress()
+                        builder_task = asyncio.ensure_future(
+                            create_and_run_generated_workflow_tool(
+                                db=db,
+                                user=user,
+                                client=client,
+                                model=model,
+                                selected_credential=selected_credential,
+                                selected_model=model,
+                                goal=goal,
+                                inputs=dict(inputs),
+                                available_workflows=workflows,
+                                public_base_url=public_base_url,
+                                attachment=attachment,
+                                cancel_event=cancel_event,
+                                credential_choices=choices,
+                                credential_mode=credential_mode,
+                                data_table_choices=table_choices,
+                                progress=tool_progress,
+                            )
                         )
+                        async for event in follow_tool(builder_task, tc.id, tool_progress):
+                            yield event
+                        result = builder_task.result()
                         tool_request = {
                             "goal": goal,
                             "inputs": inputs,
@@ -4579,24 +4663,31 @@ async def stream_dashboard_chat(
                         )
                         step_start = time.time()
                         workflows = await get_workflows_for_user_with_inputs(db, user_id)
-                        result = await edit_and_run_generated_workflow_tool(
-                            db=db,
-                            user=user,
-                            client=client,
-                            model=model,
-                            selected_credential=selected_credential,
-                            selected_model=model,
-                            workflow_id=workflow_id_str,
-                            instructions=instructions,
-                            inputs=dict(inputs),
-                            available_workflows=workflows,
-                            public_base_url=public_base_url,
-                            attachment=attachment,
-                            cancel_event=cancel_event,
-                            credential_choices=choices,
-                            credential_mode=credential_mode,
-                            data_table_choices=table_choices,
+                        tool_progress = ToolProgress()
+                        builder_task = asyncio.ensure_future(
+                            edit_and_run_generated_workflow_tool(
+                                db=db,
+                                user=user,
+                                client=client,
+                                model=model,
+                                selected_credential=selected_credential,
+                                selected_model=model,
+                                workflow_id=workflow_id_str,
+                                instructions=instructions,
+                                inputs=dict(inputs),
+                                available_workflows=workflows,
+                                public_base_url=public_base_url,
+                                attachment=attachment,
+                                cancel_event=cancel_event,
+                                credential_choices=choices,
+                                credential_mode=credential_mode,
+                                data_table_choices=table_choices,
+                                progress=tool_progress,
+                            )
                         )
+                        async for event in follow_tool(builder_task, tc.id, tool_progress):
+                            yield event
+                        result = builder_task.result()
                         tool_request = {
                             "workflow_id": workflow_id_str,
                             "instructions": instructions,
@@ -6046,7 +6137,9 @@ async def workflow_assistant_stream(
         ),
         source="assistant",
     )
-    client, provider, model, trace_context = resolve_model_binding(
+    # A Model Router decision is a blocking model call; keep it off the event loop.
+    client, provider, model, trace_context = await asyncio.to_thread(
+        resolve_model_binding,
         credential,
         config,
         request.model,
@@ -6170,7 +6263,9 @@ async def dashboard_chat_stream(
     if request.attachment:
         system_prompt = system_prompt + "\n\n" + _ATTACHMENT_ROUTING_INSTRUCTIONS
 
-    client, provider, model, trace_context = resolve_model_binding(
+    # A Model Router decision is a blocking model call; keep it off the event loop.
+    client, provider, model, trace_context = await asyncio.to_thread(
+        resolve_model_binding,
         credential,
         config,
         request.model,

@@ -4,6 +4,7 @@ import { defineStore } from "pinia";
 import type { Conversation, ConversationDetail, ContextUsage, EvalSuitePreview, Message, QueuedMessage, ToolCall, WorkflowPreview } from "@/types/chat";
 import type { FileAttachmentPayload } from "@/services/api";
 import { CHAT_CONTEXT_HEADER } from "@/lib/chatContext";
+import { applyChatLiveEvent } from "@/lib/chatLive";
 import { mergeEvalSuite } from "@/lib/evalSuitePreview";
 import { chatApi } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
@@ -46,6 +47,11 @@ export const useChatStore = defineStore("chat", () => {
     evalSuites: EvalSuitePreview[];
     error: string | null;
     isStreaming: boolean;
+    /** The model's text while it writes, before it becomes the answer or a step's narration. */
+    draft: string;
+    draftRound: number;
+    /** The tool call being written, e.g. the workflow and its nodes so far. */
+    progress: string | null;
   }
   const EMPTY_STREAM_STATE: StreamState = Object.freeze({
     messageId: null,
@@ -57,6 +63,9 @@ export const useChatStore = defineStore("chat", () => {
     evalSuites: [],
     error: null,
     isStreaming: false,
+    draft: "",
+    draftRound: 0,
+    progress: null,
   }) as StreamState;
   const streamStatesByConv = ref<Record<string, StreamState>>({});
   const contextUsageByConv = ref<Record<string, ContextUsage>>({});
@@ -83,6 +92,9 @@ export const useChatStore = defineStore("chat", () => {
       evalSuites: [],
       error: null,
       isStreaming: false,
+      draft: "",
+      draftRound: 0,
+      progress: null,
     };
     streamStatesByConv.value = {
       ...streamStatesByConv.value,
@@ -365,6 +377,9 @@ export const useChatStore = defineStore("chat", () => {
       evalSuites: [],
       error: null,
       isStreaming,
+      draft: "",
+      draftRound: 0,
+      progress: null,
     };
   }
 
@@ -450,6 +465,8 @@ export const useChatStore = defineStore("chat", () => {
           _setStreamState(conversationId, {
             messageId: payload.messageId ?? current.messageId,
             content: current.content + payload.text,
+            draft: "",
+            progress: null,
           });
         },
         () => {
@@ -481,6 +498,8 @@ export const useChatStore = defineStore("chat", () => {
                 status: "running",
               },
             ],
+            draft: "",
+            progress: null,
           });
         },
         (payload) => {
@@ -494,6 +513,7 @@ export const useChatStore = defineStore("chat", () => {
                     response_summary: payload.response_summary,
                     elapsed_ms: payload.elapsed_ms,
                     status: payload.status,
+                    progress: undefined,
                   }
                 : tc,
             ),
@@ -571,6 +591,16 @@ export const useChatStore = defineStore("chat", () => {
           });
         },
         controller.signal,
+        (event) => {
+          const current = getStreamState(conversationId);
+          const next = applyChatLiveEvent(current, event);
+          _setStreamState(conversationId, {
+            draft: next.draft,
+            draftRound: next.draftRound,
+            progress: next.progress,
+            toolCalls: next.toolCalls,
+          });
+        },
       );
     } catch {
       if (!controller.signal.aborted) {

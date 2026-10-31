@@ -90,6 +90,7 @@ import { useAiAssistantPanelFrame } from "@/composables/useAiAssistantPanelFrame
 import { useAssistantInputResize } from "@/composables/useAssistantInputResize";
 import { useAiDefaults } from "@/composables/useAiDefaults";
 import { useThinkingWord } from "@/composables/useThinkingWord";
+import { streamingWorkflowProgress } from "@/lib/workflowDraftProgress";
 import { useAuthStore } from "@/stores/auth";
 import { useWorkflowStore } from "@/stores/workflow";
 import { playSuccessSound } from "@/utils/audio";
@@ -1531,6 +1532,12 @@ const aiPanelFrameStyle = computed(() => {
 const aiLoading = ref(false);
 const thinkingWord = useThinkingWord(aiLoading);
 const aiStreaming = ref(false);
+/** While the AI Builder writes a workflow, which workflow and nodes it has written so far. */
+const streamingBuilderProgress = computed((): string | null => {
+  if (!aiStreaming.value || canvasMode.value === "ask") return null;
+  const last = aiMessages.value[aiMessages.value.length - 1];
+  return last?.role === "assistant" ? streamingWorkflowProgress(last.content) : null;
+});
 const aiAbortController = ref<AbortController | null>(null);
 const canvasMode = ref<"agent" | "ask">("agent");
 /** Off on every page load: YOLO runs are real, so the choice is not remembered. */
@@ -3180,7 +3187,7 @@ function renderContent(content: string): string {
                 </span>
                 <span
                   v-if="modelRoutingLabel(result)"
-                  class="ml-2 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-normal text-primary"
+                  class="ml-2 rounded bg-violet-500/15 px-1.5 py-0.5 text-[10px] font-normal text-violet-700 dark:text-violet-300"
                   :title="modelRoutingTitle(result)"
                   data-testid="execution-log-model-routing"
                 >
@@ -4142,6 +4149,14 @@ function renderContent(content: string): string {
                   v-if="msg.yoloSteps?.length"
                   :steps="msg.yoloSteps"
                 />
+                <div
+                  v-if="streamingBuilderProgress && msg.id === aiMessages[aiMessages.length - 1]?.id"
+                  class="workflow-detected"
+                  data-testid="ai-assistant-builder-progress"
+                >
+                  <Loader2 class="w-3 h-3 animate-spin" />
+                  <span class="truncate">{{ streamingBuilderProgress }}...</span>
+                </div>
                 <div
                   v-if="msg.workflowJson && !msg.yoloSteps"
                   class="workflow-detected"

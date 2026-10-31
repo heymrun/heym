@@ -430,14 +430,32 @@ class ChatBuildSessionTests(unittest.IsolatedAsyncioTestCase):
             ),
             patch.object(chat_build, "_load_installed_plugins", AsyncMock(return_value=[])),
         ):
-            prompt = await self._session(target=self.target.id).prompt()
+            session = self._session(target=self.target.id)
+            prompt = await session.prompt()
 
         self.assertIn("## Build mode", prompt)
         self.assertIn("## Skills", prompt)
         self.assertIn(f'"Lead intake" ({self.target.id})', prompt)
-        self.assertIn("## Workflow DSL reference", prompt)
         self.assertIn("## Current Workflow Context", prompt)
         self.assertIn("## Eval suites", prompt)
+        # The DSL reference is the same on every request, so it goes early in the prompt.
+        self.assertNotIn("## Workflow DSL reference", prompt)
+        self.assertIn("## Workflow DSL reference", session.reference())
+
+    async def test_prompt_reuses_the_workflow_list_it_is_given(self) -> None:
+        listed = AsyncMock(return_value=[])
+        given = [{"id": str(uuid.uuid4()), "name": "Invoice parser", "input_fields": []}]
+        with (
+            patch.object(
+                chat_build.template_service, "list_node_templates", AsyncMock(return_value=[])
+            ),
+            patch.object(chat_build, "get_workflows_for_user_with_inputs", listed),
+            patch.object(chat_build, "_load_installed_plugins", AsyncMock(return_value=[])),
+        ):
+            prompt = await self._session().prompt(given)
+
+        listed.assert_not_awaited()
+        self.assertIn("Invoice parser", prompt)
 
     async def test_build_turns_offer_the_eval_tools_and_hand_them_over(self) -> None:
         session = self._session()

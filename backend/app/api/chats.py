@@ -8,6 +8,7 @@ from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from threading import Event
+from typing import Any
 
 import sqlalchemy as sa
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -238,6 +239,8 @@ class SystemPromptParts:
     user_rules: str
     credentials_block: str = ""
     build_block: str = ""
+    build_reference: str = ""
+    workflows: tuple[dict[str, Any], ...] = ()
 
 
 async def _assemble_system_prompt_parts(
@@ -246,7 +249,9 @@ async def _assemble_system_prompt_parts(
     *,
     include_attachment_instructions: bool,
     credential_mode: CredentialPromptMode = CredentialPromptMode.ASK_AND_CREATE,
+    build_reference: str = "",
 ) -> SystemPromptParts:
+    """The turn's system prompt, fixed parts first so providers can cache the longest prefix."""
     workflows = await get_workflows_for_user_with_inputs(db, user.id)
     workflows_block = _format_workflows_for_prompt(workflows)
     agents_md = _load_agents_md_content() or ""
@@ -266,6 +271,7 @@ async def _assemble_system_prompt_parts(
             + "\n\n---\n\n"
             + system_prompt
         )
+    system_prompt += build_reference
     if workflows_block:
         system_prompt = (
             system_prompt
@@ -289,6 +295,8 @@ async def _assemble_system_prompt_parts(
         workflows_block=workflows_block,
         user_rules=user_rules,
         credentials_block=credentials_block,
+        build_reference=build_reference,
+        workflows=tuple(workflows),
     )
 
 
@@ -403,12 +411,6 @@ async def _run_chat_turn(
                 source="dashboard_chat",
                 session_id=conv_id,
             )
-            parts = await _assemble_system_prompt_parts(
-                user,
-                db,
-                include_attachment_instructions=turn.attachment_data is not None,
-                credential_mode=turn.credential_mode,
-            )
 
             cancel_event = _cancel_events.get(conv_id)
             if cancel_event is None:
@@ -432,7 +434,15 @@ async def _run_chat_turn(
                     attachment=attachment,
                     credential_form=turn.credential_form,
                 )
-                build_block = await build.prompt()
+            parts = await _assemble_system_prompt_parts(
+                user,
+                db,
+                include_attachment_instructions=turn.attachment_data is not None,
+                credential_mode=turn.credential_mode,
+                build_reference=build.reference() if build is not None else "",
+            )
+            if build is not None:
+                build_block = await build.prompt(list(parts.workflows))
                 parts = replace(
                     parts,
                     full_system_prompt=parts.full_system_prompt + build_block,
@@ -442,7 +452,9 @@ async def _run_chat_turn(
                 forms_block = await turn.credential_form.conversation_forms_prompt()
                 parts = replace(parts, full_system_prompt=parts.full_system_prompt + forms_block)
 
-            client, provider, model, trace_context = resolve_model_binding(
+            # A Model Router decision is a blocking model call; keep it off the event loop.
+            client, provider, model, trace_context = await asyncio.to_thread(
+                resolve_model_binding,
                 credential,
                 config,
                 turn.model,
