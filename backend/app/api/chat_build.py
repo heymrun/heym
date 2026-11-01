@@ -6,6 +6,7 @@ One `ChatBuildSession` belongs to one chat turn that may build. The chat engine
 on the instance that received the request, so the audit trail stays where AGENTS.md wants it.
 """
 
+import asyncio
 import json
 import uuid
 from threading import Event
@@ -30,7 +31,7 @@ from app.api.ai_assistant import (
 from app.api.chat_evals import ChatEvalTools
 from app.api.workflows import extract_input_fields_from_workflow, get_workflow_for_user
 from app.db.models import Credential, User, Workflow
-from app.services import template_service
+from app.services import file_intake_service, template_service
 from app.services.audit_log import audit
 from app.services.chat_build_mode import (
     AI_BUILDER_TOOL_NAMES,
@@ -70,6 +71,8 @@ from app.services.data_table_catalog import (
     format_data_tables_prompt,
     load_data_table_catalog,
 )
+from app.services.file_sandbox.manifest import FileAccessError, resolve_files
+from app.services.file_sandbox.workspace import FileWorkspace
 from app.services.generated_credentials import (
     apply_generated_credentials,
     parse_credential_choices,
@@ -152,6 +155,13 @@ RUN_WORKFLOW_TEST_TOOL_SCHEMA: dict[str, Any] = {
                     "type": "string",
                     "description": "One sentence describing what a successful run returns.",
                 },
+                "sample_file": {
+                    "type": "string",
+                    "description": (
+                        "Drive file id or exact name handed to the workflow's File Upload "
+                        "trigger. Defaults to the file attached in this conversation."
+                    ),
+                },
             },
             "required": ["inputs", "expect"],
         },
@@ -228,6 +238,17 @@ FINISH_TOOL_SCHEMA: dict[str, Any] = {
 }
 
 
+def _resolve_sample_file(user_id: uuid.UUID, ref: str) -> uuid.UUID:
+    """A Drive file the Chat user reaches, by id or exact name (Chat's own access)."""
+    from app.db.session import SessionLocal
+
+    with SessionLocal() as db:
+        refs = resolve_files(db, user_id, [ref])
+    if not refs:
+        raise FileAccessError(f"File not found or not accessible: {ref}")
+    return refs[0].id
+
+
 class ChatBuildSession:
     """The build tools of one chat turn and what they have done."""
 
@@ -245,6 +266,7 @@ class ChatBuildSession:
         llm_session_id: str | None,
         attachment: FileAttachment | None = None,
         credential_form: CredentialFormTool | None = None,
+        conversation_id: uuid.UUID | None = None,
     ) -> None:
         self.db = db
         self.user = user
@@ -257,6 +279,7 @@ class ChatBuildSession:
         # Every model request and test run in the turn carries one non-empty session id.
         self.llm_session_id = llm_session_id or str(uuid.uuid4())
         self.attachment = attachment
+        self.conversation_id = conversation_id
         # MCP turns: credentials are created on a Heym page, never in the chat.
         self.credential_form = credential_form
         self.progress = BuildProgress(workflow_id=request.target_workflow_id)
@@ -388,7 +411,7 @@ class ChatBuildSession:
             "edges": len(edges) if isinstance(edges, list) else 0,
         }
 
-    def step_label(self, name: str) -> str:
+    def step_label(self, name: str, _args: dict[str, Any] | None = None) -> str:
         if self.evals is not None and self.evals.handles(name):
             return self.evals.step_label(name)
         if name == REQUEST_CREDENTIAL_FORM_TOOL:
@@ -776,12 +799,16 @@ class ChatBuildSession:
             return tool_error("Save the workflow with save_workflow before testing it.")
         inputs = dict(args.get("inputs") or {}) if isinstance(args.get("inputs"), dict) else {}
         expect = str(args.get("expect") or "").strip()
+        try:
+            sample_file_id = await self._sample_file_id(args, workflow)
+        except FileAccessError as exc:
+            return tool_error(str(exc))
         run_inputs = dict(inputs)
-        if self.attachment is not None and self.attachment.kind != "zip":
+        if self.attachment is not None and self.attachment.kind not in ("zip", "file"):
             field_keys = [f.key for f in extract_input_fields_from_workflow(workflow)]
             inject_key = _find_injection_field(field_keys, self.attachment.kind)
             if inject_key:
-                run_inputs[inject_key] = self.attachment.content
+                run_inputs[inject_key] = self.attachment.injection_value()
         raw = await run_execute_workflow_tool(
             self.db,
             self.user.id,
@@ -791,6 +818,7 @@ class ChatBuildSession:
             self.cancel_event,
             llm_session_id=self.llm_session_id,
             progress=progress,
+            sample_file_id=sample_file_id,
         )
         try:
             result = json.loads(raw)
@@ -801,6 +829,8 @@ class ChatBuildSession:
         attempt = self.progress.record_run(str(result.get("status") or "error"))
         report = build_run_report(result, attempt=attempt, inputs=inputs, expect=expect)
         report["test_runs_left"] = MAX_BUILD_TEST_RUNS - self.progress.runs_used
+        if result.get("sample_file"):
+            report["sample_file"] = result["sample_file"]
         if self.progress.budget_spent:
             report["budget_spent"] = BUDGET_SPENT_MESSAGE
         seconds = result.get("execution_time_ms")
@@ -811,6 +841,32 @@ class ChatBuildSession:
             summary=f"Attempt {attempt}/{MAX_BUILD_TEST_RUNS} · {status}{duration}",
             status="success" if status == "success" else "error",
         )
+
+    async def _sample_file_id(self, args: dict[str, Any], workflow: Workflow) -> uuid.UUID | None:
+        """The Drive file a test run hands to the workflow's File Upload trigger.
+
+        The file the model names, else the turn's attachment, else the file this
+        conversation opened last (only when the workflow has an upload trigger).
+
+        Raises:
+            FileAccessError: the named file is missing or the user cannot reach it.
+        """
+        named = str(args.get("sample_file") or "").strip()
+        if named:
+            return await asyncio.to_thread(_resolve_sample_file, self.user.id, named)
+        if self.attachment is not None and self.attachment.kind == "file":
+            return self.attachment.file_id
+        if self.conversation_id is None:
+            return None
+        if file_intake_service.find_file_upload_trigger(workflow.nodes or []) is None:
+            return None
+        workspace = FileWorkspace.for_chat(self.user.id, self.conversation_id)
+        for entry in reversed(await asyncio.to_thread(workspace.inputs)):
+            try:
+                return uuid.UUID(str(entry.get("id")))
+            except ValueError:
+                continue
+        return None
 
     async def _finish(self, args: dict[str, Any]) -> BuildToolOutcome:
         refusal = self.progress.finish_refusal()

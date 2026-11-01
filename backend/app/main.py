@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import time
@@ -97,6 +98,7 @@ from app.services.execution_cancellation import (
     mark_own_executions_orphaned,
 )
 from app.services.execution_recovery import execution_recovery_service
+from app.services.file_sandbox.chat_workspaces import run_idle_sweeper
 from app.services.google_triggers.poller import google_trigger_poller
 from app.services.grist_pool import close_all_clients as close_grist_clients
 from app.services.grist_pool import warm_up_pools as warm_up_grist_pools
@@ -244,7 +246,9 @@ async def lifespan(app: FastAPI):
     await rabbitmq_consumer_manager.start()
     await websocket_trigger_manager.start()
     await heym_event_dispatcher.start()
+    chat_workspace_sweeper = asyncio.create_task(run_idle_sweeper())
     yield
+    chat_workspace_sweeper.cancel()
     shutdown_tracing()
     await heym_event_dispatcher.stop()
     await websocket_trigger_manager.stop()

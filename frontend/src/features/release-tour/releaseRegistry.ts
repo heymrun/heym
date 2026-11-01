@@ -19,15 +19,29 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
   {
     releaseId: "2026.24",
     publishedAt: new Date("2026-10-30T12:00:00Z"),
-    headline: "Plan schedules and map database relationships with new widgets",
+    headline: "Open large files in a sandbox, plan schedules and map database relationships",
     releaseTour: {
       label: "New in Heym",
       introTitle: "New in this release",
-      introDescription: "Gantt schedules and entity relationships, in Heym and Heym Work.",
-      tourEnabled: false,
-      sectionOrder: ["planning-widgets"],
+      introDescription: "File analysis in a sandbox, Gantt schedules and entity relationships, in Heym and Heym Work.",
+      tourEnabled: true,
+      sectionOrder: ["file-analysis", "planning-widgets"],
     },
     sections: [{
+      id: "file-analysis",
+      title: "Open large files in an isolated sandbox",
+      publishedAt: new Date("2026-10-31T12:00:00Z"),
+      blocks: [{
+        type: "prose",
+        markdown: "Attach a PDF, spreadsheet, DOCX, CSV or JSON file in Chat, or name one in Drive. The file is stored in Drive and Chat opens it in an isolated Python sandbox with no network: it inspects the pages, sheets and columns first, then reads only the part your question needs, so a large file never fills the conversation. Follow-up questions reuse what was already read. Workflows that start with a File Upload trigger get the same ability: an Agent node that receives the uploaded file opens it the same way, with nothing to switch on, and a Code node reads it through **Files** with pandas, openpyxl, pdfplumber and python-docx.",
+      }],
+      tour: {
+        description: "Ask about a large PDF or spreadsheet without pasting it. Chat inspects it in a sandbox and reads only what it needs.",
+        useCases: ["Total a column on one sheet and add a value from the last page", "Summarize the risks in a 200-page contract", "Build a workflow that extracts the same fields from every uploaded invoice"],
+        tourVisual: "file-analysis",
+        docTarget: { categoryId: "reference", slug: "file-analysis", title: "File Analysis" },
+      },
+    }, {
       id: "planning-widgets",
       title: "Gantt schedules and database relationship diagrams",
       publishedAt: new Date("2026-10-30T12:00:00Z"),
@@ -101,7 +115,7 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
       introDescription:
         "A quick look at what changed since your last update. Takes about a minute.",
       tourEnabled: true,
-      sectionOrder: ["agent-suite", "chat-evals", "concurrency-limit"],
+      sectionOrder: ["agent-suite", "chat-evals"],
     },
     sections: [
       {
@@ -167,39 +181,7 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
             title: "Chat",
           },
         },
-      },
-      {
-        id: "concurrency-limit",
-        title: "Run a workflow one at a time, or N at a time",
-        publishedAt: new Date("2026-10-26T12:00:00Z"),
-        blocks: [
-          {
-            type: "prose",
-            markdown:
-              "Turn on **Concurrency limit** in the workflow's **Properties** panel and enter how many production runs may execute at once. Webhook, cron, MCP, Portal and trigger runs above the limit wait in a first-in, first-out queue. Editor test runs always start right away.",
-          },
-          {
-            type: "prose",
-            markdown:
-              "A webhook call that has to wait gets **202 Accepted** at once, with an `execution_id`, a status URL and its place in the queue. Poll the status URL with the same credentials until the result arrives. MCP clients get the same answer and poll with **heym_execution_status**. Optional **Max queue size** and **Max wait** fields bound the queue.",
-          },
-        ],
-        tour: {
-          description:
-            "Cap concurrent runs per workflow. Extra runs wait in order, and callers get an execution id to collect the result.",
-          useCases: [
-            "Process webhooks one at a time so two runs never update the same record",
-            "Keep a rate-limited API from seeing more than two calls at once",
-            "Let an MCP client queue work and pick up the result later",
-          ],
-          tourVisual: "concurrency-limit",
-          docTarget: {
-            categoryId: "reference",
-            slug: "webhooks",
-            title: "Webhooks",
-          },
-        },
-      },
+      }
     ],
   },
 ];

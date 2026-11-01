@@ -186,26 +186,50 @@ def _current_container_mounts() -> list[dict[str, Any]]:
 
 def _resolve_workspace_mount(run_dir: Path, readonly: bool) -> list[str]:
     """Return ``docker run`` mount args exposing only ``run_dir`` to the sibling."""
+    return resolve_mount(
+        run_dir,
+        str(run_dir),
+        readonly,
+        missing_volume_hint="The Code node needs a shared workspace volume to install "
+        "dependencies.",
+        fallback_hint=" Or leave requirements.txt empty to run without dependencies.",
+    )
+
+
+def resolve_mount(
+    host_path: Path,
+    container_path: str,
+    readonly: bool,
+    *,
+    missing_volume_hint: str = "The sandbox needs a shared workspace volume.",
+    fallback_hint: str = "",
+) -> list[str]:
+    """Return ``docker run`` mount args exposing only ``host_path`` at ``container_path``.
+
+    ``host_path`` must live under the workspace mount when the backend runs in a
+    container; natively it is bound straight through.
+    """
     suffix = ",readonly" if readonly else ""
 
     # A native backend already holds a real host path, so bind it straight
-    # through at the same location. No shared volume is involved.
+    # through. No shared volume is involved.
     if not _is_containerized():
-        return ["--mount", f"type=bind,src={run_dir},dst={run_dir}{suffix}"]
+        return ["--mount", f"type=bind,src={host_path},dst={container_path}{suffix}"]
 
     mount_point = _workspace_mount_point()
     try:
-        rel = run_dir.relative_to(mount_point)
+        rel = host_path.relative_to(mount_point)
     except ValueError as exc:
         raise RuntimeError(
-            f"Code run dir {run_dir} is not under the workspace volume mount {mount_point}"
+            f"Sandbox dir {host_path} is not under the workspace volume mount {mount_point}"
         ) from exc
 
     volume = os.environ.get("HEYM_CODEX_DOCKER_WORKSPACE_VOLUME", "").strip()
     if volume:
         return [
             "--mount",
-            f"type=volume,src={volume},dst={run_dir},volume-subpath={rel.as_posix()}{suffix}",
+            f"type=volume,src={volume},dst={container_path},"
+            f"volume-subpath={rel.as_posix()}{suffix}",
         ]
 
     for mount in _current_container_mounts():
@@ -214,17 +238,16 @@ def _resolve_workspace_mount(run_dir: Path, readonly: bool) -> list[str]:
         if mount.get("Type") == "volume" and mount.get("Name"):
             return [
                 "--mount",
-                f"type=volume,src={mount['Name']},dst={run_dir},"
+                f"type=volume,src={mount['Name']},dst={container_path},"
                 f"volume-subpath={rel.as_posix()}{suffix}",
             ]
         if mount.get("Type") == "bind" and mount.get("Source"):
-            host_run_dir = Path(str(mount["Source"])) / rel
-            return ["--mount", f"type=bind,src={host_run_dir},dst={run_dir}{suffix}"]
+            host_dir = Path(str(mount["Source"])) / rel
+            return ["--mount", f"type=bind,src={host_dir},dst={container_path}{suffix}"]
 
     raise RuntimeError(
-        "The Code node needs a shared workspace volume to install dependencies. Set "
-        "HEYM_CODEX_DOCKER_WORKSPACE_VOLUME to the named volume mounted at "
-        f"{mount_point}, or leave requirements.txt empty to run without dependencies."
+        f"{missing_volume_hint} Set HEYM_CODEX_DOCKER_WORKSPACE_VOLUME to the named volume "
+        f"mounted at {mount_point}.{fallback_hint}"
     )
 
 
@@ -263,8 +286,15 @@ def _forwarded_env() -> dict[str, str]:
     }
 
 
-def hardening_args(name: str, network: str, tmpfs: str) -> list[str]:
-    """Flags shared by both sandbox phases. No Docker socket, no backend secrets."""
+def hardening_args(
+    name: str,
+    network: str,
+    tmpfs: str,
+    *,
+    memory: str = _MEMORY_LIMIT,
+    cpus: str = _CPU_LIMIT,
+) -> list[str]:
+    """Flags shared by every sandbox container. No Docker socket, no backend secrets."""
     args = [
         "docker",
         "run",
@@ -286,11 +316,11 @@ def hardening_args(name: str, network: str, tmpfs: str) -> list[str]:
         "--pids-limit",
         _PIDS_LIMIT,
         "--memory",
-        _MEMORY_LIMIT,
+        memory,
         "--memory-swap",
-        _MEMORY_LIMIT,
+        memory,
         "--cpus",
-        _CPU_LIMIT,
+        cpus,
         "--env",
         "HOME=/tmp",
         "--env",

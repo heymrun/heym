@@ -2962,9 +2962,8 @@ def _load_skill_drive_files(actor_user_id: str | None) -> list[dict[str, Any]]:
 
     import uuid as _uuid
 
-    from app.db.models import FileTeamShare, GeneratedFile, TeamMember
     from app.db.session import SessionLocal
-    from app.services.file_storage import get_file_path
+    from app.services.file_sandbox.manifest import list_accessible_files
 
     try:
         actor_uuid = _uuid.UUID(str(actor_user_id))
@@ -2972,48 +2971,21 @@ def _load_skill_drive_files(actor_user_id: str | None) -> list[dict[str, Any]]:
         return []
 
     with SessionLocal() as db:
-        owned_rows = (
-            db.query(GeneratedFile)
-            .filter(GeneratedFile.owner_id == actor_uuid)
-            .order_by(GeneratedFile.created_at.desc())
-            .all()
-        )
-        shared_rows = (
-            db.query(GeneratedFile)
-            .join(FileTeamShare, FileTeamShare.file_id == GeneratedFile.id)
-            .join(TeamMember, TeamMember.team_id == FileTeamShare.team_id)
-            .filter(TeamMember.user_id == actor_uuid)
-            .order_by(GeneratedFile.created_at.desc())
-            .all()
-        )
-
-        rows_by_id: dict[Any, Any] = {}
-        for row in [*owned_rows, *shared_rows]:
-            rows_by_id.setdefault(row.id, row)
-
-        rows = sorted(
-            rows_by_id.values(),
-            key=lambda row: row.created_at,
-            reverse=True,
-        )
-        drive_files: list[dict[str, Any]] = []
-        for row in rows:
-            source_path = get_file_path(row)
-            if not source_path.exists():
-                continue
-            drive_files.append(
-                {
-                    "id": str(row.id),
-                    "filename": row.filename,
-                    "mime_type": row.mime_type,
-                    "size_bytes": row.size_bytes,
-                    "workflow_id": str(row.workflow_id) if row.workflow_id else None,
-                    "source_node_label": row.source_node_label,
-                    "created_at": row.created_at,
-                    "source_path": str(source_path),
-                }
-            )
-        return drive_files
+        refs, _total = list_accessible_files(db, actor_uuid)
+    return [
+        {
+            "id": str(ref.id),
+            "filename": ref.name,
+            "mime_type": ref.mime,
+            "size_bytes": ref.size,
+            "workflow_id": str(ref.workflow_id) if ref.workflow_id else None,
+            "source_node_label": ref.source,
+            "created_at": ref.created_at,
+            "source_path": str(ref.storage_path),
+        }
+        for ref in refs
+        if ref.storage_path is not None and ref.storage_path.exists()
+    ]
 
 
 def _unified_tool_executor(
@@ -3032,6 +3004,12 @@ def _unified_tool_executor(
         # the agent-level toolTimeoutSeconds only when the connection has none.
         mcp_timeout = float(connection.get("timeoutSeconds") or timeout_seconds)
         return execute_mcp_tool(connection, name, args, mcp_timeout)
+    if tool_def.get("_source") == "file_sandbox":
+        output = tool_def["_file_toolbox"].call(name, args)
+        # Same key skills use, so the agent output surfaces the download links.
+        if output.get("generated_files"):
+            output["_generated_files"] = output["generated_files"]
+        return output
     if tool_def.get("_source") == "skill":
         from app.services.skill_python_executor import SkillExecutionResult, execute_skill_python
 

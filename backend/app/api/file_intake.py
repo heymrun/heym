@@ -7,7 +7,6 @@ stores the file, runs the workflow synchronously, and returns its output.
 """
 
 import asyncio
-import copy
 import uuid
 from datetime import datetime, timezone
 
@@ -32,14 +31,6 @@ def _client_ip(request: Request) -> str | None:
     if fwd:
         return fwd.split(",")[0].strip()
     return request.client.host if request.client else None
-
-
-def _attach_initial_inputs(nodes: list[dict], node_id: str, initial: dict) -> list[dict]:
-    cloned = copy.deepcopy(nodes)
-    for node in cloned:
-        if node.get("id") == node_id:
-            node.setdefault("data", {})["_initial_inputs"] = initial
-    return cloned
 
 
 @router.get("/slots/{slot_id}")
@@ -194,7 +185,7 @@ async def upload_to_slot(
         "download_url": f"{base}/api/files/{stored.id}",
     }
 
-    nodes = _attach_initial_inputs(
+    nodes = file_intake_service.with_trigger_inputs(
         workflow.nodes,
         slot.trigger_node_id,
         {"file": file_payload, "uploaded_at": now.isoformat()},

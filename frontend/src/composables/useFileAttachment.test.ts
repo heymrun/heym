@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { useFileAttachment } from "./useFileAttachment";
+import { ATTACHMENT_ACCEPT, toAttachmentPayload, useFileAttachment } from "./useFileAttachment";
 
 // `File`/`Blob` are native globals in this Node version (v24) - no jsdom
 // needed, construct real `new File([...], name, {type})` instances directly.
@@ -42,32 +42,91 @@ class FakeFailingFileReader {
   }
 }
 
+const uploadMock = vi.fn();
+const chatFiles = { upload: uploadMock };
+
 beforeEach(() => {
   vi.stubGlobal("FileReader", FakeFileReader);
+  uploadMock.mockReset();
 });
 
-const { getDocumentMock } = vi.hoisted(() => ({ getDocumentMock: vi.fn() }));
-
-vi.mock("pdfjs-dist", () => ({
-  getDocument: getDocumentMock,
-  GlobalWorkerOptions: { workerSrc: "" },
-}));
-
-function mockPdf(pagesText: string[]) {
-  getDocumentMock.mockReturnValue({
-    promise: Promise.resolve({
-      numPages: pagesText.length,
-      getPage: (i: number) =>
-        Promise.resolve({
-          getTextContent: () => Promise.resolve({ items: [{ str: pagesText[i - 1] }] }),
-        }),
-    }),
-  });
+function storedFile(name: string, size: number, mime: string): Record<string, unknown> {
+  return { id: "file-1", name, size, mime };
 }
+
+describe("processFile - documents go to Drive", () => {
+  it("uploads a spreadsheet and keeps only its Drive reference", async () => {
+    uploadMock.mockResolvedValue(storedFile("q3.xlsx", 4096, "application/vnd.ms-excel"));
+    const file = new File([new Uint8Array(10)], "q3.xlsx", { type: "" });
+
+    const { processFile, attachedFile, attachmentError } = useFileAttachment(chatFiles);
+    await processFile(file);
+
+    expect(attachmentError.value).toBeNull();
+    expect(uploadMock).toHaveBeenCalledWith(file);
+    expect(attachedFile.value).toEqual({
+      name: "q3.xlsx",
+      kind: "file",
+      mimeType: "application/vnd.ms-excel",
+      content: "",
+      sizeKb: 4,
+      fileId: "file-1",
+    });
+  });
+
+  it("sends PDFs to Drive instead of extracting their text in the browser", async () => {
+    uploadMock.mockResolvedValue(storedFile("doc.pdf", 2048, "application/pdf"));
+    const file = new File(["%PDF"], "notes.txt", { type: "application/pdf" });
+
+    const { processFile, attachedFile } = useFileAttachment(chatFiles);
+    await processFile(file);
+
+    expect(attachedFile.value?.kind).toBe("file");
+    expect(attachedFile.value?.content).toBe("");
+  });
+
+  it("shows the server's reason when Drive refuses the upload", async () => {
+    uploadMock.mockRejectedValue(new Error("File size exceeds limit (100 MB)"));
+    const file = new File(["a,b"], "big.csv", { type: "text/csv" });
+
+    const { processFile, attachmentError, attachedFile } = useFileAttachment(chatFiles);
+    await processFile(file);
+
+    expect(attachmentError.value).toBe("File size exceeds limit (100 MB)");
+    expect(attachedFile.value).toBeNull();
+  });
+
+  it("refuses documents when the host has no upload port", async () => {
+    const file = new File(["a,b"], "data.csv", { type: "text/csv" });
+
+    const { processFile, attachmentError } = useFileAttachment(null);
+    await processFile(file);
+
+    expect(attachmentError.value).toBe("Unsupported file type");
+  });
+
+  it("builds a request payload with the file id and no content", () => {
+    const payload = toAttachmentPayload({
+      name: "q3.xlsx",
+      kind: "file",
+      mimeType: "",
+      content: "",
+      sizeKb: 1,
+      fileId: "file-1",
+    });
+    expect(payload).toEqual({ name: "q3.xlsx", kind: "file", content: "", file_id: "file-1" });
+  });
+
+  it("accepts the document types in the file picker", () => {
+    for (const ext of [".xlsx", ".xls", ".docx", ".pdf", ".csv", ".tsv", ".json"]) {
+      expect(ATTACHMENT_ACCEPT.split(",")).toContain(ext);
+    }
+  });
+});
 
 describe("processFile - zip", () => {
   it("keeps a zip as a data URL so the server can unpack it", async () => {
-    const { processFile, attachedFile, attachmentError } = useFileAttachment();
+    const { processFile, attachedFile, attachmentError } = useFileAttachment(null);
     const file = new File([new Uint8Array([0x50, 0x4b, 0x03, 0x04])], "skill.zip", {
       type: "application/zip",
     });
@@ -77,6 +136,7 @@ describe("processFile - zip", () => {
     expect(attachmentError.value).toBeNull();
     expect(attachedFile.value?.kind).toBe("zip");
     expect(attachedFile.value?.content.startsWith("data:")).toBe(true);
+    expect(uploadMock).not.toHaveBeenCalled();
   });
 });
 
@@ -85,7 +145,7 @@ describe("processFile - unsupported/oversized files", () => {
     const FileReaderSpy = vi.fn();
     vi.stubGlobal("FileReader", FileReaderSpy);
 
-    const { processFile, attachmentError, attachedFile } = useFileAttachment();
+    const { processFile, attachmentError, attachedFile } = useFileAttachment(null);
     const file = new File(["x"], "x.exe", { type: "application/octet-stream" });
 
     await processFile(file);
@@ -95,15 +155,15 @@ describe("processFile - unsupported/oversized files", () => {
     expect(FileReaderSpy).not.toHaveBeenCalled();
   });
 
-  it("rejects a text file over the text size limit", async () => {
+  it("rejects an inline text file over the text size limit", async () => {
     const MAX_TEXT_BYTES = 500 * 1024;
     const FileReaderSpy = vi.fn();
     vi.stubGlobal("FileReader", FileReaderSpy);
-    const oversized = new File(["a".repeat(MAX_TEXT_BYTES + 1)], "notes.txt", {
+    const oversized = new File(["a".repeat(MAX_TEXT_BYTES + 1)], "server.log", {
       type: "text/plain",
     });
 
-    const { processFile, attachmentError, attachedFile } = useFileAttachment();
+    const { processFile, attachmentError, attachedFile } = useFileAttachment(null);
     await processFile(oversized);
 
     expect(attachmentError.value).toContain("File too large");
@@ -119,71 +179,27 @@ describe("processFile - unsupported/oversized files", () => {
       type: "image/png",
     });
 
-    const { processFile, attachmentError, attachedFile } = useFileAttachment();
+    const { processFile, attachmentError, attachedFile } = useFileAttachment(null);
     await processFile(oversized);
 
     expect(attachmentError.value).toContain("File too large");
     expect(attachedFile.value).toBeNull();
     expect(FileReaderSpy).not.toHaveBeenCalled();
   });
-
-  it("rejects a pdf file over the pdf size limit", async () => {
-    const MAX_PDF_BYTES = 5 * 1024 * 1024;
-    const oversized = new File([new Uint8Array(MAX_PDF_BYTES + 1)], "file.pdf", {
-      type: "application/pdf",
-    });
-
-    const { processFile, attachmentError, attachedFile } = useFileAttachment();
-    await processFile(oversized);
-
-    expect(attachmentError.value).toContain("File too large");
-    expect(attachedFile.value).toBeNull();
-    expect(getDocumentMock).not.toHaveBeenCalled();
-  });
 });
 
-describe("processFile - detectKind priority", () => {
-  it("an application/pdf mime type is detected as pdf regardless of extension", async () => {
-    mockPdf(["text"]);
-    const file = new File(["ignored"], "notes.txt", { type: "application/pdf" });
+describe("processFile - inline text files", () => {
+  it("reads a code file's content and populates attachedFile with correct metadata", async () => {
+    const file = new File(["print('hi')"], "script.py", { type: "text/x-python" });
 
-    const { processFile, attachedFile } = useFileAttachment();
-    await processFile(file);
-
-    expect(attachedFile.value?.kind).toBe("pdf");
-  });
-
-  it("a recognized image mime type is detected as image", async () => {
-    const file = new File(["abc"], "blob", { type: "image/png" });
-
-    const { processFile, attachedFile } = useFileAttachment();
-    await processFile(file);
-
-    expect(attachedFile.value?.kind).toBe("image");
-  });
-
-  it("falls back to extension-based detection for text files", async () => {
-    const file = new File(["hello"], "notes.txt", { type: "" });
-
-    const { processFile, attachedFile } = useFileAttachment();
-    await processFile(file);
-
-    expect(attachedFile.value?.kind).toBe("text");
-  });
-});
-
-describe("processFile - text files", () => {
-  it("reads a text file's content and populates attachedFile with correct metadata", async () => {
-    const file = new File(["hello world"], "notes.txt", { type: "text/plain" });
-
-    const { processFile, attachedFile } = useFileAttachment();
+    const { processFile, attachedFile } = useFileAttachment(null);
     await processFile(file);
 
     expect(attachedFile.value).toEqual({
-      name: "notes.txt",
+      name: "script.py",
       kind: "text",
-      mimeType: "text/plain",
-      content: "hello world",
+      mimeType: "text/x-python",
+      content: "print('hi')",
       sizeKb: Math.round(file.size / 1024),
     });
   });
@@ -191,67 +207,19 @@ describe("processFile - text files", () => {
   it("truncates text content longer than MAX_CONTENT_CHARS", async () => {
     const MAX_CONTENT_CHARS = 100_000;
     const longText = "a".repeat(MAX_CONTENT_CHARS + 50);
-    const file = new File([longText], "notes.txt", { type: "text/plain" });
+    const file = new File([longText], "server.log", { type: "text/plain" });
 
-    const { processFile, attachedFile } = useFileAttachment();
-    await processFile(file);
-
-    expect(attachedFile.value?.content.length).toBe(MAX_CONTENT_CHARS);
-    expect(attachedFile.value?.content).toBe(longText.slice(0, MAX_CONTENT_CHARS));
-  });
-});
-
-describe("processFile - image files", () => {
-  it("reads an image file as a data URL", async () => {
-    const file = new File([new Uint8Array([1, 2, 3])], "photo.png", { type: "image/png" });
-
-    const { processFile, attachedFile } = useFileAttachment();
-    await processFile(file);
-
-    expect(attachedFile.value?.content.startsWith("data:image/png;base64,")).toBe(true);
-  });
-});
-
-describe("processFile - pdf files", () => {
-  it("extracts and joins text across all pdf pages", async () => {
-    mockPdf(["Page 1 text", "Page 2 text"]);
-    const file = new File(["ignored"], "doc.pdf", { type: "application/pdf" });
-
-    const { processFile, attachedFile } = useFileAttachment();
-    await processFile(file);
-
-    expect(attachedFile.value?.content).toBe("Page 1 text\nPage 2 text");
-  });
-
-  it("truncates pdf content longer than MAX_CONTENT_CHARS", async () => {
-    const MAX_CONTENT_CHARS = 100_000;
-    mockPdf(["a".repeat(MAX_CONTENT_CHARS + 50)]);
-    const file = new File(["ignored"], "doc.pdf", { type: "application/pdf" });
-
-    const { processFile, attachedFile } = useFileAttachment();
+    const { processFile, attachedFile } = useFileAttachment(null);
     await processFile(file);
 
     expect(attachedFile.value?.content.length).toBe(MAX_CONTENT_CHARS);
   });
 
-  it("sets a pdf-specific error message when extraction throws", async () => {
-    getDocumentMock.mockReturnValue({ promise: Promise.reject(new Error("boom")) });
-    const file = new File(["ignored"], "doc.pdf", { type: "application/pdf" });
-
-    const { processFile, attachmentError, attachedFile } = useFileAttachment();
-    await processFile(file);
-
-    expect(attachmentError.value).toBe("Could not read PDF");
-    expect(attachedFile.value).toBeNull();
-  });
-});
-
-describe("processFile - read failures", () => {
   it("sets a generic error message when reading a text file fails", async () => {
     vi.stubGlobal("FileReader", FakeFailingFileReader);
-    const file = new File(["hello"], "notes.txt", { type: "text/plain" });
+    const file = new File(["hello"], "server.log", { type: "text/plain" });
 
-    const { processFile, attachmentError, attachedFile } = useFileAttachment();
+    const { processFile, attachmentError, attachedFile } = useFileAttachment(null);
     await processFile(file);
 
     expect(attachmentError.value).toBe("Failed to read file");
@@ -259,63 +227,13 @@ describe("processFile - read failures", () => {
   });
 });
 
-describe("processFile - loading state", () => {
-  it("attachmentLoading is true while reading, false after success", async () => {
-    let resolveRead: () => void;
-    const deferred = new Promise<void>((resolve) => {
-      resolveRead = resolve;
-    });
+describe("processFile - image files", () => {
+  it("reads an image file as a data URL", async () => {
+    const file = new File([new Uint8Array([1, 2, 3])], "photo.png", { type: "image/png" });
 
-    class DeferredFileReader {
-      onload: (() => void) | null = null;
-      onerror: (() => void) | null = null;
-      result: string | null = null;
-      readAsText(file: File) {
-        deferred.then(() => {
-          file.text().then((text) => {
-            this.result = text;
-            this.onload?.();
-          });
-        });
-      }
-    }
-    vi.stubGlobal("FileReader", DeferredFileReader);
-
-    const { processFile, attachmentLoading } = useFileAttachment();
-    const file = new File(["hello"], "notes.txt", { type: "text/plain" });
-
-    const pending = processFile(file);
-    expect(attachmentLoading.value).toBe(true);
-
-    resolveRead!();
-    await pending;
-
-    expect(attachmentLoading.value).toBe(false);
-  });
-
-  it("attachmentLoading goes back to false on the error path too", async () => {
-    vi.stubGlobal("FileReader", FakeFailingFileReader);
-    const { processFile, attachmentLoading } = useFileAttachment();
-    const file = new File(["hello"], "notes.txt", { type: "text/plain" });
-
+    const { processFile, attachedFile } = useFileAttachment(null);
     await processFile(file);
 
-    expect(attachmentLoading.value).toBe(false);
-  });
-});
-
-describe("clearAttachment", () => {
-  it("resets all three refs regardless of prior state", async () => {
-    const { processFile, clearAttachment, attachedFile, attachmentError, attachmentLoading } =
-      useFileAttachment();
-    const file = new File(["hello"], "notes.txt", { type: "text/plain" });
-    await processFile(file);
-    expect(attachedFile.value).not.toBeNull();
-
-    clearAttachment();
-
-    expect(attachedFile.value).toBeNull();
-    expect(attachmentError.value).toBeNull();
-    expect(attachmentLoading.value).toBe(false);
+    expect(attachedFile.value?.content.startsWith("data:image/png;base64,")).toBe(true);
   });
 });

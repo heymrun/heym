@@ -13,7 +13,7 @@ The file list shows:
 - **Name** - Original filename with a type-specific icon
 - **Type** - File MIME type (e.g., pdf, csv, docx)
 - **Size** - Human-readable file size
-- **Source** - The node label that generated the file
+- **Source** - The node label that generated the file, **manual upload**, or **Chat** for files attached in Chat
 - **Date** - When the file was created
 - **Actions** - Download, share, and delete buttons
 
@@ -89,11 +89,16 @@ Agent skills can opt into Drive reads with the skill card's **Enable Drive files
 
 Drive reads are limited to files accessible to the workflow actor: owned files and files shared with the actor through teams. Use a file id for exact lookup, or an exact filename when the user refers to a file by name. Filename lookup returns the newest accessible file with that name; `list_drive_files(filename="...")` returns all matches.
 
+## Opening Drive Files in a Sandbox
+
+Chat, an Agent node that receives a file and the Code node's **Files** field open Drive files in an isolated Python sandbox and read them selectively. Chat sees owned files and files shared with the user's teams. A workflow run sees only its own files: those uploaded through its File Upload trigger and those its nodes wrote. See [File Analysis](./file-analysis.md).
+
 ## Related
 
 - [Drive Node](../nodes/drive-node.md) - Workflow operations (list, get, delete, password, TTL, max downloads, team sharing)
 - [Drive Tab](../tabs/drive-tab.md) - Browse files in the dashboard
 - [File Generation](./file-generation.md) - How `_generated_files` and download URLs are produced
+- [File Analysis](./file-analysis.md) - Inspect and process large Drive files in an isolated sandbox
 
 ## Cleanup
 Expired share tokens are automatically cleaned up daily. Files themselves persist until manually deleted through the Drive tab. Use **Clear All** to delete every file and their share links in one action.

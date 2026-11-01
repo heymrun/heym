@@ -30,6 +30,8 @@ export interface ToolCall {
   status: ToolCallStatus
   /** What the step is doing now, while it runs, e.g. the node a workflow run is on. */
   progress?: string
+  /** What the model wrote in the same round before this call; shown above it. */
+  narration?: string
 }
 
 /** Live events of a running chat turn; none of them is stored with the message. */
@@ -150,3 +152,12 @@ export type SSEChunk =
   | { type: 'queued_message_started'; queued_message_id: string; user_message: Message }
   | { type: 'done' }
   | { type: 'error'; text?: string; message?: string }
+
+/** A chat message attachment as the API takes it. */
+export interface FileAttachmentPayload {
+  name: string
+  kind: "text" | "image" | "pdf" | "zip" | "file"
+  content: string
+  /** kind "file": the Drive file id; the server fills name, size and type from Drive. */
+  file_id?: string
+}

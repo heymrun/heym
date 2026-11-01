@@ -154,6 +154,7 @@ def execute(ctx: NodeExecutionContext) -> object:
                 execution_id=str(_sub_exec_id),
                 llm_session_id=self.llm_session_id,
                 node_pool=(_BACKGROUND_NODE_EXECUTOR if execute_do_not_wait else self._node_pool),
+                file_scope=self.file_scope,
             )
             enriched_execute_inputs = {
                 "headers": {},

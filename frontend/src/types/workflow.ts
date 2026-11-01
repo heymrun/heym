@@ -576,6 +576,8 @@ export interface NodeData {
   codeRequirements?: string;
   codeParameters?: string;
   codeAllowNetwork?: boolean;
+  /** Drive files mounted read-only for the run: an id, ids, or an expression resolving to them. */
+  codeFiles?: string;
   ocrLanguage?: string;
   ocrLanguageCustom?: string;
   ocrEncoding?: string;

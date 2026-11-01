@@ -19,6 +19,7 @@ The **Code** node runs Python you write, with its own `requirements.txt`, and re
 | `codeParameters` | expression | A JSON object wiring workflow data into the code. Expressions are resolved before the code runs |
 | `codeRequirements` | string | `requirements.txt` contents, one package per line. Empty skips installation |
 | `codeAllowNetwork` | boolean | Whether the code itself may reach the network (default `false`) |
+| `codeFiles` | expression | Optional Drive files mounted read-only for the run: an id, several ids, or an expression such as `$Upload.file.id` |
 
 ## The `main` function
 
@@ -85,6 +86,29 @@ Packages that ship no wheel and need a C compiler will fail to install. The reas
 | Running your code | Off by default. `codeAllowNetwork` turns it on |
 
 With `codeAllowNetwork` off, an outbound call such as `requests.get(...)` fails with a connection error. That is the intended default: most Code nodes transform data that another node already fetched. Prefer fetching with an **HTTP** node and passing the body in through `codeParameters`.
+
+## Reading Drive files
+
+Set **Files** (`codeFiles`) to give the code the files of the run. It accepts an id, ids separated by commas, a list, or an expression that resolves to a file or its id, such as `$Upload.file.id` or `$Upload.file`. A file opens when it came into this workflow: uploaded through its [File Upload trigger](./file-upload-trigger-node.md) or written to [Drive](../reference/drive.md) by one of its nodes. Other Drive files are not available to a run, so a workflow cannot be used to read someone's Drive.
+
+```python
+import heym_files
+import pandas as pd
+
+def main(params):
+    workbook = params.files[0]
+    df = pd.read_excel(heym_files.path(workbook.name), sheet_name="Summary")
+    df.to_csv(f"{heym_files.out_dir()}/summary.csv", index=False)
+    return {"total": float(df["Amount"].sum()), "rows": len(df)}
+```
+
+- `params.files` lists the mounted files with `id`, `name`, `mime`, `size` and `path`.
+- `heym_files.path("<name or id>")` returns a file's path under `/input`, which is read-only.
+- `/work` is scratch space for the run.
+- Files written to `heym_files.out_dir()` are saved to Drive and returned in `$nodeLabel.files` with their `id`, `name`, `mime`, `size` and `download_path`.
+- pandas, openpyxl, xlrd, pdfplumber, pypdf, python-docx and langdetect are preinstalled, so `requirements.txt` can stay empty.
+
+With **Files** set, the run gets the [File Analysis](../reference/file-analysis.md) limits (2 GB memory, 120 seconds) and runs on the main instance of a cluster.
 
 ## Sandbox and limits
 

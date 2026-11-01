@@ -77,7 +77,7 @@ from app.db.models import (
 from app.db.session import get_db
 from app.models.board_schemas import CardCreateRequest
 from app.models.schemas import DataTableColumnDef, DataTableCreate
-from app.services import template_service
+from app.services import file_intake_service, template_service
 from app.services.active_execution_overview import build_active_execution_overview
 from app.services.agent_tool_observability import summarize_tool_calls
 from app.services.assistant_node_edit import NODE_EDIT_TRACE_NODE_LABEL, build_node_edit_prompt
@@ -119,8 +119,10 @@ from app.services.data_table_catalog import (
     table_summary,
 )
 from app.services.doc_index import read_node_doc
+from app.services.drive_file_access import get_accessible_file
 from app.services.encryption import decrypt_config
 from app.services.execution_cancellation import watch_execution_nodes
+from app.services.file_sandbox.scope import RunFileScope
 from app.services.generated_credentials import (
     CredentialChoice,
     CredentialPassResult,
@@ -184,6 +186,7 @@ from app.services.workflow_save import WorkflowSnapshot, add_workflow_version
 
 if TYPE_CHECKING:
     from app.api.chat_build import ChatBuildSession
+    from app.api.chat_files import ChatFileTools
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -245,8 +248,19 @@ class AnalyzeWorkflowRequest(BaseModel):
 
 class FileAttachment(BaseModel):
     name: str
-    kind: Literal["text", "image", "pdf", "zip"]
-    content: str  # plain text for text/pdf, base64 data URL for images and zips
+    kind: Literal["text", "image", "pdf", "zip", "file"]
+    # Plain text for text/pdf, a base64 data URL for images and zips, empty for a Drive file.
+    content: str = ""
+    # kind "file": a Drive file the model opens with the file tools; never inlined.
+    file_id: uuid.UUID | None = None
+    size: int | None = None
+    mime: str | None = None
+
+    def injection_value(self) -> str:
+        """What a workflow input receives for this attachment: the Drive id or the content."""
+        if self.kind == "file":
+            return str(self.file_id or "")
+        return self.content
 
 
 class DashboardChatRequest(BaseModel):
@@ -454,6 +468,8 @@ _ATTACHMENT_ROUTING_INSTRUCTIONS = (
     "workflow input field when calling a workflow tool:\n"
     '- Image attachment → fields named "image", "base64", "photo", "picture", or similar\n'
     '- Text/PDF attachment → fields named "text", "document", "content", "file", "data", or similar\n'
+    '- Drive file attachment → fields named "file_id", "file", "document", "attachment", or '
+    "similar; pass the file id\n"
     "- If no dedicated field exists → embed the content in the primary message/query/input field"
 )
 
@@ -490,6 +506,24 @@ def _build_user_message(message: str, attachment: FileAttachment | None) -> dict
         else:
             body = f"{message}\n\n{prompt_for_zip(attachment.name, read_zip(raw))}"
         return {"role": "user", "content": body}
+    if attachment.kind == "file":
+        details = " · ".join(
+            part
+            for part in (
+                f"id {attachment.file_id}",
+                f"{attachment.size} bytes" if attachment.size is not None else "",
+                attachment.mime or "",
+            )
+            if part
+        )
+        return {
+            "role": "user",
+            "content": (
+                f"{message}\n\n[ATTACHED DRIVE FILE: {attachment.name} · {details}]\n"
+                "The file is in Heym Drive; its content is not in this message. Open it with "
+                "inspect_file and run_python."
+            ),
+        }
     if attachment.kind == "image":
         embedded = (
             f"{message}\n\n"
@@ -2627,6 +2661,45 @@ async def _record_chat_workflow_edit_version(
     return await add_workflow_version(db, workflow, before, user_id)
 
 
+_NO_UPLOAD_TRIGGER_NOTE = (
+    "The sample file was not passed in: this workflow has no File Upload trigger. At run "
+    "time a Code node's Files and an agent's file tools open only files uploaded to the "
+    "workflow, so start it with a fileUploadTrigger and read `$<trigger label>.file.id`."
+)
+
+
+async def _feed_sample_file(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    workflow: Workflow,
+    file_id: uuid.UUID,
+    public_base_url: str,
+) -> tuple[list[dict], RunFileScope | None, dict[str, Any]]:
+    """Hand a Chat file to the workflow's File Upload trigger, the way an upload arrives.
+
+    The run may then open that one file besides the workflow's own; nothing else.
+    """
+    trigger = file_intake_service.find_file_upload_trigger(workflow.nodes or [])
+    if trigger is None:
+        return workflow.nodes, None, {"passed": False, "note": _NO_UPLOAD_TRIGGER_NOTE}
+    found = await get_accessible_file(db, file_id, user_id)
+    if found is None:
+        return workflow.nodes, None, {"passed": False, "note": "The sample file is not available."}
+    row = found.file
+    payload = {
+        "id": str(row.id),
+        "name": row.filename,
+        "mime": row.mime_type,
+        "size": row.size_bytes,
+        "download_url": f"{public_base_url.rstrip('/')}/api/files/{row.id}",
+    }
+    initial = {"file": payload, "uploaded_at": datetime.now(timezone.utc).isoformat()}
+    nodes = file_intake_service.with_trigger_inputs(workflow.nodes, str(trigger["id"]), initial)
+    label = str((trigger.get("data") or {}).get("label") or "trigger")
+    note = {"passed": True, "trigger": label, "name": row.filename}
+    return nodes, RunFileScope(file_ids=frozenset({row.id})), note
+
+
 async def run_execute_workflow_tool(
     db: AsyncSession,
     user_id: uuid.UUID,
@@ -2637,10 +2710,12 @@ async def run_execute_workflow_tool(
     llm_session_id: str | None = None,
     trigger_source: str = "dashboard_chat",
     progress: ToolProgress | None = None,
+    sample_file_id: uuid.UUID | None = None,
 ) -> str:
     """Execute a workflow and return JSON string result for tool. Raises no exception; errors are returned in the result.
 
-    With `progress`, the running node is described while the run lasts.
+    With `progress`, the running node is described while the run lasts. With
+    `sample_file_id`, Chat hands that Drive file to the workflow's File Upload trigger.
     """
     if cancel_event is not None and cancel_event.is_set():
         return json.dumps({"status": "cancelled", "error": "Execution cancelled"})
@@ -2666,6 +2741,11 @@ async def run_execute_workflow_tool(
         "query": {},
         "body": inputs,
     }
+    run_nodes, file_scope, sample_note = workflow.nodes, None, None
+    if sample_file_id is not None:
+        run_nodes, file_scope, sample_note = await _feed_sample_file(
+            db, user_id, workflow, sample_file_id, public_base_url
+        )
 
     try:
         run_kwargs: dict[str, Any] = {}
@@ -2679,7 +2759,7 @@ async def run_execute_workflow_tool(
             execution_result = await asyncio.to_thread(
                 execute_workflow,
                 workflow_id=workflow.id,
-                nodes=workflow.nodes,
+                nodes=run_nodes,
                 edges=workflow.edges or [],
                 inputs=enriched_inputs,
                 workflow_cache=workflow_cache,
@@ -2690,6 +2770,7 @@ async def run_execute_workflow_tool(
                 actor_user_id=user_id,
                 cancel_event=cancel_event,
                 llm_session_id=llm_session_id,
+                file_scope=file_scope,
                 **run_kwargs,
             )
         if progress is not None:
@@ -2805,18 +2886,18 @@ async def run_execute_workflow_tool(
             execution_result.outputs,
             node_results_serializable,
         )
-        return json.dumps(
-            {
-                "status": execution_result.status,
-                "outputs": execution_result.outputs,
-                "node_results": node_results_serializable,
-                "execution_time_ms": execution_result.execution_time_ms,
-                "execution_history_id": history_entry_id,
-                "pending_review": pending_review,
-                "error": getattr(execution_result, "error", None),
-            },
-            default=str,
-        )
+        run_report: dict[str, Any] = {
+            "status": execution_result.status,
+            "outputs": execution_result.outputs,
+            "node_results": node_results_serializable,
+            "execution_time_ms": execution_result.execution_time_ms,
+            "execution_history_id": history_entry_id,
+            "pending_review": pending_review,
+            "error": getattr(execution_result, "error", None),
+        }
+        if sample_note is not None:
+            run_report["sample_file"] = sample_note
+        return json.dumps(run_report, default=str)
     except WorkflowCancelledError:
         return json.dumps({"status": "cancelled", "error": "Execution cancelled"})
     except Exception as e:
@@ -3834,10 +3915,12 @@ async def stream_dashboard_chat(
     system_prompt_parts: Any | None = None,
     credential_mode: CredentialPromptMode = CredentialPromptMode.ASK_AND_CREATE,
     build: "ChatBuildSession | None" = None,
+    files: "ChatFileTools | None" = None,
 ) -> AsyncGenerator[str, None]:
     """Run dashboard chat with tool use: loop non-streaming calls with tools until no tool_calls, then yield final content.
 
     With `build`, the turn may save, test-run and finish workflows (chat build mode).
+    With `files`, it may open Drive files in the file sandbox.
     """
     user_id = user.id
     is_reasoning = is_reasoning_model(model)
@@ -3933,6 +4016,8 @@ async def stream_dashboard_chat(
     def _call_kwargs() -> dict[str, Any]:
         # Build mode's tools change during the turn: the test budget can run out.
         tools = build.tools(DASHBOARD_CHAT_TOOLS) if build is not None else DASHBOARD_CHAT_TOOLS
+        if files is not None:
+            tools = [*tools, *files.schemas()]
         return {
             **base_kwargs,
             "tools": tools,
@@ -4204,9 +4289,16 @@ async def stream_dashboard_chat(
                     args = json.loads(tc.function.arguments) if tc.function.arguments else {}
                 except json.JSONDecodeError:
                     args = {}
-                if build is not None and build.handles(name):
-                    step_label = build.step_label(name)
-                    display_args = build.display_args(name, args)
+                tool_group = (
+                    build
+                    if build is not None and build.handles(name)
+                    else files
+                    if files is not None and files.handles(name)
+                    else None
+                )
+                if tool_group is not None:
+                    step_label = tool_group.step_label(name, args)
+                    display_args = tool_group.display_args(name, args)
                     yield (
                         "data: "
                         + json.dumps(
@@ -4224,7 +4316,7 @@ async def stream_dashboard_chat(
                     step_start = time.time()
                     tool_progress = ToolProgress()
                     build_task = asyncio.ensure_future(
-                        build.call(name, args, progress=tool_progress)
+                        tool_group.call(name, args, progress=tool_progress)
                     )
                     async for event in follow_tool(build_task, tc.id, tool_progress):
                         yield event
@@ -4326,11 +4418,14 @@ async def stream_dashboard_chat(
                     # Auto-inject attachment content into the matching workflow input field.
                     # The LLM only received metadata for images (no base64 in its context),
                     # so we inject the actual content here before execution.
-                    if attachment is not None and w is not None:
+                    sample_file_id = None
+                    if attachment is not None and attachment.kind == "file":
+                        sample_file_id = attachment.file_id
+                    elif attachment is not None and w is not None:
                         field_keys = [f.key for f in extract_input_fields_from_workflow(w)]
                         inject_key = _find_injection_field(field_keys, attachment.kind)
                         if inject_key:
-                            inputs[inject_key] = attachment.content
+                            inputs[inject_key] = attachment.injection_value()
                     tool_progress = ToolProgress()
                     run_task = asyncio.ensure_future(
                         run_execute_workflow_tool(
@@ -4342,6 +4437,7 @@ async def stream_dashboard_chat(
                             cancel_event,
                             llm_session_id=trace_context.session_id if trace_context else None,
                             progress=tool_progress,
+                            sample_file_id=sample_file_id,
                         )
                     )
                     async for event in follow_tool(run_task, tc.id, tool_progress):

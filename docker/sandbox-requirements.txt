@@ -1,0 +1,11 @@
+# Libraries the file-analysis sandbox imports (backend/app/services/file_sandbox).
+# Installed into the image's system Python because sandbox containers run plain
+# `python`, not the backend venv. Network is off inside the sandbox, so nothing
+# can be installed at run time. No PyMuPDF: its AGPL license does not fit Heym's.
+pandas==3.1.0
+openpyxl==3.1.5
+xlrd==2.0.2
+pdfplumber==0.11.10
+pypdf==6.21.4
+python-docx==1.2.0
+langdetect==1.0.9

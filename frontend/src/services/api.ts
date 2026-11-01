@@ -18,6 +18,7 @@ import type {
   AlertUpdatePayload,
 } from "@/types/alerts";
 import type { LoginRequest, PasswordChangeRequest, RegisterRequest, User, UserUpdateRequest } from "@/types/auth";
+import type { FileAttachmentPayload } from "@/types/chat";
 import type {
   CreateTemplateRequest,
   NodeTemplate,
@@ -2330,11 +2331,7 @@ export interface FixTranscriptionResponse {
   fixed_text: string;
 }
 
-export interface FileAttachmentPayload {
-  name: string;
-  kind: "text" | "image" | "pdf" | "zip";
-  content: string;
-}
+export type { FileAttachmentPayload } from "@/types/chat";
 
 export interface DashboardChatRequest {
   credentialId: string;
@@ -3688,12 +3685,17 @@ export const filesApi = {
     await api.delete("/files");
   },
 
-  upload: async (file: File, shareWithMyTeams = false): Promise<GeneratedFile> => {
+  upload: async (
+    file: File,
+    shareWithMyTeams = false,
+    source: "manual" | "chat" = "manual",
+  ): Promise<GeneratedFile> => {
     const formData = new FormData();
     formData.append("file", file);
     formData.append("share_with_my_teams", String(shareWithMyTeams));
     const response = await api.post<GeneratedFile>("/files/upload", formData, {
       headers: { "Content-Type": "multipart/form-data" },
+      params: { source },
     });
     return response.data;
   },

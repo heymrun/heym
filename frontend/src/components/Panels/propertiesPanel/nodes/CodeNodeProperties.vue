@@ -19,6 +19,8 @@ const CODE_PLACEHOLDER = `def main(params):
 const {
   workflowStore,
   codeParametersInputRef,
+  codeFilesInputRef,
+  codeExpressionFields,
   selectedNode,
   selectedNodeEvaluateDialogLabel,
   updateNodeData,
@@ -120,10 +122,47 @@ async function formatCode(): Promise<void> {
         :dialog-node-label="selectedNodeEvaluateDialogLabel"
         dialog-key-label="Parameters"
         field-key="codeParameters"
+        navigation-enabled
+        :navigation-index="0"
+        :navigation-total="codeExpressionFields.total"
         @update:model-value="updateNodeData('codeParameters', $event)"
+        @navigate="codeExpressionFields.navigate"
+        @register-field-index="codeExpressionFields.registerIndex"
       />
       <p class="text-xs text-muted-foreground">
         A JSON object. Expressions are resolved before the code runs.
+      </p>
+    </div>
+
+    <div
+      class="space-y-2"
+      data-testid="code-files-field"
+    >
+      <Label>Files</Label>
+      <ExpressionInput
+        ref="codeFilesInputRef"
+        :model-value="selectedNode.data.codeFiles || ''"
+        placeholder="$Upload.file.id"
+        :rows="1"
+        :nodes="workflowStore.nodes"
+        :node-results="workflowStore.nodeResults"
+        :edges="workflowStore.edges"
+        :current-node-id="selectedNode.id"
+        :dialog-node-label="selectedNodeEvaluateDialogLabel"
+        dialog-key-label="Files"
+        field-key="codeFiles"
+        navigation-enabled
+        :navigation-index="1"
+        :navigation-total="codeExpressionFields.total"
+        @update:model-value="updateNodeData('codeFiles', $event)"
+        @navigate="codeExpressionFields.navigate"
+        @register-field-index="codeExpressionFields.registerIndex"
+      />
+      <p class="text-xs text-muted-foreground">
+        Optional Drive files, mounted read-only: an id, several ids, or an expression such as
+        <code class="font-mono">$Upload.file.id</code>. Open them with
+        <code class="font-mono">heym_files.path("name")</code>; files written to
+        <code class="font-mono">heym_files.out_dir()</code> are saved to Drive.
       </p>
     </div>
 

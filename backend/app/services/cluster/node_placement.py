@@ -27,7 +27,7 @@ NODE_PLACEMENT: dict[str, Placement] = {
     "bigquery": _ANY,
     "chartOutput": _ANY,
     "clickhouse": _ANY,
-    "code": _ANY,
+    "code": _ANY,  # narrowed to MAIN_ONLY by _code_placement when codeFiles is set
     "codex": _MAIN,
     "condition": _ANY,
     "consoleLog": _ANY,
@@ -96,12 +96,28 @@ def _agent_placement(data: dict) -> Placement:
 
     Skill code reads and writes Heym Drive through _load_skill_drive_files /
     _persist_skill_files in llm_service.py. Python tools, MCP tools and
-    sub-workflow tools have no local file dependency.
+    sub-workflow tools have no local file dependency. The file sandbox turns on
+    only for a Drive file whose content is on this instance, and the nodes that
+    put Drive files into a run (upload trigger, drive, googleDrive, converter,
+    code with codeFiles) already pin it to the main instance.
     """
-    return _MAIN if (data.get("skills") or []) else _ANY
+    if data.get("skills"):
+        return _MAIN
+    return _ANY
 
 
-_CONDITIONAL: dict[str, Callable[[dict], Placement]] = {"agent": _agent_placement}
+def _code_placement(data: dict) -> Placement:
+    """A Code node pins the run only when it reads Drive files (``codeFiles``)."""
+    files = data.get("codeFiles")
+    if isinstance(files, list):
+        return _MAIN if files else _ANY
+    return _MAIN if str(files or "").strip() else _ANY
+
+
+_CONDITIONAL: dict[str, Callable[[dict], Placement]] = {
+    "agent": _agent_placement,
+    "code": _code_placement,
+}
 
 
 def node_placement(node: dict) -> Placement:

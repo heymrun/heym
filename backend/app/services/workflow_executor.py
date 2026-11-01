@@ -61,6 +61,8 @@ from app.services.expression_evaluator import (
 from app.services.expression_evaluator import (
     is_top_level_ternary_expression as _is_top_level_ternary_expression,
 )
+from app.services.file_sandbox.scope import RunFileScope
+from app.services.file_sandbox.tools import FileToolbox
 from app.services.highlight.highlight_builder import build_highlight_payload
 from app.services.llm_trace import LLMTraceContext
 from app.services.model_router import ModelRouterConfigError, build_router_for_credential
@@ -2030,6 +2032,9 @@ def _restore_sub_workflow_executions(executions: list[dict] | None) -> list[SubW
 
 
 class WorkflowExecutor:
+    # Drive files this run may open in the file sandbox; a sub-workflow keeps its parent's.
+    file_scope = RunFileScope()
+
     def __init__(
         self,
         nodes: list[dict],
@@ -2055,6 +2060,7 @@ class WorkflowExecutor:
         execution_id: str = "",
         node_pool: ThreadPoolExecutor | None = None,
         llm_session_id: str | None = None,
+        file_scope: RunFileScope | None = None,
     ) -> None:
         self.nodes = {node["id"]: node for node in nodes}
         self._node_pool = node_pool or _SHARED_EXECUTOR
@@ -2078,6 +2084,7 @@ class WorkflowExecutor:
         self.credentials_context = credentials_context or {}
         self.global_variables_context = global_variables_context or {}
         self.workflow_id = workflow_id
+        self.file_scope = (file_scope or RunFileScope()).including_workflow(workflow_id)
         self.workflow_name = workflow_name
         self.workflow_description = workflow_description
         self.execution_id = execution_id
@@ -4148,6 +4155,7 @@ class WorkflowExecutor:
                 execution_id=str(_sub_execution_id),
                 llm_session_id=self.llm_session_id,
                 node_pool=self._node_pool,
+                file_scope=self.file_scope,
             )
             enriched_inputs = {
                 "headers": {},
@@ -5035,7 +5043,42 @@ class WorkflowExecutor:
         node_data: dict,
         guardrails_config: dict | None = None,
     ) -> dict:
-        """Execute agent node with optional tool calling."""
+        """Execute agent node with optional tool calling.
+
+        When the input or resolved prompt carries a file of this run (uploaded to the workflow
+        or written by its nodes), the agent gets the file sandbox tools for those files and a
+        workspace that lives for this one execution.
+        """
+        from app.services.file_sandbox.detect import agent_input_toolbox
+
+        resolved_prompts = tuple(
+            self._resolve_template(str(node_data.get(key) or ""), inputs, node_id or "")
+            for key in ("userMessage", "systemInstruction")
+        )
+        toolbox = agent_input_toolbox(
+            (self._visible_inputs(inputs), *resolved_prompts),
+            self.actor_user_id,
+            scope=self.file_scope,
+            source_label=str(node_data.get("label") or "Agent"),
+            workflow_id=self.workflow_id,
+        )
+        if toolbox is None:
+            return self._run_agent_node(node_id, inputs, node_data, guardrails_config)
+        try:
+            return self._run_agent_node(
+                node_id, inputs, node_data, guardrails_config, file_toolbox=toolbox
+            )
+        finally:
+            toolbox.workspace.delete()
+
+    def _run_agent_node(
+        self,
+        node_id: str | None,
+        inputs: dict,
+        node_data: dict,
+        guardrails_config: dict | None = None,
+        file_toolbox: FileToolbox | None = None,
+    ) -> dict:
         combined_input = ""
         for data in self._visible_inputs(inputs).values():
             if isinstance(data, dict) and "text" in data:
@@ -5513,6 +5556,16 @@ class WorkflowExecutor:
                 system_instruction = f"{system_instruction}\n\n{mcp_hint}"
             else:
                 system_instruction = mcp_hint
+
+        if file_toolbox is not None:
+            from app.services.file_sandbox.instructions import agent_file_instructions
+            from app.services.file_sandbox.tools import agent_tool_defs
+
+            merged_tools.extend(agent_tool_defs(file_toolbox))
+            file_rules = agent_file_instructions(file_toolbox.input_files)
+            system_instruction = (
+                f"{system_instruction}\n\n{file_rules}" if system_instruction else file_rules
+            )
 
         is_orchestrator = bool(node_data.get("isOrchestrator", False))
         sub_agent_labels = node_data.get("subAgentLabels") or []
@@ -8243,6 +8296,7 @@ def execute_workflow(
     workflow_description: str = "",
     execution_id: str = "",
     llm_session_id: str | None = None,
+    file_scope: RunFileScope | None = None,
 ) -> ExecutionResult:
     executor = WorkflowExecutor(
         nodes,
@@ -8263,6 +8317,7 @@ def execute_workflow(
         workflow_description=workflow_description,
         execution_id=execution_id,
         llm_session_id=llm_session_id,
+        file_scope=file_scope,
     )
     try:
         result = executor.execute(workflow_id, inputs)

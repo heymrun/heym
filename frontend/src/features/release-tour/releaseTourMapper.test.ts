@@ -381,10 +381,11 @@ describe("shipped release registry", () => {
     const catalog = buildReleaseTourCatalog(RELEASE_REGISTRY);
 
     expect(catalog?.slides.map((slide) => slide.id)).toEqual([
+      "file-analysis",
+      "planning-widgets",
       "a2a-agent",
       "agent-suite",
       "chat-evals",
-      "concurrency-limit",
     ]);
   });
 
@@ -397,7 +398,7 @@ describe("shipped release registry", () => {
       section.tour ? [section.tour] : [],
     );
 
-    expect(tours.map((tour) => tour.tourVisual)).toContain("concurrency-limit");
+    expect(tours.map((tour) => tour.tourVisual)).toContain("file-analysis");
     expect(tours.map((tour) => tour.tourVisual)).toContain("planning-widgets");
     expect(tours.map((tour) => tour.tourVisual)).toContain("agent-suite");
     expect(tours.map((tour) => tour.tourVisual)).toContain("chat-evals");

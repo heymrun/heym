@@ -3,8 +3,9 @@ import { defineStore } from "pinia";
 
 import type { Conversation, ConversationDetail, ContextUsage, EvalSuitePreview, Message, QueuedMessage, ToolCall, WorkflowPreview } from "@/types/chat";
 import type { FileAttachmentPayload } from "@/services/api";
+import { DRIVE_ATTACHMENT_MARKER } from "@/lib/chatAttachment";
 import { CHAT_CONTEXT_HEADER } from "@/lib/chatContext";
-import { applyChatLiveEvent } from "@/lib/chatLive";
+import { applyChatLiveEvent, visibleDraft } from "@/lib/chatLive";
 import { mergeEvalSuite } from "@/lib/evalSuitePreview";
 import { chatApi } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
@@ -486,6 +487,7 @@ export const useChatStore = defineStore("chat", () => {
         },
         (payload) => {
           const current = getStreamState(conversationId);
+          const narration = visibleDraft(current.draft).trim();
           _setStreamState(conversationId, {
             messageId: payload.messageId ?? current.messageId,
             toolCalls: [
@@ -496,6 +498,7 @@ export const useChatStore = defineStore("chat", () => {
                 label: payload.label,
                 args: payload.args,
                 status: "running",
+                ...(narration ? { narration } : {}),
               },
             ],
             draft: "",
@@ -716,7 +719,7 @@ export const useChatStore = defineStore("chat", () => {
   }
 
   function _titleFromContent(content: string): string {
-    const cutIndexes = ["\n\n[ATTACHED FILE:", `\n\n${CHAT_CONTEXT_HEADER}`]
+    const cutIndexes = ["\n\n[ATTACHED FILE:", DRIVE_ATTACHMENT_MARKER, `\n\n${CHAT_CONTEXT_HEADER}`]
       .map((marker) => content.indexOf(marker))
       .filter((index) => index !== -1);
     const cutIdx = cutIndexes.length > 0 ? Math.min(...cutIndexes) : -1;

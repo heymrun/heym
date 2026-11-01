@@ -38,6 +38,7 @@ You can also start a conversation from the chat box on the [Workflows tab](./wor
 - **Where runs fail and why they are slow** – Ask where your workflows fail or why they are slow and Chat names the workflows that ran most, failed most and are slowest, and the node types that take the most time (average per call and total), fail most and run most, the same numbers as the [Analytics](./analytics-tab.md) tab. Node types are counted for runs from the release that added node analytics. Ask about the last hour, 3 or 6 hours, 24 hours, 7 or 30 days, or all time; the hour windows start on the hour, so "the last hour" at 15:20 covers 14:00 until now.
 - **Live run status** – Ask what is running right now and Chat answers with the count, the workflow names, how long each run has been going, which node it is on, and a link straight to the live run
 - **Run context chips** – **Ask AI** in [Execution History](../reference/execution-history.md#ask-ai) opens a new conversation with the selected workflow run attached as chips. See [Asking About a Run](#asking-about-a-run)
+- **Files** – Attach a PDF, spreadsheet, DOCX, CSV or JSON file, or name one already in Drive. The file is stored in your [Drive](../reference/drive.md) and Chat opens it in an isolated sandbox: it inspects the structure first and reads only the part your question needs, so large files never fill the context. See [Working with Files](#working-with-files)
 
 ## Using Chat from an MCP Client
 
@@ -72,6 +73,16 @@ Each step appears as a row in the conversation: **Saving the workflow**, **Testi
 Follow-up feedback in the same chat changes that workflow instead of creating another one. For example, after Chat creates a workflow you can say "add an approval step" or "change the output format", and Chat saves, tests and fixes it again. Chat can also change an existing workflow you name, as long as you can edit it.
 
 This is best for requests where you want the work done as a reusable automation, not just a one-off answer.
+
+## Working with Files
+
+Drop a file on the composer or use the paperclip. Documents (PDF, XLSX, XLS, CSV, TSV, DOCX, JSON, TXT, MD) go to your Drive with the source **Chat**, and the message carries only the file's name and id. Images and skill zips are attached as before.
+
+Chat answers file questions with [File Analysis](../reference/file-analysis.md): it calls `inspect_file` for the type, structure and a short sample, then `run_python` for the specific operation, such as "take the Total field on the Summary sheet and add the value from the last page". Results come back as tables or short extracts, and files Chat creates (xlsx, csv, json) are saved to Drive with a link.
+
+Each conversation keeps a working folder, so follow-ups reuse what was already read and computed. It is deleted when you delete the conversation, when you ask Chat to clear it, or after 30 days without use.
+
+When you ask Chat to build a workflow around a file, it inspects the real file first so the workflow uses the right sheet, column and page names, then tests the workflow with that file.
 
 ## Creating Kanban Tasks
 
@@ -164,6 +175,7 @@ The editor's AI Assistant does not create suites.
 - [Variables Tab](./global-variables-tab.md) – Global variables available to Chat
 - [Node Types](../reference/node-types.md) – LLM and Agent nodes for workflows
 - [Agent Node](../nodes/agent-node.md) – AI Agent with tool calling
+- [File Analysis](../reference/file-analysis.md) – How Chat and workflows open large files in an isolated sandbox
 - [AI Assistant](../reference/ai-assistant.md) – Editor assistant powered by the same workflow builder DSL
 - [Execution History](../reference/execution-history.md) – View past runs (History button in header)
 - [Scheduled Tab](./scheduled-tab.md) – Calendar of upcoming cron runs (same data Chat can summarize)

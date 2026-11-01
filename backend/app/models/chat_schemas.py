@@ -53,6 +53,8 @@ class ToolCallRecord(BaseModel):
     response_summary: str | None = None
     elapsed_ms: float | None = None
     status: ToolCallStatus
+    # What the model wrote in the same round before this call; shown above it.
+    narration: str | None = None
 
 
 class MessageResponse(BaseModel):
@@ -98,8 +100,12 @@ class ConversationDetailResponse(BaseModel):
 
 class ChatFileAttachment(BaseModel):
     name: str
-    kind: Literal["text", "image", "pdf", "zip"]
-    content: str
+    kind: Literal["text", "image", "pdf", "zip", "file"]
+    content: str = ""
+    # kind "file": a Drive file id. The server checks access and fills name, size and mime.
+    file_id: uuid.UUID | None = None
+    size: int | None = None
+    mime: str | None = None
 
 
 class MessageCreate(BaseModel):
