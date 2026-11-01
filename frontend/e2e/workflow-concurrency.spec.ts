@@ -17,7 +17,8 @@ const WAIT_NODES = [
     id: "wait",
     type: "wait",
     position: { x: 340, y: 160 },
-    data: { label: "pause", duration: 5000 },
+    // Holds the slot until History has opened, even on a slow CI runner (seen at ~6 s).
+    data: { label: "pause", duration: 15000 },
   },
   {
     id: "out",
@@ -116,7 +117,7 @@ test("a second production run waits in the queue and shows in History", async ({
           const status = await page.request.get(new URL(body.status_url).pathname);
           return ((await status.json()) as { status: string }).status;
         },
-        { timeout: 30_000 },
+        { timeout: 45_000 },
       )
       .toBe("success");
 
