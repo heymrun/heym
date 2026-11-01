@@ -37,6 +37,16 @@ class NodePlacementTests(unittest.TestCase):
         node = {"type": "agent", "data": {"skills": [{"name": "report"}]}}
         self.assertEqual(node_placement(node), Placement.MAIN_ONLY)
 
+    def test_code_node_reading_drive_files_is_pinned_to_main(self) -> None:
+        for files in ("$Upload.file.id", ["a"]):
+            node = {"type": "code", "data": {"codeFiles": files}}
+            self.assertEqual(node_placement(node), Placement.MAIN_ONLY)
+
+    def test_code_node_with_blank_files_runs_anywhere(self) -> None:
+        for files in ("", "   ", [], None):
+            node = {"type": "code", "data": {"codeFiles": files}}
+            self.assertEqual(node_placement(node), Placement.ANYWHERE)
+
     def test_unknown_node_type_is_pinned_to_main(self) -> None:
         self.assertEqual(node_placement({"type": "acmePlugin", "data": {}}), Placement.MAIN_ONLY)
 

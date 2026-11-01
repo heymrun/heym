@@ -388,6 +388,7 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
       codeRequirements: "",
       codeParameters: '{\n  "name": "Heym"\n}',
       codeAllowNetwork: false,
+      codeFiles: "",
     },
   },
   jsonOutputMapper: {

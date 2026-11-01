@@ -355,6 +355,12 @@ Optional **per-agent-node** knowledge graph stored in the database. When enabled
 
 Use the pink **brain** control on the node (when memory is on or the model row is shown) to open the graph editor and optional **memory sharing** (other workflows/agents). Full behavior, REST paths, and JSON export details: [Agent Persistent Memory](../reference/agent-persistent-memory.md).
 
+## File analysis
+
+File analysis turns on by itself. When the agent's input or its resolved message carries a file of the run (a PDF, spreadsheet, CSV, DOCX, JSON or text file uploaded through the workflow's File Upload trigger or written by one of its nodes), the agent opens it in an isolated Python sandbox with no network. It gets `list_files`, `inspect_file` and `run_python` for those files in that run: it inspects the file first and then reads only what the task needs, instead of receiving the whole file. Files it writes to `heym_files.out_dir()` are saved to Drive and listed in the agent's `_generated_files`.
+
+Pass the file in the message, for example `Summarize the risks in $Upload.file.id`. The agent opens only the files its input carried; other Drive files stay closed to it, whatever id a message contains. See [File Analysis](../reference/file-analysis.md) for the tools, limits and security model.
+
 ## Responses API and reasoning continuity
 
 A **Use Responses API** checkbox routes the agent's model calls through the

@@ -140,6 +140,7 @@ export const DOCS_MANIFEST: Record<string, DocCategory> = {
       { slug: "download-import", title: "Download & Import" },
       { slug: "portal", title: "Portal" },
       { slug: "file-generation", title: "File Generation" },
+      { slug: "file-analysis", title: "File Analysis" },
       { slug: "drive", title: "Drive" },
       { slug: "security", title: "Security" },
       { slug: "sso", title: "Single Sign-On" },

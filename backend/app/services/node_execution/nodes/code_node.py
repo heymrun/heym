@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import re
+import uuid
 
 from app.services.code_python_executor import execute_code
 from app.services.node_execution.base import NodeExecutionContext
@@ -57,6 +59,36 @@ def _resolve_parameters(ctx: NodeExecutionContext) -> dict:
     return resolved
 
 
+def _file_ids(value: object) -> list[str]:
+    """Normalize a resolved Files value: an id, ids separated by commas or lines, a list,
+    or objects with an ``id`` (a Drive file, ``$Upload.file``)."""
+    if isinstance(value, dict):
+        value = value.get("id") or value.get("file_id") or ""
+    if isinstance(value, list):
+        ids: list[str] = []
+        for item in value:
+            ids.extend(_file_ids(item))
+        return list(dict.fromkeys(ids))
+    text = str(value or "")
+    return list(dict.fromkeys(part.strip() for part in re.split(r"[,\n]", text) if part.strip()))
+
+
+def _resolve_file_refs(ctx: NodeExecutionContext) -> list[str]:
+    raw = ctx.node_data.get("codeFiles")
+    if isinstance(raw, list):
+        return _file_ids(raw)
+    if not isinstance(raw, str) or not raw.strip():
+        return []
+    return _file_ids(_resolve_value(ctx, raw.strip()))
+
+
+def _workflow_uuid(ctx: NodeExecutionContext) -> uuid.UUID | None:
+    try:
+        return uuid.UUID(str(ctx.executor.workflow_id)) if ctx.executor.workflow_id else None
+    except ValueError:
+        return None
+
+
 def execute(ctx: NodeExecutionContext) -> object:
     """Execute the code node."""
     code = str(ctx.node_data.get("codeSource") or "")
@@ -66,6 +98,36 @@ def execute(ctx: NodeExecutionContext) -> object:
     requirements = str(ctx.node_data.get("codeRequirements") or "")
     allow_network = bool(ctx.node_data.get("codeAllowNetwork", False))
     params = _resolve_parameters(ctx)
+
+    file_refs = _resolve_file_refs(ctx)
+    if file_refs:
+        from app.services.file_sandbox.code_node import execute_code_with_files
+
+        actor_id = ctx.executor._require_actor_user_id("Code node files")
+        with_files = execute_code_with_files(
+            code=code,
+            requirements=requirements,
+            params=params,
+            allow_network=allow_network,
+            file_refs=file_refs,
+            actor_id=actor_id,
+            scope=ctx.executor.file_scope,
+            workflow_id=_workflow_uuid(ctx),
+            source_label=str(ctx.node_label or "code"),
+        )
+        output: dict = {
+            "result": with_files.result,
+            "logs": with_files.logs,
+            "install": {
+                "ok": True,
+                "tool": with_files.install_tool,
+                "log": with_files.install_log,
+            },
+            "files": with_files.files,
+        }
+        if with_files.rejected_files:
+            output["rejected_files"] = with_files.rejected_files
+        return output
 
     outcome = execute_code(
         code=code,

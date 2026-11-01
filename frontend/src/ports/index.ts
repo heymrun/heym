@@ -100,6 +100,25 @@ export interface CredentialsPort {
 
 export const credentialsPortKey: InjectionKey<CredentialsPort> = Symbol("credentialsPort");
 
+/** A document a chat attaches by reference, after the host stored it. */
+export interface ChatUploadedFile {
+  id: string;
+  name: string;
+  mime: string;
+  size: number;
+}
+
+/**
+ * Where the chat composer puts document attachments (PDF, spreadsheets, DOCX, CSV, JSON) so the
+ * chat opens them in the file sandbox instead of pasting them into the message. Heym uploads to
+ * Drive. `upload` rejects with an Error whose message can be shown as is.
+ */
+export interface ChatFilesPort {
+  upload: (file: File) => Promise<ChatUploadedFile>;
+}
+
+export const chatFilesPortKey: InjectionKey<ChatFilesPort> = Symbol("chatFilesPort");
+
 /** Returns the host's implementation of a port; throws when the host did not provide one. */
 export function usePort<T>(key: InjectionKey<T>): T {
   const port = inject(key, null);

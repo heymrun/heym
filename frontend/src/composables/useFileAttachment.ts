@@ -1,41 +1,56 @@
-import { ref } from "vue";
+import { inject, ref } from "vue";
+
+import { chatFilesPortKey, type ChatFilesPort } from "@/ports";
+import type { FileAttachmentPayload } from "@/types/chat";
 
 export interface AttachedFile {
   name: string;
-  kind: "text" | "image" | "pdf" | "zip";
+  kind: "text" | "image" | "pdf" | "zip" | "file";
   mimeType: string;
   content: string;
   sizeKb: number;
+  /** kind "file": the Drive file the chat opens in the file sandbox. */
+  fileId?: string;
 }
 
-const TEXT_EXTENSIONS = new Set([
-  "txt",
+/** Documents go to Drive and are opened in the file sandbox, never pasted into the chat. */
+const DRIVE_EXTENSIONS = new Set([
+  "pdf",
+  "xlsx",
+  "xlsm",
+  "xls",
   "csv",
+  "tsv",
+  "docx",
   "json",
+  "jsonl",
+  "txt",
   "md",
-  "py",
-  "ts",
-  "js",
-  "html",
-  "xml",
-  "yaml",
-  "yml",
-  "log",
 ]);
+const TEXT_EXTENSIONS = new Set(["py", "ts", "js", "html", "xml", "yaml", "yml", "log"]);
 const IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
 const MAX_TEXT_BYTES = 500 * 1024;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
-const MAX_PDF_BYTES = 5 * 1024 * 1024;
 const MAX_ZIP_BYTES = 8 * 1024 * 1024;
 const MAX_CONTENT_CHARS = 100_000;
 
-function detectKind(file: File): "text" | "image" | "pdf" | "zip" | null {
+export const ATTACHMENT_ACCEPT = [
+  ...[...DRIVE_EXTENSIONS, ...TEXT_EXTENSIONS].map((ext) => `.${ext}`),
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".gif",
+  ".webp",
+  ".zip",
+].join(",");
+
+function detectKind(file: File): AttachedFile["kind"] | null {
   const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
   if (ext === "zip" || file.type === "application/zip" || file.type === "application/x-zip-compressed") {
     return "zip";
   }
-  if (file.type === "application/pdf") return "pdf";
   if (IMAGE_MIME_TYPES.has(file.type)) return "image";
+  if (DRIVE_EXTENSIONS.has(ext) || file.type === "application/pdf") return "file";
   if (TEXT_EXTENSIONS.has(ext)) return "text";
   return null;
 }
@@ -58,30 +73,21 @@ function readFileAsDataURL(file: File): Promise<string> {
   });
 }
 
-async function extractPdfText(file: File): Promise<string> {
-  const { getDocument, GlobalWorkerOptions } = await import("pdfjs-dist");
-  GlobalWorkerOptions.workerSrc = new URL(
-    "pdfjs-dist/build/pdf.worker.min.mjs",
-    import.meta.url,
-  ).href;
-  const buffer = await file.arrayBuffer();
-  const pdf = await getDocument({ data: buffer }).promise;
-  const pages: string[] = [];
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const page = await pdf.getPage(i);
-    const textContent = await page.getTextContent();
-    const pageText = textContent.items
-      .map((item: Record<string, unknown>) =>
-        typeof item["str"] === "string" ? item["str"] : "",
-      )
-      .join(" ");
-    pages.push(pageText);
+/** The request body for an attachment: a Drive reference, or inline content. */
+export function toAttachmentPayload(file: AttachedFile): FileAttachmentPayload {
+  if (file.kind === "file") {
+    return { name: file.name, kind: "file", content: "", file_id: file.fileId };
   }
-  const full = pages.join("\n");
-  return full.length > MAX_CONTENT_CHARS ? full.slice(0, MAX_CONTENT_CHARS) : full;
+  return { name: file.name, kind: file.kind, content: file.content };
 }
 
-export function useFileAttachment() {
+/**
+ * `chatFiles` defaults to the host's port and is optional, so a host without document uploads
+ * still takes text, images and zips.
+ */
+export function useFileAttachment(
+  chatFiles: ChatFilesPort | null = inject(chatFilesPortKey, null),
+) {
   const attachedFile = ref<AttachedFile | null>(null);
   const attachmentError = ref<string | null>(null);
   const attachmentLoading = ref(false);
@@ -89,18 +95,19 @@ export function useFileAttachment() {
   async function processFile(file: File): Promise<void> {
     attachmentError.value = null;
     const kind = detectKind(file);
-    if (!kind) {
+    if (!kind || (kind === "file" && chatFiles === null)) {
       attachmentError.value = "Unsupported file type";
       return;
     }
+    // Drive enforces its own upload limit and answers with the reason.
     const maxBytes =
       kind === "image"
         ? MAX_IMAGE_BYTES
-        : kind === "pdf"
-          ? MAX_PDF_BYTES
-          : kind === "zip"
-            ? MAX_ZIP_BYTES
-            : MAX_TEXT_BYTES;
+        : kind === "zip"
+          ? MAX_ZIP_BYTES
+          : kind === "text"
+            ? MAX_TEXT_BYTES
+            : Number.POSITIVE_INFINITY;
     if (file.size > maxBytes) {
       const maxMb = maxBytes / (1024 * 1024);
       attachmentError.value = `File too large (max ${maxMb} MB)`;
@@ -109,11 +116,21 @@ export function useFileAttachment() {
 
     attachmentLoading.value = true;
     try {
+      if (kind === "file" && chatFiles !== null) {
+        const stored = await chatFiles.upload(file);
+        attachedFile.value = {
+          name: stored.name,
+          kind,
+          mimeType: stored.mime,
+          content: "",
+          sizeKb: Math.round(stored.size / 1024),
+          fileId: stored.id,
+        };
+        return;
+      }
       let content: string;
       if (kind === "image" || kind === "zip") {
         content = await readFileAsDataURL(file);
-      } else if (kind === "pdf") {
-        content = await extractPdfText(file);
       } else {
         content = await readFileAsText(file);
         if (content.length > MAX_CONTENT_CHARS) {
@@ -127,8 +144,9 @@ export function useFileAttachment() {
         content,
         sizeKb: Math.round(file.size / 1024),
       };
-    } catch {
-      attachmentError.value = kind === "pdf" ? "Could not read PDF" : "Failed to read file";
+    } catch (error: unknown) {
+      attachmentError.value =
+        kind === "file" && error instanceof Error ? error.message : "Failed to read file";
     } finally {
       attachmentLoading.value = false;
     }

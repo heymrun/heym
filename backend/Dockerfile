@@ -92,6 +92,12 @@ ENV TZ=Europe/Berlin
 
 RUN pip install uv
 
+# The file-analysis sandbox runs this image's system Python (not the venv) with no
+# network, so its libraries are baked in here.
+COPY docker/sandbox-requirements.txt /tmp/sandbox-requirements.txt
+RUN uv pip install --system --no-cache -r /tmp/sandbox-requirements.txt \
+    && rm /tmp/sandbox-requirements.txt
+
 ARG APP_VERSION
 ENV APP_VERSION=${APP_VERSION}
 

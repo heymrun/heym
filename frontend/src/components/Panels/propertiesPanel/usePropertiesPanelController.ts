@@ -86,6 +86,7 @@ import {
   s3OperationOptions,
   supabaseOperationOptions,
 } from "./operationOptions";
+import { useCodeExpressionFields } from "./nodes/codeExpressionFields";
 import { randomUUID } from "@/lib/uuid";
 
 interface ExpandableFieldRef {
@@ -601,6 +602,8 @@ export function usePropertiesPanelController() {
   const crawlerUrlInputRef = ref<ExpandableFieldRef | null>(null);
   const consoleLogMessageInputRef = ref<ExpandableFieldRef | null>(null);
   const codeParametersInputRef = ref<ExpandableFieldRef | null>(null);
+  const codeExpressionFields = useCodeExpressionFields(codeParametersInputRef);
+  const codeFilesInputRef = codeExpressionFields.filesRef;
   type ConverterExpressionFieldKey = "source" | "converterFileId" | "ocrPageRange";
 
   interface ConverterExpressionField {
@@ -2183,7 +2186,7 @@ export function usePropertiesPanelController() {
     rabbitmqMessageBodyInputRef.value?.closeExpandDialog();
     crawlerUrlInputRef.value?.closeExpandDialog();
     consoleLogMessageInputRef.value?.closeExpandDialog();
-    codeParametersInputRef.value?.closeExpandDialog();
+    codeExpressionFields.closeAll();
     closeConverterExpressionDialogs();
     closeHeymExpressionDialogs();
     switchExpressionInputRef.value?.closeExpandDialog();
@@ -2834,7 +2837,7 @@ export function usePropertiesPanelController() {
       const tryOpenDialog = (attempts = 0): void => {
         if (attempts > 20) return;
         if (codeParametersInputRef.value) {
-          nextTick(() => codeParametersInputRef.value?.openExpandDialog());
+          nextTick(() => codeExpressionFields.openAt(0));
         } else {
           setTimeout(() => tryOpenDialog(attempts + 1), 100);
         }
@@ -9293,6 +9296,8 @@ export function usePropertiesPanelController() {
     crawlerUrlInputRef,
     consoleLogMessageInputRef,
     codeParametersInputRef,
+    codeFilesInputRef,
+    codeExpressionFields,
     converterExpressionFieldCount,
     converterExpressionFieldIndex,
     setConverterExpressionInputRef,

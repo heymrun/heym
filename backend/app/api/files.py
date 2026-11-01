@@ -4,8 +4,19 @@ import base64
 import io
 import uuid
 import zipfile
+from typing import Literal
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+    status,
+)
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -328,10 +339,11 @@ async def upload_file(
     request: Request,
     file: UploadFile = File(...),
     share_with_my_teams: bool = Form(False),
+    source: Literal["manual", "chat"] = Query("manual"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> GeneratedFileResponse:
-    """Upload a file manually to Drive."""
+    """Upload a file manually to Drive, or as a Chat attachment (``source=chat``)."""
     base_url = build_public_base_url(request)
     file_bytes = await read_upload_file_limited(file)
     try:
@@ -341,7 +353,7 @@ async def upload_file(
             file_bytes=file_bytes,
             filename=file.filename or "upload",
             mime_type=file.content_type,
-            source_node_label="manual upload",
+            source_node_label="Chat" if source == "chat" else "manual upload",
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

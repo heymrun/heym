@@ -52,7 +52,12 @@ import { markdownToPlainText, renderMarkdown } from "@/lib/markdown";
 import { aiApi } from "@/services/api";
 import { useChatModelSelection } from "@/composables/useChatModelSelection";
 import { useDictation } from "@/composables/useDictation";
-import { useFileAttachment } from "@/composables/useFileAttachment";
+import { splitDriveAttachment } from "@/lib/chatAttachment";
+import {
+  ATTACHMENT_ACCEPT,
+  toAttachmentPayload,
+  useFileAttachment,
+} from "@/composables/useFileAttachment";
 import type { AttachedFile } from "@/composables/useFileAttachment";
 import { useQuickPrompts } from "@/composables/useQuickPrompts";
 import { useThinkingWord } from "@/composables/useThinkingWord";
@@ -215,7 +220,13 @@ const userMessageParts = computed(() => {
 });
 
 function messageText(msg: Message): string {
-  return userMessageParts.value.get(msg.id)?.text ?? msg.content;
+  const text = userMessageParts.value.get(msg.id)?.text ?? msg.content;
+  return msg.role === "user" ? splitDriveAttachment(text).text : text;
+}
+
+function messageAttachmentName(msg: Message): string | null {
+  if (msg.attachmentName) return msg.attachmentName;
+  return msg.role === "user" ? splitDriveAttachment(msg.content).name : null;
 }
 
 function messageContextItems(msg: Message): ChatContextItem[] {
@@ -778,13 +789,7 @@ async function send(): Promise<void> {
     content,
     selectedCredentialId.value,
     selectedModel.value,
-    payloadAttachment
-      ? {
-          name: payloadAttachment.name,
-          kind: payloadAttachment.kind,
-          content: payloadAttachment.content,
-        }
-      : null,
+    payloadAttachment ? toAttachmentPayload(payloadAttachment) : null,
   );
   focusInputWhenReady();
 }
@@ -1027,11 +1032,20 @@ onUnmounted(() => {
               v-if="msg.role === 'assistant' && msg.tool_calls && msg.tool_calls.length > 0"
               class="mb-2 flex flex-col gap-1.5"
             >
-              <ChatToolCall
+              <template
                 v-for="tc in msg.tool_calls"
                 :key="tc.id"
-                :tool-call="tc"
-              />
+              >
+                <!-- eslint-disable vue/no-v-html -->
+                <div
+                  v-if="tc.narration"
+                  class="chat-markdown my-1"
+                  data-testid="chat-tool-narration"
+                  v-html="renderMarkdown(tc.narration)"
+                />
+                <!-- eslint-enable vue/no-v-html -->
+                <ChatToolCall :tool-call="tc" />
+              </template>
             </div>
             <!-- eslint-disable vue/no-v-html -->
             <div
@@ -1127,11 +1141,11 @@ onUnmounted(() => {
               :suites="msg.evalSuites"
             />
             <div
-              v-if="msg.attachmentName"
+              v-if="messageAttachmentName(msg)"
               class="mt-1.5 flex items-center gap-1 text-xs opacity-70"
             >
               <Paperclip class="w-3 h-3 shrink-0" />
-              <span class="truncate">{{ msg.attachmentName }}</span>
+              <span class="truncate">{{ messageAttachmentName(msg) }}</span>
             </div>
           </div>
 
@@ -1161,11 +1175,20 @@ onUnmounted(() => {
               v-if="streamState.toolCalls.length > 0"
               class="mb-3 flex flex-col gap-1.5"
             >
-              <ChatToolCall
+              <template
                 v-for="tc in streamState.toolCalls"
                 :key="tc.id"
-                :tool-call="tc"
-              />
+              >
+                <!-- eslint-disable vue/no-v-html -->
+                <div
+                  v-if="tc.narration"
+                  class="chat-markdown my-1"
+                  data-testid="chat-tool-narration"
+                  v-html="renderMarkdown(tc.narration)"
+                />
+                <!-- eslint-enable vue/no-v-html -->
+                <ChatToolCall :tool-call="tc" />
+              </template>
             </div>
             <!-- eslint-disable vue/no-v-html -->
             <div
@@ -1332,7 +1355,7 @@ onUnmounted(() => {
       <input
         ref="fileInputRef"
         type="file"
-        accept=".txt,.csv,.json,.md,.py,.ts,.js,.html,.xml,.yaml,.yml,.log,.jpg,.jpeg,.png,.gif,.webp,.pdf,.zip"
+        :accept="ATTACHMENT_ACCEPT"
         class="hidden"
         @change="handleFileInputChange"
       >

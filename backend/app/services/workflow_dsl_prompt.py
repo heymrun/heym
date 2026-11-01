@@ -806,6 +806,7 @@ The response includes `$llmNodeLabel.image` (base64 data URL) which can be used 
   - `tools`: Array of Python tool definitions (optional, empty array = no Python tools)
   - `mcpConnections`: Array of MCP server connections (optional). Each connection exposes tools from an MCP server.
   - `skills`: Array of skill bundles (optional). Each skill has `name`, `content`, optional `files`, optional `timeoutSeconds`, and optional `driveFilesEnabled` (default false). Set `driveFilesEnabled: true` only when that skill must read Heym Drive files by id or filename at runtime.
+  - File analysis is automatic, there is no field for it: when the agent's input or its resolved `userMessage`/`systemInstruction` carries the id of a file that came into this workflow (uploaded through its `fileUploadTrigger` or written by its nodes; PDF, XLSX/XLS, CSV/TSV, DOCX, JSON/JSONL, TXT/MD), the agent gets `list_files`, `inspect_file` and `run_python` for those files in that run. It opens them inside an isolated, network-less Python sandbox with pandas, openpyxl, pdfplumber, pypdf and python-docx, inspects their structure first and extracts only what it needs, without putting the whole file in context. Other Drive files stay closed to it. Files it writes to `heym_files.out_dir()` are saved to Drive. For open-ended questions about PDFs, spreadsheets, CSVs, DOCX or JSON that vary from run to run, pass the file id in `userMessage` (e.g. `"Summarize the risks in file $Upload.file.id"`).
   - `toolTimeoutSeconds`: Timeout per tool execution in seconds (default: 30)
   - `maxToolIterations`: Max tool-call loop iterations (default: 30)
   - `temperature`: Creativity (0.0-2.0, default 0.7)
@@ -1623,7 +1624,8 @@ Access the converted file downstream with `$convertDoc.id` and `$convertDoc.down
   - `codeRequirements`: `requirements.txt` contents, one package per line (e.g. `"requests==2.32.3\\npandas\\n"`). Leave it `""` when the standard library is enough — that skips dependency installation entirely and makes the node much faster.
   - `codeParameters`: A JSON object string wiring workflow data into the code, e.g. `"{\\"name\\": \\"$trigger.body.name\\", \\"rows\\": \\"$fetchRows.result\\"}"`. Expressions are resolved before the code runs. Inside `main`, read them with dot notation: `params.name`, `params.rows[0].id`. Keys that are not valid Python identifiers are read as `params["my key"]`.
   - `codeAllowNetwork`: Boolean, default `false`. When `false` the execution container has no network at all. Set `true` ONLY when the code itself must reach the internet. Dependency installation always has network regardless of this flag.
-- **Output**: `$label.result` is whatever `main` returned. `$label.logs` is the captured `print` output. `$label.install` is `{ok, tool, log}` describing the dependency install.
+  - `codeFiles`: (optional) files of this run to mount read-only: an expression resolving to a file id, a list of ids, or objects with an `id` (e.g. `"$Upload.file.id"`, `"$Upload.file"`). Only files that came into this workflow open: uploaded through its `fileUploadTrigger` or written by its own nodes. Any other Drive file id fails as not found. Inside `main`, `params.files` lists them (`id`, `name`, `mime`, `size`, `path`) and `import heym_files; heym_files.path("<name or id>")` returns a file's path. pandas, openpyxl, xlrd, pdfplumber, pypdf, python-docx and langdetect are preinstalled, so `codeRequirements` can stay `""`. Files written to `heym_files.out_dir()` are saved to Drive and returned in `$label.files`.
+- **Output**: `$label.result` is whatever `main` returned. `$label.logs` is the captured `print` output. `$label.install` is `{ok, tool, log}` describing the dependency install. With `codeFiles`, `$label.files` lists the files the code saved (`id`, `name`, `mime`, `size`, `download_path`).
 
 **Example** (compute a weighted score from upstream rows):
 ```json
@@ -1653,6 +1655,23 @@ Downstream nodes read `$scoreRows.result.total` and `$scoreRows.result.count`.
   }
 }
 ```
+
+**Example** (read one sheet of an uploaded workbook and total a column):
+```json
+{
+  "type": "code",
+  "data": {
+    "label": "totalSales",
+    "codeSource": "import heym_files\nimport pandas as pd\n\ndef main(params):\n    df = pd.read_excel(heym_files.path(params.files[0].id), sheet_name=\"Sales\", usecols=[\"Region\", \"Amount\"])\n    return {\"total\": float(df[\"Amount\"].sum()), \"rows\": len(df)}\n",
+    "codeRequirements": "",
+    "codeParameters": "{}",
+    "codeAllowNetwork": false,
+    "codeFiles": "$Upload.file.id"
+  }
+}
+```
+
+**⚠️ FILES: CODE NODE FOR FIXED EXTRACTION, AGENT FOR OPEN QUESTIONS**: When the same fields are pulled from the same kind of file every run (a sheet's column, a total, a table on a known page), use a `code` node with `codeFiles`. When the question about the document changes or needs judgement, use an `agent` whose `userMessage` carries the file id (file analysis turns on by itself). Start such workflows with a `fileUploadTrigger` and read `$<trigger label>.file.id`: at run time `codeFiles` and agent file tools open only files uploaded to the workflow or written by its nodes, never a Drive id typed into an input or a prompt. Never paste file contents into an `llm` prompt.
 
 **⚠️ `codeSource` MUST NOT CONTAIN BACKTICKS**: The code field is plain Python only. NEVER wrap it in triple backticks or use backticks inside the string. Backticks break workflow JSON extraction, exactly as they do for agent tool `code` (rule 36b).
 

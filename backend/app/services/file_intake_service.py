@@ -1,5 +1,6 @@
 """Mint, validate, and audit single-use file-upload capability slots."""
 
+import copy
 import fnmatch
 import secrets
 import uuid
@@ -42,6 +43,15 @@ def find_file_upload_trigger(nodes: list[dict]) -> dict | None:
         if node.get("type") == "fileUploadTrigger":
             return node
     return None
+
+
+def with_trigger_inputs(nodes: list[dict], node_id: str, initial: dict) -> list[dict]:
+    """A copy of ``nodes`` where the trigger ``node_id`` starts with ``initial``."""
+    cloned = copy.deepcopy(nodes)
+    for node in cloned:
+        if node.get("id") == node_id:
+            node.setdefault("data", {})["_initial_inputs"] = initial
+    return cloned
 
 
 def mint_source_for(trigger_source: str | None, default: str) -> str:

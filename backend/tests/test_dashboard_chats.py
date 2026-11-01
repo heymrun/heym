@@ -775,6 +775,36 @@ class IngestToolEventTests(unittest.TestCase):
         self.assertEqual(bucket[0]["status"], "running")
         self.assertEqual(bucket[0]["args"], {"k": "v"})
 
+    def test_text_between_tool_calls_stays_with_the_next_call(self) -> None:
+        from app.api.chats import _ingest_tool_event, _RoundNarration
+        from app.models.chat_schemas import ToolCallRecord
+
+        narration = _RoundNarration()
+        bucket: list[dict] = []
+        narration.add({"type": "draft", "round": 1, "text": "Checking the "})
+        narration.add({"type": "draft", "round": 1, "text": "file first."})
+        _ingest_tool_event(bucket, {"type": "tool_start", "id": "a"}, narration.take())
+        _ingest_tool_event(bucket, {"type": "tool_start", "id": "b"}, narration.take())
+        narration.add({"type": "draft", "round": 2, "text": "stale"})
+        narration.add({"type": "draft", "round": 3, "text": "Fixing it with `converter`:"})
+        _ingest_tool_event(bucket, {"type": "tool_start", "id": "c"}, narration.take())
+
+        self.assertEqual(bucket[0]["narration"], "Checking the file first.")
+        self.assertNotIn("narration", bucket[1])
+        self.assertEqual(bucket[2]["narration"], "Fixing it with `converter`:")
+        self.assertEqual(
+            ToolCallRecord.model_validate({**bucket[2], "label": ""}).narration,
+            "Fixing it with `converter`:",
+        )
+
+    def test_a_questions_block_is_not_kept_as_narration(self) -> None:
+        from app.api.chats import _RoundNarration
+
+        narration = _RoundNarration()
+        narration.add({"round": 1, "text": "One question:\n```heym-clarify\n{}\n```"})
+        self.assertEqual(narration.take(), "One question:")
+        self.assertEqual(narration.take(), "")
+
     def test_tool_end_updates_matching_entry(self) -> None:
         from app.api.chats import _ingest_tool_event
 

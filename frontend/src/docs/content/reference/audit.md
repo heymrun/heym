@@ -106,9 +106,11 @@ Runs started by a schedule, a trigger node, a queue or an event are not audit li
 | Data tables | `data_table.create` · `update` · `delete` · `clone` · `row_create` · `row_update` · `row_delete` · `rows_clear` · `rows_bulk_create` · `import_csv` · `export_csv` · `share_add` · `share_remove` · `team_share_add` · `team_share_remove` |
 | Dashboards | `dashboard.create` · `update` · `delete` · `widget_create` · `widget_delete` · `share_add` · `share_remove` · `team_share_add` · `team_share_remove` |
 | Boards | `board.create` · `update` · `delete` · `column_create` · `column_update` · `column_delete` · `column_empty` · `card_create` · `card_update` · `card_delete` · `card_move` · `card_run` · `share_add` · `share_remove` · `team_share_add` · `team_share_remove` |
-| Drive | `drive.upload` · `download` · `delete` · `delete_all` · `bulk_delete` · `share_create` · `share_revoke` · `team_sharing_update` · `bulk_team_sharing_update` |
+| Drive | `drive.upload` · `download` · `delete` · `delete_all` · `bulk_delete` · `share_create` · `share_revoke` · `team_sharing_update` · `bulk_team_sharing_update` · `chat_mount` |
 | Teams | `team.create` · `update` · `delete` · `member_add` · `member_remove` |
 | Folders | `folder.create` · `update` · `delete` · `workflow_move` |
+
+`drive.chat_mount` is logged the first time a conversation opens a Drive file in the [file sandbox](./file-analysis.md), with the conversation id and whether the file was shared with the user.
 
 Bulk operations are logged once per request with a count, not once per row. A CSV import of 5,000 rows produces one `data_table.import_csv` line carrying `imported`, `rejected`, and `total`.
 

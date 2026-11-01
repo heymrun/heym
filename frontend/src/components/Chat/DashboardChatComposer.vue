@@ -5,7 +5,11 @@ import { Loader2, Paperclip, Send, X } from "lucide-vue-next";
 
 import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 import { useChatModelSelection } from "@/composables/useChatModelSelection";
-import { useFileAttachment } from "@/composables/useFileAttachment";
+import {
+  ATTACHMENT_ACCEPT,
+  toAttachmentPayload,
+  useFileAttachment,
+} from "@/composables/useFileAttachment";
 import { useAuthStore } from "@/stores/auth";
 import { useChatStore } from "@/stores/chat";
 
@@ -14,8 +18,6 @@ const emit = defineEmits<{
   (event: "open-credentials"): void;
 }>();
 
-const ATTACHMENT_ACCEPT =
-  ".txt,.csv,.json,.md,.py,.ts,.js,.html,.xml,.yaml,.yml,.log,.jpg,.jpeg,.png,.gif,.webp,.pdf,.zip";
 const MAX_INPUT_HEIGHT_PX = 180;
 const PLACEHOLDER_ROTATION_MS = 5000;
 const PROMPT_SUGGESTIONS: string[] = [
@@ -186,7 +188,7 @@ async function submit(): Promise<void> {
       text,
       selectedCredentialId.value,
       selectedModel.value,
-      payload ? { name: payload.name, kind: payload.kind, content: payload.content } : null,
+      payload ? toAttachmentPayload(payload) : null,
     );
     input.value = "";
     clearAttachment();

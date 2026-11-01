@@ -30,6 +30,7 @@ from app.api.ai_assistant import (
     stream_dashboard_chat,
 )
 from app.api.chat_build import ChatBuildSession
+from app.api.chat_files import ChatFileTools
 from app.api.deps import get_current_user, get_current_user_id, get_db
 from app.api.workflows import get_workflow_for_user
 from app.db.models import (
@@ -63,7 +64,12 @@ from app.services.chat_eval_mode import EVAL_SUITE_SAVED_EVENT
 from app.services.credential_access import get_accessible_credential
 from app.services.credential_catalog import CredentialPromptMode, build_credentials_prompt
 from app.services.credential_setup import CredentialFormTool
+from app.services.drive_file_access import get_accessible_file
 from app.services.encryption import decrypt_config
+from app.services.file_sandbox.chat_workspaces import (
+    delete_all_chat_workspaces,
+    delete_chat_workspace,
+)
 from app.services.heym_agent.errors import AgentError
 from app.services.heym_agent.links import (
     WorkflowLink,
@@ -139,19 +145,40 @@ def _build_hidden_eval_suite_marker(suite_id: str, suite_name: str) -> str:
     return f"\n<!-- heym-eval-suite-id:{suite_id} heym-eval-suite-name:{safe_name} -->"
 
 
-def _ingest_tool_event(tool_calls_for_message: list[dict], payload: dict) -> None:
+class _RoundNarration:
+    """Text a model round wrote before its tool calls, kept with the round's first call."""
+
+    def __init__(self) -> None:
+        self._round: object = None
+        self._parts: list[str] = []
+
+    def add(self, payload: dict) -> None:
+        if payload.get("round") != self._round:
+            self._round, self._parts = payload.get("round"), []
+        self._parts.append(str(payload.get("text") or ""))
+
+    def take(self) -> str:
+        text = "".join(self._parts).split("```heym-clarify")[0].strip()
+        self._parts = []
+        return text
+
+
+def _ingest_tool_event(
+    tool_calls_for_message: list[dict], payload: dict, narration: str = ""
+) -> None:
     """Update tool_calls_for_message in place from a parsed SSE payload."""
     ptype = payload.get("type")
     if ptype == "tool_start":
-        tool_calls_for_message.append(
-            {
-                "id": str(payload.get("id") or ""),
-                "name": str(payload.get("name") or ""),
-                "label": str(payload.get("label") or ""),
-                "args": payload.get("args") or {},
-                "status": "running",
-            }
-        )
+        entry = {
+            "id": str(payload.get("id") or ""),
+            "name": str(payload.get("name") or ""),
+            "label": str(payload.get("label") or ""),
+            "args": payload.get("args") or {},
+            "status": "running",
+        }
+        if narration:
+            entry["narration"] = narration
+        tool_calls_for_message.append(entry)
     elif ptype == "tool_end":
         tc_id = str(payload.get("id") or "")
         for entry in tool_calls_for_message:
@@ -250,6 +277,7 @@ async def _assemble_system_prompt_parts(
     include_attachment_instructions: bool,
     credential_mode: CredentialPromptMode = CredentialPromptMode.ASK_AND_CREATE,
     build_reference: str = "",
+    file_rules: str = "",
 ) -> SystemPromptParts:
     """The turn's system prompt, fixed parts first so providers can cache the longest prefix."""
     workflows = await get_workflows_for_user_with_inputs(db, user.id)
@@ -271,7 +299,7 @@ async def _assemble_system_prompt_parts(
             + "\n\n---\n\n"
             + system_prompt
         )
-    system_prompt += build_reference
+    system_prompt += build_reference + file_rules
     if workflows_block:
         system_prompt = (
             system_prompt
@@ -367,6 +395,7 @@ async def _run_chat_turn(
     assistant_chunks: list[str] = []
     workflow_context_markers: list[str] = []
     tool_calls_for_message: list[dict] = []
+    narration = _RoundNarration()
 
     try:
         async with async_session_maker() as db:
@@ -384,11 +413,7 @@ async def _run_chat_turn(
             config = decrypt_config(credential.encrypted_config)
 
             attachment = (
-                FileAttachment(
-                    name=turn.attachment_data["name"],
-                    kind=turn.attachment_data["kind"],
-                    content=turn.attachment_data["content"],
-                )
+                FileAttachment.model_validate(turn.attachment_data)
                 if turn.attachment_data
                 else None
             )
@@ -433,13 +458,16 @@ async def _run_chat_turn(
                     llm_session_id=conv_id,
                     attachment=attachment,
                     credential_form=turn.credential_form,
+                    conversation_id=conv_uuid,
                 )
+            files = ChatFileTools(user=user, conversation_id=conv_uuid)
             parts = await _assemble_system_prompt_parts(
                 user,
                 db,
                 include_attachment_instructions=turn.attachment_data is not None,
                 credential_mode=turn.credential_mode,
                 build_reference=build.reference() if build is not None else "",
+                file_rules=files.instructions(),
             )
             if build is not None:
                 build_block = await build.prompt(list(parts.workflows))
@@ -451,6 +479,11 @@ async def _run_chat_turn(
             if turn.credential_form is not None:
                 forms_block = await turn.credential_form.conversation_forms_prompt()
                 parts = replace(parts, full_system_prompt=parts.full_system_prompt + forms_block)
+            workspace_block = await asyncio.to_thread(files.workspace_block)
+            if workspace_block:
+                parts = replace(
+                    parts, full_system_prompt=parts.full_system_prompt + workspace_block
+                )
 
             # A Model Router decision is a blocking model call; keep it off the event loop.
             client, provider, model, trace_context = await asyncio.to_thread(
@@ -480,6 +513,7 @@ async def _run_chat_turn(
                 system_prompt_parts=parts,
                 credential_mode=turn.credential_mode,
                 build=build,
+                files=files,
             ):
                 if chunk.startswith("data: "):
                     try:
@@ -489,6 +523,8 @@ async def _run_chat_turn(
                     ptype = payload.get("type")
                     if ptype == "content":
                         assistant_chunks.append(str(payload.get("text") or ""))
+                    elif ptype == "draft":
+                        narration.add(payload)
                     elif ptype == "workflow_created":
                         w_id = str(payload.get("workflow_id") or "").strip()
                         w_name = str(payload.get("workflow_name") or "").strip()
@@ -506,7 +542,8 @@ async def _run_chat_turn(
                                 _build_hidden_eval_suite_marker(s_id, s_name or "Eval suite")
                             )
                     elif ptype in ("tool_start", "tool_end", "compressed"):
-                        _ingest_tool_event(tool_calls_for_message, payload)
+                        lead = narration.take() if ptype == "tool_start" else ""
+                        _ingest_tool_event(tool_calls_for_message, payload, lead)
                     if turn.on_event is not None and payload:
                         await _notify_turn_event(turn.on_event, payload)
                 await _publish_payload_with_message_id(conv_id, chunk, assistant_message_id)
@@ -632,11 +669,7 @@ async def _dequeue_next_turn(conv_id: str) -> ChatTurn | None:
             return None
 
         attachment = (
-            FileAttachment(
-                name=item.attachment["name"],
-                kind=item.attachment["kind"],
-                content=item.attachment["content"],
-            )
+            FileAttachment.model_validate(item.attachment)
             if isinstance(item.attachment, dict)
             else None
         )
@@ -1104,6 +1137,7 @@ async def clear_conversations(
         delete(DashboardConversation).where(DashboardConversation.user_id == current_user.id)
     )
     await db.commit()
+    await asyncio.to_thread(delete_all_chat_workspaces, current_user.id)
 
 
 @router.get("/quick-prompts", response_model=QuickPromptsResponse)
@@ -1224,6 +1258,7 @@ async def delete_conversation(
     conversation = await _get_conversation_or_404(conversation_id, current_user.id, db)
     await db.delete(conversation)
     await db.commit()
+    await asyncio.to_thread(delete_chat_workspace, current_user.id, conversation_id)
 
 
 def _fallback_title_from_content(content: str) -> str:
@@ -1313,6 +1348,30 @@ async def _resolve_build_request(
     return BuildRequest(target_workflow_id=body.target_workflow_id, skill_only=skill_only)
 
 
+async def _attachment_data(
+    db: AsyncSession, user_id: uuid.UUID, body: MessageCreate
+) -> dict | None:
+    """The attachment as stored; a Drive file is checked and described from its row."""
+    if body.attachment is None:
+        return None
+    if body.attachment.kind != "file":
+        return body.attachment.model_dump(mode="json")
+    if body.attachment.file_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="file_id is required")
+    access = await get_accessible_file(db, body.attachment.file_id, user_id)
+    if access is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    row = access.file
+    return {
+        "name": row.filename,
+        "kind": "file",
+        "content": "",
+        "file_id": str(row.id),
+        "size": row.size_bytes,
+        "mime": row.mime_type,
+    }
+
+
 @router.post(
     "/{conversation_id}/messages",
     response_model=SendMessageResponse,
@@ -1347,7 +1406,7 @@ async def send_message(
         )
 
     build = await _resolve_build_request(db, current_user.id, body)
-    attachment_data = body.attachment.model_dump() if body.attachment else None
+    attachment_data = await _attachment_data(db, current_user.id, body)
     conv_id_str = str(conversation_id)
     if conversation.is_running:
         queued_at = datetime.now(timezone.utc)
@@ -1408,15 +1467,7 @@ async def send_message(
             queued_message=queued_response,
         )
 
-    attachment = (
-        FileAttachment(
-            name=body.attachment.name,
-            kind=body.attachment.kind,
-            content=body.attachment.content,
-        )
-        if body.attachment
-        else None
-    )
+    attachment = FileAttachment.model_validate(attachment_data) if attachment_data else None
     user_message = _build_user_message(body.content, attachment)
     message_created_at = datetime.now(timezone.utc)
     message = DashboardMessage(
