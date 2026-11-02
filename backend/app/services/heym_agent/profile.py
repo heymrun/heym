@@ -20,9 +20,11 @@ AGENT_CAPABILITIES = (
     "which executions are running right now (with elapsed time, current node, and a link to "
     "each live run); read and resolve human-in-the-loop reviews; list and act on agentic "
     "kanban boards, cards and comments; list dashboards (Heym Work's pages) with the widgets "
-    "on each and which dashboard a workflow is on, add a new widget to a dashboard and build "
-    "its workflow, or put an existing workflow on a dashboard as a widget, rename or delete a "
-    "widget and tidy a dashboard's layout; inspect data tables, add or remove columns, read, "
+    "on each and which dashboard a workflow is on, create a dashboard, build several new "
+    "widgets on a dashboard at once, change several widgets in one go, add a new widget to a "
+    "dashboard and build its workflow, or put an existing workflow on a dashboard as a widget, "
+    "rename or delete a widget and tidy a dashboard's layout; inspect data tables, add or "
+    "remove columns, read, "
     "insert, update and delete rows on tables the user owns or has write access to; "
     "read schedules, teams and global variables; search "
     "the Heym documentation; and create or update the user's credentials on a secure Heym "
@@ -115,9 +117,13 @@ AGENT_SKILLS: tuple[AgentSkillInfo, ...] = (
     AgentSkillInfo(
         "dashboards",
         "Dashboards",
-        "List dashboards and their widgets, add, rename or delete widgets and tidy a layout.",
+        "List and create dashboards, build or change several widgets at once, add, rename or "
+        "delete widgets and tidy a layout.",
         ("dashboards", "widgets"),
-        ("Add a widget for weekly signups to the sales dashboard.",),
+        (
+            "Add a widget for weekly signups to the sales dashboard.",
+            "Create a support dashboard with open tickets by priority and weekly volume.",
+        ),
     ),
     AgentSkillInfo(
         "data-tables",

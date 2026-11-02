@@ -124,16 +124,30 @@ def tool_draft_message(name: str, arguments: str) -> str | None:
 
 
 class ToolProgress:
-    """What a running chat tool is doing now; the turn reads it while it waits for the tool."""
+    """What a running chat tool is doing now; the turn reads it while it waits for the tool.
+
+    A tool may also queue whole stream events with `emit`, such as a dashboard widget that is
+    ready while the rest still build, so a client can show it before the tool returns.
+    """
 
     def __init__(self) -> None:
         self.message: str | None = None
         # Asked on every poll when set, e.g. which node of a run is running.
         self.describe: Callable[[], str | None] | None = None
+        self._events: list[dict[str, Any]] = []
 
     def current(self) -> str | None:
         described = self.describe() if self.describe is not None else None
         return described or self.message
+
+    def emit(self, event: dict[str, Any]) -> None:
+        """Queue a stream event for the turn to send on its next poll."""
+        self._events.append(event)
+
+    def drain(self) -> list[dict[str, Any]]:
+        """The queued events, oldest first; the queue is empty afterwards."""
+        events, self._events = self._events, []
+        return events
 
 
 def tool_progress_event(call_id: str, message: str) -> str:
@@ -145,7 +159,8 @@ def tool_progress_event(call_id: str, message: str) -> str:
 async def follow_tool(
     task: "asyncio.Future[Any]", call_id: str, progress: ToolProgress
 ) -> AsyncIterator[str]:
-    """Wait for a tool task, yielding a `tool_progress` event whenever its line changes.
+    """Wait for a tool task, yielding a `tool_progress` event whenever its line changes, and
+    the events the tool queued with `ToolProgress.emit`.
 
     The caller reads `task.result()` afterwards; a turn that stops here cancels the task.
     """
@@ -153,12 +168,16 @@ async def follow_tool(
     try:
         while not task.done():
             await asyncio.wait({task}, timeout=TOOL_PROGRESS_POLL_SECONDS)
+            for event in progress.drain():
+                yield "data: " + json.dumps(event, default=str) + "\n\n"
             if task.done():
                 break
             message = progress.current()
             if message and message != shown:
                 shown = message
                 yield tool_progress_event(call_id, message)
+        for event in progress.drain():
+            yield "data: " + json.dumps(event, default=str) + "\n\n"
     finally:
         if not task.done():
             task.cancel()

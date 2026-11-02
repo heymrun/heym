@@ -184,7 +184,7 @@ async def generate_widget_dsl(
     current_workflow: dict[str, Any] | None = None,
     workflow_id: uuid.UUID | None = None,
     node_label: str | None = None,
-    session_id: uuid.UUID | None = None,
+    session_id: uuid.UUID | str | None = None,
 ) -> dict[str, Any]:
     """Generate a widget workflow DSL (nodes + edges) ending in a chartOutput node.
 
@@ -1373,6 +1373,121 @@ def _proposal_response(proposal: WidgetProposal) -> WidgetProposalResponse:
     )
 
 
+async def widget_create_prompt(
+    db: AsyncSession,
+    dashboard: Dashboard,
+    user: User,
+    prompt: str,
+    data_table_ids: list[uuid.UUID],
+) -> str:
+    """What the model is told to build a new widget: the request and the page's context.
+
+    Raises HTTPException when a named data table is out of the caller's or the owner's reach.
+    """
+    # The widget's workflow runs as the dashboard's owner, so they must be able to read it too.
+    tables = await _table_contexts(db, data_table_ids, user.id)
+    if dashboard.owner_id != user.id:
+        await _table_contexts(db, data_table_ids, dashboard.owner_id, for_owner=True)
+    context = describe_tables(tables, with_data=False)
+    detail = await _detail_page_context(db, dashboard, user)
+    # A HITL widget shows every review unless the request names a workflow it can show.
+    review_sources = await list_review_sources(db, user.id)
+    sources = hitl_sources_context(review_sources) if review_sources else ""
+    return "\n\n".join(part for part in (prompt, detail, context, sources) if part)
+
+
+async def checked_widget_chart(
+    db: AsyncSession, user: User, old_nodes: list[Any], nodes: list[Any]
+) -> dict[str, Any]:
+    """The chartOutput node of a generated widget graph, once the graph may be saved.
+
+    Raises HTTPException for blocked nodes, a graph without a chartOutput node, or a saved
+    HITL filter the user cannot use.
+    """
+    blocked_error = dashboard_widget_blocked_nodes_error(nodes)
+    if blocked_error is not None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=blocked_error,
+        )
+    chart_nodes = [n for n in nodes if isinstance(n, dict) and n.get("type") == "chartOutput"]
+    if not chart_nodes:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="AI did not produce a chartOutput node",
+        )
+    await ensure_saved_filter_allowed(db, user.id, old_nodes, nodes, detail=AI_FILTER_ERROR)
+    return chart_nodes[-1]
+
+
+async def save_generated_widget(
+    db: AsyncSession,
+    dashboard: Dashboard,
+    user: User,
+    dsl: dict[str, Any],
+    *,
+    prompt: str,
+    title: str | None = None,
+    layout: dict[str, Any] | None = None,
+    position: int | None = None,
+) -> DashboardWidget:
+    """Put a generated widget graph on ``dashboard`` as a new chart widget, and audit it.
+
+    Raises HTTPException when the graph cannot be a widget.
+    """
+    nodes = dsl.get("nodes", [])
+    edges = dsl.get("edges", [])
+    chart_node = await checked_widget_chart(db, user, [], nodes)
+    chart_type = (chart_node.get("data") or {}).get("chartType", "bar")
+    name = widget_title(title, dsl.get("name"), prompt)
+    description = dsl.get("description") or None
+    workflow = Workflow(
+        name=name,
+        description=description,
+        owner_id=dashboard.owner_id,
+        kind="dashboard_widget",
+        nodes=nodes,
+        edges=edges,
+    )
+    db.add(workflow)
+    await db.flush()
+    widget = DashboardWidget(
+        dashboard_id=dashboard.id,
+        workflow_id=workflow.id,
+        title=name,
+        description=description,
+        chart_type=chart_type,
+        layout=layout or {"x": 0, "y": 0, "w": 4, "h": 4},
+        cache_ttl_seconds=300,
+    )
+    if position is not None:
+        widget.position = position
+    db.add(widget)
+    await db.commit()
+    await db.refresh(widget)
+    audit(
+        action="dashboard.widget_create",
+        actor=user,
+        target_type="dashboard",
+        target_id=dashboard.id,
+        target_name=dashboard.name,
+        widget_id=widget.id,
+        widget_title=widget.title,
+    )
+    return widget
+
+
+def ensure_llm_credential(credential: Any) -> None:
+    """Raises HTTPException unless ``credential`` exists and is an LLM credential."""
+    if credential is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Credential not found")
+    if credential.type not in LLM_CREDENTIAL_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Credential must be an LLM type (OpenAI, Google, or Custom)",
+        )
+
+
 @router.post(
     "/{dashboard_id}/widgets/ai-generate",
     response_model=DashboardWidgetResponse,
@@ -1386,81 +1501,102 @@ async def ai_generate_widget(
 ) -> DashboardWidgetResponse:
     dashboard, _ = await _get_dashboard_for_user(db, dashboard_id, current_user, write=True)
     credential = await get_credential_for_user(body.credential_id, current_user, db)
-    if credential is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Credential not found")
-    if credential.type not in LLM_CREDENTIAL_TYPES:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Credential must be an LLM type (OpenAI, Google, or Custom)",
-        )
-
-    # The widget's workflow runs as the dashboard's owner, so they must be able to read it too.
-    tables = await _table_contexts(db, body.data_table_ids, current_user.id)
-    if dashboard.owner_id != current_user.id:
-        await _table_contexts(db, body.data_table_ids, dashboard.owner_id, for_owner=True)
-    context = describe_tables(tables, with_data=False)
-    detail = await _detail_page_context(db, dashboard, current_user)
-    # A HITL widget shows every review unless the request names a workflow it can show.
-    review_sources = await list_review_sources(db, current_user.id)
-    sources = hitl_sources_context(review_sources) if review_sources else ""
+    ensure_llm_credential(credential)
+    prompt = await widget_create_prompt(
+        db, dashboard, current_user, body.prompt, body.data_table_ids
+    )
     dsl = await generate_widget_dsl(
-        "\n\n".join(part for part in (body.prompt, detail, context, sources) if part),
+        prompt,
         credential=credential,
         model=body.model,
         user=current_user,
         node_label="AI Widget Create",
         session_id=body.session_id,
     )
+    widget = await save_generated_widget(db, dashboard, current_user, dsl, prompt=body.prompt)
+    return _widget_to_response(widget)
+
+
+def ensure_refinable(widget: DashboardWidget) -> None:
+    """Raises HTTPException for a widget an AI fine-tune cannot change."""
+    if widget.chart_type == FILE_RUN_WIDGET_TYPE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A file-run widget runs an existing workflow; change it in the editor",
+        )
+
+
+def widget_workflow_snapshot(workflow: Workflow) -> dict[str, Any]:
+    """The widget graph a fine-tune edits, as the model reads it."""
+    return {
+        "name": workflow.name,
+        "description": workflow.description,
+        "nodes": workflow.nodes,
+        "edges": workflow.edges,
+    }
+
+
+async def widget_refine_prompt(
+    db: AsyncSession,
+    widget: DashboardWidget,
+    dashboard: Dashboard,
+    user: User,
+    prompt: str,
+    data_table_ids: list[uuid.UUID],
+    page_kind: str | None,
+) -> str:
+    """What the model is told to change a widget: the request and the page's context.
+
+    Raises HTTPException when a named data table is out of the caller's or the owner's reach.
+    """
+    tables = await _table_contexts(db, data_table_ids, user.id)
+    if dashboard.owner_id != user.id:
+        await _table_contexts(db, data_table_ids, dashboard.owner_id, for_owner=True)
+    context = describe_tables(tables, with_data=True)
+    detail = await _refine_page_context(db, dashboard, user, page_kind, prompt)
+    sources = (
+        hitl_sources_context(await list_review_sources(db, user.id))
+        if widget.chart_type == HITL_WIDGET_TYPE
+        else ""
+    )
+    return "\n\n".join(part for part in (prompt, detail, context, sources) if part)
+
+
+async def apply_refined_widget(
+    db: AsyncSession,
+    widget: DashboardWidget,
+    workflow: Workflow,
+    user: User,
+    dsl: dict[str, Any],
+) -> int | None:
+    """Replace a widget's graph with a fine-tuned one; returns the Edit History version.
+
+    The pre-edit graph is stored first, so the fine-tune can be reverted. Raises
+    HTTPException when the new graph cannot be a widget.
+    """
     nodes = dsl.get("nodes", [])
     edges = dsl.get("edges", [])
-    blocked_error = dashboard_widget_blocked_nodes_error(nodes)
-    if blocked_error is not None:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=blocked_error,
-        )
-    chart_nodes = [n for n in nodes if n.get("type") == "chartOutput"]
-    if not chart_nodes:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="AI did not produce a chartOutput node",
-        )
-    await ensure_saved_filter_allowed(db, current_user.id, [], nodes, detail=AI_FILTER_ERROR)
-    chart_type = chart_nodes[-1].get("data", {}).get("chartType", "bar")
-    title = widget_title(dsl.get("name"), body.prompt)
-    description = dsl.get("description") or None
-    workflow = Workflow(
-        name=title,
-        description=description,
-        owner_id=dashboard.owner_id,
-        kind="dashboard_widget",
-        nodes=nodes,
-        edges=edges,
+    chart_node = await checked_widget_chart(db, user, workflow.nodes or [], nodes)
+
+    # Snapshot the pre-edit workflow so the AI fine-tune shows up in Edit History.
+    previous_version = await _record_chat_workflow_edit_version(
+        db=db,
+        workflow=workflow,
+        user_id=user.id,
+        old_nodes=workflow.nodes or [],
+        old_edges=workflow.edges or [],
     )
-    db.add(workflow)
-    await db.flush()
-    widget = DashboardWidget(
-        dashboard_id=dashboard.id,
-        workflow_id=workflow.id,
-        title=title,
-        description=description,
-        chart_type=chart_type,
-        layout={"x": 0, "y": 0, "w": 4, "h": 4},
-        cache_ttl_seconds=300,
-    )
-    db.add(widget)
+
+    workflow.nodes = nodes
+    workflow.edges = edges
+    widget.chart_type = (chart_node.get("data") or {}).get("chartType", widget.chart_type)
+    # Invalidate the widget cache so the next load recomputes with the new workflow.
+    widget.cached_payload = None
+    widget.cached_at = None
+    widget.cached_workflow_version = None
     await db.commit()
     await db.refresh(widget)
-    audit(
-        action="dashboard.widget_create",
-        actor=current_user,
-        target_type="dashboard",
-        target_id=dashboard.id,
-        target_name=dashboard.name,
-        widget_id=widget.id,
-        widget_title=widget.title,
-    )
-    return _widget_to_response(widget)
+    return previous_version if isinstance(previous_version, int) else None
 
 
 @router.post("/widgets/{widget_id}/ai-refine", response_model=DashboardWidgetResponse)
@@ -1471,19 +1607,9 @@ async def ai_refine_widget(
     db: AsyncSession = Depends(get_db),
 ) -> DashboardWidgetResponse:
     widget, dashboard, _ = await _load_widget_for_user(db, widget_id, current_user, write=True)
-    if widget.chart_type == FILE_RUN_WIDGET_TYPE:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="A file-run widget runs an existing workflow; change it in the editor",
-        )
+    ensure_refinable(widget)
     credential = await get_credential_for_user(body.credential_id, current_user, db)
-    if credential is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Credential not found")
-    if credential.type not in LLM_CREDENTIAL_TYPES:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Credential must be an LLM type (OpenAI, Google, or Custom)",
-        )
+    ensure_llm_credential(credential)
 
     wf_result = await db.execute(select(Workflow).where(Workflow.id == widget.workflow_id))
     workflow = wf_result.scalar_one_or_none()
@@ -1492,69 +1618,23 @@ async def ai_refine_widget(
             status_code=status.HTTP_404_NOT_FOUND, detail="Widget workflow not found"
         )
 
-    current_workflow = {
-        "name": workflow.name,
-        "description": workflow.description,
-        "nodes": workflow.nodes,
-        "edges": workflow.edges,
-    }
-    tables = await _table_contexts(db, body.data_table_ids, current_user.id)
-    if dashboard.owner_id != current_user.id:
-        await _table_contexts(db, body.data_table_ids, dashboard.owner_id, for_owner=True)
-    context = describe_tables(tables, with_data=True)
-    detail = await _refine_page_context(db, dashboard, current_user, body.page_kind, body.prompt)
-    sources = (
-        hitl_sources_context(await list_review_sources(db, current_user.id))
-        if widget.chart_type == HITL_WIDGET_TYPE
-        else ""
+    prompt = await widget_refine_prompt(
+        db, widget, dashboard, current_user, body.prompt, body.data_table_ids, body.page_kind
     )
     dsl = await generate_widget_dsl(
-        "\n\n".join(part for part in (body.prompt, detail, context, sources) if part),
+        prompt,
         credential=credential,
         model=body.model,
         user=current_user,
-        current_workflow=current_workflow,
+        current_workflow=widget_workflow_snapshot(workflow),
         workflow_id=widget.workflow_id,
         node_label="AI Widget Fine-tune",
     )
-    nodes = dsl.get("nodes", [])
-    edges = dsl.get("edges", [])
-    blocked_error = dashboard_widget_blocked_nodes_error(nodes)
-    if blocked_error is not None:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=blocked_error,
-        )
-    chart_nodes = [n for n in nodes if n.get("type") == "chartOutput"]
-    if not chart_nodes:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="AI did not produce a chartOutput node",
-        )
-    await ensure_saved_filter_allowed(
-        db, current_user.id, workflow.nodes, nodes, detail=AI_FILTER_ERROR
+    previous_version = await apply_refined_widget(db, widget, workflow, current_user, dsl)
+    response = _widget_to_response(
+        widget, hitl_filter=hitl_filter_model(widget, dsl.get("nodes", []))
     )
-
-    # Snapshot the pre-edit workflow so the AI fine-tune shows up in Edit History.
-    previous_version = await _record_chat_workflow_edit_version(
-        db=db,
-        workflow=workflow,
-        user_id=current_user.id,
-        old_nodes=workflow.nodes or [],
-        old_edges=workflow.edges or [],
-    )
-
-    workflow.nodes = nodes
-    workflow.edges = edges
-    widget.chart_type = chart_nodes[-1].get("data", {}).get("chartType", widget.chart_type)
-    # Invalidate the widget cache so the next load recomputes with the new workflow.
-    widget.cached_payload = None
-    widget.cached_at = None
-    widget.cached_workflow_version = None
-    await db.commit()
-    await db.refresh(widget)
-    response = _widget_to_response(widget, hitl_filter=hitl_filter_model(widget, nodes))
-    if isinstance(previous_version, int):
+    if previous_version is not None:
         response.previous_version_number = previous_version
     return response
 

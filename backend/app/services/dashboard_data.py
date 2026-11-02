@@ -193,6 +193,28 @@ def _field(value: Any, name: str) -> Any:
     return getattr(value, name, None)
 
 
+NO_CHART_OUTPUT_ERROR = "Workflow produced no chartOutput"
+
+
+def no_chart_error(result: Any) -> str:
+    """Why a widget run drew nothing: the first failed node and its error, when one failed.
+
+    The node's own error says what to fix (a missing column, a node that cannot run here);
+    without it a widget only says that no chart came out.
+    """
+    for node in getattr(result, "node_results", []) or []:
+        if _field(node, "status") != "error":
+            continue
+        error = _field(node, "error")
+        if error:
+            label = _field(node, "node_label") or _field(node, "node_type") or "A node"
+            return f"{NO_CHART_OUTPUT_ERROR}: {label} failed: {error}"
+    outputs = getattr(result, "outputs", None)
+    if isinstance(outputs, dict) and isinstance(outputs.get("error"), str) and outputs["error"]:
+        return f"{NO_CHART_OUTPUT_ERROR}: {outputs['error']}"
+    return NO_CHART_OUTPUT_ERROR
+
+
 def _highlight_rows(result: Any) -> list[dict]:
     """Normalize a run's node_results to plain dicts for the highlight builder."""
     rows = getattr(result, "node_results", []) or []
@@ -476,7 +498,7 @@ async def compute_widget_data(
         payload=payload,
         cached=False,
         computed_at=now,
-        error=None if payload is not None else "Workflow produced no chartOutput",
+        error=None if payload is not None else no_chart_error(result),
         highlight=build_highlight_payload(_highlight_rows(result), nodes, None),
     )
 
