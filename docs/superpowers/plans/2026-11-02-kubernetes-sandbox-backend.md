@@ -6434,6 +6434,8 @@ class LiveSandboxTest(unittest.TestCase):
 Run: `cd backend && HEYM_K8S_LIVE_CONTEXT=orbstack SECRET_KEY=test-secret-key-for-tests-only-32-bytes HEYM_OTEL_ENABLED=false uv run pytest tests/live/test_k8s_sandbox_live.py -v`
 Expected: `4 passed`. Without the variable: `4 skipped`.
 
+Found on the first live run: the canary pod does not read stdin, finished before the attach arrived, and the API server answered the attach with HTTP 500. The canary now reads stdin first like every runner, and `KubernetesBackend._run_pod` falls back to the pod's exit status and log when the attach is refused (`test_container_gone_before_attach_falls_back_to_the_log`).
+
 - [ ] **Step 3: Confirm nothing was left behind**
 
 Run: `kubectl --context orbstack get pods -A -l app.kubernetes.io/managed-by=heym`
