@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: heym
+  labels:
+    # The backend itself runs as root, so the namespace can only warn. Sandbox pods
+    # are restricted-compliant; a dedicated sandbox namespace can enforce it (README).
+    pod-security.kubernetes.io/warn: restricted

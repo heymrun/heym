@@ -1,0 +1,19 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: heym
+resources:
+  - ../../base
+  - postgres.yaml
+images:
+  - name: ghcr.io/heymrun/heym
+    newName: heym-backend
+    newTag: local
+patches:
+  - path: patch-pvc.yaml
+  # The local image is the backend-only image on port 10105. A JSON patch replaces the
+  # port list; a strategic merge would keep both ports under the same name.
+  - target: {kind: Deployment, name: heym}
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/ports
+        value: [{name: http, containerPort: 10105}]
