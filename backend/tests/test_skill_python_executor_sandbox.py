@@ -14,7 +14,6 @@ from pathlib import Path
 from unittest import mock
 
 import app.services.skill_python_executor as executor
-from app.services.sandbox import get_sandbox_manager, reset_sandbox_manager
 from app.services.skill_python_executor import (
     SkillExecutionResult,
     execute_skill_python,
@@ -345,16 +344,6 @@ class SkillSubprocessFeatureTest(unittest.TestCase):
 
 class SkillDockerFailClosedTest(unittest.TestCase):
     """A sandbox that cannot start must fail closed, not return a docker error as a result."""
-
-    def setUp(self) -> None:
-        # Pin Docker and build the manager now: selecting it lazily inside a test would
-        # probe Docker through the Popen/run this test patches.
-        pinned = mock.patch.dict("os.environ", {"HEYM_SANDBOX_BACKEND": "docker"})
-        pinned.start()
-        self.addCleanup(pinned.stop)
-        reset_sandbox_manager()
-        self.addCleanup(reset_sandbox_manager)
-        get_sandbox_manager()
 
     def _env(self, tmp: str) -> dict[str, str]:
         return {
