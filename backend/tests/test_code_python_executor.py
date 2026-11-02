@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from app.services import code_python_executor as executor
+from app.services.sandbox.docker_backend import docker_mount_args
 
 
 class BuildRunCommandTest(unittest.TestCase):
@@ -14,7 +15,7 @@ class BuildRunCommandTest(unittest.TestCase):
             image="heym-backend:local",
             name="heym-code-abc",
             allow_network=False,
-            mount_args=[],
+            mounts=(),
             deps_path=None,
         )
         self.assertIn("--network", cmd)
@@ -27,7 +28,7 @@ class BuildRunCommandTest(unittest.TestCase):
             image="heym-backend:local",
             name="heym-code-abc",
             allow_network=True,
-            mount_args=[],
+            mounts=(),
             deps_path=None,
         )
         self.assertEqual(cmd[cmd.index("--network") + 1], "bridge")
@@ -37,7 +38,7 @@ class BuildRunCommandTest(unittest.TestCase):
             image="heym-backend:local",
             name="heym-code-abc",
             allow_network=False,
-            mount_args=[],
+            mounts=(),
             deps_path=None,
         )
         joined = " ".join(cmd)
@@ -54,15 +55,16 @@ class BuildRunCommandTest(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("--entrypoint") + 1], "python")
 
     def test_deps_path_is_exported_as_pythonpath(self) -> None:
-        cmd = executor._build_run_command(
-            image="heym-backend:local",
-            name="heym-code-abc",
-            allow_network=False,
-            mount_args=["--mount", "type=volume,src=v,dst=/d,volume-subpath=x,readonly"],
-            deps_path=Path("/d/.deps"),
-        )
+        with patch.object(executor, "_is_containerized", return_value=False):
+            cmd = executor._build_run_command(
+                image="heym-backend:local",
+                name="heym-code-abc",
+                allow_network=False,
+                mounts=(executor._code_workspace_mount(Path("/d"), readonly=True),),
+                deps_path=Path("/d/.deps"),
+            )
         self.assertIn("PYTHONPATH=/d/.deps", cmd)
-        self.assertIn("--mount", cmd)
+        self.assertIn("type=bind,src=/d,dst=/d,readonly", cmd)
 
 
 class BuildInstallCommandTest(unittest.TestCase):
@@ -70,7 +72,7 @@ class BuildInstallCommandTest(unittest.TestCase):
         cmd = executor._build_install_command(
             image="heym-backend:local",
             name="heym-code-install-abc",
-            mount_args=["--mount", "type=bind,src=/h/r,dst=/r"],
+            mounts=(),
             run_dir=Path("/r"),
             tool="uv",
         )
@@ -86,7 +88,7 @@ class BuildInstallCommandTest(unittest.TestCase):
         cmd = executor._build_install_command(
             image="heym-backend:local",
             name="heym-code-install-abc",
-            mount_args=[],
+            mounts=(),
             run_dir=Path("/r"),
             tool="pip",
         )
@@ -101,7 +103,7 @@ class BuildInstallCommandTest(unittest.TestCase):
         cmd = executor._build_install_command(
             image="heym-backend:local",
             name="heym-code-install-abc",
-            mount_args=[],
+            mounts=(),
             run_dir=Path("/r"),
             tool="uv",
         )
@@ -133,13 +135,13 @@ class WorkspaceLocationTest(unittest.TestCase):
             patch.object(executor, "_is_containerized", return_value=False),
             patch.dict("os.environ", {}, clear=False),
         ):
-            args = executor._resolve_workspace_mount(run_dir, readonly=True)
+            args = docker_mount_args(executor._code_workspace_mount(run_dir, readonly=True))
         self.assertEqual(args, ["--mount", f"type=bind,src={run_dir},dst={run_dir},readonly"])
 
     def test_native_backend_bind_is_writable_for_the_install_phase(self) -> None:
         run_dir = Path(tempfile.gettempdir()) / "heym-code-runs" / "abc"
         with patch.object(executor, "_is_containerized", return_value=False):
-            args = executor._resolve_workspace_mount(run_dir, readonly=False)
+            args = docker_mount_args(executor._code_workspace_mount(run_dir, readonly=False))
         self.assertEqual(args, ["--mount", f"type=bind,src={run_dir},dst={run_dir}"])
 
     def test_named_volume_still_wins_inside_a_container(self) -> None:
@@ -154,7 +156,7 @@ class WorkspaceLocationTest(unittest.TestCase):
             ),
         ):
             run_dir = Path("/app/data/codex-workspaces/_code-runs/abc")
-            args = executor._resolve_workspace_mount(run_dir, readonly=True)
+            args = docker_mount_args(executor._code_workspace_mount(run_dir, readonly=True))
         self.assertEqual(
             args,
             [
@@ -179,7 +181,7 @@ class ForwardedEnvTest(unittest.TestCase):
             },
         ):
             cmd = executor._build_install_command(
-                image="img", name="n", mount_args=[], run_dir=Path("/r"), tool="uv"
+                image="img", name="n", mounts=(), run_dir=Path("/r"), tool="uv"
             )
         self.assertIn("HTTPS_PROXY=http://corp:3128", cmd)
         self.assertIn("no_proxy=localhost", cmd)
@@ -198,10 +200,10 @@ class ForwardedEnvTest(unittest.TestCase):
             },
         ):
             install = executor._build_install_command(
-                image="img", name="n", mount_args=[], run_dir=Path("/r"), tool="uv"
+                image="img", name="n", mounts=(), run_dir=Path("/r"), tool="uv"
             )
             run = executor._build_run_command(
-                image="img", name="n", allow_network=True, mount_args=[], deps_path=None
+                image="img", name="n", allow_network=True, mounts=(), deps_path=None
             )
         for cmd in (install, run):
             joined = " ".join(cmd)
@@ -211,7 +213,7 @@ class ForwardedEnvTest(unittest.TestCase):
     def test_host_home_never_overrides_the_sandbox_home(self) -> None:
         with patch.dict("os.environ", {"HOME": "/root"}):
             cmd = executor._build_run_command(
-                image="img", name="n", allow_network=False, mount_args=[], deps_path=None
+                image="img", name="n", allow_network=False, mounts=(), deps_path=None
             )
         self.assertIn("HOME=/tmp", cmd)
         self.assertNotIn("HOME=/root", cmd)
@@ -262,9 +264,7 @@ class ExecuteCodeTest(unittest.TestCase):
         with (
             patch.object(executor, "docker_available", return_value=True),
             patch.object(executor, "resolve_sandbox_image", return_value="img"),
-            patch.object(
-                executor.subprocess, "Popen", return_value=_fake_proc(_OK_ENVELOPE)
-            ) as popen,
+            patch("subprocess.Popen", return_value=_fake_proc(_OK_ENVELOPE)) as popen,
         ):
             outcome = executor.execute_code("def main(params):\n    return 1\n", "   ", {}, False)
 
@@ -281,9 +281,7 @@ class ExecuteCodeTest(unittest.TestCase):
         with (
             patch.object(executor, "docker_available", return_value=True),
             patch.object(executor, "resolve_sandbox_image", return_value="img"),
-            patch.object(
-                executor.subprocess, "Popen", return_value=_fake_proc(_OK_ENVELOPE)
-            ) as popen,
+            patch("subprocess.Popen", return_value=_fake_proc(_OK_ENVELOPE)) as popen,
         ):
             executor.execute_code("def main(params):\n    return 1\n", "", {"a": 1}, False)
 
@@ -298,10 +296,12 @@ class ExecuteCodeTest(unittest.TestCase):
                 patch.object(executor, "docker_available", return_value=True),
                 patch.object(executor, "resolve_sandbox_image", return_value="img"),
                 patch.object(executor, "_code_run_root", return_value=Path(tmp)),
-                patch.object(executor, "_resolve_workspace_mount", return_value=["--mount", "m"]),
-                patch.object(
-                    executor.subprocess,
-                    "Popen",
+                patch(
+                    "app.services.sandbox.docker_backend.docker_mount_args",
+                    return_value=["--mount", "m"],
+                ),
+                patch(
+                    "subprocess.Popen",
                     side_effect=[_fake_proc("Installed 1 package"), _fake_proc(_OK_ENVELOPE)],
                 ) as popen,
             ):
@@ -324,10 +324,12 @@ class ExecuteCodeTest(unittest.TestCase):
                 patch.object(executor, "docker_available", return_value=True),
                 patch.object(executor, "resolve_sandbox_image", return_value="img"),
                 patch.object(executor, "_code_run_root", return_value=Path(tmp)),
-                patch.object(executor, "_resolve_workspace_mount", return_value=["--mount", "m"]),
-                patch.object(
-                    executor.subprocess,
-                    "Popen",
+                patch(
+                    "app.services.sandbox.docker_backend.docker_mount_args",
+                    return_value=["--mount", "m"],
+                ),
+                patch(
+                    "subprocess.Popen",
                     side_effect=[
                         _fake_proc("", "uv exploded", returncode=1),
                         _fake_proc("Successfully installed requests"),
@@ -351,10 +353,12 @@ class ExecuteCodeTest(unittest.TestCase):
                 patch.object(executor, "docker_available", return_value=True),
                 patch.object(executor, "resolve_sandbox_image", return_value="img"),
                 patch.object(executor, "_code_run_root", return_value=Path(tmp)),
-                patch.object(executor, "_resolve_workspace_mount", return_value=["--mount", "m"]),
-                patch.object(
-                    executor.subprocess,
-                    "Popen",
+                patch(
+                    "app.services.sandbox.docker_backend.docker_mount_args",
+                    return_value=["--mount", "m"],
+                ),
+                patch(
+                    "subprocess.Popen",
                     side_effect=[
                         _fake_proc("", "uv failed", returncode=1),
                         _fake_proc("", "pip failed", returncode=1),
@@ -375,10 +379,12 @@ class ExecuteCodeTest(unittest.TestCase):
                 patch.object(executor, "docker_available", return_value=True),
                 patch.object(executor, "resolve_sandbox_image", return_value="img"),
                 patch.object(executor, "_code_run_root", return_value=root),
-                patch.object(executor, "_resolve_workspace_mount", return_value=["--mount", "m"]),
-                patch.object(
-                    executor.subprocess,
-                    "Popen",
+                patch(
+                    "app.services.sandbox.docker_backend.docker_mount_args",
+                    return_value=["--mount", "m"],
+                ),
+                patch(
+                    "subprocess.Popen",
                     side_effect=[_fake_proc("ok"), _fake_proc("", "", returncode=125)],
                 ),
             ):
@@ -392,9 +398,7 @@ class ExecuteCodeTest(unittest.TestCase):
         with (
             patch.object(executor, "docker_available", return_value=True),
             patch.object(executor, "resolve_sandbox_image", return_value="img"),
-            patch.object(
-                executor.subprocess, "Popen", return_value=_fake_proc("", "no such image", 127)
-            ),
+            patch("subprocess.Popen", return_value=_fake_proc("", "no such image", 127)),
         ):
             with self.assertRaises(RuntimeError) as ctx:
                 executor.execute_code("def main(params):\n    return 1\n", "", {}, False)
@@ -405,7 +409,7 @@ class ExecuteCodeTest(unittest.TestCase):
         with (
             patch.object(executor, "docker_available", return_value=True),
             patch.object(executor, "resolve_sandbox_image", return_value="img"),
-            patch.object(executor.subprocess, "Popen", return_value=_fake_proc(envelope)),
+            patch("subprocess.Popen", return_value=_fake_proc(envelope)),
         ):
             with self.assertRaises(ValueError) as ctx:
                 executor.execute_code("def main(params):\n    raise ValueError\n", "", {}, False)
@@ -418,8 +422,8 @@ class ExecuteCodeTest(unittest.TestCase):
         with (
             patch.object(executor, "docker_available", return_value=True),
             patch.object(executor, "resolve_sandbox_image", return_value="img"),
-            patch.object(executor.subprocess, "Popen", return_value=proc),
-            patch.object(executor, "_force_remove_container") as force_remove,
+            patch("subprocess.Popen", return_value=proc),
+            patch("app.services.sandbox.docker_backend._docker_rm") as force_remove,
         ):
             with self.assertRaises(TimeoutError):
                 executor.execute_code("def main(params):\n    return 1\n", "", {}, False)
@@ -430,7 +434,7 @@ class ExecuteCodeTest(unittest.TestCase):
         with (
             patch.object(executor, "docker_available", return_value=True),
             patch.object(executor, "resolve_sandbox_image", return_value="img"),
-            patch.object(executor.subprocess, "Popen", return_value=_fake_proc("not json")),
+            patch("subprocess.Popen", return_value=_fake_proc("not json")),
         ):
             with self.assertRaises(ValueError) as ctx:
                 executor.execute_code("def main(params):\n    return 1\n", "", {}, False)

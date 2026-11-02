@@ -2002,7 +2002,15 @@ sed -i '' 's/patch.object(executor, "_resolve_workspace_mount", return_value=\["
 sed -i '' 's/patch.object(executor, "_force_remove_container")/patch("app.services.sandbox.docker_backend._docker_rm")/' tests/test_code_python_executor.py
 sed -i '' 's/executor\._resolve_workspace_mount(run_dir, readonly=True)/docker_mount_args(executor._code_workspace_mount(run_dir, readonly=True))/' tests/test_code_python_executor.py
 sed -i '' 's/executor\._resolve_workspace_mount(run_dir, readonly=False)/docker_mount_args(executor._code_workspace_mount(run_dir, readonly=False))/' tests/test_code_python_executor.py
-grep -n "_resolve_workspace_mount\|mount_args=" tests/test_code_python_executor.py
+python3 - <<'PY'
+import re
+p = "tests/test_code_python_executor.py"
+s = open(p).read()
+# The module no longer imports subprocess; the global attribute is the same object.
+s = re.sub(r'patch\.object\(\s*executor\.subprocess,\s*"Popen",', 'patch("subprocess.Popen",', s)
+open(p, "w").write(s)
+PY
+grep -n "_resolve_workspace_mount\|mount_args=\|executor.subprocess" tests/test_code_python_executor.py
 ```
 
 Expected from the `grep`: only the `test_deps_path_is_exported_as_pythonpath` line, which is replaced below. Add `from app.services.sandbox.docker_backend import docker_mount_args` to the test's imports.

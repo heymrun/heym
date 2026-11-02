@@ -1,22 +1,23 @@
-"""Execute Code node Python in a disposable, hardened Docker sandbox.
+"""Execute Code node Python in a disposable, hardened sandbox.
 
 Unlike the Agent tool sandbox (``python_tool_executor``) and the skill sandbox
 (``skill_python_executor``), this path has **no subprocess fallback and reads
-no sandbox-mode environment variable**. When no Docker daemon is reachable the
+no sandbox-mode environment variable**. When no sandbox backend is reachable the
 Code node fails closed, because the code it runs is arbitrary user Python with
 arbitrary third-party dependencies.
 
-Execution is one or two throwaway containers:
+Execution is one or two throwaway sandboxes (Docker containers or Kubernetes
+pods, see ``app.services.sandbox``):
 
-* With no dependencies, a single ``--network none`` container runs the code.
-  The runner source travels in the stdin payload, so nothing is mounted.
-* With dependencies, a network-enabled container installs them into a per-run
+* With no dependencies, a single offline sandbox runs the code. The runner
+  source travels in the stdin payload, so nothing is mounted.
+* With dependencies, a network-enabled sandbox installs them into a per-run
   ``.deps`` directory on the shared workspace volume (``uv`` first, ``pip`` as
-  a compatibility retry), then a second container mounts that subtree
+  a compatibility retry), then a second sandbox mounts that subtree
   ``readonly`` and runs the code with ``PYTHONPATH`` pointing at it.
 
-Neither container receives the Docker socket or any backend secret, and the
-run directory is deleted on every exit path.
+Neither sandbox receives the Docker socket, a ServiceAccount token or any backend
+secret, and the run directory is deleted on every exit path.
 """
 
 from __future__ import annotations
@@ -25,13 +26,22 @@ import json
 import logging
 import os
 import shutil
-import socket
-import subprocess
 import tempfile
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+
+from app.services.sandbox import (
+    DockerVolumeSource,
+    SandboxSpec,
+    Tmpfs,
+    WorkspaceMount,
+    get_sandbox_manager,
+)
+from app.services.sandbox.docker_backend import render_docker_argv
+from app.services.sandbox.env import CODE_FORWARD_PREFIXES, forwarded_env
+from app.services.sandbox.errors import SandboxTimeoutError
+from app.services.sandbox.spec import START_FAILURE_CODES
 
 logger = logging.getLogger(__name__)
 
@@ -52,9 +62,8 @@ _CODE_RUN_SUBDIR = "_code-runs"
 _DEPS_DIRNAME = ".deps"
 _REQUIREMENTS_FILENAME = "requirements.txt"
 
-# Docker exit codes that mean the container never started. These must fail
-# closed so an unstartable sandbox is never mistaken for a completed run.
-_DOCKER_START_FAILURE_CODES: frozenset[int] = frozenset({125, 126, 127})
+# Old name kept: the file sandbox imports it.
+_DOCKER_START_FAILURE_CODES: frozenset[int] = START_FAILURE_CODES
 
 # Reads the stdin payload, executes the shipped runner source, and hands the
 # payload to its ``run``. Keeping the runner out of the image sidesteps the
@@ -67,8 +76,6 @@ _BOOTSTRAP = (
     "exec(compile(p['runner'],'code_runner.py','exec'),g);"
     "g['run'](p)"
 )
-
-_docker_available_cache: bool | None = None
 
 
 @dataclass
@@ -90,44 +97,15 @@ def _truncate(text: str, limit: int = _MAX_INSTALL_LOG_CHARS) -> str:
 
 
 def docker_available() -> bool:
-    """Return True when a working Docker daemon is reachable (cached)."""
-    global _docker_available_cache
-    if _docker_available_cache is not None:
-        return _docker_available_cache
-    try:
-        result = subprocess.run(
-            ["docker", "version", "--format", "{{.Server.Version}}"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        _docker_available_cache = result.returncode == 0 and bool(result.stdout.strip())
-    except (FileNotFoundError, subprocess.SubprocessError, OSError):
-        _docker_available_cache = False
-    return _docker_available_cache
+    """True when the sandbox backend (Docker or Kubernetes) can start sandboxes."""
+    return get_sandbox_manager().available()
 
 
 def resolve_sandbox_image() -> str | None:
-    """Resolve the sandbox image without introducing a new variable."""
-    override = (
-        os.environ.get("HEYM_PYTHON_TOOL_IMAGE", "").strip()
-        or os.environ.get("HEYM_CODEX_DOCKER_IMAGE", "").strip()
+    """``HEYM_PYTHON_TOOL_IMAGE``, ``HEYM_CODEX_DOCKER_IMAGE``, else the backend's own image."""
+    return get_sandbox_manager().resolve_image(
+        ("HEYM_PYTHON_TOOL_IMAGE", "HEYM_CODEX_DOCKER_IMAGE")
     )
-    if override:
-        return override
-    try:
-        result = subprocess.run(
-            ["docker", "inspect", "--format", "{{.Config.Image}}", socket.gethostname()],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        image = result.stdout.strip()
-        if result.returncode == 0 and image:
-            return image
-    except (FileNotFoundError, subprocess.SubprocessError, OSError):
-        pass
-    return None
 
 
 def _runner_source() -> str:
@@ -141,8 +119,8 @@ def _workspace_mount_point() -> Path:
 
 
 def _is_containerized() -> bool:
-    """True when the backend itself runs inside a container."""
-    return Path("/.dockerenv").exists()
+    """True when sandbox workspaces must live on the volume shared with the sandbox."""
+    return get_sandbox_manager().uses_shared_workspace()
 
 
 def _code_run_root() -> Path:
@@ -157,36 +135,38 @@ def _code_run_root() -> Path:
     return _workspace_mount_point() / _CODE_RUN_SUBDIR
 
 
-def _current_container_mounts() -> list[dict[str, Any]]:
-    """Best-effort inspection of the backend container's own Docker mounts."""
-    try:
-        hostname = Path("/etc/hostname").read_text(encoding="utf-8").strip()
-    except OSError:
-        return []
-    if not hostname:
-        return []
-    try:
-        result = subprocess.run(
-            ["docker", "inspect", hostname], capture_output=True, text=True, timeout=5
-        )
-    except (FileNotFoundError, subprocess.SubprocessError, OSError):
-        return []
-    if result.returncode != 0:
-        return []
-    try:
-        parsed = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        return []
-    if isinstance(parsed, list) and parsed and isinstance(parsed[0], dict):
-        mounts = parsed[0].get("Mounts")
-        if isinstance(mounts, list):
-            return [m for m in mounts if isinstance(m, dict)]
-    return []
+def workspace_mount(
+    host_path: Path,
+    container_path: str,
+    readonly: bool,
+    *,
+    missing_volume_hint: str = "The sandbox needs a shared workspace volume.",
+    fallback_hint: str = "",
+) -> WorkspaceMount:
+    """Expose only ``host_path`` at ``container_path``.
+
+    ``host_path`` must live under the workspace mount when the backend runs in a
+    container; a native backend binds it straight through.
+    """
+    mount_point = _workspace_mount_point()
+    return WorkspaceMount(
+        host_path=host_path,
+        target=container_path,
+        readonly=readonly,
+        docker=DockerVolumeSource(
+            mount_point=mount_point,
+            volume_env=("HEYM_CODEX_DOCKER_WORKSPACE_VOLUME",),
+            missing_message=(
+                f"{missing_volume_hint} Set HEYM_CODEX_DOCKER_WORKSPACE_VOLUME to the named "
+                f"volume mounted at {mount_point}.{fallback_hint}"
+            ),
+            native_bind=not _is_containerized(),
+        ),
+    )
 
 
-def _resolve_workspace_mount(run_dir: Path, readonly: bool) -> list[str]:
-    """Return ``docker run`` mount args exposing only ``run_dir`` to the sibling."""
-    return resolve_mount(
+def _code_workspace_mount(run_dir: Path, readonly: bool) -> WorkspaceMount:
+    return workspace_mount(
         run_dir,
         str(run_dir),
         readonly,
@@ -196,211 +176,122 @@ def _resolve_workspace_mount(run_dir: Path, readonly: bool) -> list[str]:
     )
 
 
-def resolve_mount(
-    host_path: Path,
-    container_path: str,
-    readonly: bool,
+def code_spec(
     *,
-    missing_volume_hint: str = "The sandbox needs a shared workspace volume.",
-    fallback_hint: str = "",
-) -> list[str]:
-    """Return ``docker run`` mount args exposing only ``host_path`` at ``container_path``.
-
-    ``host_path`` must live under the workspace mount when the backend runs in a
-    container; natively it is bound straight through.
-    """
-    suffix = ",readonly" if readonly else ""
-
-    # A native backend already holds a real host path, so bind it straight
-    # through. No shared volume is involved.
-    if not _is_containerized():
-        return ["--mount", f"type=bind,src={host_path},dst={container_path}{suffix}"]
-
-    mount_point = _workspace_mount_point()
-    try:
-        rel = host_path.relative_to(mount_point)
-    except ValueError as exc:
-        raise RuntimeError(
-            f"Sandbox dir {host_path} is not under the workspace volume mount {mount_point}"
-        ) from exc
-
-    volume = os.environ.get("HEYM_CODEX_DOCKER_WORKSPACE_VOLUME", "").strip()
-    if volume:
-        return [
-            "--mount",
-            f"type=volume,src={volume},dst={container_path},"
-            f"volume-subpath={rel.as_posix()}{suffix}",
-        ]
-
-    for mount in _current_container_mounts():
-        if str(mount.get("Destination") or "") != str(mount_point):
-            continue
-        if mount.get("Type") == "volume" and mount.get("Name"):
-            return [
-                "--mount",
-                f"type=volume,src={mount['Name']},dst={container_path},"
-                f"volume-subpath={rel.as_posix()}{suffix}",
-            ]
-        if mount.get("Type") == "bind" and mount.get("Source"):
-            host_dir = Path(str(mount["Source"])) / rel
-            return ["--mount", f"type=bind,src={host_dir},dst={container_path}{suffix}"]
-
-    raise RuntimeError(
-        f"{missing_volume_hint} Set HEYM_CODEX_DOCKER_WORKSPACE_VOLUME to the named volume "
-        f"mounted at {mount_point}.{fallback_hint}"
+    site: str,
+    name: str,
+    image: str,
+    network: str,
+    tmpfs: str,
+    entrypoint: str,
+    args: tuple[str, ...],
+    workdir: str,
+    mounts: tuple[WorkspaceMount, ...] = (),
+    extra_env: tuple[str, ...] = (),
+    memory: str = _MEMORY_LIMIT,
+    cpus: str = _CPU_LIMIT,
+) -> SandboxSpec:
+    """The Code node sandbox: non-root, no capabilities, read-only root, allowlisted env."""
+    return SandboxSpec(
+        site=site,
+        name=name,
+        image=image,
+        entrypoint=entrypoint,
+        args=args,
+        network=network,
+        user=_SANDBOX_USER,
+        tmpfs=(Tmpfs.parse(tmpfs),),
+        workdir=workdir,
+        pids=_PIDS_LIMIT,
+        memory=memory,
+        memory_swap=memory,
+        cpus=cpus,
+        env=(
+            "HOME=/tmp",
+            "PYTHONDONTWRITEBYTECODE=1",
+            "PYTHONIOENCODING=utf-8",
+            *forwarded_env(CODE_FORWARD_PREFIXES),
+            *extra_env,
+        ),
+        workspace_mounts=mounts,
     )
 
 
-# Non-secret, portable settings forwarded into both phases. Dependency install
-# has to reach PyPI, which fails behind a corporate proxy or a custom CA bundle
-# unless these survive. Everything else -- database URLs, SECRET_KEY /
-# ENCRYPTION_KEY, provider API keys -- is withheld by this allowlist, which
-# fails safe: a new backend secret is dropped by default.
-_ENV_FORWARD_PREFIXES: tuple[str, ...] = (
-    "LANG",
-    "LANGUAGE",
-    "TZ",
-    "LC_",
-    "SSL_",
-    "HTTP_PROXY",
-    "HTTPS_PROXY",
-    "NO_PROXY",
-    "ALL_PROXY",
-    "http_proxy",
-    "https_proxy",
-    "no_proxy",
-    "all_proxy",
-    "REQUESTS_CA_BUNDLE",
-    "CURL_CA_BUNDLE",
-)
+def _install_spec(
+    image: str, name: str, mounts: tuple[WorkspaceMount, ...], run_dir: Path, tool: str
+) -> SandboxSpec:
+    target = str(run_dir / _DEPS_DIRNAME)
+    requirements = str(run_dir / _REQUIREMENTS_FILENAME)
+    if tool == "uv":
+        args = ("pip", "install", "--no-cache", "--target", target, "-r", requirements)
+    else:
+        args = ("install", "--no-cache-dir", "--target", target, "-r", requirements)
+    return code_spec(
+        site="code-install",
+        name=name,
+        image=image,
+        network="bridge",
+        tmpfs=_INSTALL_TMPFS,
+        entrypoint=tool,
+        args=args,
+        workdir="/tmp",
+        mounts=mounts,
+    )
 
 
-def _forwarded_env() -> dict[str, str]:
-    """Return the allowlisted, non-secret environment to pass into the sandbox."""
-    return {
-        key: value
-        for key, value in os.environ.items()
-        # HOME is set explicitly to a writable tmpfs path; the backend's value
-        # must never override it.
-        if key != "HOME" and key.startswith(_ENV_FORWARD_PREFIXES)
-    }
-
-
-def hardening_args(
+def _run_spec(
+    image: str,
     name: str,
-    network: str,
-    tmpfs: str,
-    *,
-    memory: str = _MEMORY_LIMIT,
-    cpus: str = _CPU_LIMIT,
-) -> list[str]:
-    """Flags shared by every sandbox container. No Docker socket, no backend secrets."""
-    args = [
-        "docker",
-        "run",
-        "--rm",
-        "-i",
-        "--name",
-        name,
-        "--network",
-        network,
-        "--read-only",
-        "--tmpfs",
-        tmpfs,
-        "--user",
-        _SANDBOX_USER,
-        "--cap-drop",
-        "ALL",
-        "--security-opt",
-        "no-new-privileges",
-        "--pids-limit",
-        _PIDS_LIMIT,
-        "--memory",
-        memory,
-        "--memory-swap",
-        memory,
-        "--cpus",
-        cpus,
-        "--env",
-        "HOME=/tmp",
-        "--env",
-        "PYTHONDONTWRITEBYTECODE=1",
-        "--env",
-        "PYTHONIOENCODING=utf-8",
-    ]
-    for key, value in _forwarded_env().items():
-        args.extend(["--env", f"{key}={value}"])
-    return args
+    allow_network: bool,
+    mounts: tuple[WorkspaceMount, ...],
+    deps_path: Path | None,
+) -> SandboxSpec:
+    return code_spec(
+        site="code-run",
+        name=name,
+        image=image,
+        network="bridge" if allow_network else "none",
+        tmpfs=_RUN_TMPFS,
+        entrypoint="python",
+        args=("-c", _BOOTSTRAP),
+        workdir="/tmp",
+        mounts=mounts,
+        extra_env=(f"PYTHONPATH={deps_path}",) if deps_path is not None else (),
+    )
 
 
 def _build_install_command(
-    image: str,
-    name: str,
-    mount_args: list[str],
-    run_dir: Path,
-    tool: str,
+    image: str, name: str, mounts: tuple[WorkspaceMount, ...], run_dir: Path, tool: str
 ) -> list[str]:
-    """Build the dependency install container command for ``uv`` or ``pip``."""
-    target = str(run_dir / _DEPS_DIRNAME)
-    requirements = str(run_dir / _REQUIREMENTS_FILENAME)
-    cmd = hardening_args(name, "bridge", _INSTALL_TMPFS)
-    cmd.extend(mount_args)
-    cmd.extend(["--workdir", "/tmp", "--entrypoint", tool, image])
-    if tool == "uv":
-        cmd.extend(["pip", "install", "--no-cache", "--target", target, "-r", requirements])
-    else:
-        cmd.extend(["install", "--no-cache-dir", "--target", target, "-r", requirements])
-    return cmd
+    """The install sandbox as ``docker run`` argv (``uv`` or ``pip``)."""
+    return render_docker_argv(_install_spec(image, name, mounts, run_dir, tool))
 
 
 def _build_run_command(
     image: str,
     name: str,
     allow_network: bool,
-    mount_args: list[str],
+    mounts: tuple[WorkspaceMount, ...],
     deps_path: Path | None,
 ) -> list[str]:
-    """Build the code execution container command."""
-    cmd = hardening_args(name, "bridge" if allow_network else "none", _RUN_TMPFS)
-    cmd.extend(mount_args)
-    if deps_path is not None:
-        cmd.extend(["--env", f"PYTHONPATH={deps_path}"])
-    cmd.extend(["--workdir", "/tmp", "--entrypoint", "python", image, "-c", _BOOTSTRAP])
-    return cmd
-
-
-def _force_remove_container(name: str) -> None:
-    try:
-        subprocess.run(["docker", "rm", "-f", name], capture_output=True, text=True, timeout=10)
-    except (FileNotFoundError, subprocess.SubprocessError, OSError):
-        pass
+    """The execution sandbox as ``docker run`` argv."""
+    return render_docker_argv(_run_spec(image, name, allow_network, mounts, deps_path))
 
 
 def run_sandbox_container(
-    cmd: list[str],
+    spec: SandboxSpec,
     stdin_text: str | None,
     timeout_seconds: float,
-    name: str,
     phase: str,
 ) -> tuple[int, str, str]:
-    """Run one sandbox container and return ``(returncode, stdout, stderr)``."""
-    proc = subprocess.Popen(
-        cmd,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
+    """Run one sandbox and return ``(returncode, stdout, stderr)``."""
     try:
-        stdout, stderr = proc.communicate(input=stdin_text, timeout=timeout_seconds)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
-        _force_remove_container(name)
+        result = get_sandbox_manager().run(spec, stdin_text, timeout_seconds)
+    except SandboxTimeoutError:
         raise TimeoutError(
             f"Code node {phase} timed out after {timeout_seconds:.0f} seconds"
         ) from None
-    return proc.returncode, stdout or "", stderr or ""
+    return result.returncode, result.stdout, result.stderr
 
 
 def _chmod_best_effort(path: Path, mode: int) -> None:
@@ -417,13 +308,15 @@ def _install_dependencies(image: str, run_dir: Path, requirements: str) -> tuple
     deps_dir.mkdir(parents=True, exist_ok=True)
     _chmod_best_effort(deps_dir, 0o777)
 
-    mount_args = _resolve_workspace_mount(run_dir, readonly=False)
+    mounts = (_code_workspace_mount(run_dir, readonly=False),)
     attempts: list[str] = []
     for tool in ("uv", "pip"):
         name = f"heym-code-install-{uuid.uuid4().hex}"
-        cmd = _build_install_command(image, name, mount_args, run_dir, tool)
         returncode, stdout, stderr = run_sandbox_container(
-            cmd, None, _INSTALL_TIMEOUT_SECONDS, name, "dependency install"
+            _install_spec(image, name, mounts, run_dir, tool),
+            None,
+            _INSTALL_TIMEOUT_SECONDS,
+            "dependency install",
         )
         attempts.append(f"[{tool}] exit {returncode}\n{stdout}{stderr}".strip())
         if returncode == 0:
@@ -491,20 +384,22 @@ def execute_code(
     install_log = ""
 
     try:
-        mount_args: list[str] = []
+        mounts: tuple[WorkspaceMount, ...] = ()
         deps_path: Path | None = None
         if needs_install:
             run_dir = _code_run_root() / uuid.uuid4().hex
             run_dir.mkdir(parents=True, exist_ok=True)
             _chmod_best_effort(run_dir, 0o777)
             install_tool, install_log = _install_dependencies(image, run_dir, requirements)
-            mount_args = _resolve_workspace_mount(run_dir, readonly=True)
+            mounts = (_code_workspace_mount(run_dir, readonly=True),)
             deps_path = run_dir / _DEPS_DIRNAME
 
         name = f"heym-code-{uuid.uuid4().hex}"
-        cmd = _build_run_command(image, name, allow_network, mount_args, deps_path)
         returncode, stdout, stderr = run_sandbox_container(
-            cmd, payload, _RUN_TIMEOUT_SECONDS, name, "execution"
+            _run_spec(image, name, allow_network, mounts, deps_path),
+            payload,
+            _RUN_TIMEOUT_SECONDS,
+            "execution",
         )
         if returncode in _DOCKER_START_FAILURE_CODES:
             raise RuntimeError(

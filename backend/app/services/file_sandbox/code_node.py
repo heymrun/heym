@@ -18,11 +18,11 @@ from app.services.code_python_executor import (
     _install_dependencies,
     _parse_envelope,
     _runner_source,
+    code_spec,
     docker_available,
-    hardening_args,
-    resolve_mount,
     resolve_sandbox_image,
     run_sandbox_container,
+    workspace_mount,
 )
 from app.services.file_sandbox import executor as sandbox
 from app.services.file_sandbox.limits import CALL_TIMEOUT_SECONDS, CPU_LIMIT, MEMORY_LIMIT, TMPFS
@@ -99,22 +99,29 @@ def execute_code_with_files(
             )
 
         name = f"heym-code-{uuid.uuid4().hex}"
-        cmd = hardening_args(
-            name, "bridge" if allow_network else "none", TMPFS, memory=MEMORY_LIMIT, cpus=CPU_LIMIT
-        )
-        cmd.extend(resolve_mount(workspace.in_dir, INPUT_MOUNT, readonly=True))
-        cmd.extend(resolve_mount(workspace.work_dir, WORK_MOUNT, readonly=False))
-        if requirements.strip():
-            cmd.extend(["--env", f"PYTHONPATH={_DEPS_PATH}"])
-        cmd.extend(
-            ["--workdir", WORK_MOUNT, "--entrypoint", "python", image, "-c", sandbox._BOOTSTRAP]
+        spec = code_spec(
+            site="code-files",
+            name=name,
+            image=image,
+            network="bridge" if allow_network else "none",
+            tmpfs=TMPFS,
+            entrypoint="python",
+            args=("-c", sandbox._BOOTSTRAP),
+            workdir=WORK_MOUNT,
+            mounts=(
+                workspace_mount(workspace.in_dir, INPUT_MOUNT, readonly=True),
+                workspace_mount(workspace.work_dir, WORK_MOUNT, readonly=False),
+            ),
+            extra_env=(f"PYTHONPATH={_DEPS_PATH}",) if requirements.strip() else (),
+            memory=MEMORY_LIMIT,
+            cpus=CPU_LIMIT,
         )
         payload = sandbox.build_payload(
             "code_node", code_runner=_runner_source(), code=code, params=run_params
         )
         with sandbox._containers:
             returncode, stdout, stderr = run_sandbox_container(
-                cmd, json.dumps(payload, default=str), CALL_TIMEOUT_SECONDS, name, "execution"
+                spec, json.dumps(payload, default=str), CALL_TIMEOUT_SECONDS, "execution"
             )
         if returncode in _DOCKER_START_FAILURE_CODES:
             raise RuntimeError(

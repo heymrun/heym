@@ -19,11 +19,13 @@ import textwrap
 import uuid
 
 from app.services.code_python_executor import (
+    code_spec,
     docker_available,
-    hardening_args,
     resolve_sandbox_image,
     run_sandbox_container,
 )
+from app.services.sandbox import SandboxSpec
+from app.services.sandbox.docker_backend import render_docker_argv
 
 logger = logging.getLogger(__name__)
 
@@ -187,19 +189,31 @@ def _parse_error_message(raw: str) -> str:
     return "The code could not be parsed as Python."
 
 
+def _format_spec(image: str, name: str) -> SandboxSpec:
+    """Hardened, offline sandbox for Ruff."""
+    return code_spec(
+        site="code-format",
+        name=name,
+        image=image,
+        network="none",
+        tmpfs=_FORMAT_TMPFS,
+        entrypoint="sh",
+        args=("-c", _PROBE_SCRIPT),
+        workdir="/tmp",
+    )
+
+
 def _build_format_command(image: str, name: str) -> list[str]:
     """Build the hardened, offline ``docker run`` invocation for Ruff."""
-    cmd = hardening_args(name, "none", _FORMAT_TMPFS)
-    cmd.extend(["--workdir", "/tmp", "--entrypoint", "sh", image, "-c", _PROBE_SCRIPT])
-    return cmd
+    return render_docker_argv(_format_spec(image, name))
 
 
 def _run_ruff(image: str, source: str) -> tuple[int, str, str]:
-    """Run one throwaway Ruff container over ``source``."""
+    """Run one throwaway Ruff sandbox over ``source``."""
     name = f"heym-code-format-{uuid.uuid4().hex}"
     try:
         return run_sandbox_container(
-            _build_format_command(image, name), source, _TIMEOUT_SECONDS, name, "formatting"
+            _format_spec(image, name), source, _TIMEOUT_SECONDS, "formatting"
         )
     except TimeoutError as exc:
         raise RuntimeError(str(exc)) from exc
