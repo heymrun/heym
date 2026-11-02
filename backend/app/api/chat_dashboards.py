@@ -1,5 +1,6 @@
-"""Dashboards in chat: which dashboards a user can open, the widgets on each, placing a workflow
-on one as a widget, renaming and deleting widgets, and tidying a dashboard's layout.
+"""Dashboards in chat: which dashboards a user can open, the widgets on each, creating a
+dashboard, placing a workflow on one as a widget, renaming and deleting widgets, and tidying a
+dashboard's layout. ``chat_dashboard_builds`` builds and changes several widgets at once.
 
 Heym Work shows these dashboards as its pages, so ``list_dashboards`` is also the page to widget
 map there. The tools follow the Dashboards routes' access rules: a dashboard is reached by
@@ -14,6 +15,9 @@ behind. An existing workflow can be placed too: a chart widget gets its own hidd
 widget never touches the workflow it came from, and a workflow without a chartOutput node
 becomes a run widget, which points at the workflow itself. Every widget's workflow runs as the
 dashboard's owner.
+
+Every change is also told to the client as a ``dashboard`` stream event (``dashboard_event``),
+so a screen that shows the dashboard, such as Heym Work's page beside its chat, redraws it.
 """
 
 import uuid
@@ -21,12 +25,13 @@ from dataclasses import dataclass
 from typing import Any
 
 from fastapi import HTTPException, status
+from pydantic import ValidationError
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.workflows import get_workflow_for_user
 from app.db.models import Dashboard, DashboardWidget, User, Workflow
-from app.models.dashboard_schemas import WidgetLayout
+from app.models.dashboard_schemas import DashboardCreateRequest, WidgetLayout
 from app.services.audit_log import audit
 from app.services.dashboard_access import (
     PERMISSION_OWNER,
@@ -47,6 +52,7 @@ from app.services.widget_title import DEFAULT_WIDGET_TITLE
 from app.services.workflow_dsl_prompt import DASHBOARD_WIDGET_PROMPT_HINT
 
 LIST_DASHBOARDS_TOOL = "list_dashboards"
+CREATE_DASHBOARD_TOOL = "create_dashboard"
 ADD_DASHBOARD_WIDGET_TOOL = "add_dashboard_widget"
 RENAME_DASHBOARD_WIDGET_TOOL = "rename_dashboard_widget"
 DELETE_DASHBOARD_WIDGET_TOOL = "delete_dashboard_widget"
@@ -54,6 +60,7 @@ TIDY_DASHBOARD_TOOL = "tidy_dashboard"
 DASHBOARD_TOOL_NAMES = frozenset(
     {
         LIST_DASHBOARDS_TOOL,
+        CREATE_DASHBOARD_TOOL,
         ADD_DASHBOARD_WIDGET_TOOL,
         RENAME_DASHBOARD_WIDGET_TOOL,
         DELETE_DASHBOARD_WIDGET_TOOL,
@@ -69,6 +76,17 @@ EMPTY_WIDGET_NEEDS_BUILD_ERROR = (
     "This chat cannot build a widget's workflow. Put an existing workflow on the dashboard "
     "with workflow_id, or build the widget in the Dashboard tab."
 )
+CREATE_NEEDS_BUILD_ERROR = (
+    "This chat cannot create dashboards. Create one in the Dashboard tab, or in Heym Work as "
+    "an Editor."
+)
+
+# What a ``dashboard`` stream event says changed.
+DASHBOARD_CREATED = "created"
+WIDGET_ADDED = "widget_added"
+WIDGET_UPDATED = "widget_updated"
+WIDGET_REMOVED = "widget_removed"
+DASHBOARD_ARRANGED = "arranged"
 
 DASHBOARD_TOOL_SCHEMAS: list[dict[str, Any]] = [
     {
@@ -89,6 +107,23 @@ DASHBOARD_TOOL_SCHEMAS: list[dict[str, Any]] = [
                     },
                 },
                 "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": CREATE_DASHBOARD_TOOL,
+            "description": "Create a new, empty dashboard owned by the user, and return its id and url. Heym Work shows it as a page. Call it when the user asks for a new dashboard or page, never to put widgets on one that exists: resolve that with list_dashboards. Then fill it: build_dashboard_widgets builds several widgets at once, add_dashboard_widget places an existing workflow.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "The dashboard's name: a few words that say what it is for, in the user's language.",
+                    },
+                },
+                "required": ["name"],
             },
         },
     },
@@ -195,6 +230,7 @@ DASHBOARD_TOOL_SCHEMAS: list[dict[str, Any]] = [
 
 _STEP_LABELS = {
     LIST_DASHBOARDS_TOOL: "Reading dashboards...",
+    CREATE_DASHBOARD_TOOL: "Creating dashboard...",
     ADD_DASHBOARD_WIDGET_TOOL: "Adding widget to dashboard...",
     RENAME_DASHBOARD_WIDGET_TOOL: "Renaming widget...",
     DELETE_DASHBOARD_WIDGET_TOOL: "Deleting widget...",
@@ -212,6 +248,53 @@ def dashboard_tool_label(name: str) -> str:
 def dashboard_url(public_base_url: str, dashboard_id: object) -> str:
     """The dashboard's page in the Dashboard tab."""
     return f"{public_base_url.rstrip('/')}/?tab=dashboard&dashboard={dashboard_id}"
+
+
+def dashboard_event(
+    action: str,
+    dashboard_id: object,
+    *,
+    widget_id: object | None = None,
+    title: str | None = None,
+) -> dict[str, Any]:
+    """A ``dashboard`` stream event: what changed on which dashboard, for a client to redraw."""
+    event: dict[str, Any] = {
+        "type": "dashboard",
+        "action": action,
+        "dashboard_id": str(dashboard_id),
+    }
+    if widget_id is not None:
+        event["widget_id"] = str(widget_id)
+    if title is not None:
+        event["title"] = title
+    return event
+
+
+def dashboard_change_events(name: str, data: object) -> list[dict[str, Any]]:
+    """The ``dashboard`` stream events of one dashboard tool's result; none for a read or an
+    error."""
+    if not isinstance(data, dict) or data.get("error"):
+        return []
+    dashboard = data.get("dashboard") or {}
+    dashboard_id = dashboard.get("id")
+    if not dashboard_id:
+        return []
+    widget = data.get("widget") or {}
+    if name == CREATE_DASHBOARD_TOOL:
+        return [dashboard_event(DASHBOARD_CREATED, dashboard_id, title=dashboard.get("name"))]
+    if name == ADD_DASHBOARD_WIDGET_TOOL:
+        action = WIDGET_ADDED
+    elif name == RENAME_DASHBOARD_WIDGET_TOOL:
+        action = WIDGET_UPDATED
+    elif name == DELETE_DASHBOARD_WIDGET_TOOL:
+        action = WIDGET_REMOVED
+    elif name == TIDY_DASHBOARD_TOOL:
+        return [dashboard_event(DASHBOARD_ARRANGED, dashboard_id)]
+    else:
+        return []
+    return [
+        dashboard_event(action, dashboard_id, widget_id=widget.get("id"), title=widget.get("title"))
+    ]
 
 
 def _uuid_arg(value: object) -> uuid.UUID | None:
@@ -390,6 +473,43 @@ def _next_step(new: _NewWidget) -> str:
         f"{new.workflow.id}, keeping the name {new.title!r}, then test it with "
         "run_workflow_test and finish. Follow widget_rules."
     )
+
+
+async def create_dashboard_for_chat(
+    db: AsyncSession,
+    user: User,
+    args: dict[str, Any],
+    public_base_url: str,
+    *,
+    can_build: bool,
+) -> dict[str, Any]:
+    """Create an empty dashboard the user owns, as the Dashboard tab's New dashboard does."""
+    if not can_build:
+        return {"error": CREATE_NEEDS_BUILD_ERROR}
+    try:
+        name = DashboardCreateRequest(name=_text_arg(args.get("name"))).name
+    except ValidationError:
+        return {"error": "name must be a short, non-empty dashboard name (at most 255 characters)"}
+    dashboard = Dashboard(owner_id=user.id, name=name)
+    db.add(dashboard)
+    await db.commit()
+    await db.refresh(dashboard)
+    audit(
+        action="dashboard.create",
+        actor=user,
+        target_type="dashboard",
+        target_id=dashboard.id,
+        target_name=dashboard.name,
+        source="chat",
+    )
+    return {
+        "created": True,
+        "dashboard": _dashboard_ref(dashboard, public_base_url),
+        "next_step": (
+            "The dashboard is empty. Fill it with build_dashboard_widgets (several new widgets "
+            "at once) or add_dashboard_widget with an existing workflow_id, then link its url."
+        ),
+    }
 
 
 async def add_dashboard_widget_for_chat(
@@ -623,10 +743,13 @@ async def call_dashboard_tool(
 ) -> dict[str, Any]:
     """Run one dashboard tool and return its result.
 
-    ``can_build`` says whether the turn can save workflows, which filling an empty widget needs.
+    ``can_build`` says whether the turn can save workflows, which filling an empty widget and
+    creating a dashboard need.
     """
     if name == LIST_DASHBOARDS_TOOL:
         return await list_dashboards_for_chat(db, user, args, public_base_url)
+    if name == CREATE_DASHBOARD_TOOL:
+        return await create_dashboard_for_chat(db, user, args, public_base_url, can_build=can_build)
     if name == RENAME_DASHBOARD_WIDGET_TOOL:
         return await rename_dashboard_widget_for_chat(db, user, args, public_base_url)
     if name == DELETE_DASHBOARD_WIDGET_TOOL:
@@ -647,6 +770,8 @@ def summarize_dashboard_tool(name: str, data: object) -> str:
         return f"{int(data.get('count') or 0)} dashboard(s), {widgets} widget(s) listed"
     widget = data.get("widget") or {}
     dashboard = data.get("dashboard") or {}
+    if name == CREATE_DASHBOARD_TOOL:
+        return f"Created dashboard {dashboard.get('name')!r}"
     if name == RENAME_DASHBOARD_WIDGET_TOOL:
         return f"Renamed widget to {widget.get('title')!r} on dashboard {dashboard.get('name')!r}"
     if name == DELETE_DASHBOARD_WIDGET_TOOL:
