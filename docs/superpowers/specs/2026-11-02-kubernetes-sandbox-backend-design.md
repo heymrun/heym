@@ -140,7 +140,7 @@ backend/app/services/sandbox/
   __init__.py          get_sandbox_manager()
   spec.py              SandboxSpec, Tmpfs, WorkspaceMount, OperatorMount, SandboxResult
   manager.py           SandboxManager: backend selection, availability, delegation
-  errors.py            SandboxUnavailableError, SandboxStartError, SandboxTimeoutError
+  errors.py            SandboxTimeoutError, SandboxConfigError
   env.py               shared env allowlists (the three prefix tuples that exist today)
   docker_backend.py    argv rendering, run, force_remove, self image, mount resolution
   coding_agents.py     RunScope + SandboxSpec for Codex and OpenCode (stdlib only)
@@ -689,3 +689,25 @@ access". There is no release tour entry: nothing changes in the UI.
 | Attach behaves differently across runtimes (containerd, CRI-O on OpenShift) | Pod status is the source of truth for exit codes, with a logs fallback. Live tests on OrbStack (docker runtime) only, so OpenShift stays a community-verified target. |
 | OpenShift UID assignment under `restricted-v2` | Discovery-based detection (see Pod). Untested locally; verified by the issue author or a CRC/OpenShift Local run before claiming support. |
 | Lost output before attach | Start gate for Codex and OpenCode; every other runner reads stdin first. |
+
+## Implementation notes (2026-11-02)
+
+Found while implementing and verifying on OrbStack; the code and tests already reflect them.
+
+- **Host data in local images.** `.dockerignore` did not exclude `data` or `backend/data`,
+  so a local build copied the developer's workspaces and Drive files into the image.
+  The old whole-volume mount hid them under the workspace root; with scoped mounts a
+  runner could list them. Both directories are now ignored (release images are built
+  from a clean checkout and never had them).
+- **Pod finished before the attach.** The network canary did not read stdin, finished
+  before the attach arrived, and the API server answered HTTP 500. The canary now reads
+  stdin first, and the backend falls back to the pod's exit status and log when an
+  attach is refused.
+- **Service links.** A Service named `postgres` makes Kubernetes inject
+  `POSTGRES_PORT=tcp://...` into the backend pod, which breaks Heym's own
+  `POSTGRES_PORT` setting. The example Deployment sets `enableServiceLinks: false`.
+- **Tests and backend selection.** Selecting `auto` probes `docker version`. Tests that
+  patch `subprocess` globally would hit that probe if the manager were built inside
+  them, so `tests/conftest.py` builds a Docker-pinned manager before every test; tests
+  about selection reset it themselves.
+- `SandboxTimeout` is `SandboxTimeoutError` (Ruff N818).
