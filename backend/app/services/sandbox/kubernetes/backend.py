@@ -14,9 +14,10 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from websockets.exceptions import InvalidHandshake
 
 from app.services.sandbox.errors import SandboxConfigError, SandboxTimeoutError
-from app.services.sandbox.kubernetes.attach import exchange, open_attach
+from app.services.sandbox.kubernetes.attach import AttachSession, exchange, open_attach
 from app.services.sandbox.kubernetes.client import KubeApiError, KubeClient
 from app.services.sandbox.kubernetes.config import KubeConfig, KubeConfigError
 from app.services.sandbox.kubernetes.lifecycle import wait_started, wait_terminated
@@ -169,22 +170,25 @@ class KubernetesBackend:
             if started.state == "failed":
                 return SandboxResult(START_FAILURE_RETURNCODE, "", f"kubernetes: {started.reason}")
             stdout, stderr, status_code = b"", b"", None
+            attached = False
             if started.state == "running":
-                session = open_attach(self._client, spec.name)
-                try:
-                    stdout, stderr, status_code = exchange(
-                        session,
-                        stdin.encode("utf-8") if stdin is not None else None,
-                        time.monotonic() + timeout_seconds,
-                    )
-                except TimeoutError:
-                    raise SandboxTimeoutError(
-                        f"sandbox pod {spec.name} ran past {timeout_seconds:.0f} seconds"
-                    ) from None
-                finally:
-                    session.close()
+                session = self._attach(spec.name)
+                if session is not None:
+                    attached = True
+                    try:
+                        stdout, stderr, status_code = exchange(
+                            session,
+                            stdin.encode("utf-8") if stdin is not None else None,
+                            time.monotonic() + timeout_seconds,
+                        )
+                    except TimeoutError:
+                        raise SandboxTimeoutError(
+                            f"sandbox pod {spec.name} ran past {timeout_seconds:.0f} seconds"
+                        ) from None
+                    finally:
+                        session.close()
             finished = wait_terminated(self._client, spec.name)
-            if started.state == "terminated" and not stdout:
+            if not attached and not stdout:
                 stdout = self._client.pod_log(spec.name).encode("utf-8")
             code = finished.code if finished.code is not None else status_code
             if code is None:
@@ -198,6 +202,14 @@ class KubernetesBackend:
             )
         finally:
             self.force_remove(spec.name)
+
+    def _attach(self, name: str) -> AttachSession | None:
+        """Attach, or None when the container finished before the attach arrived."""
+        try:
+            return open_attach(self._client, name)
+        except (InvalidHandshake, OSError) as exc:
+            logger.info("Attach to sandbox pod %s failed (%s); reading its log instead", name, exc)
+            return None
 
     def process_command(self, spec: SandboxSpec) -> ProcessCommand:
         """The bridge command for callers that spawn the sandbox (MCP stdio)."""

@@ -60,6 +60,20 @@ class RunTest(unittest.TestCase):
         attach.assert_not_called()
         backend._client.delete_pod.assert_called_once()
 
+    def test_container_gone_before_attach_falls_back_to_the_log(self) -> None:
+        from websockets.exceptions import InvalidHandshake
+
+        backend = _backend()
+        backend._client.pod_log.return_value = "early output"
+        with (
+            patch.object(kube_backend, "wait_started", return_value=PodStart("running")),
+            patch.object(kube_backend, "open_attach", side_effect=InvalidHandshake("500")),
+            patch.object(kube_backend, "wait_terminated", return_value=PodExit(0)),
+        ):
+            result = backend.run(_spec(), None, 5)
+        self.assertEqual((result.returncode, result.stdout), (0, "early output"))
+        backend._client.delete_pod.assert_called_once()
+
     def test_timeout_deletes_and_raises(self) -> None:
         backend = _backend()
         with (

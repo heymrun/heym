@@ -17,6 +17,8 @@ from app.services.sandbox.spec import SandboxResult, SandboxSpec, Tmpfs
 
 CANARY_SCRIPT = (
     "import os,socket,sys\n"
+    # Read stdin first, like every runner, so the attach always arrives in time.
+    "sys.stdin.read()\n"
     "targets=[(os.environ.get('KUBERNETES_SERVICE_HOST',''),"
     "int(os.environ.get('KUBERNETES_SERVICE_PORT') or 443)),('1.1.1.1',443)]\n"
     "for host,port in targets:\n"
