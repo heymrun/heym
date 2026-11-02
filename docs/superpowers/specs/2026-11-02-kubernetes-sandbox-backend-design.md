@@ -140,7 +140,7 @@ backend/app/services/sandbox/
   __init__.py          get_sandbox_manager()
   spec.py              SandboxSpec, Tmpfs, WorkspaceMount, OperatorMount, SandboxResult
   manager.py           SandboxManager: backend selection, availability, delegation
-  errors.py            SandboxUnavailableError, SandboxStartError, SandboxTimeout
+  errors.py            SandboxUnavailableError, SandboxStartError, SandboxTimeoutError
   env.py               shared env allowlists (the three prefix tuples that exist today)
   docker_backend.py    argv rendering, run, force_remove, self image, mount resolution
   coding_agents.py     RunScope + SandboxSpec for Codex and OpenCode (stdlib only)
@@ -402,7 +402,7 @@ to verify it.
    briefly until it is set. The channel-3 status message is only a fallback.
    `reason: OOMKilled` sets `oom_killed`.
 5. Delete the pod with grace period 0, on every exit path. On timeout, delete first,
-   then raise `SandboxTimeout`, which subclasses `TimeoutError` so each site's
+   then raise `SandboxTimeoutError`, which subclasses `TimeoutError` so each site's
    existing message still applies.
 
 If the container already finished before the attach connected (only possible for a

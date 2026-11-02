@@ -30,7 +30,7 @@ Create:
 |---|---|
 | `backend/app/services/sandbox/__init__.py` | public exports |
 | `backend/app/services/sandbox/spec.py` | `SandboxSpec`, `Tmpfs`, `WorkspaceMount`, `DockerVolumeSource`, `OperatorMount`, `SandboxResult`, `ProcessCommand`, exit-code constants |
-| `backend/app/services/sandbox/errors.py` | `SandboxTimeout`, `SandboxConfigError` |
+| `backend/app/services/sandbox/errors.py` | `SandboxTimeoutError`, `SandboxConfigError` |
 | `backend/app/services/sandbox/env.py` | env allowlists shared by sites |
 | `backend/app/services/sandbox/docker_backend.py` | argv rendering, mount resolution, run, cleanup, self image |
 | `backend/app/services/sandbox/manager.py` | backend selection, `get_sandbox_manager()` |
@@ -733,7 +733,7 @@ class ProcessCommand:
 """Errors shared by every sandbox backend."""
 
 
-class SandboxTimeout(TimeoutError):
+class SandboxTimeoutError(TimeoutError):
     """The sandbox ran past its limit. Its container or pod is already removed."""
 
 
@@ -820,7 +820,7 @@ from app.services.sandbox.docker_backend import (
     operator_mount_args,
     render_docker_argv,
 )
-from app.services.sandbox.errors import SandboxTimeout
+from app.services.sandbox.errors import SandboxTimeoutError
 from app.services.sandbox.spec import (
     DockerVolumeSource,
     OperatorMount,
@@ -954,7 +954,7 @@ class BackendTest(unittest.TestCase):
             patch("subprocess.Popen", return_value=proc),
             patch.object(docker_backend, "_docker_rm") as rm,
         ):
-            with self.assertRaises(SandboxTimeout):
+            with self.assertRaises(SandboxTimeoutError):
                 DockerBackend().run(self._spec(), None, 5)
         proc.kill.assert_called_once()
         rm.assert_called_once_with("heym-t-1")
@@ -999,7 +999,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from app.services.sandbox.errors import SandboxTimeout
+from app.services.sandbox.errors import SandboxTimeoutError
 from app.services.sandbox.spec import (
     OperatorMount,
     ProcessCommand,
@@ -1203,7 +1203,7 @@ class DockerBackend:
             proc.kill()
             proc.wait()
             _docker_rm(spec.name)
-            raise SandboxTimeout(
+            raise SandboxTimeoutError(
                 f"sandbox {spec.name} ran past {timeout_seconds:.0f} seconds"
             ) from None
         return SandboxResult(proc.returncode, stdout or "", stderr or "")
@@ -1453,7 +1453,7 @@ Delete `import socket`, `_docker_available_cache`, the bodies of `_docker_availa
 ```python
 from app.services.sandbox import SandboxSpec, Tmpfs, get_sandbox_manager
 from app.services.sandbox.docker_backend import render_docker_argv
-from app.services.sandbox.errors import SandboxTimeout
+from app.services.sandbox.errors import SandboxTimeoutError
 
 
 def _docker_available() -> bool:
@@ -1497,7 +1497,7 @@ def _execute_docker(payload_json: str, timeout_seconds: float, image: str) -> st
     name = f"heym-pytool-{uuid.uuid4().hex}"
     try:
         result = get_sandbox_manager().run(_tool_spec(image, name), payload_json, timeout_seconds)
-    except SandboxTimeout:
+    except SandboxTimeoutError:
         raise TimeoutError(f"Tool execution timed out after {timeout_seconds} seconds") from None
     if result.stderr:
         logger.warning("Docker tool stderr: %s", result.stderr)
@@ -1570,7 +1570,7 @@ from app.services.sandbox import (
 )
 from app.services.sandbox.docker_backend import render_docker_argv
 from app.services.sandbox.env import CODE_FORWARD_PREFIXES, forwarded_env
-from app.services.sandbox.errors import SandboxTimeout
+from app.services.sandbox.errors import SandboxTimeoutError
 from app.services.sandbox.spec import START_FAILURE_CODES
 
 logger = logging.getLogger(__name__)
@@ -1773,7 +1773,7 @@ def run_sandbox_container(
     """Run one sandbox and return ``(returncode, stdout, stderr)``."""
     try:
         result = get_sandbox_manager().run(spec, stdin_text, timeout_seconds)
-    except SandboxTimeout:
+    except SandboxTimeoutError:
         raise TimeoutError(
             f"Code node {phase} timed out after {timeout_seconds:.0f} seconds"
         ) from None
@@ -2048,7 +2048,7 @@ Delete `import socket`, `import subprocess`, `_docker_available_cache`, `_force_
 ```python
 from app.services.sandbox import SandboxSpec, Tmpfs, get_sandbox_manager
 from app.services.sandbox.docker_backend import render_docker_argv
-from app.services.sandbox.errors import SandboxTimeout
+from app.services.sandbox.errors import SandboxTimeoutError
 
 
 def _docker_available() -> bool:
@@ -2107,7 +2107,7 @@ def run_script(
         result = get_sandbox_manager().run(
             _playwright_spec(image, name), script_content, timeout_seconds
         )
-    except SandboxTimeout:
+    except SandboxTimeoutError:
         raise TimeoutError(
             f"Playwright script timed out after {timeout_seconds:.1f} seconds"
         ) from None
@@ -2146,7 +2146,7 @@ from app.services.sandbox import (
 )
 from app.services.sandbox.docker_backend import render_docker_argv
 from app.services.sandbox.env import SKILL_FORWARD_PREFIXES, forwarded_env
-from app.services.sandbox.errors import SandboxTimeout
+from app.services.sandbox.errors import SandboxTimeoutError
 
 
 def _docker_available() -> bool:
@@ -2248,7 +2248,7 @@ def _execute_skill_docker(
         spec = _skill_spec(image, name, mount_point, run_dir, entry_point)
         try:
             result = get_sandbox_manager().run(spec, args_json, timeout_seconds)
-        except SandboxTimeout:
+        except SandboxTimeoutError:
             raise TimeoutError(
                 f"Skill execution timed out after {timeout_seconds} seconds"
             ) from None
@@ -4835,7 +4835,7 @@ import json
 import unittest
 from unittest.mock import MagicMock, patch
 
-from app.services.sandbox.errors import SandboxConfigError, SandboxTimeout
+from app.services.sandbox.errors import SandboxConfigError, SandboxTimeoutError
 from app.services.sandbox.kubernetes import backend as kube_backend
 from app.services.sandbox.kubernetes.backend import KubernetesBackend
 from app.services.sandbox.kubernetes.config import KubeConfig
@@ -4894,7 +4894,7 @@ class RunTest(unittest.TestCase):
             patch.object(kube_backend, "open_attach"),
             patch.object(kube_backend, "exchange", side_effect=TimeoutError),
         ):
-            with self.assertRaises(SandboxTimeout):
+            with self.assertRaises(SandboxTimeoutError):
                 backend.run(_spec(), None, 5)
         backend._client.delete_pod.assert_called_once()
 
@@ -4975,7 +4975,7 @@ from typing import Any
 
 import httpx
 
-from app.services.sandbox.errors import SandboxConfigError, SandboxTimeout
+from app.services.sandbox.errors import SandboxConfigError, SandboxTimeoutError
 from app.services.sandbox.kubernetes.attach import exchange, open_attach
 from app.services.sandbox.kubernetes.client import KubeApiError, KubeClient
 from app.services.sandbox.kubernetes.config import KubeConfig, KubeConfigError
@@ -5134,7 +5134,7 @@ class KubernetesBackend:
                         time.monotonic() + timeout_seconds,
                     )
                 except TimeoutError:
-                    raise SandboxTimeout(
+                    raise SandboxTimeoutError(
                         f"sandbox pod {spec.name} ran past {timeout_seconds:.0f} seconds"
                     ) from None
                 finally:
