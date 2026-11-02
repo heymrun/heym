@@ -1,0 +1,52 @@
+# A worker reaches only the database. It runs distributable nodes (the Code node,
+# Playwright, Agent Python tools), so it needs the same ServiceAccount for sandbox
+# pods and a claim at the workspace directory for Code node dependencies. On a
+# multi-node cluster give it its own ReadWriteOnce claim or share a ReadWriteMany one.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: heym-worker
+  labels:
+    app.kubernetes.io/name: heym-worker
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: heym-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: heym-worker
+    spec:
+      serviceAccountName: heym-backend
+      enableServiceLinks: false
+      containers:
+        - name: heym
+          image: heym-backend:local
+          # Main owns the schema, so the worker skips the image's migration step.
+          command: ["sh", "-c", "uv run python -m uvicorn app.main:app --host 0.0.0.0 --port 10105 --workers 2"]
+          ports:
+            - {name: http, containerPort: 10105}
+          env:
+            - {name: HEYM_SANDBOX_BACKEND, value: kubernetes}
+            - {name: HEYM_CLUSTER_ENABLED, value: "true"}
+            - {name: HEYM_INSTANCE_ROLE, value: worker}
+            - {name: HEYM_INSTANCE_ID, value: worker-1}
+            - {name: HEYM_INSTANCE_NAME, value: Worker 1}
+            - name: DATABASE_URL
+              valueFrom: {secretKeyRef: {name: heym-secrets, key: DATABASE_URL}}
+            - name: SECRET_KEY
+              valueFrom: {secretKeyRef: {name: heym-secrets, key: SECRET_KEY}}
+            - name: ENCRYPTION_KEY
+              valueFrom: {secretKeyRef: {name: heym-secrets, key: ENCRYPTION_KEY}}
+          volumeMounts:
+            - {name: data, mountPath: /app/data}
+          readinessProbe:
+            httpGet: {path: /api/health, port: http}
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: heym-data

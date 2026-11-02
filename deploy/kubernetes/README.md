@@ -41,6 +41,16 @@ a claim named `heym-data` in the sandbox namespace bound to the same RWX share
 `runtimeClassName` (for example gVisor), `imagePullSecrets` and `priorityClassName`.
 Nothing else is accepted.
 
+## Load distribution
+
+Workers are more Deployments of the same image with `HEYM_INSTANCE_ROLE=worker`, the
+same `SECRET_KEY` and `ENCRYPTION_KEY`, and the `heym-backend` ServiceAccount, so they
+can start sandbox pods too. A worker runs the Code node, so it needs a claim at the
+workspace directory for Code node dependencies: its own `ReadWriteOnce` claim works,
+because those directories only live for one run. `overlays/orbstack-cluster` adds one
+worker; `scripts/k8s-cluster-smoke.sh` checks that queued runs land on it and that
+their sandbox pods are the worker's.
+
 ## Local test on OrbStack
 
     docker compose build backend
@@ -50,3 +60,6 @@ Nothing else is accepted.
       --from-literal=SECRET_KEY=$(openssl rand -hex 32) \
       --from-literal=ENCRYPTION_KEY=$(openssl rand -hex 32)
     ./scripts/k8s-sandbox-smoke.sh
+
+For main plus a worker, apply `overlays/orbstack-cluster` instead and run
+`./scripts/k8s-cluster-smoke.sh`.

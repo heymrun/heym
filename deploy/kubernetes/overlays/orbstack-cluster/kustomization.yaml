@@ -1,0 +1,23 @@
+# Load distribution on OrbStack: the main instance plus one worker Deployment.
+# Postgres is the only channel between them; each runs its own sandbox pods.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: heym
+resources:
+  - ../orbstack
+  - worker.yaml
+patches:
+  - target: {kind: Deployment, name: heym}
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value: {name: HEYM_CLUSTER_ENABLED, value: "true"}
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value: {name: HEYM_INSTANCE_ROLE, value: main}
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value: {name: HEYM_INSTANCE_ID, value: main}
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value: {name: HEYM_INSTANCE_NAME, value: Main}
