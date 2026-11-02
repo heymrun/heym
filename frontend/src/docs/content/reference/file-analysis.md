@@ -1,6 +1,6 @@
 # File Analysis
 
-File analysis lets Chat, the [Agent node](../nodes/agent-node.md) and the [Code node](../nodes/code-node.md) open large files from [Drive](./drive.md) in an isolated Python sandbox. PDFs, spreadsheets, CSV, DOCX and JSON are inspected first and then read selectively, so a 200-page contract or a workbook with a million rows never has to fit into a model's context.
+File analysis lets Chat, the [Agent node](../nodes/agent-node.md) and the [Code node](../nodes/code-node.md) open and analyze large files from [Drive](./drive.md) in an isolated Python sandbox. PDFs, spreadsheets, CSV, DOCX and JSON are inspected first and then read selectively, so a 200-page contract or a workbook with a million rows never has to fit into a model's context.
 
 ## How it works
 

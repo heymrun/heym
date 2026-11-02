@@ -86,7 +86,7 @@ When a call creates or edits a workflow, the reply lists each one with its full 
 - To change a workflow it built earlier, continue the thread with the same `conversation_id`. The assistant updates that workflow instead of creating a new one, and it only changes workflows you can edit.
 - When the five test runs are used up, the assistant stops and explains what still fails.
 
-`heym_chat` can inspect your tables and rows, create tables, add or remove columns, and insert, update or delete rows. Give it a table name, UUID or DataTable link, for example: “Add two string columns, name and surname, to https://heym.example/?tab=datatable/<table-id>.” It changes the table directly and preserves existing columns and values when adding columns.
+`heym_chat` can inspect your tables and rows, create tables, add or remove columns, and insert, update or delete rows. Give it a table name, UUID or DataTable link, for example: “Add two string columns, name and surname, to `https://heym.example/?tab=datatable/<table-id>`.” It changes the table directly and preserves existing columns and values when adding columns.
 
 Writes require ownership or **write** access through a direct or team share. Read-only access allows inspection. Row writes use the DataTable tab's type, default, required and unique checks; partial imports report rejected rows. Removing columns deletes their values from every row. As in the DataTable tab, column removal and clearing all rows ask for confirmation first; reply with the same `conversation_id` to confirm. Deleting a selected row needs no extra confirmation.
 
