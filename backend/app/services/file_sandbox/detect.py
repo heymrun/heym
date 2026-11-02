@@ -25,9 +25,26 @@ from app.services.file_sandbox.workspace import FileWorkspace
 
 logger = logging.getLogger(__name__)
 
-# Mirrors DRIVE_EXTENSIONS in frontend/src/composables/useFileAttachment.ts.
+# Mirrors DRIVE_EXTENSIONS and the image types in frontend/src/composables/useFileAttachment.ts.
 SUPPORTED_EXTENSIONS = frozenset(
-    {".pdf", ".xlsx", ".xlsm", ".xls", ".csv", ".tsv", ".docx", ".json", ".jsonl", ".txt", ".md"}
+    {
+        ".pdf",
+        ".xlsx",
+        ".xlsm",
+        ".xls",
+        ".csv",
+        ".tsv",
+        ".docx",
+        ".json",
+        ".jsonl",
+        ".txt",
+        ".md",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".webp",
+    }
 )
 _SUPPORTED_MIMES = frozenset(
     {
@@ -43,6 +60,10 @@ _SUPPORTED_MIMES = frozenset(
         "application/jsonl",
         "text/plain",
         "text/markdown",
+        "image/png",
+        "image/jpeg",
+        "image/gif",
+        "image/webp",
     }
 )
 

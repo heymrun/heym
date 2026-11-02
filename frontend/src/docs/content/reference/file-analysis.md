@@ -50,7 +50,9 @@ df.to_csv(f"{heym_files.out_dir()}/by-region.csv", index=False)
 
 ## In Chat
 
-Attach a PDF, spreadsheet, DOCX, CSV or JSON file in the [Chat tab](../tabs/chat-tab.md), Heym Work's Chat or through the MCP `heym_chat` tool. The file is stored in your Drive and only its name and id go into the message. Chat inspects it, reads the part your question needs, and answers with tables or short extracts. You can also ask about a file already in Drive by name.
+Attach a PDF, spreadsheet, DOCX, CSV or JSON file, or an image (PNG, JPG, GIF, WebP), in the [Chat tab](../tabs/chat-tab.md), Heym Work's Chat or through the MCP `heym_chat` tool. The file is stored in your Drive and only its name and id go into the message. Chat inspects it, reads the part your question needs, and answers with tables or short extracts. An image is read with OCR: Chat gets its size and its text, such as the rows of a table in a screenshot, but not its colours or layout. You can also ask about a file already in Drive by name.
+
+When Chat runs a workflow that has an input named like an image field (`image`, `photo`, `picture`, `base64`), an attached image is passed to it as a data URL, as before. Images over 5 MB stay in Drive.
 
 When Chat builds a workflow around a file, it inspects the real file first, so sheet, column and page names in the workflow match it. The workflow starts with a File Upload trigger. Fixed extraction becomes a Code node with **Files** set; open questions about documents that vary become an Agent that receives the file id in its message. The test run hands your file to the trigger, the way an upload arrives, and running a workflow from Chat with an attached file does the same.
 

@@ -177,6 +177,9 @@ class MCPJsonRpcFileUploadTests(unittest.IsolatedAsyncioTestCase):
 
 
 class MCPJsonRpcProgressTests(unittest.IsolatedAsyncioTestCase):
+    # Bound hangs without imposing a latency target on oversubscribed CI runners.
+    STREAM_TIMEOUT_SECONDS = 5
+
     async def asyncTearDown(self) -> None:
         mcp_sse_channels.unregister("progress-session")
 
@@ -209,14 +212,18 @@ class MCPJsonRpcProgressTests(unittest.IsolatedAsyncioTestCase):
             )
 
             self.assertEqual(response.status_code, 202)
-            progress = json.loads(await asyncio.wait_for(queue.get(), timeout=0.2))
+            progress = json.loads(
+                await asyncio.wait_for(queue.get(), timeout=self.STREAM_TIMEOUT_SECONDS)
+            )
             self.assertEqual(progress["method"], "notifications/progress")
             self.assertEqual(progress["params"]["progressToken"], "progress-1")
 
             done.set()
             final: dict | None = None
             for _ in range(5):
-                payload = json.loads(await asyncio.wait_for(queue.get(), timeout=0.2))
+                payload = json.loads(
+                    await asyncio.wait_for(queue.get(), timeout=self.STREAM_TIMEOUT_SECONDS)
+                )
                 if payload.get("id") == 1:
                     final = payload
                     break
@@ -251,8 +258,12 @@ class MCPJsonRpcProgressTests(unittest.IsolatedAsyncioTestCase):
             )
 
             body_iterator = response.body_iterator
-            first_chunk = await asyncio.wait_for(body_iterator.__anext__(), timeout=0.2)
-            second_chunk = await asyncio.wait_for(body_iterator.__anext__(), timeout=0.2)
+            first_chunk = await asyncio.wait_for(
+                body_iterator.__anext__(), timeout=self.STREAM_TIMEOUT_SECONDS
+            )
+            second_chunk = await asyncio.wait_for(
+                body_iterator.__anext__(), timeout=self.STREAM_TIMEOUT_SECONDS
+            )
             self.assertTrue(first_chunk.startswith(": keep-alive"))
             self.assertGreater(len(first_chunk), 1024)
             self.assertIn("notifications/progress", second_chunk)
@@ -260,7 +271,9 @@ class MCPJsonRpcProgressTests(unittest.IsolatedAsyncioTestCase):
             done.set()
             chunks: list[str] = []
             for _ in range(5):
-                chunk = await asyncio.wait_for(body_iterator.__anext__(), timeout=0.2)
+                chunk = await asyncio.wait_for(
+                    body_iterator.__anext__(), timeout=self.STREAM_TIMEOUT_SECONDS
+                )
                 chunks.append(chunk)
                 if '"id": "call-1"' in chunk:
                     break
@@ -300,8 +313,12 @@ class MCPJsonRpcProgressTests(unittest.IsolatedAsyncioTestCase):
             )
 
             body_iterator = response.body_iterator
-            first_chunk = await asyncio.wait_for(body_iterator.__anext__(), timeout=0.2)
-            second_chunk = await asyncio.wait_for(body_iterator.__anext__(), timeout=0.2)
+            first_chunk = await asyncio.wait_for(
+                body_iterator.__anext__(), timeout=self.STREAM_TIMEOUT_SECONDS
+            )
+            second_chunk = await asyncio.wait_for(
+                body_iterator.__anext__(), timeout=self.STREAM_TIMEOUT_SECONDS
+            )
             self.assertTrue(first_chunk.startswith(": keep-alive"))
             self.assertGreater(len(first_chunk), 1024)
             self.assertIn("notifications/progress", second_chunk)
@@ -309,7 +326,9 @@ class MCPJsonRpcProgressTests(unittest.IsolatedAsyncioTestCase):
             done.set()
             chunks: list[str] = []
             for _ in range(5):
-                chunk = await asyncio.wait_for(body_iterator.__anext__(), timeout=0.2)
+                chunk = await asyncio.wait_for(
+                    body_iterator.__anext__(), timeout=self.STREAM_TIMEOUT_SECONDS
+                )
                 chunks.append(chunk)
                 if '"id": "named-call-1"' in chunk:
                     break

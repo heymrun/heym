@@ -89,13 +89,14 @@ _DESCRIPTIONS = {
         "First step for any file: its type, metadata and structure (PDF pages, text layer and "
         "language, scanned pages read with OCR; spreadsheet sheets, title rows, the real header row, columns and types, "
         "or label/value cells; CSV encoding, delimiter and columns; "
-        "DOCX headings and tables; JSON shape) with a short sample. Reads only what the "
-        "summary needs."
+        "DOCX headings and tables; JSON shape; an image's size and its text read with OCR) "
+        "with a short sample. Reads only what the summary needs."
     ),
     RUN_PYTHON_TOOL: (
         "Run Python 3 in an isolated sandbox with no network. pandas, openpyxl, xlrd, "
-        "pdfplumber, pypdf, python-docx and langdetect are installed; `heym_ocr.pdf_to_text` "
-        "reads scanned PDF pages. Files in `files` are "
+        "pdfplumber, pypdf, python-docx, Pillow and langdetect are installed; "
+        "`heym_ocr.pdf_to_text` reads scanned PDF pages and `heym_ocr.image_to_text` "
+        "images. Files in `files` are "
         "mounted read-only: `import heym_files; heym_files.path('<name or id>')`. /work keeps "
         "files for this session; files written to heym_files.out_dir() are saved to Heym "
         "Drive and returned as links. stdout is capped at 20,000 characters, so print only "
