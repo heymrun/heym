@@ -228,6 +228,44 @@ describe("processFile - inline text files", () => {
 });
 
 describe("processFile - image files", () => {
+  it("uploads an image to Drive like a document when the host stores chat files", async () => {
+    uploadMock.mockResolvedValue(storedFile("screen.png", 6 * 1024 * 1024, "image/png"));
+    const FileReaderSpy = vi.fn();
+    vi.stubGlobal("FileReader", FileReaderSpy);
+    const file = new File([new Uint8Array(6 * 1024 * 1024)], "screen.png", { type: "image/png" });
+
+    const { processFile, attachedFile, attachmentError } = useFileAttachment(chatFiles);
+    await processFile(file);
+
+    expect(uploadMock).toHaveBeenCalledWith(file);
+    expect(attachmentError.value).toBeNull();
+    expect(attachedFile.value).toEqual({
+      name: "screen.png",
+      kind: "file",
+      mimeType: "image/png",
+      content: "",
+      sizeKb: 6144,
+      fileId: "file-1",
+    });
+    expect(toAttachmentPayload(attachedFile.value!)).toEqual({
+      name: "screen.png",
+      kind: "file",
+      content: "",
+      file_id: "file-1",
+    });
+    expect(FileReaderSpy).not.toHaveBeenCalled();
+  });
+
+  it("shows Drive's refusal of an image upload", async () => {
+    uploadMock.mockRejectedValue(new Error("Drive is full"));
+    const file = new File([new Uint8Array([1])], "screen.png", { type: "image/png" });
+
+    const { processFile, attachmentError } = useFileAttachment(chatFiles);
+    await processFile(file);
+
+    expect(attachmentError.value).toBe("Drive is full");
+  });
+
   it("reads an image file as a data URL", async () => {
     const file = new File([new Uint8Array([1, 2, 3])], "photo.png", { type: "image/png" });
 

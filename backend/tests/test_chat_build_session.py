@@ -415,6 +415,27 @@ class ChatBuildSessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.runner.await_args.args[3], {})
         self.assertEqual(self.runner.await_args.kwargs["sample_file_id"], file_id)
 
+    async def test_an_image_from_drive_still_reaches_the_image_input(self) -> None:
+        file_id = uuid.uuid4()
+        session = self._session(
+            attachment=FileAttachment(
+                name="screen.png", kind="file", file_id=file_id, mime="image/png"
+            )
+        )
+        await session.call("save_workflow", {"workflow": DSL})
+        image = AsyncMock(return_value=("image", "data:image/png;base64,AAAA"))
+
+        with patch.object(chat_build, "image_input", image):
+            await session.call("run_workflow_test", {"inputs": {"text": "hi"}, "expect": "x"})
+
+        self.assertEqual(
+            self.runner.await_args.args[3], {"text": "hi", "image": "data:image/png;base64,AAAA"}
+        )
+        self.assertEqual(self.runner.await_args.kwargs["sample_file_id"], file_id)
+        kwargs = image.await_args.kwargs
+        self.assertEqual((kwargs["file_id"], kwargs["mime"]), (file_id, "image/png"))
+        self.assertEqual(image.await_args.args[1], self.user.id)
+
     async def test_a_named_sample_file_is_resolved_for_the_chat_user(self) -> None:
         session = self._session()
         await session.call("save_workflow", {"workflow": DSL})

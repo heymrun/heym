@@ -13,7 +13,10 @@ export interface AttachedFile {
   fileId?: string;
 }
 
-/** Documents go to Drive and are opened in the file sandbox, never pasted into the chat. */
+/**
+ * Documents go to Drive and are opened in the file sandbox, never pasted into the chat. Images
+ * go there too when the host stores chat files, so the sandbox reads their text with OCR.
+ */
 const DRIVE_EXTENSIONS = new Set([
   "pdf",
   "xlsx",
@@ -99,9 +102,11 @@ export function useFileAttachment(
       attachmentError.value = "Unsupported file type";
       return;
     }
+    const toDrive = chatFiles !== null && (kind === "file" || kind === "image");
     // Drive enforces its own upload limit and answers with the reason.
-    const maxBytes =
-      kind === "image"
+    const maxBytes = toDrive
+      ? Number.POSITIVE_INFINITY
+      : kind === "image"
         ? MAX_IMAGE_BYTES
         : kind === "zip"
           ? MAX_ZIP_BYTES
@@ -116,11 +121,11 @@ export function useFileAttachment(
 
     attachmentLoading.value = true;
     try {
-      if (kind === "file" && chatFiles !== null) {
+      if (toDrive) {
         const stored = await chatFiles.upload(file);
         attachedFile.value = {
           name: stored.name,
-          kind,
+          kind: "file",
           mimeType: stored.mime,
           content: "",
           sizeKb: Math.round(stored.size / 1024),
@@ -146,7 +151,7 @@ export function useFileAttachment(
       };
     } catch (error: unknown) {
       attachmentError.value =
-        kind === "file" && error instanceof Error ? error.message : "Failed to read file";
+        toDrive && error instanceof Error ? error.message : "Failed to read file";
     } finally {
       attachmentLoading.value = false;
     }

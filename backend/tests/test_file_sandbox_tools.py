@@ -225,24 +225,26 @@ class DetectTests(unittest.TestCase):
         self.assertEqual(len(detect.file_id_candidates(text)), 50)
 
     def test_supported_types_by_extension_then_mime(self) -> None:
-        for name in ("a.pdf", "b.XLSX", "c.csv", "d.docx", "e.json", "f.jsonl", "g.md"):
+        for name in ("a.pdf", "b.XLSX", "c.csv", "d.docx", "e.json", "f.jsonl", "g.md", "h.PNG"):
             self.assertTrue(detect.is_analyzable(name, None), name)
-        for name in ("a.png", "b.zip", "c.mp4", "d.exe"):
+        for name in ("b.zip", "c.mp4", "d.exe", "e.svg"):
             self.assertFalse(detect.is_analyzable(name, "application/pdf"), name)
         self.assertTrue(detect.is_analyzable("export", "text/csv; charset=utf-8"))
-        self.assertFalse(detect.is_analyzable("photo", "image/png"))
+        self.assertTrue(detect.is_analyzable("photo", "image/png"))
+        self.assertTrue(detect.is_analyzable("scan.jpg", None))
+        self.assertFalse(detect.is_analyzable("drawing", "image/svg+xml"))
 
     def test_only_supported_files_with_stored_content_count(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             stored = Path(tmp) / "q3.xlsx"
             stored.write_bytes(b"x")
             kept = _ref(stored)
-            image = _ref(stored, name="photo.png")
+            video = _ref(stored, name="clip.mp4")
             missing = replace(
                 kept, id=uuid.uuid4(), name="gone.csv", storage_path=Path(tmp) / "gone.csv"
             )
             unusable = replace(kept, id=uuid.uuid4(), storage_path=None)
-            rows = [kept, image, missing, unusable]
+            rows = [kept, video, missing, unusable]
             scope = RunFileScope(file_ids=frozenset({kept.id}))
             with patch.object(detect, "accessible_files_by_id", return_value=rows) as lookup:
                 result = detect.analyzable_input_files(MagicMock(), uuid.uuid4(), {kept.id}, scope)

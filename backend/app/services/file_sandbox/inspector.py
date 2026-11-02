@@ -1,8 +1,8 @@
 """Structural inspection of one file, run inside the file sandbox.
 
 Importable as ``heym_inspector`` in the sandbox, where pandas, openpyxl, xlrd,
-pdfplumber, pypdf, python-docx and langdetect are installed, and ``heym_ocr`` (the
-Converter node's Tesseract OCR) reads scanned pages. It reads only what a summary
+pdfplumber, pypdf, python-docx, Pillow and langdetect are installed, and ``heym_ocr`` (the
+Converter node's Tesseract OCR) reads scanned pages and images. It reads only what a summary
 needs: the first pages, ``read_only`` workbooks, a sample of rows, the first
 records of a large JSON file. Never imported by the backend at run time.
 """
@@ -27,6 +27,8 @@ MAX_OUTLINE = 60
 HEADER_SCAN_ROWS = 30
 MAX_TITLE_ROWS = 5
 MAX_KEY_VALUES = 20
+# An image's OCR text is all there is to read of it, so more of it is shown than a sample.
+IMAGE_TEXT_CHARS = 6000
 
 _EXTENSION_KINDS = {
     ".pdf": "pdf",
@@ -45,7 +47,17 @@ _EXTENSION_KINDS = {
     ".xml": "text",
     ".html": "text",
     ".htm": "text",
+    ".png": "image",
+    ".jpg": "image",
+    ".jpeg": "image",
+    ".gif": "image",
+    ".webp": "image",
+    ".bmp": "image",
+    ".tif": "image",
+    ".tiff": "image",
 }
+# Formats Tesseract may not read itself; the first frame goes to it as PNG.
+_CONVERT_FOR_OCR = {"GIF", "WEBP"}
 _UTF8_BOM = b"\xef\xbb\xbf"
 
 
@@ -87,6 +99,12 @@ def detect_kind(path: Path, name: str | None = None, mime: str | None = None) ->
         head = handle.read(4096)
     if head.startswith(b"%PDF"):
         return "pdf"
+    if (
+        head.startswith((b"\x89PNG", b"\xff\xd8\xff", b"GIF8", b"II*\x00", b"MM\x00*"))
+        or head[:4] == b"RIFF"
+        and head[8:12] == b"WEBP"
+    ):
+        return "image"
     if head.startswith(b"\xd0\xcf\x11\xe0"):
         return "xls"
     if head.startswith(b"PK"):
@@ -254,6 +272,67 @@ def _ocr_pages(path: Path, pages: list[int]) -> dict[str, Any]:
         f"(at most {MAX_OCR_PAGES} per call). In a workflow, the Converter node's pdfToText "
         "does the same.",
     }
+
+
+def _image_details(path: Path) -> tuple[dict[str, Any], bytes]:
+    """Size and format of an image, and the bytes OCR reads (a GIF or WebP as PNG)."""
+    data = path.read_bytes()
+    try:
+        import io
+
+        from PIL import Image
+
+        with Image.open(io.BytesIO(data)) as image:
+            details = {
+                "width": image.width,
+                "height": image.height,
+                "format": image.format,
+                "mode": image.mode,
+                "frames": int(getattr(image, "n_frames", 1) or 1),
+            }
+            if image.format in _CONVERT_FOR_OCR:
+                buffer = io.BytesIO()
+                image.convert("RGB").save(buffer, format="PNG")
+                data = buffer.getvalue()
+    except Exception:  # an unreadable header still leaves OCR to try
+        details = {}
+    return details, data
+
+
+def _inspect_image(path: Path, options: dict[str, Any]) -> dict[str, Any]:
+    """An image's size and format, and its text read with OCR."""
+    details, data = _image_details(path)
+    engine = _ocr_engine()
+    try:
+        ocr = engine.image_to_text(data, filename=f"{path.stem}.png", language=engine.AUTO_LANGUAGE)
+    except ValueError as exc:
+        return {
+            **details,
+            "ocr_error": str(exc),
+            "suggestion": "OCR failed here. Look at the image with Pillow in run_python, or ask "
+            "the user what it shows.",
+        }
+    text = ocr.text or ""
+    result: dict[str, Any] = {
+        **details,
+        "ocr": True,
+        "ocr_language": ocr.language,
+        "chars": len(text),
+        "text": _clip(text, IMAGE_TEXT_CHARS),
+        "language": _language(text),
+    }
+    if not text.strip():
+        result["suggestion"] = (
+            "OCR found no text: the image may be a photo, a chart or a diagram. Use its size "
+            "and format, analyse it with Pillow in run_python, or ask the user what it shows."
+        )
+    else:
+        result["suggestion"] = (
+            "This is the image's text, read with OCR: words and numbers, not its layout or "
+            "colours. In run_python, `heym_ocr.image_to_text(data, psm='6').text` reads it "
+            "again as one block, which can keep table rows together."
+        )
+    return result
 
 
 def _infer_type(values: list[Any]) -> str:
@@ -779,6 +858,7 @@ _INSPECTORS = {
     "json": _inspect_json,
     "jsonl": _inspect_jsonl,
     "text": _inspect_text,
+    "image": _inspect_image,
     "zip": _inspect_binary,
     "binary": _inspect_binary,
 }

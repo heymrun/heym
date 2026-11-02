@@ -49,6 +49,7 @@ from app.services.chat_build_mode import (
     tool_error,
 )
 from app.services.chat_eval_mode import eval_instructions
+from app.services.chat_image_input import image_input
 from app.services.chat_progress import ToolProgress
 from app.services.collab.saves import queue_collab_saved
 from app.services.credential_access import load_accessible_credential_ids
@@ -804,11 +805,22 @@ class ChatBuildSession:
         except FileAccessError as exc:
             return tool_error(str(exc))
         run_inputs = dict(inputs)
+        field_keys = [f.key for f in extract_input_fields_from_workflow(workflow)]
         if self.attachment is not None and self.attachment.kind not in ("zip", "file"):
-            field_keys = [f.key for f in extract_input_fields_from_workflow(workflow)]
             inject_key = _find_injection_field(field_keys, self.attachment.kind)
             if inject_key:
                 run_inputs[inject_key] = self.attachment.injection_value()
+        elif self.attachment is not None and self.attachment.kind == "file":
+            # An image from Drive still reaches the workflow's image input as itself.
+            image = await image_input(
+                self.db,
+                self.user.id,
+                file_id=self.attachment.file_id,
+                mime=self.attachment.mime,
+                field_keys=field_keys,
+            )
+            if image is not None:
+                run_inputs[image[0]] = image[1]
         raw = await run_execute_workflow_tool(
             self.db,
             self.user.id,

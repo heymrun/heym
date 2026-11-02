@@ -417,6 +417,68 @@ class JsonTests(InspectorTestCase):
         self.assertEqual(result["lines"], 5)
 
 
+class ImageTests(InspectorTestCase):
+    def _image(self, name: str, image_format: str, size: tuple[int, int] = (320, 120)) -> Path:
+        from PIL import Image
+
+        path = self.dir / name
+        Image.new("RGB", size, "white").save(path, format=image_format)
+        return path
+
+    def _engine(self, text: str | Exception) -> SimpleNamespace:
+        def image_to_text(_data: bytes, *, filename: str, language: str) -> SimpleNamespace:
+            if isinstance(text, Exception):
+                raise text
+            return SimpleNamespace(text=text, language="eng")
+
+        return SimpleNamespace(
+            AUTO_LANGUAGE="auto", image_to_text=unittest.mock.Mock(wraps=image_to_text)
+        )
+
+    def test_an_image_gives_its_size_and_its_text_read_with_ocr(self) -> None:
+        path = self._image("screen.png", "PNG")
+        engine = self._engine("Today's Priorities\nBergfreunde  2. Review evidence  20 - weak")
+        with unittest.mock.patch.object(inspector, "_ocr_engine", return_value=engine):
+            result = inspect(str(path))
+        self.assertEqual(result["kind"], "image")
+        self.assertEqual((result["width"], result["height"], result["format"]), (320, 120, "PNG"))
+        self.assertTrue(result["ocr"])
+        self.assertIn("Bergfreunde", result["text"])
+        self.assertEqual(result["ocr_language"], "eng")
+        self.assertIn("psm='6'", result["suggestion"])
+        self.assertEqual(engine.image_to_text.call_args.kwargs["language"], "auto")
+
+    def test_a_gif_goes_to_ocr_as_png(self) -> None:
+        path = self._image("anim.gif", "GIF")
+        engine = self._engine("Hello")
+        with unittest.mock.patch.object(inspector, "_ocr_engine", return_value=engine):
+            result = inspect(str(path))
+        self.assertEqual(result["format"], "GIF")
+        self.assertTrue(engine.image_to_text.call_args.args[0].startswith(b"\x89PNG"))
+
+    def test_an_image_without_text_points_to_pillow(self) -> None:
+        path = self._image("photo.jpg", "JPEG")
+        with unittest.mock.patch.object(inspector, "_ocr_engine", return_value=self._engine(" ")):
+            result = inspect(str(path))
+        self.assertEqual(result["chars"], 1)
+        self.assertIn("no text", result["suggestion"])
+        self.assertIn("Pillow", result["suggestion"])
+
+    def test_ocr_failure_keeps_the_size(self) -> None:
+        path = self._image("screen.webp", "WEBP")
+        engine = self._engine(ValueError("OCR: 'tesseract' was not found on PATH"))
+        with unittest.mock.patch.object(inspector, "_ocr_engine", return_value=engine):
+            result = inspect(str(path))
+        self.assertEqual(result["width"], 320)
+        self.assertIn("tesseract", result["ocr_error"])
+        self.assertIn("Pillow", result["suggestion"])
+
+    def test_images_are_detected_by_magic_bytes(self) -> None:
+        for image_format in ("PNG", "JPEG", "GIF", "WEBP"):
+            path = self._image(f"upload-{image_format}", image_format)
+            self.assertEqual(detect_kind(path), "image", image_format)
+
+
 class DetectionTests(InspectorTestCase):
     def test_magic_bytes_win_without_an_extension(self) -> None:
         path = self.dir / "upload"

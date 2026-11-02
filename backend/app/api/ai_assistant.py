@@ -97,6 +97,7 @@ from app.services.assistant_yolo import (
     stream_until_disconnect,
     stream_yolo_assistant_turn,
 )
+from app.services.chat_image_input import IMAGE_FIELD_KEYWORDS, image_input
 from app.services.chat_progress import ToolProgress, follow_tool, workflow_draft_message
 from app.services.chat_round_stream import (
     RoundAnswer,
@@ -479,11 +480,12 @@ _ATTACHMENT_ROUTING_INSTRUCTIONS = (
     '- Text/PDF attachment → fields named "text", "document", "content", "file", "data", or similar\n'
     '- Drive file attachment → fields named "file_id", "file", "document", "attachment", or '
     "similar; pass the file id\n"
+    "- An image attached as a Drive file reaches image fields by itself; leave those out\n"
     "- If no dedicated field exists → embed the content in the primary message/query/input field"
 )
 
 
-_IMAGE_FIELD_KEYWORDS = {"image", "base64", "photo", "picture", "img"}
+_IMAGE_FIELD_KEYWORDS = IMAGE_FIELD_KEYWORDS
 _TEXT_FIELD_KEYWORDS = {"text", "document", "content", "file", "data"}
 
 
@@ -4452,6 +4454,17 @@ async def stream_dashboard_chat(
                     sample_file_id = None
                     if attachment is not None and attachment.kind == "file":
                         sample_file_id = attachment.file_id
+                        # An image from Drive still reaches a workflow's image input as itself.
+                        if w is not None:
+                            image = await image_input(
+                                db,
+                                user_id,
+                                file_id=attachment.file_id,
+                                mime=attachment.mime,
+                                field_keys=[f.key for f in extract_input_fields_from_workflow(w)],
+                            )
+                            if image is not None:
+                                inputs[image[0]] = image[1]
                     elif attachment is not None and w is not None:
                         field_keys = [f.key for f in extract_input_fields_from_workflow(w)]
                         inject_key = _find_injection_field(field_keys, attachment.kind)
