@@ -5481,9 +5481,11 @@ class SelectionTest(unittest.TestCase):
         self.assertEqual(self._select({}, False, True, True).backend_name, "kubernetes")
 
     def test_auto_without_either_stays_docker_and_fails_closed(self) -> None:
-        manager = self._select({}, False, False, False)
-        self.assertEqual(manager.backend_name, "docker")
-        self.assertFalse(manager.available())
+        # available() is asked again after selection, so keep Docker down for it too.
+        with patch.object(manager_module.DockerBackend, "available", return_value=False):
+            manager = self._select({}, False, False, False)
+            self.assertEqual(manager.backend_name, "docker")
+            self.assertFalse(manager.available())
 
     def test_forced_docker_never_tries_kubernetes(self) -> None:
         self.assertEqual(self._select({"HEYM_SANDBOX_BACKEND": "docker"}, False, True, True).backend_name, "docker")

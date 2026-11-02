@@ -8,6 +8,7 @@ import threading
 from typing import Protocol
 
 from app.services.sandbox.docker_backend import DockerBackend
+from app.services.sandbox.errors import SandboxConfigError
 from app.services.sandbox.spec import ProcessCommand, SandboxResult, SandboxSpec
 
 logger = logging.getLogger(__name__)
@@ -78,8 +79,74 @@ class SandboxManager:
         return self._backend.uses_shared_workspace()
 
 
+BACKEND_ENV = "HEYM_SANDBOX_BACKEND"
+
+
+class UnavailableBackend:
+    """A backend that was asked for but cannot run. Every call fails closed."""
+
+    def __init__(self, name: str, reason: str) -> None:
+        self.name = name
+        self.reason = reason
+
+    def available(self) -> bool:
+        return False
+
+    def resolve_image(self) -> str | None:
+        return None
+
+    def run(self, spec: SandboxSpec, stdin: str | None, timeout_seconds: float) -> SandboxResult:
+        raise SandboxConfigError(self.reason)
+
+    def process_command(self, spec: SandboxSpec) -> ProcessCommand:
+        raise SandboxConfigError(self.reason)
+
+    def force_remove(self, name: str | None) -> None:
+        return None
+
+    def uses_shared_workspace(self) -> bool:
+        return True
+
+
+def backend_mode() -> str:
+    """``auto`` (default), ``docker`` or ``kubernetes`` from HEYM_SANDBOX_BACKEND."""
+    raw = (os.environ.get(BACKEND_ENV) or "auto").strip().lower()
+    if raw not in ("auto", "docker", "kubernetes"):
+        logger.warning("Unknown %s=%r; using 'auto'", BACKEND_ENV, raw)
+        return "auto"
+    return raw
+
+
+def _kubernetes_backend(*, forced: bool) -> SandboxBackend:
+    from app.services.sandbox.kubernetes import config as kube_config
+    from app.services.sandbox.kubernetes.backend import KubernetesBackend
+
+    try:
+        if kube_config.in_cluster_available():
+            config = kube_config.load_in_cluster()
+        elif forced:
+            config = kube_config.load_kubeconfig()
+        else:
+            return UnavailableBackend("kubernetes", "not running in a Kubernetes pod")
+    except kube_config.KubeConfigError as exc:
+        logger.warning("Kubernetes sandbox backend unavailable: %s", exc)
+        return UnavailableBackend("kubernetes", str(exc))
+    return KubernetesBackend(config)
+
+
 def _build_manager() -> SandboxManager:
-    return SandboxManager(DockerBackend())
+    mode = backend_mode()
+    if mode == "docker":
+        return SandboxManager(DockerBackend())
+    if mode == "kubernetes":
+        return SandboxManager(_kubernetes_backend(forced=True))
+    docker = DockerBackend()
+    if docker.available():
+        return SandboxManager(docker)
+    kubernetes = _kubernetes_backend(forced=False)
+    if kubernetes.available():
+        return SandboxManager(kubernetes)
+    return SandboxManager(docker)
 
 
 _manager: SandboxManager | None = None
