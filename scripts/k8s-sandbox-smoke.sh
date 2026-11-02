@@ -12,7 +12,7 @@ k exec -i "$POD" -- sh -c '
     if [ -x "$py" ]; then cd "$(dirname "$(dirname "$(dirname "$py")")")" && exec "$py" -; fi
   done
   echo "backend virtualenv not found" >&2; exit 127
-' < "$HERE/k8s_sandbox_smoke.py"
+' < "$HERE/sandbox_smoke.py"
 
 sleep 2
 LEFT="$(kubectl --context "$CONTEXT" get pods -A -l app.kubernetes.io/managed-by=heym --no-headers 2>/dev/null | wc -l | tr -d ' ')"
