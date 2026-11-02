@@ -6116,6 +6116,9 @@ spec:
         app.kubernetes.io/name: heym
     spec:
       serviceAccountName: heym-backend
+      # Service links inject POSTGRES_PORT=tcp://... for a Service named postgres, which
+      # collides with Heym's own POSTGRES_PORT setting.
+      enableServiceLinks: false
       containers:
         - name: heym
           image: ghcr.io/heymrun/heym:latest
