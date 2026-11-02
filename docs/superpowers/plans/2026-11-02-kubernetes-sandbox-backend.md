@@ -3362,6 +3362,10 @@ docker compose exec backend sh -c '
 
 Expected: the listing shows only `aaaa…` and `aaaa….codex-home` (plus `.` and `..`), then `BLOCKED`. Repeat with `heym-opencode-docker`, `HOME=<root>/<id>.oc-home`, `HEYM_OPENCODE_DOCKER_ENTRYPOINT=sh` and the `/app/data/opencode-workspaces` root.
 
+- [ ] **Step 2b: Keep host data out of images**
+
+A local build copies `backend/data` (workspaces, Drive files) into the image, and with the volume no longer mounted over the workspace root, a runner sees those baked-in directories. Add `data` and `backend/data` to `.dockerignore` (no build needs them), rebuild, and repeat Step 2: the listing then shows only the run's own two directories.
+
 - [ ] **Step 3: Full check**
 
 Run: `SECRET_KEY=test-secret-key-for-tests-only-32-bytes HEYM_OTEL_ENABLED=false ./check.sh`
