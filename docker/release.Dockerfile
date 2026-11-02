@@ -185,6 +185,8 @@ COPY docker/heym-codex-docker /usr/local/bin/heym-codex-docker
 COPY docker/heym-opencode-docker /usr/local/bin/heym-opencode-docker
 
 # Playwright: install Chromium and final-stage system dependencies into the release image.
+# Outside root's home so a non-root sandbox (Kubernetes runs it as 65534) can read the browsers.
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 RUN cd /app/backend && uv run python -m playwright install --with-deps chromium
 
 ENV HEYM_CODEX_CLI_COMMAND=/usr/local/bin/heym-codex-docker \
