@@ -23,7 +23,6 @@ import tempfile
 import unittest
 import uuid
 from collections.abc import Callable
-from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -277,15 +276,6 @@ def _site_cases(docker: FakeDocker) -> dict[str, list[str]]:
     return out
 
 
-def _load_script(name: str):  # noqa: ANN202
-    path = REPO / "docker" / name
-    loader = SourceFileLoader(name.replace("-", "_"), str(path))
-    spec = importlib.util.spec_from_loader(loader.name, loader)
-    module = importlib.util.module_from_spec(spec)
-    loader.exec_module(module)
-    return module
-
-
 def agent_dirs(agent: str) -> tuple[Path, Path, Path]:
     """``(root, run workspace, run home)`` for a parity run of one coding agent."""
     root = ROOT / f"{agent}-workspaces"
@@ -322,18 +312,6 @@ def keep_signal_handlers(test: unittest.TestCase) -> None:
     """Wrappers install SIGTERM/SIGINT/SIGHUP handlers; restore pytest's afterwards."""
     for caught in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
         test.addCleanup(signal.signal, caught, signal.getsignal(caught))
-
-
-def _old_wrapper_case(docker: FakeDocker, agent: str) -> list[str]:
-    _root, workspace, _home = agent_dirs(agent)
-    module = _load_script(f"heym-{agent}-docker")
-    with (
-        patch.dict(os.environ, agent_env(agent)),
-        patch.object(module.Path, "cwd", return_value=workspace),
-        patch.object(module.sys, "argv", [f"heym-{agent}-docker", *AGENT_ARGS[agent]]),
-    ):
-        (argv,) = docker.capture(module.main)
-    return argv
 
 
 def without_mounts(normalized: dict) -> dict:
