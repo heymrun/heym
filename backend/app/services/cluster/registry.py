@@ -17,6 +17,7 @@ from app.config import settings
 from app.db.models import ClusterInstance
 from app.db.session import async_session_maker
 from app.services.cluster import identity
+from app.services.sandbox import get_sandbox_manager
 
 logger = logging.getLogger("cluster")
 
@@ -110,6 +111,14 @@ def _docker_reachable() -> bool:
         return False
 
 
+def _sandbox_reachable() -> bool:
+    """``docker_ok`` now means "a sandbox backend is reachable" (column name kept)."""
+    manager = get_sandbox_manager()
+    if manager.backend_name == "kubernetes":
+        return manager.available()
+    return _docker_reachable()
+
+
 APPLICATION_NAME_PREFIX = "heym-"
 
 
@@ -153,7 +162,7 @@ async def write_heartbeat() -> None:
         version=settings.resolved_version,
         schema_revision=revision,
         keys_fingerprint=identity.keys_fingerprint(),
-        docker_ok=_docker_reachable(),
+        docker_ok=await asyncio.to_thread(_sandbox_reachable),
         db_latency_ms=latency_ms,
         heartbeat_at=datetime.now(timezone.utc),
     )
