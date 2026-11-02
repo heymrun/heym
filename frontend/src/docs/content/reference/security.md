@@ -76,7 +76,7 @@ The execution backend is controlled by the `HEYM_PYTHON_TOOL_SANDBOX` environmen
 
 | Value | Behavior |
 |-------|----------|
-| `auto` (default) | Run in the hardened Docker container. If Docker is unavailable, execution **fails closed** — it does not silently run untrusted code without OS isolation. |
+| `auto` (default) | Run in the hardened sandbox: a Docker container, or a restricted pod on [Kubernetes](../getting-started/running-and-deployment.md#kubernetes). If no sandbox backend is available, execution **fails closed** — it does not silently run untrusted code without OS isolation. |
 | `docker` | Same as `auto`, but never falls back. |
 | `subprocess` | Run in a local in-process subprocess guarded by an import allowlist. This is **not a security boundary** and is intended only for trusted code or local development. `run.sh` selects it for native dev. |
 

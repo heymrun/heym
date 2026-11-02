@@ -90,7 +90,7 @@ An Agent reads the contents of the files it receives. When the same agent also r
 
 ## Requirements
 
-File analysis needs Docker on the Heym instance, like the Code node. Runs that read Drive files run on the main instance of a [cluster](./cluster.md).
+File analysis needs a sandbox backend on the Heym instance (Docker, or [Kubernetes](../getting-started/running-and-deployment.md#kubernetes)), like the Code node. Runs that read Drive files run on the main instance of a [cluster](./cluster.md).
 
 ## Related
 

@@ -124,7 +124,7 @@ Your code runs as a non-root user in a container with all Linux capabilities dro
 
 These are fixed properties of the sandbox, not configuration.
 
-> **Docker is required.** Unlike Agent Python tools and skills, the Code node has no local fallback mode and no environment variable to relax it. Without a reachable Docker daemon the node fails with a clear error rather than running your code in the backend process. On native `./run.sh` development, start Docker before using this node. See [Security → Code node sandbox](../reference/security.md#code-node-sandbox).
+> **A sandbox backend is required.** The Code node runs in a Docker container, or in a restricted pod when Heym runs on [Kubernetes](../getting-started/running-and-deployment.md#kubernetes). Unlike Agent Python tools and skills, it has no local fallback mode and no environment variable to relax it. Without a reachable sandbox backend the node fails with a clear error rather than running your code in the backend process. On native `./run.sh` development, start Docker before using this node. See [Security → Code node sandbox](../reference/security.md#code-node-sandbox).
 
 ## Use another node when one fits
 

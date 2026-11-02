@@ -82,6 +82,18 @@ lifetimes) that override these code defaults when you copy it.
 
 > While the guard is on, MCP HTTP/SSE tool fetches connect directly (they do not honor `HTTP_PROXY`/`HTTPS_PROXY`) so the pinned target IP is authoritative, matching the Drive download guard.
 
+## Sandbox backend
+
+Every sandbox (Agent Python tools, skills, the Code node and its formatter, file analysis, custom Playwright, MCP `stdio`, Codex, OpenCode) runs through one sandbox backend: Docker sibling containers, or pods created through the Kubernetes API. Docker stays the default. The per-sandbox variables below (`HEYM_PYTHON_TOOL_SANDBOX`, `HEYM_PLAYWRIGHT_SANDBOX`, `HEYM_MCP_STDIO_SANDBOX`) still choose between a sandbox and `subprocess`; `HEYM_SANDBOX_BACKEND` chooses where sandboxes run. All three variables are optional: a Docker deployment needs none of them, and a backend pod with a ServiceAccount picks Kubernetes on its own.
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HEYM_SANDBOX_BACKEND` | `auto` uses Docker when a daemon answers, else Kubernetes when the backend runs in a pod with a ServiceAccount, else fails closed. `docker` and `kubernetes` force one backend and never fall back to the other. | `auto` |
+| `HEYM_SANDBOX_K8S_NAMESPACE` | Namespace for sandbox pods. Sandboxes that need a workspace (skills, Code node dependencies, file analysis, Codex, OpenCode) need the workspace PersistentVolumeClaim in that namespace. | the backend's namespace |
+| `HEYM_SANDBOX_K8S_POD_OVERRIDES` | JSON object with any of `nodeSelector`, `tolerations`, `runtimeClassName` (for example gVisor), `imagePullSecrets`, `priorityClassName`. Any other key disables the Kubernetes backend, so an override can never loosen a pod's security context. | none |
+
+On Kubernetes every sandbox is one pod under Pod Security `restricted`: non-root, all capabilities dropped, no privilege escalation, RuntimeDefault seccomp, and no ServiceAccount token. It needs Kubernetes 1.30+ and a CNI that enforces NetworkPolicy: before the first sandbox that must be offline, Heym starts a test pod and refuses offline sandboxes if that pod can still connect. A sandbox's workspace is mounted as a `subPath` of the PersistentVolumeClaim behind the backend's own workspace directory, never the whole claim. With a `ReadWriteOnce` claim, sandboxes run on the backend's node. `HEYM_MCP_STDIO_FILES_VOLUME` names a PersistentVolumeClaim there and `HEYM_MCP_STDIO_FILES_SUBPATH` its `subPath`; `HEYM_MCP_STDIO_FILES_HOST_DIR` is refused. Requirements, RBAC and example manifests: [deploy/kubernetes](deploy/kubernetes/README.md).
+
 ## Playwright custom code sandbox
 
 The Playwright node's **Run Code** mode (`playwrightCode`) is off by default. When enabled it runs in a hardened throwaway sibling container (Compose / GHCR) or, for native `./run.sh`, falls back to `subprocess`. Step-based Playwright nodes are unaffected.
@@ -97,7 +109,7 @@ The Playwright node's **Run Code** mode (`playwrightCode`) is off by default. Wh
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `HEYM_PYTHON_TOOL_SANDBOX` | How user-defined Agent Python **tools** and **skills** run: `auto` (Docker sandbox, fail-closed), `docker` (never falls back), or `subprocess` (no security boundary; trusted/local only). Governs both paths. MCP `stdio` isolation is **not** affected by this and has its own `HEYM_MCP_STDIO_SANDBOX`. | `auto` |
+| `HEYM_PYTHON_TOOL_SANDBOX` | How user-defined Agent Python **tools** and **skills** run: `auto` (sandbox on the [sandbox backend](#sandbox-backend), fail-closed), `docker` (sandbox required, never falls back), or `subprocess` (no security boundary; trusted/local only). Governs both paths. MCP `stdio` isolation is **not** affected by this and has its own `HEYM_MCP_STDIO_SANDBOX`. | `auto` |
 | `HEYM_PYTHON_TOOL_IMAGE` | Image used for the Python tool Docker sandbox (also the skill sandbox fallback when `HEYM_SKILL_IMAGE` is empty). Empty auto-detects the running backend image. | — |
 
 ## Agent skill sandbox
@@ -119,7 +131,7 @@ Untrusted Agent Python **skills** run in a hardened, throwaway sibling container
 
 ## Code node sandbox
 
-**The Code node adds no variables of its own, and deliberately has no `subprocess` escape hatch.** It runs arbitrary user Python with arbitrary dependencies, so it always requires a reachable Docker daemon and fails closed without one — `HEYM_PYTHON_TOOL_SANDBOX` does not apply to it. Its limits (512m memory, 1 CPU, 256 PIDs, 120s install timeout, 60s execution timeout) are constants in `app/services/code_python_executor.py`, not configuration.
+**The Code node adds no variables of its own, and deliberately has no `subprocess` escape hatch.** It runs arbitrary user Python with arbitrary dependencies, so it always requires a reachable [sandbox backend](#sandbox-backend) (Docker or Kubernetes) and fails closed without one — `HEYM_PYTHON_TOOL_SANDBOX` does not apply to it. Its limits (512m memory, 1 CPU, 256 PIDs, 120s install timeout, 60s execution timeout) are constants in `app/services/code_python_executor.py`, not configuration.
 
 It reuses existing variables only: `HEYM_PYTHON_TOOL_IMAGE` then `HEYM_CODEX_DOCKER_IMAGE` for image resolution (falling back to inspecting the backend's own image), and `HEYM_CODEX_WORKSPACE_DIR` / `HEYM_CODEX_DOCKER_WORKSPACE_VOLUME` for the per-run dependency workspace when the backend is containerised. A native `run.sh` backend needs neither variable: it bind-mounts a local temporary directory instead. Code nodes with an empty `requirements.txt` mount nothing at all, since the install phase is skipped.
 
@@ -147,7 +159,7 @@ Only the env vars set on the connection reach the server. The backend's own envi
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `HEYM_MCP_STDIO_SANDBOX` | Isolation for MCP `stdio` servers: `auto` (Docker required, fail-closed), `docker` (never falls back), or `subprocess`. Independent of `HEYM_PYTHON_TOOL_SANDBOX`. ⚠️ `subprocess` removes the boundary entirely and runs the caller's command on the backend host, which is the GHSA-378x-q589-34mv condition: **trusted single-user instances only, never on a shared or hosted deployment.** | `auto` |
+| `HEYM_MCP_STDIO_SANDBOX` | Isolation for MCP `stdio` servers: `auto` (sandbox backend required, fail-closed), `docker` (sandbox required, never falls back), or `subprocess`. Independent of `HEYM_PYTHON_TOOL_SANDBOX`. ⚠️ `subprocess` removes the boundary entirely and runs the caller's command on the backend host, which is the GHSA-378x-q589-34mv condition: **trusted single-user instances only, never on a shared or hosted deployment.** | `auto` |
 | `HEYM_MCP_STDIO_IMAGE` | Image used to run non-`docker` stdio commands (`npx`, `uvx`, `node`, `python`, …). Compose defaults it to `HEYM_BACKEND_IMAGE`, the GHCR image to its own release tag; set it only for native `run.sh` (`heym-backend:local`) or a custom runner. Falls back to `HEYM_PYTHON_TOOL_IMAGE`, then `HEYM_CODEX_DOCKER_IMAGE`, then container inspect, then fails closed. The `docker run <image>` form names its own image. | — |
 | `HEYM_MCP_STDIO_FILES_PATH` | Mount point inside the sandbox for the optional file mount below. | `/mnt/heym-files` |
 | `HEYM_MCP_STDIO_FILES_VOLUME` | Docker volume to expose to MCP servers. **Nothing is mounted unless you set this** (or the host-dir variant); there is no fallback to application volumes. | — |
@@ -177,7 +189,7 @@ Only the env vars set on the connection reach the server. The backend's own envi
 
 ## Codex node
 
-The [Codex node](frontend/src/docs/content/nodes/codex-node.md) runs the OpenAI Codex CLI in an isolated workspace. It needs the `codex` CLI and `git` on PATH. Local `./run.sh` uses the native `codex` CLI. Docker deployments use the bundled `heym-codex-docker` wrapper, which starts a sibling container from the same Heym image so Codex's bubblewrap sandbox can create Linux namespaces outside the backend container. That container also passes `--security-opt systempaths=unconfined` (Docker Engine 25+). Docker's default masked `/proc` paths otherwise reject bubblewrap's fresh proc mount, and every Codex command fails with `bwrap: Can't mount proc on /newroot/proc: Operation not permitted`.
+The [Codex node](frontend/src/docs/content/nodes/codex-node.md) runs the OpenAI Codex CLI in an isolated workspace. It needs the `codex` CLI and `git` on PATH. Local `./run.sh` uses the native `codex` CLI. Docker deployments use the bundled `heym-codex-docker` wrapper, which starts a sibling container from the same Heym image so Codex's bubblewrap sandbox can create Linux namespaces outside the backend container. That container also passes `--security-opt systempaths=unconfined` (Docker Engine 25+). Docker's default masked `/proc` paths otherwise reject bubblewrap's fresh proc mount, and every Codex command fails with `bwrap: Can't mount proc on /newroot/proc: Operation not permitted`. Each run mounts only its own workspace and its `<workspace>.codex-home` directory, never the rest of the workspace volume (Docker Engine 25+ for a named volume). On Kubernetes the run is a restricted pod, where bubblewrap cannot run, so Codex uses `--sandbox danger-full-access` and the pod is the boundary.
 
 | Variable | Description | Default |
 |----------|-------------|---------|
@@ -185,7 +197,7 @@ The [Codex node](frontend/src/docs/content/nodes/codex-node.md) runs the OpenAI 
 | `HEYM_CODEX_WORKSPACE_DIR` | Directory for cloned repo workspaces (its `<workspace>.codex-home` sibling holds the auth bundle, outside the repo). | `./data/codex-workspaces` |
 | `HEYM_CODEX_NETWORK_ACCESS` | Allow outbound network access for commands inside Codex's `workspace-write` sandbox. Docker deploys set this to `true` so Codex can download files/dependencies while still writing only inside the workspace. | `false` |
 | `HEYM_CODEX_DOCKER_IMAGE` | Image used by `heym-codex-docker`. Compose defaults to the locally built backend image (`heym-backend:local`). The release image defaults to the same single GHCR image (`ghcr.io/heymrun/heym:<version>`). | auto |
-| `HEYM_CODEX_DOCKER_WORKSPACE_VOLUME` | Docker volume mounted into each Codex runner at `HEYM_CODEX_WORKSPACE_DIR`. Docker Compose uses `heym-codex-workspaces`. | — |
+| `HEYM_CODEX_DOCKER_WORKSPACE_VOLUME` | Docker volume holding `HEYM_CODEX_WORKSPACE_DIR`; each Codex runner mounts only its run's two directories from it. Docker Compose uses `heym-codex-workspaces`. | — |
 | `HEYM_CODEX_HOST_WORKSPACE_DIR` | Absolute host path for `HEYM_CODEX_WORKSPACE_DIR` when using bind mounts instead of a Docker volume. | — |
 | `HEYM_CODEX_DOCKER_NETWORK` | Docker network mode for Codex runner containers. | `bridge` |
 | `HEYM_CODEX_DOCKER_CPUS` | CPU limit passed to Codex runner containers. | `2` |
@@ -201,7 +213,7 @@ The [Codex node](frontend/src/docs/content/nodes/codex-node.md) runs the OpenAI 
 
 ## OpenCode Go node
 
-The [OpenCode Go node](frontend/src/docs/content/nodes/opencode-go-node.md) runs the OpenCode CLI (Go) in an isolated workspace against a GitHub repository. It needs the `opencode` CLI and `git` on PATH. Local `./run.sh` uses the native `opencode` CLI (host subprocess). Docker deployments use the bundled `heym-opencode-docker` wrapper, which starts a hardened sibling container from the same Heym image (all capabilities dropped, `no-new-privileges`, read-only root, resource limits) sharing the workspace named volume. All git/GitHub operations run host-side, so the GitHub token is never placed inside the OpenCode process/container.
+The [OpenCode Go node](frontend/src/docs/content/nodes/opencode-go-node.md) runs the OpenCode CLI (Go) in an isolated workspace against a GitHub repository. It needs the `opencode` CLI and `git` on PATH. Local `./run.sh` uses the native `opencode` CLI (host subprocess). Docker deployments use the bundled `heym-opencode-docker` wrapper, which starts a hardened sibling container from the same Heym image (all capabilities dropped, `no-new-privileges`, read-only root, resource limits) sharing the workspace named volume. All git/GitHub operations run host-side, so the GitHub token is never placed inside the OpenCode process/container. Each run mounts only its own workspace and its `<workspace>.oc-home` directory, never the rest of the workspace volume. With a named volume this needs Docker Engine 25+ (`volume-subpath`).
 
 | Variable | Description | Default |
 |----------|-------------|---------|
@@ -210,7 +222,7 @@ The [OpenCode Go node](frontend/src/docs/content/nodes/opencode-go-node.md) runs
 | `HEYM_OPENCODE_GIT_AUTHOR_NAME` | Author name for commits OpenCode creates. | `Heym OpenCode` |
 | `HEYM_OPENCODE_GIT_AUTHOR_EMAIL` | Author email for OpenCode commits. The GitHub avatar shown next to it is derived from this email (matching GitHub account, else Gravatar). | `support@heym.run` |
 | `HEYM_OPENCODE_DOCKER_IMAGE` | Image used by `heym-opencode-docker`. Compose defaults to the locally built backend image (`heym-backend:local`). The release image defaults to the same single GHCR image (`ghcr.io/heymrun/heym:<version>`). | auto |
-| `HEYM_OPENCODE_DOCKER_WORKSPACE_VOLUME` | Docker volume mounted into each OpenCode runner at `HEYM_OPENCODE_WORKSPACE_DIR`. Docker Compose uses `heym-opencode-workspaces`. | — |
+| `HEYM_OPENCODE_DOCKER_WORKSPACE_VOLUME` | Docker volume holding `HEYM_OPENCODE_WORKSPACE_DIR`; each OpenCode runner mounts only its run's two directories from it. Docker Compose uses `heym-opencode-workspaces`. | — |
 | `HEYM_OPENCODE_HOST_WORKSPACE_DIR` | Absolute host path for `HEYM_OPENCODE_WORKSPACE_DIR` when using bind mounts instead of a Docker volume. | — |
 | `HEYM_OPENCODE_DOCKER_NETWORK` | Docker network mode for OpenCode runner containers (egress is required to reach the model gateway). | `bridge` |
 | `HEYM_OPENCODE_DOCKER_CPUS` | CPU limit passed to OpenCode runner containers. | `2` |
