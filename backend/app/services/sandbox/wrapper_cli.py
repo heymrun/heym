@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import signal
+import stat
 import subprocess
 import sys
 import uuid
@@ -51,6 +52,8 @@ def main(argv: list[str]) -> int:
         kubernetes=kubernetes,
         cwd=cwd,
     )
+    if kubernetes:
+        return _run_kubernetes(manager, spec, (scope.workspace, scope.home))
     return _run_docker(manager, spec)
 
 
@@ -77,6 +80,51 @@ def _run_docker(manager: SandboxManager, spec: SandboxSpec) -> int:
         return process.wait()
     finally:
         manager.force_remove(spec.name)
+
+
+def _open_to_sandbox_user(root: Path) -> None:
+    """The pod runs as 65534 (or an OpenShift-assigned uid); the backend wrote these as root."""
+
+    def widen(path: str, directory: bool) -> None:
+        try:
+            info = os.lstat(path)
+        except OSError:
+            return
+        if stat.S_ISLNK(info.st_mode):
+            return
+        executable = directory or bool(info.st_mode & 0o111)
+        mode = stat.S_IMODE(info.st_mode) | 0o666 | (0o111 if executable else 0)
+        try:
+            os.chmod(path, mode)
+        except OSError:
+            pass
+
+    widen(str(root), True)
+    for current, dirs, files in os.walk(root):
+        for name in dirs:
+            widen(os.path.join(current, name), True)
+        for name in files:
+            widen(os.path.join(current, name), False)
+
+
+def _run_kubernetes(manager: SandboxManager, spec: SandboxSpec, run_dirs: tuple[Path, Path]) -> int:
+    from app.services.sandbox.kubernetes import process
+
+    if not manager.available():
+        reason = getattr(manager.backend, "unavailable_reason", "") or "unknown reason"
+        print(f"The Kubernetes sandbox backend is unavailable: {reason}", file=sys.stderr)
+        return 127
+    for directory in run_dirs:
+        _open_to_sandbox_user(directory)
+    backend = manager.backend
+    return process.run_attached(
+        backend.client,
+        backend.manifest(spec, None),
+        start_gate=spec.start_gate,
+        stdin=sys.stdin.buffer,
+        stdout=sys.stdout.buffer,
+        stderr=sys.stderr.buffer,
+    )
 
 
 if __name__ == "__main__":

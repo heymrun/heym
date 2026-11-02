@@ -57,3 +57,52 @@ class WrapperCliTest(unittest.TestCase):
 
     def test_unknown_agent(self) -> None:
         self.assertEqual(wrapper_cli.main(["vim"]), 2)
+
+
+class KubernetesPathTest(unittest.TestCase):
+    def test_opens_the_run_to_the_pod_user_and_attaches(self) -> None:
+        root = Path(tempfile.mkdtemp()).resolve()
+        (root / RUN).mkdir()
+        (root / f"{RUN}.codex-home").mkdir()
+        secret = root / f"{RUN}.codex-home" / "auth.json"
+        secret.write_text("{}")
+        secret.chmod(0o600)
+        backend = MagicMock()
+        backend.manifest.return_value = {"metadata": {"name": "heym-codex-1"}}
+        manager = MagicMock()
+        manager.backend_name = "kubernetes"
+        manager.available.return_value = True
+        manager.backend = backend
+        manager.resolve_image.return_value = "img"
+        env = {"HEYM_CODEX_WORKSPACE_DIR": str(root), "CODEX_HOME": f"{root}/{RUN}.codex-home"}
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch.object(wrapper_cli, "get_sandbox_manager", return_value=manager),
+            patch.object(wrapper_cli.Path, "cwd", return_value=root / RUN),
+            patch(
+                "app.services.sandbox.kubernetes.process.run_attached", return_value=7
+            ) as attached,
+        ):
+            self.assertEqual(wrapper_cli.main(["codex", "exec"]), 7)
+        spec = backend.manifest.call_args.args[0]
+        self.assertTrue(spec.start_gate)
+        self.assertIn("GIT_CONFIG_VALUE_0=*", spec.env)
+        self.assertEqual(attached.call_args.kwargs["start_gate"], True)
+        self.assertEqual(secret.stat().st_mode & 0o666, 0o666)
+
+    def test_unavailable_kubernetes_fails_without_a_pod(self) -> None:
+        root = Path(tempfile.mkdtemp()).resolve()
+        (root / RUN).mkdir()
+        (root / f"{RUN}.codex-home").mkdir()
+        manager = MagicMock()
+        manager.backend_name = "kubernetes"
+        manager.available.return_value = False
+        manager.resolve_image.return_value = "img"
+        env = {"HEYM_CODEX_WORKSPACE_DIR": str(root), "CODEX_HOME": f"{root}/{RUN}.codex-home"}
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch.object(wrapper_cli, "get_sandbox_manager", return_value=manager),
+            patch.object(wrapper_cli.Path, "cwd", return_value=root / RUN),
+        ):
+            self.assertEqual(wrapper_cli.main(["codex", "exec"]), 127)
+        manager.backend.manifest.assert_not_called()
