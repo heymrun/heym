@@ -377,8 +377,26 @@ class DockerArgvParityTest(unittest.TestCase):
         return {name: normalize(argv) for name, argv in cases.items()}
 
     def agent_argv(self, agent: str) -> list[str]:
-        """Milestone 2 replaces this with the new builder."""
-        return _old_wrapper_case(self.docker, agent)
+        from app.services.sandbox.coding_agents import PROFILES, agent_spec, run_scope
+        from app.services.sandbox.docker_backend import render_docker_argv
+
+        profile = PROFILES[agent]
+        _root, workspace, _home = agent_dirs(agent)
+        env = {**os.environ, **agent_env(agent)}
+        with patch.dict(os.environ, agent_env(agent)):
+            scope = run_scope(profile, workspace, env)
+            run_id = env.get(profile.run_id_env or "", "") or "<hex>"
+            spec = agent_spec(
+                profile,
+                scope,
+                AGENT_ARGS[agent],
+                env,
+                image=_IMAGE,
+                name=f"heym-{agent}-{run_id}",
+                kubernetes=False,
+                cwd=workspace,
+            )
+            return render_docker_argv(spec)
 
     def test_every_site_renders_the_recorded_argv(self) -> None:
         actual = self._actual()
@@ -390,7 +408,11 @@ class DockerArgvParityTest(unittest.TestCase):
         self.assertEqual(sorted(actual), sorted(golden))
         for name in sorted(golden):
             with self.subTest(case=name):
-                self.assertEqual(actual[name], golden[name])
+                if name in ("codex", "opencode"):
+                    # Milestone 2 replaced the whole-volume mount with two scoped ones.
+                    self.assertEqual(without_mounts(actual[name]), without_mounts(golden[name]))
+                else:
+                    self.assertEqual(actual[name], golden[name])
 
     def test_no_backend_secret_reaches_any_argv(self) -> None:
         for name, normalized in self._actual().items():

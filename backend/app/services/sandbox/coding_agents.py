@@ -109,7 +109,9 @@ def _value(env: Mapping[str, str], name: str) -> str:
 
 def run_scope(profile: AgentProfile, cwd: Path, env: Mapping[str, str]) -> RunScope:
     """The run the runner was started for, or :class:`RunScopeError`."""
-    root = Path(_value(env, f"{profile.env_prefix}_WORKSPACE_DIR") or profile.default_root).resolve()
+    root = Path(
+        _value(env, f"{profile.env_prefix}_WORKSPACE_DIR") or profile.default_root
+    ).resolve()
     here = cwd.resolve()
     try:
         rel = here.relative_to(root)
@@ -140,3 +142,93 @@ def run_scope(profile: AgentProfile, cwd: Path, env: Mapping[str, str]) -> RunSc
         if not directory.is_dir():
             raise RunScopeError(f"{directory} does not exist")
     return RunScope(root=root, run_id=run_id, workspace=workspace, home=home)
+
+
+def _volume_source(profile: AgentProfile, scope: RunScope) -> DockerVolumeSource:
+    prefix = profile.env_prefix
+    return DockerVolumeSource(
+        mount_point=scope.root,
+        volume_env=(f"{prefix}_DOCKER_WORKSPACE_VOLUME",),
+        host_root_env=f"{prefix}_HOST_WORKSPACE_DIR",
+        label=f"{profile.label} run dir",
+        missing_message=(
+            f"{profile.label} Docker runner needs {prefix}_DOCKER_WORKSPACE_VOLUME, "
+            f"{prefix}_HOST_WORKSPACE_DIR, or a Docker mount at {prefix}_WORKSPACE_DIR."
+        ),
+    )
+
+
+def _agent_env(profile: AgentProfile, scope: RunScope, env: Mapping[str, str]) -> list[str]:
+    items: list[str] = []
+    if profile is CODEX:
+        items.extend([f"CODEX_HOME={scope.home}", "HOME=/tmp"])
+    else:
+        home = _value(env, "HOME") or "/tmp"
+        for name in ("HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME"):
+            if env.get(name):
+                items.append(f"{name}={env[name]}")
+        if not env.get("XDG_CONFIG_HOME"):
+            items.append(f"XDG_CONFIG_HOME={home}/.config")
+        if not env.get("XDG_DATA_HOME"):
+            items.append(f"XDG_DATA_HOME={home}/.local/share")
+    for name in profile.forward_env:
+        if env.get(name):
+            items.append(f"{name}={env[name]}")
+    return items
+
+
+def _deadline(env: Mapping[str, str]) -> float | None:
+    raw = _value(env, DEADLINE_ENV)
+    try:
+        value = float(raw) if raw else None
+    except ValueError:
+        return None
+    return value if value and value > 0 else None
+
+
+def agent_spec(
+    profile: AgentProfile,
+    scope: RunScope,
+    args: Sequence[str],
+    env: Mapping[str, str],
+    *,
+    image: str,
+    name: str,
+    kubernetes: bool,
+    cwd: Path,
+) -> SandboxSpec:
+    """The runner sandbox for one Codex or OpenCode invocation."""
+    prefix = profile.env_prefix
+    memory = _value(env, f"{prefix}_DOCKER_MEMORY") or "4g"
+    source = _volume_source(profile, scope)
+    items = _agent_env(profile, scope, env)
+    if kubernetes:
+        items.extend(_GIT_SAFE_DIRECTORY)
+    extra = tuple(shlex.split(_value(env, f"{prefix}_DOCKER_EXTRA_ARGS")))
+    codex = profile is CODEX
+    return SandboxSpec(
+        site=profile.agent,
+        name=name,
+        image=image,
+        entrypoint=_value(env, f"{prefix}_DOCKER_ENTRYPOINT") or profile.entrypoint,
+        args=tuple(args),
+        network=_value(env, f"{prefix}_DOCKER_NETWORK") or "bridge",
+        user=None,
+        read_only_root=not codex,
+        tmpfs=() if codex else (Tmpfs("/tmp", "rw,nosuid", "512m"),),
+        pids=_value(env, f"{prefix}_DOCKER_PIDS") or "1024",
+        memory=memory,
+        memory_swap=memory,
+        cpus=_value(env, f"{prefix}_DOCKER_CPUS") or "2",
+        cap_drop_all=not codex,
+        no_new_privileges=not codex,
+        env=tuple(items),
+        workdir=str(cwd.resolve()),
+        workspace_mounts=(
+            WorkspaceMount(scope.workspace, str(scope.workspace), False, source),
+            WorkspaceMount(scope.home, str(scope.home), False, source),
+        ),
+        docker_extra_args=(_CODEX_DOCKER_PRIVILEGES if codex else ()) + extra,
+        deadline_seconds=_deadline(env),
+        start_gate=kubernetes,
+    )
