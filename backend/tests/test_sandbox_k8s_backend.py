@@ -1,5 +1,6 @@
 import json
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from app.services.sandbox.errors import SandboxConfigError, SandboxTimeoutError
@@ -7,7 +8,7 @@ from app.services.sandbox.kubernetes import backend as kube_backend
 from app.services.sandbox.kubernetes.backend import KubernetesBackend
 from app.services.sandbox.kubernetes.config import KubeConfig
 from app.services.sandbox.kubernetes.lifecycle import PodExit, PodStart
-from app.services.sandbox.spec import SandboxSpec
+from app.services.sandbox.spec import DockerVolumeSource, OperatorMount, SandboxSpec, WorkspaceMount
 
 CONFIG = KubeConfig(
     server="https://k:443", namespace="sb", own_namespace="sb", in_cluster=True, token="t"
@@ -92,18 +93,6 @@ class RunTest(unittest.TestCase):
             backend.run(_spec(network="none"), None, 5)
         backend._client.create_pod.assert_not_called()
 
-    def test_workspace_mounts_fail_closed_until_milestone_4(self) -> None:
-        from pathlib import Path
-
-        from app.services.sandbox.spec import DockerVolumeSource, WorkspaceMount
-
-        mount = WorkspaceMount(Path("/w/x"), "/w/x", False, DockerVolumeSource(Path("/w"), (), "m"))
-        spec = SandboxSpec(
-            site="skill", name="n", image="i", entrypoint="p", workspace_mounts=(mount,)
-        )
-        with self.assertRaises(SandboxConfigError):
-            _backend().run(spec, None, 5)
-
 
 class AvailabilityTest(unittest.TestCase):
     def test_old_server_or_missing_rbac_is_unavailable(self) -> None:
@@ -139,3 +128,63 @@ class ProcessAndImageTest(unittest.TestCase):
         self.assertEqual(_backend(client).resolve_image(), "ghcr.io/heymrun/heym:1")
         client.get_pod.return_value = {"spec": {"containers": [{"image": "a"}, {"image": "b"}]}}
         self.assertIsNone(_backend(client).resolve_image())
+
+
+BACKEND_POD = {
+    "spec": {
+        "nodeName": "node-a",
+        "containers": [
+            {"image": "img", "volumeMounts": [{"name": "data", "mountPath": "/app/data"}]}
+        ],
+        "volumes": [{"name": "data", "persistentVolumeClaim": {"claimName": "heym-data"}}],
+    }
+}
+
+
+def _mounted_spec(path: str = "/app/data/codex-workspaces/_code-runs/abc") -> SandboxSpec:
+    source = DockerVolumeSource(Path("/app/data/codex-workspaces"), (), "m")
+    mount = WorkspaceMount(Path(path), path, True, source)
+    return SandboxSpec(
+        site="code-run", name="n", image="i", entrypoint="python", workspace_mounts=(mount,)
+    )
+
+
+class WorkspaceMountTest(unittest.TestCase):
+    def _backend(self, modes: list[str]) -> KubernetesBackend:
+        client = MagicMock()
+        client.get_pod.return_value = BACKEND_POD
+        client.get_pvc.return_value = {"status": {"accessModes": modes}}
+        return _backend(client)
+
+    def test_rwx_claim_mounts_only_the_run_subpath_anywhere(self) -> None:
+        manifest = self._backend(["ReadWriteMany"]).manifest(_mounted_spec(), 5)
+        mounts = manifest["spec"]["containers"][0]["volumeMounts"]
+        self.assertIn(
+            {
+                "name": "ws-0",
+                "mountPath": "/app/data/codex-workspaces/_code-runs/abc",
+                "subPath": "codex-workspaces/_code-runs/abc",
+                "readOnly": True,
+            },
+            mounts,
+        )
+        self.assertNotIn("nodeName", manifest["spec"])
+
+    def test_rwo_claim_pins_to_the_backend_node(self) -> None:
+        manifest = self._backend(["ReadWriteOnce"]).manifest(_mounted_spec(), 5)
+        self.assertEqual(manifest["spec"]["nodeName"], "node-a")
+
+    def test_path_outside_every_claim_fails_closed(self) -> None:
+        with self.assertRaises(SandboxConfigError):
+            self._backend(["ReadWriteMany"]).manifest(_mounted_spec("/tmp/elsewhere/abc"), 5)
+
+    def test_operator_host_dir_is_refused(self) -> None:
+        spec = SandboxSpec(
+            site="mcp-stdio",
+            name="n",
+            image="i",
+            entrypoint="npx",
+            operator_mount=OperatorMount(target="/mnt/f", host_dir="/srv"),
+        )
+        with self.assertRaises(SandboxConfigError):
+            self._backend(["ReadWriteMany"]).manifest(spec, None)

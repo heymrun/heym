@@ -107,3 +107,44 @@ class RestrictedPodAdvisoryTest(unittest.TestCase):
         ):
             with self.subTest(key), self.assertRaises(SandboxConfigError):
                 parse_overrides(json.dumps({key: True}))
+
+    def test_workspace_pods_never_mount_a_whole_claim(self) -> None:
+        from unittest.mock import MagicMock
+
+        from app.services.sandbox.kubernetes.backend import KubernetesBackend
+        from app.services.sandbox.kubernetes.config import KubeConfig
+
+        client = MagicMock()
+        client.namespace = "heym"
+        client.has_api_group.return_value = False
+        client.get_pvc.return_value = {"status": {"accessModes": ["ReadWriteMany"]}}
+        client.get_pod.return_value = {
+            "spec": {
+                "containers": [
+                    {"image": "i", "volumeMounts": [{"name": "d", "mountPath": "/app/data"}]}
+                ],
+                "volumes": [{"name": "d", "persistentVolumeClaim": {"claimName": "heym-data"}}],
+            }
+        }
+        config = KubeConfig(
+            server="https://k", namespace="heym", own_namespace="heym", in_cluster=True
+        )
+        backend = KubernetesBackend(config, client=client, instance="heym-0")
+        with patch.dict(os.environ, {"HEYM_CODEX_WORKSPACE_DIR": "/app/data/codex-workspaces"}):
+            spec = skill_python_executor._skill_spec(
+                "img",
+                "n",
+                Path("/app/data/codex-workspaces"),
+                Path("/app/data/codex-workspaces/_skill-workspaces/_skills/abc"),
+                "main.py",
+            )
+        manifest = backend.manifest(spec, 5)
+        claim_mounts = [
+            m
+            for m in manifest["spec"]["containers"][0]["volumeMounts"]
+            if m["name"].startswith("ws-")
+        ]
+        self.assertEqual(len(claim_mounts), 1)
+        self.assertEqual(
+            claim_mounts[0]["subPath"], "codex-workspaces/_skill-workspaces/_skills/abc"
+        )

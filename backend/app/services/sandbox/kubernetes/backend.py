@@ -29,6 +29,12 @@ from app.services.sandbox.kubernetes.pod import (
     build_pod,
     parse_overrides,
 )
+from app.services.sandbox.kubernetes.workspace import (
+    claim_mounts,
+    operator_volume,
+    placement_node,
+    resolve_volume,
+)
 from app.services.sandbox.spec import (
     START_FAILURE_RETURNCODE,
     ProcessCommand,
@@ -66,6 +72,7 @@ class KubernetesBackend:
         self._context: PodContext | None = None
         self._self_pod: dict[str, Any] | None = None
         self._offline = OfflineCheck(self._run_pod)
+        self._placements: dict[frozenset[str], str | None] = {}
         self.unavailable_reason = ""
 
     @property
@@ -137,12 +144,21 @@ class KubernetesBackend:
 
     def pod_volumes(self, spec: SandboxSpec) -> tuple[tuple[PodVolume, ...], str | None]:
         """Workspace and operator mounts as PVC subPaths, plus the node to pin to (if any)."""
-        if spec.workspace_mounts or spec.operator_mount is not None:
-            raise SandboxConfigError(
-                "This sandbox needs a workspace volume, which the Kubernetes backend does not "
-                "mount yet."
+        volumes: list[PodVolume] = []
+        if spec.workspace_mounts:
+            mounts = claim_mounts(self.self_pod() or {})
+            volumes.extend(
+                resolve_volume(mounts, mount.host_path, mount.target, mount.readonly)
+                for mount in spec.workspace_mounts
             )
-        return (), None
+        if spec.operator_mount is not None:
+            volumes.append(operator_volume(spec.operator_mount))
+        if not volumes:
+            return (), None
+        claims = frozenset(volume.claim for volume in volumes)
+        if claims not in self._placements:
+            self._placements[claims] = placement_node(self._client, set(claims), self.self_pod())
+        return tuple(volumes), self._placements[claims]
 
     def manifest(self, spec: SandboxSpec, timeout_seconds: float | None) -> dict[str, Any]:
         """The pod manifest for ``spec``; one-shot runs get a deadline from their timeout."""
