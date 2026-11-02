@@ -29,7 +29,9 @@ from unittest.mock import MagicMock, patch
 GOLDEN = Path(__file__).parent / "fixtures" / "sandbox_docker_argv.json"
 RECORD = os.environ.get("HEYM_RECORD_SANDBOX_ARGV") == "1"
 REPO = Path(__file__).resolve().parents[2]
-TMP = tempfile.gettempdir()
+# A temp dir of the test's own: on CI the system one is "/tmp", and scrubbing that would
+# also rewrite the sandboxes' own "HOME=/tmp" and "--tmpfs /tmp:..." values.
+TMP = os.path.join(os.path.realpath(tempfile.gettempdir()), "heym-parity-tmp")
 TMP_REAL = os.path.realpath(TMP)
 ROOT = Path(TMP) / "heym-sandbox-parity"
 RUN_ID = "0123456789abcdef0123456789abcdef"
@@ -325,6 +327,9 @@ class DockerArgvParityTest(unittest.TestCase):
     def setUp(self) -> None:
         shutil.rmtree(ROOT, ignore_errors=True)
         ROOT.mkdir(parents=True)
+        temp_dir = patch.object(tempfile, "tempdir", TMP)
+        temp_dir.start()
+        self.addCleanup(temp_dir.stop)
         self.docker = FakeDocker()
         for target, fake in (
             ("subprocess.run", self.docker.run),
