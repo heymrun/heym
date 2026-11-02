@@ -58,12 +58,17 @@ the sandbox, and ``subprocess`` is the explicit trusted/single-user opt-out.
 import logging
 import os
 import shutil
-import socket
-import subprocess
 import uuid
 from dataclasses import dataclass, field
 
 from app.config import settings
+from app.services.sandbox import (
+    OperatorMount,
+    SandboxSpec,
+    Tmpfs,
+    get_sandbox_manager,
+    reset_sandbox_manager,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -135,8 +140,6 @@ _SANDBOX_TMPFS_PATH = "/tmp"
 # Nobody:nogroup. Root in the sandbox is refused even if explicitly configured.
 _DEFAULT_SANDBOX_USER = "65534:65534"
 
-_docker_available_cache: bool | None = None
-
 
 class MCPStdioSandboxError(ValueError):
     """Raised when an MCP stdio command cannot be run safely."""
@@ -182,109 +185,102 @@ _NEVER_AUTO_MOUNTED_VOLUME_VARS = (
 )
 
 
-def _resolve_files_mount() -> list[str]:
-    """Return the file mount for the sandbox, which is nothing unless configured.
+@dataclass
+class _CarriedFlags:
+    """What a caller's ``docker run`` may keep: env, workdir and entrypoint."""
 
-    **No application storage is mounted by default.** An earlier revision fell
-    back to the skill/Codex workspace volume so file-oriented MCP servers would
-    keep working. That was wrong: those volumes hold *every* tenant's workspaces,
-    and mounting the volume root gave one caller's MCP process read (and write)
-    access to other users' data. Note the skill runner deliberately mounts only
-    a per-run ``volume-subpath`` for exactly this reason; copying its volume
-    lookup without that scoping removed the isolation it was built to provide.
+    env: list[str] = field(default_factory=list)
+    workdir: str | None = None
+    entrypoint: str | None = None
 
-    Heym's own ``FILE_STORAGE_DIR`` is not auto-mounted either, for the same
-    reason: Drive uploads are per user and team, so the directory as a whole is
-    cross-tenant.
 
-    A mount therefore only happens when an operator names one explicitly, which
-    is a deliberate act they can scope to an isolated volume or subpath. It is
-    read-only unless they also opt into writes.
-    """
+def _files_mount() -> OperatorMount | None:
+    """The operator-configured files mount, or None. See the module docstring."""
     for var in _NEVER_AUTO_MOUNTED_VOLUME_VARS:
         if os.environ.get(var, "").strip():
             logger.debug(
                 "MCP stdio sandbox: ignoring %s; application volumes are never auto-mounted",
                 var,
             )
-
     writable = os.environ.get("HEYM_MCP_STDIO_FILES_WRITABLE", "").strip().lower() in (
         "1",
         "true",
         "yes",
     )
-
     volume = os.environ.get("HEYM_MCP_STDIO_FILES_VOLUME", "").strip()
     if volume:
-        spec = f"type=volume,src={volume},dst={_FILES_MOUNT_PATH}"
-        subpath = os.environ.get("HEYM_MCP_STDIO_FILES_SUBPATH", "").strip()
-        if subpath:
-            spec += f",volume-subpath={subpath}"
-        if not writable:
-            spec += ",readonly"
-        return ["--mount", spec]
-
+        subpath = os.environ.get("HEYM_MCP_STDIO_FILES_SUBPATH", "").strip() or None
+        return OperatorMount(
+            target=_FILES_MOUNT_PATH, volume=volume, subpath=subpath, writable=writable
+        )
     host_dir = os.environ.get("HEYM_MCP_STDIO_FILES_HOST_DIR", "").strip()
     if host_dir:
-        suffix = "" if writable else ":ro"
-        return ["--volume", f"{host_dir}:{_FILES_MOUNT_PATH}{suffix}"]
-
+        return OperatorMount(target=_FILES_MOUNT_PATH, host_dir=host_dir, writable=writable)
     logger.debug("MCP stdio sandbox: no file mount configured; the server sees no Heym files")
-    return []
+    return None
 
 
 def docker_available() -> bool:
-    """Return True when a working Docker daemon is reachable (cached)."""
-    global _docker_available_cache
-    if _docker_available_cache is not None:
-        return _docker_available_cache
-    try:
-        result = subprocess.run(
-            ["docker", "version", "--format", "{{.Server.Version}}"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        _docker_available_cache = result.returncode == 0 and bool(result.stdout.strip())
-    except (FileNotFoundError, subprocess.SubprocessError, OSError):
-        _docker_available_cache = False
-    return _docker_available_cache
+    """True when the sandbox backend (Docker or Kubernetes) can start sandboxes."""
+    return get_sandbox_manager().available()
 
 
 def reset_docker_available_cache() -> None:
-    """Clear the cached Docker probe (used by tests)."""
-    global _docker_available_cache
-    _docker_available_cache = None
+    """Forget the selected sandbox backend (used by tests)."""
+    reset_sandbox_manager()
 
 
 def _sandbox_image() -> str | None:
-    """Resolve the image used for non-``docker`` commands (it ships node and uv).
-
-    Compose and the GHCR release image both set ``HEYM_MCP_STDIO_IMAGE``; the
-    Codex and ``docker inspect`` fallbacks cover deployments that do not.
-    Returns None when nothing resolves, so the caller can fail with an
-    explanation instead of running ``docker run`` against a missing image.
-    """
-    override = (
-        (os.getenv("HEYM_MCP_STDIO_IMAGE") or "").strip()
-        or (os.getenv("HEYM_PYTHON_TOOL_IMAGE") or "").strip()
-        or (os.getenv("HEYM_CODEX_DOCKER_IMAGE") or "").strip()
+    """Image for non-``docker`` commands (it ships node and uv); None fails closed."""
+    return get_sandbox_manager().resolve_image(
+        ("HEYM_MCP_STDIO_IMAGE", "HEYM_PYTHON_TOOL_IMAGE", "HEYM_CODEX_DOCKER_IMAGE")
     )
-    if override:
-        return override
-    try:
-        result = subprocess.run(
-            ["docker", "inspect", "--format", "{{.Config.Image}}", socket.gethostname()],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        image = result.stdout.strip()
-        if result.returncode == 0 and image:
-            return image
-    except (FileNotFoundError, subprocess.SubprocessError, OSError):
-        pass
-    return None
+
+
+def _mcp_spec(
+    *,
+    name: str,
+    image: str,
+    entrypoint: str | None,
+    args: list[str],
+    workdir: str | None,
+    extra_env: list[str],
+) -> SandboxSpec:
+    """Flags shared by every sandboxed MCP server. ``-i`` carries the protocol.
+
+    The tmpfs at ``/tmp`` is the only writable path. It is ``exec`` so npx/uvx can
+    run what they install, and ``HOME`` plus the npm/uv/XDG caches point into it,
+    because uid 65534's passwd home does not exist. See the git history of
+    ``_hardening_flags`` for why each one was needed.
+    """
+    return SandboxSpec(
+        site="mcp-stdio",
+        name=name,
+        image=image,
+        entrypoint=entrypoint,
+        args=tuple(args),
+        network="bridge",
+        user=_sandbox_user(),
+        tmpfs=(
+            Tmpfs(
+                _SANDBOX_TMPFS_PATH, "rw,exec,nosuid", _tunable("HEYM_MCP_STDIO_TMPFS_SIZE", "512m")
+            ),
+        ),
+        workdir=workdir,
+        pids=_tunable("HEYM_MCP_STDIO_PIDS", "256"),
+        memory=_tunable("HEYM_MCP_STDIO_MEMORY", "512m"),
+        cpus=_tunable("HEYM_MCP_STDIO_CPUS", "2"),
+        env=(
+            "HOME=/tmp",
+            "NPM_CONFIG_CACHE=/tmp/.npm",
+            "NPM_CONFIG_UPDATE_NOTIFIER=false",
+            "XDG_CACHE_HOME=/tmp/.cache",
+            "XDG_DATA_HOME=/tmp/.local/share",
+            "UV_CACHE_DIR=/tmp/.uv",
+            *extra_env,
+        ),
+        operator_mount=_files_mount(),
+    )
 
 
 def _tunable(var: str, default: str) -> str:
@@ -350,76 +346,7 @@ def _sandbox_user() -> str:
     return f"{uid}:{gid}"
 
 
-def _hardening_flags(name: str, network: str = "bridge", workdir: str | None = None) -> list[str]:
-    """Flags shared by every sandboxed MCP server container.
-
-    ``-i`` is mandatory: the MCP protocol is a bidirectional stream over the
-    child's stdin/stdout. No Docker socket is mounted, which is the difference
-    between this and a host-side ``docker run``.
-
-    The root filesystem is read-only, so the tmpfs at ``/tmp`` is the only place
-    the server can write. Three details make that usable for ``npx`` / ``uvx``
-    servers, all of which were missing at first and broke them outright:
-
-    * ``exec`` on the tmpfs. Docker applies ``noexec`` to every ``--tmpfs`` unless
-      it is named explicitly, so a package manager could install a server and
-      then fail to run its binary. This does not weaken the boundary in practice:
-      the caller already chooses the entrypoint, so running code inside the
-      container is the premise, not the escalation. The boundary is the missing
-      socket, the dropped capabilities and the non-root user.
-    * ``HOME``. The container runs as uid 65534, whose passwd entry points at
-      ``/nonexistent``, so npm's first action is ``mkdir /nonexistent`` and it
-      dies with ENOENT before it ever reaches the registry.
-    * cache directories. npm and uv both want to write under ``HOME`` or
-      ``XDG_CACHE_HOME``; pointing them at the tmpfs keeps them off the
-      read-only rootfs.
-
-    ``workdir`` is passed for the backend-image path only. The backend image's
-    WORKDIR is ``/app``, which *is* the Heym backend project, so ``uv run ...``
-    discovers it and dies syncing it against the read-only rootfs. Starting in
-    the tmpfs is a narrowing, not a loosening. The ``docker run IMAGE`` form
-    keeps its own image's WORKDIR.
-    """
-    return [
-        "--rm",
-        "-i",
-        "--name",
-        name,
-        "--network",
-        network,
-        "--read-only",
-        "--tmpfs",
-        f"{_SANDBOX_TMPFS_PATH}:rw,exec,nosuid,size={_tunable('HEYM_MCP_STDIO_TMPFS_SIZE', '512m')}",
-        *(["--workdir", workdir] if workdir else []),
-        "--env",
-        "HOME=/tmp",
-        "--env",
-        "NPM_CONFIG_CACHE=/tmp/.npm",
-        "--env",
-        "NPM_CONFIG_UPDATE_NOTIFIER=false",
-        "--env",
-        "XDG_CACHE_HOME=/tmp/.cache",
-        "--env",
-        "XDG_DATA_HOME=/tmp/.local/share",
-        "--env",
-        "UV_CACHE_DIR=/tmp/.uv",
-        "--user",
-        _sandbox_user(),
-        "--cap-drop",
-        "ALL",
-        "--security-opt",
-        "no-new-privileges",
-        "--pids-limit",
-        _tunable("HEYM_MCP_STDIO_PIDS", "256"),
-        "--memory",
-        _tunable("HEYM_MCP_STDIO_MEMORY", "512m"),
-        "--cpus",
-        _tunable("HEYM_MCP_STDIO_CPUS", "2"),
-        *_resolve_files_mount(),
-    ]
-
-
-def _parse_docker_run(argv: list[str]) -> tuple[list[str], list[str], str, list[str]]:
+def _parse_docker_run(argv: list[str]) -> tuple[_CarriedFlags, list[str], str, list[str]]:
     """Split a caller's ``docker run`` invocation.
 
     Returns ``(carried_flags, notes, image, image_args)``. Raises when a flag
@@ -431,7 +358,7 @@ def _parse_docker_run(argv: list[str]) -> tuple[list[str], list[str], str, list[
             f"Received: {' '.join(argv[:2]) or 'docker'}"
         )
 
-    carried: list[str] = []
+    carried = _CarriedFlags()
     notes: list[str] = []
     index = 2
     image = ""
@@ -468,7 +395,7 @@ def _parse_docker_run(argv: list[str]) -> tuple[list[str], list[str], str, list[
             notes.append("network flag ignored; the sandbox manages networking")
         elif flag in ("-e", "--env"):
             if value:
-                carried.extend(["--env", value])
+                carried.env.append(value)
         elif flag in ("-v", "--volume"):
             raise MCPStdioSandboxError(
                 f"MCP stdio option '{flag}' is not allowed: "
@@ -482,10 +409,10 @@ def _parse_docker_run(argv: list[str]) -> tuple[list[str], list[str], str, list[
             )
         elif flag in ("-w", "--workdir"):
             if value:
-                carried.extend(["--workdir", value])
+                carried.workdir = value
         elif flag == "--entrypoint":
             if value:
-                carried.extend(["--entrypoint", value])
+                carried.entrypoint = value
         elif flag in ("-u", "--user"):
             notes.append("user flag ignored; the sandbox runs as a non-root user")
         elif flag in ("-i", "-t", "-it", "-ti", "--interactive", "--tty", "--rm", "--init"):
@@ -544,47 +471,42 @@ def build_sandboxed_command(
     name = f"heym-mcp-stdio-{uuid.uuid4().hex[:12]}"
     basename = os.path.basename((command or "").strip()).lower()
     stem = basename.rsplit(".", 1)[0] if "." in basename else basename
+    user_env = [f"{key}={value}" for key, value in (env or {}).items()]
 
     if stem == "docker":
         carried, notes, image, image_args = _parse_docker_run([command, *args])
-        argv = ["docker", "run", *_hardening_flags(name), *carried]
-        for key, value in (env or {}).items():
-            argv.extend(["--env", f"{key}={value}"])
-        argv.append(image)
-        argv.extend(image_args)
-        # Env is passed via --env flags, so the docker CLI itself inherits nothing.
-        return SandboxedCommand(argv=argv, env={}, container_name=name, notes=notes)
-
-    image = _sandbox_image()
-    if not image:
-        raise MCPStdioSandboxError(
-            f"Cannot isolate the MCP stdio command '{command}': the sandbox image could not "
-            "be resolved. Set HEYM_MCP_STDIO_IMAGE (or HEYM_PYTHON_TOOL_IMAGE) to the backend "
-            "image, or use the `docker run <image>` form, which names its own image."
+        spec = _mcp_spec(
+            name=name,
+            image=image,
+            entrypoint=carried.entrypoint,
+            args=image_args,
+            workdir=carried.workdir,
+            extra_env=[*carried.env, *user_env],
         )
-    argv = [
-        "docker",
-        "run",
-        *_hardening_flags(name, workdir=_SANDBOX_TMPFS_PATH),
-        "--entrypoint",
-        command,
-    ]
-    for key, value in (env or {}).items():
-        argv.extend(["--env", f"{key}={value}"])
-    argv.extend([image, *args])
-    return SandboxedCommand(argv=argv, env={}, container_name=name)
+    else:
+        notes = []
+        image = _sandbox_image()
+        if not image:
+            raise MCPStdioSandboxError(
+                f"Cannot isolate the MCP stdio command '{command}': the sandbox image could "
+                "not be resolved. Set HEYM_MCP_STDIO_IMAGE (or HEYM_PYTHON_TOOL_IMAGE) to the "
+                "backend image, or use the `docker run <image>` form, which names its own image."
+            )
+        spec = _mcp_spec(
+            name=name,
+            image=image,
+            entrypoint=command,
+            args=list(args),
+            workdir=_SANDBOX_TMPFS_PATH,
+            extra_env=user_env,
+        )
+    # Env travels inside the command; the spawning client inherits nothing of ours.
+    process = get_sandbox_manager().process_command(spec)
+    return SandboxedCommand(
+        argv=process.argv, env=process.env, container_name=process.name, notes=notes
+    )
 
 
 def force_remove_container(name: str | None) -> None:
-    """Best-effort cleanup for a sandbox container that outlived its session."""
-    if not name:
-        return
-    try:
-        subprocess.run(
-            ["docker", "rm", "-f", name],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-    except (FileNotFoundError, subprocess.SubprocessError, OSError):
-        pass
+    """Best-effort cleanup for a sandbox that outlived its session."""
+    get_sandbox_manager().force_remove(name)

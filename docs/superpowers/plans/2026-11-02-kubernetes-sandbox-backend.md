@@ -2471,6 +2471,8 @@ def force_remove_container(name: str | None) -> None:
 
 Add `field` to the `dataclasses` import.
 
+Two image-resolution tests patch `app.services.mcp_stdio_sandbox.subprocess.run`; the module no longer imports `subprocess`, so point them at the same global: `sed -i '' 's/patch("app.services.mcp_stdio_sandbox.subprocess.run")/patch("subprocess.run")/g' tests/test_mcp_stdio_sandbox.py`.
+
 - [ ] **Step 2: Run tests**
 
 Run: `PYTEST tests/test_mcp_stdio_sandbox.py tests/test_sandbox_docker_parity.py`
