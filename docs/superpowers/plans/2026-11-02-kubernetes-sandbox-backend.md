@@ -148,6 +148,8 @@ _BASE_ENV = {
     "HEYM_CODEX_DOCKER_IMAGE": _IMAGE,
     "HEYM_OPENCODE_DOCKER_IMAGE": _IMAGE,
     "HEYM_SKILL_PYTHON": "/app/.venv/bin/python",
+    # A local .env may set mcp_stdio_sandbox=subprocess; the parity cases need the sandbox.
+    "HEYM_MCP_STDIO_SANDBOX": "docker",
 }
 
 
