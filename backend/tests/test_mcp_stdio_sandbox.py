@@ -467,13 +467,13 @@ class SandboxImageResolutionTests(unittest.TestCase):
             self.assertEqual(_sandbox_image(), "ghcr.io/heymrun/heym:0.0.75")
 
     def test_falls_back_to_container_inspect(self) -> None:
-        with patch("app.services.mcp_stdio_sandbox.subprocess.run") as run:
+        with patch("subprocess.run") as run:
             run.return_value = SimpleNamespace(returncode=0, stdout="inspected/image:2\n")
             self.assertEqual(_sandbox_image(), "inspected/image:2")
 
     def test_no_hardcoded_compose_tag(self) -> None:
         """Nothing resolvable must not silently become a Compose-only tag."""
-        with patch("app.services.mcp_stdio_sandbox.subprocess.run") as run:
+        with patch("subprocess.run") as run:
             run.return_value = SimpleNamespace(returncode=1, stdout="")
             self.assertIsNone(_sandbox_image())
 

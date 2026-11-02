@@ -32,14 +32,14 @@ built image.
 
 import logging
 import os
-import socket
-import subprocess
 import sys
 import uuid
 
-logger = logging.getLogger(__name__)
+from app.services.sandbox import SandboxSpec, Tmpfs, get_sandbox_manager
+from app.services.sandbox.docker_backend import render_docker_argv
+from app.services.sandbox.errors import SandboxTimeoutError
 
-_docker_available_cache: bool | None = None
+logger = logging.getLogger(__name__)
 
 # Compose backend image layout vs single-container GHCR release layout.
 _DEFAULT_SANDBOX_PYTHONS = (
@@ -58,24 +58,6 @@ def sandbox_mode() -> str:
         logger.warning("Unknown HEYM_PLAYWRIGHT_SANDBOX=%r; defaulting to 'auto'", raw)
         return "auto"
     return raw
-
-
-def _docker_available() -> bool:
-    """Return True when a working Docker daemon is reachable (cached)."""
-    global _docker_available_cache
-    if _docker_available_cache is not None:
-        return _docker_available_cache
-    try:
-        result = subprocess.run(
-            ["docker", "version", "--format", "{{.Server.Version}}"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        _docker_available_cache = result.returncode == 0 and bool(result.stdout.strip())
-    except (FileNotFoundError, subprocess.SubprocessError, OSError):
-        _docker_available_cache = False
-    return _docker_available_cache
 
 
 def _sandbox_python() -> str:
@@ -98,101 +80,6 @@ def _sandbox_python() -> str:
     return _DEFAULT_SANDBOX_PYTHONS[-1]
 
 
-def _resolve_image() -> str | None:
-    """Resolve the image to run scripts in.
-
-    Prefers an explicit override, then the Codex/OpenCode runner image (Compose
-    and the GHCR release image already set ``HEYM_CODEX_DOCKER_IMAGE`` to the
-    backend image), and finally ``docker inspect`` of this container. Env
-    fallbacks matter because inspect is not reliable in every deployment.
-    """
-    override = (
-        os.environ.get("HEYM_PLAYWRIGHT_SANDBOX_IMAGE", "").strip()
-        or os.environ.get("HEYM_CODEX_DOCKER_IMAGE", "").strip()
-    )
-    if override:
-        return override
-    try:
-        result = subprocess.run(
-            ["docker", "inspect", "--format", "{{.Config.Image}}", socket.gethostname()],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        image = result.stdout.strip()
-        if result.returncode == 0 and image:
-            return image
-    except (FileNotFoundError, subprocess.SubprocessError, OSError):
-        pass
-    return None
-
-
-def _force_remove_container(name: str) -> None:
-    try:
-        subprocess.run(
-            ["docker", "rm", "-f", name],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-    except (FileNotFoundError, subprocess.SubprocessError, OSError):
-        pass
-
-
-def build_docker_command(image: str, name: str) -> list[str]:
-    """Build a hardened, throwaway ``docker run`` invocation that reads the script on stdin.
-
-    Deliberately omits ``-v`` mounts and the Docker socket so the sandbox cannot touch the
-    host, backend volumes or the daemon. Network stays on (browser automation needs it).
-    """
-    memory = os.environ.get("HEYM_PLAYWRIGHT_SANDBOX_MEMORY", "1g")
-    cmd = [
-        "docker",
-        "run",
-        "--rm",
-        "-i",
-        "--name",
-        name,
-        "--network",
-        os.environ.get("HEYM_PLAYWRIGHT_SANDBOX_NETWORK", "bridge"),
-        "--security-opt",
-        "no-new-privileges",
-        "--cap-drop",
-        "ALL",
-        "--pids-limit",
-        os.environ.get("HEYM_PLAYWRIGHT_SANDBOX_PIDS", "512"),
-        "--memory",
-        memory,
-        "--memory-swap",
-        memory,
-        "--cpus",
-        os.environ.get("HEYM_PLAYWRIGHT_SANDBOX_CPUS", "2"),
-        # Chromium needs a larger /dev/shm than Docker's 64m default.
-        "--shm-size",
-        os.environ.get("HEYM_PLAYWRIGHT_SANDBOX_SHM_SIZE", "1g"),
-        # Writable scratch without touching the host.
-        "--tmpfs",
-        "/tmp:rw,nosuid,size=256m",
-    ]
-    user = os.environ.get("HEYM_PLAYWRIGHT_SANDBOX_USER", "").strip()
-    if user:
-        cmd += ["--user", user]
-    cmd += [
-        # entrypoint.sh / release-entrypoint starts the app and ignores args, so
-        # override it to run python reading the streamed script from stdin. Use the
-        # image's uv venv interpreter (bare `python` lacks playwright).
-        "--entrypoint",
-        _sandbox_python(),
-        "--env",
-        "PYTHONIOENCODING=utf-8",
-        "--env",
-        "PYTHONDONTWRITEBYTECODE=1",
-        image,
-        "-",
-    ]
-    return cmd
-
-
 def require_image() -> str:
     """Resolve the sandbox image, failing closed if Docker or the image is unavailable."""
     if not _docker_available():
@@ -213,32 +100,64 @@ def require_image() -> str:
     return image
 
 
+def _docker_available() -> bool:
+    """True when the sandbox backend (Docker or Kubernetes) can start sandboxes."""
+    return get_sandbox_manager().available()
+
+
+def _resolve_image() -> str | None:
+    """``HEYM_PLAYWRIGHT_SANDBOX_IMAGE``, ``HEYM_CODEX_DOCKER_IMAGE``, else the backend's own image."""
+    return get_sandbox_manager().resolve_image(
+        ("HEYM_PLAYWRIGHT_SANDBOX_IMAGE", "HEYM_CODEX_DOCKER_IMAGE")
+    )
+
+
+def _playwright_spec(image: str, name: str) -> SandboxSpec:
+    """Throwaway sandbox that reads the script on stdin. Network stays on for browsing."""
+    memory = os.environ.get("HEYM_PLAYWRIGHT_SANDBOX_MEMORY", "1g")
+    user = os.environ.get("HEYM_PLAYWRIGHT_SANDBOX_USER", "").strip()
+    return SandboxSpec(
+        site="playwright",
+        name=name,
+        image=image,
+        entrypoint=_sandbox_python(),
+        args=("-",),
+        network=os.environ.get("HEYM_PLAYWRIGHT_SANDBOX_NETWORK", "bridge"),
+        user=user or None,
+        read_only_root=False,
+        tmpfs=(Tmpfs("/tmp", "rw,nosuid", "256m"),),
+        shm_size=os.environ.get("HEYM_PLAYWRIGHT_SANDBOX_SHM_SIZE", "1g"),
+        pids=os.environ.get("HEYM_PLAYWRIGHT_SANDBOX_PIDS", "512"),
+        memory=memory,
+        memory_swap=memory,
+        cpus=os.environ.get("HEYM_PLAYWRIGHT_SANDBOX_CPUS", "2"),
+        env=("PYTHONIOENCODING=utf-8", "PYTHONDONTWRITEBYTECODE=1"),
+    )
+
+
+def build_docker_command(image: str, name: str) -> list[str]:
+    """Build a hardened, throwaway ``docker run`` invocation that reads the script on stdin."""
+    return render_docker_argv(_playwright_spec(image, name))
+
+
 def run_script(
     script_content: str,
     timeout_seconds: float,
     image: str | None = None,
 ) -> tuple[int, str, str]:
-    """Run ``script_content`` in a hardened throwaway container.
+    """Run ``script_content`` in a hardened throwaway sandbox; return ``(returncode, stdout, stderr)``.
 
-    Returns ``(returncode, stdout, stderr)``. Raises :class:`TimeoutError` if the script
-    exceeds ``timeout_seconds`` and :class:`PlaywrightSandboxUnavailableError` if the sandbox
-    cannot be established.
+    Raises :class:`TimeoutError` past ``timeout_seconds`` and
+    :class:`PlaywrightSandboxUnavailableError` when the sandbox cannot be established.
     """
     image = image or require_image()
     name = f"heym-pw-{uuid.uuid4().hex}"
-    cmd = build_docker_command(image, name)
-    proc = subprocess.Popen(
-        cmd,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
     try:
-        stdout, stderr = proc.communicate(input=script_content, timeout=timeout_seconds)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
-        _force_remove_container(name)
-        raise TimeoutError(f"Playwright script timed out after {timeout_seconds:.1f} seconds")
-    return proc.returncode, stdout or "", stderr or ""
+        result = get_sandbox_manager().run(
+            _playwright_spec(image, name), script_content, timeout_seconds
+        )
+    except SandboxTimeoutError:
+        raise TimeoutError(
+            f"Playwright script timed out after {timeout_seconds:.1f} seconds"
+        ) from None
+    return result.returncode, result.stdout, result.stderr

@@ -18,11 +18,11 @@ from typing import Any
 
 from app.services.code_python_executor import (
     _DOCKER_START_FAILURE_CODES,
+    code_spec,
     docker_available,
-    hardening_args,
-    resolve_mount,
     resolve_sandbox_image,
     run_sandbox_container,
+    workspace_mount,
 )
 from app.services.file_sandbox.limits import (
     CALL_TIMEOUT_SECONDS,
@@ -32,6 +32,7 @@ from app.services.file_sandbox.limits import (
     TMPFS,
 )
 from app.services.file_sandbox.workspace import INPUT_MOUNT, WORK_MOUNT, FileWorkspace
+from app.services.sandbox import SandboxSpec
 
 logger = logging.getLogger(__name__)
 
@@ -82,13 +83,24 @@ def build_payload(mode: str, **fields: Any) -> dict[str, Any]:
     return {"runner": _source("runner.py"), "modules": module_sources(), "mode": mode, **fields}
 
 
-def build_command(image: str, name: str, workspace: FileWorkspace) -> list[str]:
-    """The ``docker run`` command for one call."""
-    cmd = hardening_args(name, "none", TMPFS, memory=MEMORY_LIMIT, cpus=CPU_LIMIT)
-    cmd.extend(resolve_mount(workspace.in_dir, INPUT_MOUNT, readonly=True))
-    cmd.extend(resolve_mount(workspace.work_dir, WORK_MOUNT, readonly=False))
-    cmd.extend(["--workdir", WORK_MOUNT, "--entrypoint", "python", image, "-c", _BOOTSTRAP])
-    return cmd
+def build_spec(image: str, name: str, workspace: FileWorkspace) -> SandboxSpec:
+    """The sandbox for one call: offline, ``/input`` read-only, ``/work`` writable."""
+    return code_spec(
+        site="files",
+        name=name,
+        image=image,
+        network="none",
+        tmpfs=TMPFS,
+        entrypoint="python",
+        args=("-c", _BOOTSTRAP),
+        workdir=WORK_MOUNT,
+        mounts=(
+            workspace_mount(workspace.in_dir, INPUT_MOUNT, readonly=True),
+            workspace_mount(workspace.work_dir, WORK_MOUNT, readonly=False),
+        ),
+        memory=MEMORY_LIMIT,
+        cpus=CPU_LIMIT,
+    )
 
 
 def run_in_sandbox(workspace: FileWorkspace, payload: dict[str, Any]) -> SandboxOutcome:
@@ -111,11 +123,13 @@ def run_in_sandbox(workspace: FileWorkspace, payload: dict[str, Any]) -> Sandbox
             "the backend image."
         )
     name = f"heym-files-{uuid.uuid4().hex}"
-    cmd = build_command(image, name, workspace)
     with _containers:
         try:
             returncode, stdout, stderr = run_sandbox_container(
-                cmd, json.dumps(payload, default=str), CALL_TIMEOUT_SECONDS, name, "file call"
+                build_spec(image, name, workspace),
+                json.dumps(payload, default=str),
+                CALL_TIMEOUT_SECONDS,
+                "file call",
             )
         except TimeoutError:
             raise TimeoutError(

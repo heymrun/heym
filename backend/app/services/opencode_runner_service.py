@@ -34,6 +34,8 @@ from app.services.opencode_catalog import (
     OPENCODE_ZEN_BASE_URL,
     qualify_model_id,
 )
+from app.services.sandbox import get_sandbox_manager
+from app.services.sandbox.coding_agents import DEADLINE_ENV
 
 logger = logging.getLogger(__name__)
 
@@ -368,6 +370,7 @@ class OpenCodeRunnerService:
         env = dict(os.environ)
         env.pop("OPENAI_API_KEY", None)
         env.pop("CODEX_ACCESS_TOKEN", None)
+        env["HEYM_SANDBOX_BACKEND"] = get_sandbox_manager().backend_name
         return env
 
     def _run_command(
@@ -613,6 +616,7 @@ class OpenCodeRunnerService:
         # ``docker run`` is only a client, so killing it leaves the container running.
         run_id = uuid.uuid4().hex
         env["HEYM_OPENCODE_RUN_ID"] = run_id
+        env[DEADLINE_ENV] = str(int(request.timeout_seconds) + 60)
         cmd = self.build_run_command(
             model, request, workspace, prompt=prompt_override, session_id=session_id
         )
@@ -652,8 +656,14 @@ class OpenCodeRunnerService:
 
     @staticmethod
     def _remove_runner_container(run_id: str) -> None:
-        """Force-remove the sibling runner container; a no-op outside Docker deployments."""
-        if not run_id or not shutil.which("docker"):
+        """Remove the runner container or pod; a no-op without a sandbox backend."""
+        if not run_id:
+            return
+        manager = get_sandbox_manager()
+        if manager.backend_name == "kubernetes":
+            manager.force_remove(f"{_RUNNER_CONTAINER_PREFIX}{run_id}")
+            return
+        if not shutil.which("docker"):
             return
         try:
             subprocess.run(

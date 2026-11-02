@@ -1,0 +1,48 @@
+# Sandbox pods carry app.kubernetes.io/managed-by=heym; the backend's own pods do not.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: heym-sandbox-no-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/managed-by: heym
+  policyTypes: [Ingress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: heym-sandbox-offline
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/managed-by: heym
+      heym.run/network: none
+  policyTypes: [Egress]
+  egress: []
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: heym-sandbox-egress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/managed-by: heym
+      heym.run/network: egress
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    # Internet only: private ranges cover pod/service CIDRs and 169.254.169.254
+    # (cloud metadata). Add your HTTP proxy's address here if you use one.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10]

@@ -312,6 +312,18 @@ Your original data directory is untouched by this procedure, so it remains your 
 
 ---
 
+## Kubernetes
+
+Heym runs on clusters without a Docker daemon (containerd-only nodes, Talos, Bottlerocket, OpenShift). When the backend runs in a pod with a ServiceAccount, every sandbox (Agent Python tools, skills, the Code node, file analysis, custom Playwright, MCP `stdio`, Codex and OpenCode) runs as its own pod through the Kubernetes API: non-root, all capabilities dropped, no ServiceAccount token, Pod Security `restricted`. Docker deployments keep running sandboxes as sibling containers; nothing changes for them.
+
+Start from the example manifests in [`deploy/kubernetes`](https://github.com/heymrun/heym/tree/main/deploy/kubernetes). They need:
+
+- Kubernetes 1.30 or newer.
+- A CNI that enforces NetworkPolicy. Before the first sandbox that must be offline, Heym starts a test pod and refuses offline sandboxes if it can still connect.
+- One PersistentVolumeClaim at `/app/data`. Each sandbox mounts only its own directory of it. With `ReadWriteMany`, sandboxes can run on any node; with `ReadWriteOnce`, they run on the backend's node.
+
+The sandbox variables are optional; see [Environment Variables → Sandbox backend](https://github.com/heymrun/heym/blob/main/ENVIRONMENT-VARIABLES.md#sandbox-backend).
+
 ## Running More Than One Instance
 
 Everything above deploys a single Heym instance. When one machine is no longer

@@ -1,139 +1,59 @@
+"""The wrapper scripts are shims: find the backend venv and hand over to wrapper_cli."""
+
 import importlib.util
-import json
-import os
-import tempfile
 import unittest
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from unittest.mock import patch
 
+REPO = Path(__file__).resolve().parents[2]
 
-def _load_wrapper() -> object:
-    repo_root = Path(__file__).resolve().parents[2]
-    script_path = repo_root / "docker" / "heym-codex-docker"
-    loader = SourceFileLoader("heym_codex_docker", str(script_path))
-    spec = importlib.util.spec_from_loader("heym_codex_docker", loader)
-    if spec is None or spec.loader is None:
-        raise RuntimeError("Could not load heym-codex-docker")
+
+def _load(name: str):  # noqa: ANN202
+    loader = SourceFileLoader(name.replace("-", "_"), str(REPO / "docker" / name))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    loader.exec_module(module)
     return module
 
 
-class TestCodexDockerWrapper(unittest.TestCase):
-    def setUp(self) -> None:
-        self.wrapper = _load_wrapper()
-
-    def test_runner_image_prefers_env(self) -> None:
-        with patch.dict(os.environ, {"HEYM_CODEX_DOCKER_IMAGE": "custom:tag"}, clear=True):
-            self.assertEqual(self.wrapper._runner_image(), "custom:tag")
-
-    def test_runner_image_falls_back_to_current_container_image(self) -> None:
-        inspected = {"Config": {"Image": "ghcr.io/heymrun/heym:1.2.3"}}
+class ShimTest(unittest.TestCase):
+    def _exec_for(self, script: str, present: str) -> tuple:
+        module = _load(script)
         with (
-            patch.dict(os.environ, {}, clear=True),
-            patch.object(self.wrapper, "_inspect_current_container", return_value=inspected),
+            patch.object(module.os.path, "isfile", side_effect=lambda p: p == present),
+            patch.object(module.os, "execve") as execve,
+            patch.object(module.sys, "argv", [script, "exec", "--json"]),
         ):
-            self.assertEqual(self.wrapper._runner_image(), "ghcr.io/heymrun/heym:1.2.3")
+            module.main()
+        return execve.call_args.args
 
-    def test_workspace_mount_prefers_configured_volume(self) -> None:
-        with patch.dict(
-            os.environ,
-            {"HEYM_CODEX_DOCKER_WORKSPACE_VOLUME": "heym-codex-workspaces"},
-            clear=True,
-        ):
-            self.assertEqual(
-                self.wrapper._workspace_mount(Path("/app/data/codex-workspaces")),
-                [
-                    "--mount",
-                    "type=volume,src=heym-codex-workspaces,dst=/app/data/codex-workspaces",
-                ],
-            )
+    def test_compose_image_layout(self) -> None:
+        python, argv, env = self._exec_for("heym-codex-docker", "/app/.venv/bin/python")
+        self.assertEqual(python, "/app/.venv/bin/python")
+        self.assertEqual(
+            argv,
+            [
+                "/app/.venv/bin/python",
+                "-m",
+                "app.services.sandbox.wrapper_cli",
+                "codex",
+                "exec",
+                "--json",
+            ],
+        )
+        self.assertEqual(env["PYTHONPATH"], "/app")
 
-    def test_workspace_mount_detects_bind_mount_from_current_container(self) -> None:
-        inspected = {
-            "Mounts": [
-                {
-                    "Type": "bind",
-                    "Source": "/srv/heym/codex-workspaces",
-                    "Destination": "/app/data/codex-workspaces",
-                }
-            ]
-        }
+    def test_release_image_layout(self) -> None:
+        python, argv, env = self._exec_for("heym-opencode-docker", "/app/backend/.venv/bin/python")
+        self.assertEqual(argv[3], "opencode")
+        self.assertEqual(env["PYTHONPATH"], "/app/backend")
+
+    def test_missing_venv_fails_without_running_anything(self) -> None:
+        module = _load("heym-codex-docker")
         with (
-            patch.dict(os.environ, {}, clear=True),
-            patch.object(self.wrapper, "_inspect_current_container", return_value=inspected),
+            patch.object(module.os.path, "isfile", return_value=False),
+            patch.object(module.os, "execve") as execve,
         ):
-            self.assertEqual(
-                self.wrapper._workspace_mount(Path("/app/data/codex-workspaces")),
-                [
-                    "--mount",
-                    "type=bind,src=/srv/heym/codex-workspaces,dst=/app/data/codex-workspaces",
-                ],
-            )
-
-    def test_workspace_mount_fails_closed_without_shared_mount(self) -> None:
-        with (
-            patch.dict(os.environ, {}, clear=True),
-            patch.object(self.wrapper, "_inspect_current_container", return_value={}),
-            self.assertRaises(SystemExit),
-        ):
-            self.wrapper._workspace_mount(Path("/app/data/codex-workspaces"))
-
-    def test_runner_unmasks_proc_so_bubblewrap_can_mount_it(self) -> None:
-        captured: dict[str, list[str]] = {}
-
-        def fake_run(cmd: list[str], stdin: object = None, check: bool = False) -> object:
-            del stdin, check
-            captured["cmd"] = cmd
-            return type("Completed", (), {"returncode": 0})()
-
-        with tempfile.TemporaryDirectory() as tmp:
-            workspace = Path(tmp) / "codex-workspaces"
-            repo = workspace / "repo"
-            repo.mkdir(parents=True)
-            env = {
-                "HEYM_CODEX_DOCKER_IMAGE": "heym-backend:local",
-                "HEYM_CODEX_DOCKER_WORKSPACE_VOLUME": "heym-codex-workspaces",
-                "HEYM_CODEX_WORKSPACE_DIR": str(workspace),
-                "CODEX_HOME": str(workspace / ".codex-home"),
-            }
-            with (
-                patch.dict(os.environ, env, clear=True),
-                patch.object(self.wrapper.Path, "cwd", return_value=repo),
-                patch.object(self.wrapper.subprocess, "run", side_effect=fake_run),
-                patch.object(self.wrapper.sys, "argv", ["heym-codex-docker", "exec"]),
-            ):
-                self.assertEqual(self.wrapper.main(), 0)
-
-        cmd = captured["cmd"]
-        security_opts = [cmd[index + 1] for index, arg in enumerate(cmd) if arg == "--security-opt"]
-        self.assertIn("systempaths=unconfined", security_opts)
-        self.assertIn("seccomp=unconfined", security_opts)
-        self.assertIn("apparmor=unconfined", security_opts)
-        self.assertIn("SYS_ADMIN", cmd)
-
-    def test_inspect_current_container_parses_docker_output(self) -> None:
-        completed = type(
-            "Completed",
-            (),
-            {
-                "returncode": 0,
-                "stdout": json.dumps([{"Config": {"Image": "heym-backend:local"}}]),
-            },
-        )()
-        with tempfile.NamedTemporaryFile("w", encoding="utf-8") as handle:
-            handle.write("container-id\n")
-            handle.flush()
-            with (
-                patch("pathlib.Path.read_text", return_value="container-id"),
-                patch("subprocess.run", return_value=completed),
-            ):
-                self.assertEqual(
-                    self.wrapper._inspect_current_container(),
-                    {"Config": {"Image": "heym-backend:local"}},
-                )
-
-
-if __name__ == "__main__":
-    unittest.main()
+            self.assertEqual(module.main(), 127)
+        execve.assert_not_called()

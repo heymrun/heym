@@ -13,6 +13,8 @@ from app.config import settings
 from app.services.codex_catalog import CODEX_REASONING_EFFORTS
 from app.services.coding_agent import pr_publish
 from app.services.github_service import GitHubService
+from app.services.sandbox import get_sandbox_manager
+from app.services.sandbox.coding_agents import DEADLINE_ENV
 
 # OpenAI strict structured output requires every property to appear in `required` when
 # `additionalProperties` is false; optional fields are expressed as nullable instead.
@@ -487,6 +489,7 @@ class CodexRunnerService:
         codex_home = self._codex_home_dir(workspace)
         codex_home.mkdir(parents=True, exist_ok=True)
         env = self._codex_env(workspace, access_token)
+        env[DEADLINE_ENV] = str(int(min(timeout_seconds, 120)) + 60)
         try:
             subprocess.run(
                 [self.cli_command, "login", "--with-access-token"],
@@ -535,11 +538,12 @@ class CodexRunnerService:
         cmd.extend(["-c", 'approval_policy="never"'])
         if settings.codex_network_access:
             cmd.extend(["-c", "sandbox_workspace_write.network_access=true"])
+        sandbox_mode = self._codex_sandbox_mode()
         if resume_thread_id:
             # `codex exec resume` rejects --sandbox; set the sandbox via config override instead.
-            cmd.extend(["-c", 'sandbox_mode="workspace-write"'])
+            cmd.extend(["-c", f'sandbox_mode="{sandbox_mode}"'])
         else:
-            cmd.extend(["--sandbox", "workspace-write"])
+            cmd.extend(["--sandbox", sandbox_mode])
         # Skip the plugin/skill marketplace download — the runner uses a fresh CODEX_HOME per run,
         # so leaving it on re-clones hundreds of files every execution.
         cmd.extend(["--disable", "plugins"])
@@ -547,11 +551,13 @@ class CodexRunnerService:
         if resume_thread_id:
             cmd.append(resume_thread_id)
         cmd.append(prompt)
+        exec_env = self._codex_env(workspace, codex_access_token)
+        exec_env[DEADLINE_ENV] = str(int(timeout_seconds) + 60)
         try:
             completed = subprocess.run(
                 cmd,
                 cwd=workspace,
-                env=self._codex_env(workspace, codex_access_token),
+                env=exec_env,
                 stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,
@@ -959,10 +965,22 @@ class CodexRunnerService:
             detail = self._mask_sensitive(exc.stderr or exc.stdout or str(exc), values)
             raise ValueError(detail or "Command failed") from exc
 
+    def _codex_sandbox_mode(self) -> str:
+        """``danger-full-access`` only when Codex runs inside a Kubernetes sandbox pod.
+
+        Bubblewrap cannot run in a restricted pod, so there the pod is the boundary. A host
+        ``codex`` binary keeps Codex's own sandbox whatever the backend.
+        """
+        wrapped = Path(self.cli_command).name == "heym-codex-docker"
+        if wrapped and get_sandbox_manager().backend_name == "kubernetes":
+            return "danger-full-access"
+        return "workspace-write"
+
     def _safe_env(self) -> dict[str, str]:
         env = dict(os.environ)
         env.pop("CODEX_ACCESS_TOKEN", None)
         env.pop("OPENAI_API_KEY", None)
+        env["HEYM_SANDBOX_BACKEND"] = get_sandbox_manager().backend_name
         return env
 
     @staticmethod

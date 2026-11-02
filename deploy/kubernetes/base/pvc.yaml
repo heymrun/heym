@@ -1,0 +1,12 @@
+# One claim for /app/data: Drive files, plugins and both workspace roots. Sandbox
+# pods mount single subPaths of it, never the whole claim. ReadWriteMany lets them
+# run on any node; ReadWriteOnce pins them to the backend's node.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: heym-data
+spec:
+  accessModes: [ReadWriteMany]
+  resources:
+    requests:
+      storage: 50Gi

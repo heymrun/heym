@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: heym
+  labels:
+    app.kubernetes.io/name: heym
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: heym
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: heym
+    spec:
+      serviceAccountName: heym-backend
+      # Service links inject POSTGRES_PORT=tcp://... for a Service named postgres, which
+      # collides with Heym's own POSTGRES_PORT setting.
+      enableServiceLinks: false
+      containers:
+        - name: heym
+          image: ghcr.io/heymrun/heym:latest
+          ports:
+            - {name: http, containerPort: 4017}
+          env:
+            - {name: HEYM_SANDBOX_BACKEND, value: kubernetes}
+            - {name: AUTO_REWRITE_LOCAL_DATABASE_HOST, value: "false"}
+            - name: DATABASE_URL
+              valueFrom: {secretKeyRef: {name: heym-secrets, key: DATABASE_URL}}
+            - name: SECRET_KEY
+              valueFrom: {secretKeyRef: {name: heym-secrets, key: SECRET_KEY}}
+            - name: ENCRYPTION_KEY
+              valueFrom: {secretKeyRef: {name: heym-secrets, key: ENCRYPTION_KEY}}
+          volumeMounts:
+            - {name: data, mountPath: /app/data}
+          readinessProbe:
+            httpGet: {path: /api/health, port: http}
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: heym-data

@@ -143,7 +143,7 @@ Declare `MAIN_ONLY` when the node:
   allowlist the source address).
 
 Declare `ANYWHERE` otherwise — including nodes that open a Docker sandbox. Every
-instance in a cluster runs the same image with its own Docker socket, so a
+instance in a cluster runs the same image with its own Docker socket or Kubernetes API access, so a
 sandbox is not a reason to pin a run to the main instance, and `code` and
 `playwright` are exactly the CPU-heavy work worth moving off it.
 

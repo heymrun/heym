@@ -24,6 +24,11 @@ frontend/.e2e-artifacts
 .gitignore
 **/.DS_Store
 
+# Runtime data (Drive files, plugins, coding-agent workspaces). A host's data must
+# never ship in an image: sandboxes see the image's workspace roots.
+data
+backend/data
+
 # Local secrets (never bake into an image)
 .env
 .env.local

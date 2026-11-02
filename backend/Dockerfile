@@ -105,6 +105,8 @@ COPY backend/pyproject.toml backend/uv.lock* ./
 RUN uv sync --frozen --no-dev
 
 # Playwright: install Chromium and system dependencies for browser automation
+# Outside root's home so a non-root sandbox (Kubernetes runs it as 65534) can read the browsers.
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 RUN uv run python -m playwright install --with-deps chromium
 
 # Skip redundant install at container startup (already in image)

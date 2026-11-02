@@ -30,7 +30,7 @@ Placement is decided from the workflow's nodes before the run starts. A run stay
 | Send Email | Corporate SMTP relays commonly allowlist one source address |
 | Plugin nodes | A plugin is installed on one instance's disk |
 
-**Everything else is distributed** — including the Code node, Playwright and Agent Python tools. Every instance runs the same image with its own Docker socket, so a sandbox is not a reason to keep a run on main, and those are the most CPU-hungry nodes in the product.
+**Everything else is distributed** — including the Code node, Playwright and Agent Python tools. Every instance runs the same image with its own sandbox backend (a Docker socket, or Kubernetes API access), so a sandbox is not a reason to keep a run on main, and those are the most CPU-hungry nodes in the product.
 
 A workflow whose sub-workflow is chosen by an expression cannot be inspected ahead of time, so it stays on main.
 

@@ -246,8 +246,12 @@ async def lifespan(app: FastAPI):
     await rabbitmq_consumer_manager.start()
     await websocket_trigger_manager.start()
     await heym_event_dispatcher.start()
+    from app.services.sandbox.kubernetes.janitor import run_janitor
+
+    sandbox_janitor = asyncio.create_task(run_janitor())
     chat_workspace_sweeper = asyncio.create_task(run_idle_sweeper())
     yield
+    sandbox_janitor.cancel()
     chat_workspace_sweeper.cancel()
     shutdown_tracing()
     await heym_event_dispatcher.stop()

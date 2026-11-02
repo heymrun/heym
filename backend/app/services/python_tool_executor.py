@@ -28,12 +28,15 @@ container of the same image.
 import json
 import logging
 import os
-import socket
 import subprocess
 import sys
 import tempfile
 import uuid
 from pathlib import Path
+
+from app.services.sandbox import SandboxSpec, Tmpfs, get_sandbox_manager
+from app.services.sandbox.docker_backend import render_docker_argv
+from app.services.sandbox.errors import SandboxTimeoutError
 
 logger = logging.getLogger(__name__)
 
@@ -42,8 +45,6 @@ _RUNNER_FILENAME = "python_tool_runner.py"
 # with WORKDIR /app -> backend/app/services/python_tool_runner.py = /app/...).
 _DEFAULT_CONTAINER_RUNNER_PATH = "/app/app/services/python_tool_runner.py"
 
-_docker_available_cache: bool | None = None
-
 
 def _sandbox_mode() -> str:
     raw = os.environ.get("HEYM_PYTHON_TOOL_SANDBOX", "auto").strip().lower()
@@ -51,44 +52,6 @@ def _sandbox_mode() -> str:
         logger.warning("Unknown HEYM_PYTHON_TOOL_SANDBOX=%r; defaulting to 'auto'", raw)
         return "auto"
     return raw
-
-
-def _docker_available() -> bool:
-    """Return True when a working Docker daemon is reachable (cached)."""
-    global _docker_available_cache
-    if _docker_available_cache is not None:
-        return _docker_available_cache
-    try:
-        result = subprocess.run(
-            ["docker", "version", "--format", "{{.Server.Version}}"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        _docker_available_cache = result.returncode == 0 and bool(result.stdout.strip())
-    except (FileNotFoundError, subprocess.SubprocessError, OSError):
-        _docker_available_cache = False
-    return _docker_available_cache
-
-
-def _resolve_image() -> str | None:
-    """Resolve the image to run tools in: explicit override, else this container's image."""
-    override = os.environ.get("HEYM_PYTHON_TOOL_IMAGE", "").strip()
-    if override:
-        return override
-    try:
-        result = subprocess.run(
-            ["docker", "inspect", "--format", "{{.Config.Image}}", socket.gethostname()],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        image = result.stdout.strip()
-        if result.returncode == 0 and image:
-            return image
-    except (FileNotFoundError, subprocess.SubprocessError, OSError):
-        pass
-    return None
 
 
 def _runner_local_path() -> str:
@@ -134,84 +97,52 @@ def _execute_subprocess(payload_json: str, timeout_seconds: float) -> str:
     return stdout
 
 
-def _force_remove_container(name: str) -> None:
-    try:
-        subprocess.run(
-            ["docker", "rm", "-f", name],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-    except (FileNotFoundError, subprocess.SubprocessError, OSError):
-        pass
+def _docker_available() -> bool:
+    """True when the sandbox backend (Docker or Kubernetes) can start sandboxes."""
+    return get_sandbox_manager().available()
+
+
+def _resolve_image() -> str | None:
+    """``HEYM_PYTHON_TOOL_IMAGE``, else the image the backend itself runs."""
+    return get_sandbox_manager().resolve_image(("HEYM_PYTHON_TOOL_IMAGE",))
+
+
+def _tool_spec(image: str, name: str) -> SandboxSpec:
+    """Hardened, offline sandbox for one tool call. The runner reads its payload on stdin."""
+    memory = os.environ.get("HEYM_PYTHON_TOOL_MEMORY", "256m")
+    return SandboxSpec(
+        site="pytool",
+        name=name,
+        image=image,
+        entrypoint="python",
+        args=(os.environ.get("HEYM_PYTHON_TOOL_RUNNER_PATH", _DEFAULT_CONTAINER_RUNNER_PATH),),
+        network=os.environ.get("HEYM_PYTHON_TOOL_NETWORK", "none"),
+        user=os.environ.get("HEYM_PYTHON_TOOL_USER", "65534:65534"),
+        tmpfs=(Tmpfs("/tmp", "rw,noexec,nosuid", "64m"),),
+        workdir="/tmp",
+        pids=os.environ.get("HEYM_PYTHON_TOOL_PIDS", "128"),
+        memory=memory,
+        memory_swap=memory,
+        cpus=os.environ.get("HEYM_PYTHON_TOOL_CPUS", "1"),
+        env=("PYTHONDONTWRITEBYTECODE=1", "PYTHONIOENCODING=utf-8"),
+    )
 
 
 def _build_docker_command(image: str, name: str) -> list[str]:
-    """Build a hardened, throwaway `docker run` invocation for the tool runner."""
-    runner_path = os.environ.get("HEYM_PYTHON_TOOL_RUNNER_PATH", _DEFAULT_CONTAINER_RUNNER_PATH)
-    memory = os.environ.get("HEYM_PYTHON_TOOL_MEMORY", "256m")
-    return [
-        "docker",
-        "run",
-        "--rm",
-        "-i",
-        "--name",
-        name,
-        "--network",
-        os.environ.get("HEYM_PYTHON_TOOL_NETWORK", "none"),
-        "--read-only",
-        "--tmpfs",
-        "/tmp:rw,noexec,nosuid,size=64m",
-        "--workdir",
-        "/tmp",
-        "--user",
-        os.environ.get("HEYM_PYTHON_TOOL_USER", "65534:65534"),
-        "--cap-drop",
-        "ALL",
-        "--security-opt",
-        "no-new-privileges",
-        "--pids-limit",
-        os.environ.get("HEYM_PYTHON_TOOL_PIDS", "128"),
-        "--memory",
-        memory,
-        "--memory-swap",
-        memory,
-        "--cpus",
-        os.environ.get("HEYM_PYTHON_TOOL_CPUS", "1"),
-        # Override the backend image ENTRYPOINT (entrypoint.sh starts uvicorn and
-        # ignores its args) so the container actually runs the tool runner.
-        "--entrypoint",
-        "python",
-        "--env",
-        "PYTHONDONTWRITEBYTECODE=1",
-        "--env",
-        "PYTHONIOENCODING=utf-8",
-        image,
-        runner_path,
-    ]
+    """The ``docker run`` argv of one tool call."""
+    return render_docker_argv(_tool_spec(image, name))
 
 
 def _execute_docker(payload_json: str, timeout_seconds: float, image: str) -> str:
-    """Run the tool runner inside a hardened, throwaway sibling container."""
+    """Run the tool runner in a hardened, throwaway sandbox and return its stdout."""
     name = f"heym-pytool-{uuid.uuid4().hex}"
-    cmd = _build_docker_command(image, name)
-    proc = subprocess.Popen(
-        cmd,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
     try:
-        stdout, stderr = proc.communicate(input=payload_json, timeout=timeout_seconds)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
-        _force_remove_container(name)
-        raise TimeoutError(f"Tool execution timed out after {timeout_seconds} seconds")
-    if stderr:
-        logger.warning("Docker tool stderr: %s", stderr)
-    return stdout
+        result = get_sandbox_manager().run(_tool_spec(image, name), payload_json, timeout_seconds)
+    except SandboxTimeoutError:
+        raise TimeoutError(f"Tool execution timed out after {timeout_seconds} seconds") from None
+    if result.stderr:
+        logger.warning("Docker tool stderr: %s", result.stderr)
+    return result.stdout
 
 
 def execute_tool(
