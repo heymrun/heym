@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from app.services import code_python_executor as executor
+from app.services.sandbox import get_sandbox_manager, reset_sandbox_manager
 from app.services.sandbox.docker_backend import docker_mount_args
 
 
@@ -239,10 +240,14 @@ _OK_ENVELOPE = json.dumps({"success": True, "result": {"ok": 1}, "logs": "hi\n"}
 
 class ExecuteCodeTest(unittest.TestCase):
     def setUp(self) -> None:
-        executor._docker_available_cache = None
-
-    def tearDown(self) -> None:
-        executor._docker_available_cache = None
+        # Pin Docker and build the manager now: selecting it lazily inside a test would
+        # probe Docker through the Popen/run this test patches.
+        pinned = patch.dict("os.environ", {"HEYM_SANDBOX_BACKEND": "docker"})
+        pinned.start()
+        self.addCleanup(pinned.stop)
+        reset_sandbox_manager()
+        self.addCleanup(reset_sandbox_manager)
+        get_sandbox_manager()
 
     def test_fails_closed_when_docker_is_unavailable(self) -> None:
         with patch.object(executor, "docker_available", return_value=False):

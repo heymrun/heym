@@ -26,6 +26,7 @@ class WrapperCliTest(unittest.TestCase):
             "HEYM_OPENCODE_DOCKER_IMAGE": "img:1",
             "HOME": f"{self.root}/{RUN}.oc-home",
             "HEYM_OPENCODE_RUN_ID": "abc123",
+            "HEYM_SANDBOX_BACKEND": "docker",
         }
 
     def test_runs_docker_with_the_scoped_spec_and_removes_the_container(self) -> None:
