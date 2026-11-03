@@ -325,6 +325,12 @@ Start from the example manifests in [`deploy/kubernetes`](https://github.com/hey
 
 The sandbox variables are optional; see [Environment Variables → Sandbox backend](https://github.com/heymrun/heym/blob/main/ENVIRONMENT-VARIABLES.md#sandbox-backend).
 
+Prefer Helm? [heym-helm](https://github.com/amasolov/heym-helm) is a community chart maintained by Alexey Masolov, published on [Artifact Hub](https://artifacthub.io/packages/helm/heym/heym), with platform presets for OpenShift, EKS, AKS and GKE:
+
+```bash
+helm install heym oci://ghcr.io/amasolov/charts/heym -n heym --create-namespace -f values.yaml
+```
+
 ## Running More Than One Instance
 
 Everything above deploys a single Heym instance. When one machine is no longer

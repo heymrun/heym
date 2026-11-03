@@ -22,6 +22,15 @@ runs as its own pod through the Kubernetes API.
       --from-literal=SECRET_KEY=$(openssl rand -hex 32) \
       --from-literal=ENCRYPTION_KEY=$(openssl rand -hex 32)
 
+## Helm
+
+[heym-helm](https://github.com/amasolov/heym-helm) is a community chart maintained by
+Alexey Masolov and published on
+[Artifact Hub](https://artifacthub.io/packages/helm/heym/heym), with platform presets for
+OpenShift, EKS, AKS and GKE:
+
+    helm install heym oci://ghcr.io/amasolov/charts/heym -n heym --create-namespace -f values.yaml
+
 ## Storage
 
 `heym-data` holds Drive files, plugins and the Codex/OpenCode workspaces. Sandbox
