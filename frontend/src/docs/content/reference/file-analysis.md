@@ -60,7 +60,7 @@ A conversation keeps its working folder between messages, so a follow-up such as
 
 ## In workflows
 
-A run opens only its own files: those uploaded through the workflow's [File Upload trigger](../nodes/file-upload-trigger-node.md) and those its nodes wrote to Drive. A sub-workflow also opens its parent's. A Drive file id typed into an input or put together in a prompt opens nothing, so nobody can add a node to a workflow to read the owner's Drive.
+A run opens only its own files: those uploaded through the workflow's [File Upload trigger](../nodes/file-upload-trigger-node.md), those its nodes wrote to Drive, and those a [Drive node](../nodes/drive-node.md) **Get** step fetched in the same run. A sub-workflow also opens its parent's. A Drive file id typed into an input or put together in a prompt opens nothing without a Drive Get step, so a workflow reads the owner's Drive only through a step you can see on the canvas.
 
 - **Agent node**: there is nothing to switch on. When the agent's input or message carries a file of the run, it gets the tools above for those files; its working folder is deleted when the node finishes. Pass the file id in the message, for example `Summarize the risks in $Upload.file.id`.
 - **Code node**: set **Files** to an expression such as `$Upload.file.id`. The files are mounted for that run, listed in `params.files`, and anything written to `heym_files.out_dir()` comes back in `$label.files`.

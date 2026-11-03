@@ -132,7 +132,7 @@ Canvas node tools let an agent call configured workflow nodes directly from the 
 
 The Skills section now includes **AI Build** for creating new skills, an inline AI edit action for existing skills, per-skill ZIP download, and an optional **Enable Drive files** switch for skills that need to read Heym Drive files at runtime. The Skill Builder modal streams a chat conversation on the left, accepts drag-and-drop files with each fine-tune comment, shows a live read-only preview of generated `SKILL.md` and `.py` files on the right, can download that preview as a ZIP, and saves uploaded fine-tune files back as bundled skill assets through the same ZIP ingestion flow used by manual uploads.
 
-When its input carries a file of the run (uploaded through the workflow's File Upload trigger or written by its nodes), the agent opens it in an isolated, network-less Python sandbox with no setting to turn on: it inspects a PDF, spreadsheet, CSV, DOCX or JSON file's structure first and reads only what the task needs, and files it writes are saved to Drive. See [File Analysis](./file-analysis.md).
+When its input carries a file of the run (uploaded through the workflow's File Upload trigger, written by its nodes, or fetched by a Drive node's Get), the agent opens it in an isolated, network-less Python sandbox with no setting to turn on: it inspects a PDF, spreadsheet, CSV, DOCX or JSON file's structure first and reads only what the task needs, and files it writes are saved to Drive. See [File Analysis](./file-analysis.md).
 
 With **[Agent Persistent Memory](./agent-persistent-memory.md)** enabled, each agent node keeps its own knowledge graph: facts are loaded into the system prompt when non-empty, and successful runs trigger a background merge of new entities and relationships. Sub-agents use separate graphs. You can **share** an agent’s graph with other agents (same or other workflows) with read-only or read/write access from the graph dialog. The canvas brain control opens the graph editor.
 
@@ -258,7 +258,7 @@ See also [Third-Party Integrations](./integrations.md) and [Credentials](./crede
 
 #### [Slack](../nodes/slack-node.md)
 
-The Slack node posts to Slack and can wait for a person's answer there. A Slack Webhook [credential](./credentials.md) sends one message; a Slack Bot credential adds channel messages and DMs, thread replies, message updates, colored outcome cards, reactions, reading messages and person lookup, plus approvals, buttons and forms that pause the run until someone answers in Slack or in the [Human-in-the-Loop](./human-in-the-loop.md) inbox. Posting steps output `channel`, `ts` and `threadTs`, so later steps continue in the same thread.
+The Slack node posts to Slack and can wait for a person's answer there. A Slack Webhook [credential](./credentials.md) sends one message; a Slack Bot credential adds channel messages and DMs, thread replies, message updates, colored outcome cards, reactions, reading messages, person lookup, downloading a message's files into [Heym Drive](../tabs/drive-tab.md) with its text and sending Drive files to Slack, plus approvals, buttons and forms that pause the run until someone answers in Slack or in the [Human-in-the-Loop](./human-in-the-loop.md) inbox. Posting steps output `channel`, `ts` and `threadTs`, so later steps continue in the same thread.
 
 Pairs with [Slack Trigger](../nodes/slack-trigger-node.md), [Error Handler](../nodes/error-handler-node.md), and [Third-Party Integrations](./integrations.md).
 

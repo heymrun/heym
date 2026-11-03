@@ -15,6 +15,7 @@ import tempfile
 import unittest
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from sqlalchemy import delete, literal, select, union_all
@@ -30,7 +31,7 @@ from app.services.file_sandbox.manifest import (
     resolve_files,
     still_accessible,
 )
-from app.services.file_sandbox.scope import RunFileScope
+from app.services.file_sandbox.scope import RunFileScope, grant_run_files
 from app.services.file_sandbox.tools import FileToolbox
 from app.services.file_sandbox.workspace import FileWorkspace
 
@@ -314,6 +315,29 @@ class RealPostgresFileSandboxAccessTests(unittest.TestCase):
             for ref in (str(self.private_file), "salaries.xlsx", str(self.other_upload_file)):
                 with self.assertRaises(FileAccessError):
                     resolve_files(db, self.owner, [ref], scope=scope)
+
+    def test_a_file_the_drive_node_got_opens_for_later_steps(self) -> None:
+        """Drive Get is the visible way into the actor's Drive; a typed id still is not."""
+        run = SimpleNamespace(file_scope=self._run_scope())
+        with SessionLocal() as db:
+            with self.assertRaises(FileAccessError):
+                resolve_files(db, self.owner, [str(self.private_file)], scope=run.file_scope)
+            grant_run_files(run, [self.private_file])
+            opened = resolve_files(db, self.owner, [str(self.private_file)], scope=run.file_scope)
+            self.assertEqual(opened[0].id, self.private_file)
+            with self.assertRaises(FileAccessError):
+                resolve_files(db, self.owner, [str(self.other_upload_file)], scope=run.file_scope)
+
+    def test_a_drive_get_grant_keeps_the_access_rule(self) -> None:
+        run = SimpleNamespace(file_scope=self._run_scope())
+        grant_run_files(run, [self.private_file, self.shared_file])
+        with SessionLocal() as db:
+            with self.assertRaises(FileAccessError):
+                resolve_files(db, self.outsider, [str(self.private_file)], scope=run.file_scope)
+            with self.assertRaises(FileAccessError):
+                resolve_files(
+                    db, self.other_team_member, [str(self.shared_file)], scope=run.file_scope
+                )
 
     def test_loosened_rule_would_turn_tools_on_for_a_foreign_file(self) -> None:
         """Mutation check: the agent-input refusal comes from the same team filter."""

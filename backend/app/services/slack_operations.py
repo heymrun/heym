@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from importlib import import_module
 from typing import Any
 
+from app.services import slack_files
 from app.services import slack_service as slack
 from app.services.node_execution.base import NodeExecutionContext
 
@@ -32,6 +33,8 @@ OPERATIONS = frozenset(
         "deleteMessage",
         "getMessages",
         "findUser",
+        "downloadFile",
+        "sendFile",
     }
 )
 # An outcome can follow an earlier approval: `$approval.approval` picks the card's color.
@@ -318,6 +321,16 @@ def run_bot_operation(ctx: NodeExecutionContext, credential_id: str, config: dic
         return _get_messages(ctx, token)
     if operation == "findUser":
         return _find_user(ctx, token)
+    if operation == "downloadFile":
+        return slack_files.download_files(ctx, token)
+    if operation == "sendFile":
+        return slack_files.send_files(
+            ctx,
+            token,
+            channel=slack.resolve_target(token, _required(ctx, "slackChannel", "channel")),
+            thread_ts=_text(ctx, "slackThreadTs").strip(),
+            comment=_text(ctx, "message"),
+        )
 
     channel = slack.resolve_target(token, _required(ctx, "slackChannel", "channel"))
     if operation == "updateMessage":

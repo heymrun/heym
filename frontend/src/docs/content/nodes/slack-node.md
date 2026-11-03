@@ -1,6 +1,6 @@
 # Slack
 
-The **Slack** node posts to Slack and can wait for a person's answer there. With a **Slack Webhook** credential it sends one message to the webhook's channel. With a **Slack Bot** credential (a bot token, `xoxb-…`) it runs every operation below: channel messages, direct messages, thread replies, message updates, outcome cards, reactions, reading messages, and approvals, buttons and forms that pause the run until someone answers.
+The **Slack** node posts to Slack and can wait for a person's answer there. With a **Slack Webhook** credential it sends one message to the webhook's channel. With a **Slack Bot** credential (a bot token, `xoxb-…`) it runs every operation below: channel messages, direct messages, thread replies, message updates, outcome cards, reactions, reading messages, downloading and sending files, and approvals, buttons and forms that pause the run until someone answers.
 
 ## Overview
 
@@ -26,6 +26,8 @@ The **Slack** node posts to Slack and can wait for a person's answer there. With
 | Delete message | Deletes a message the bot posted | No |
 | Read messages | Reads a channel's latest messages, or a thread's replies | No |
 | Find person | Looks a person up by id or email | No |
+| Download files | Saves a message's files to Heym Drive and returns them with the message's text | No |
+| Send files | Shares Heym Drive files in a channel, a DM or a thread, with an optional message | No |
 
 ## Parameters
 
@@ -42,12 +44,18 @@ The **Slack** node posts to Slack and can wait for a person's answer there. With
 | `slackFormTitle`, `slackSubmitLabel`, `slackFormFields` | text, list | The form's title, submit button and fields (`text`, `multiline`, `number`, `email`, `date`, `select`) |
 | `slackAllowedUsers` | expression | Who may answer an approval, buttons or a form: user ids or emails, comma separated. Empty lets anyone in the channel answer. |
 | `slackOutcomeStatus`, `slackOutcomeTitle` | text | The outcome card's color and headline. The status can follow an approval: `$approval.approval`. |
+| `slackFile` | expression | **Download files:** a Slack message such as `$slackEvent.event` (all its files and its text), a message or file link, a file id (`F…`), or a list of files |
+| `slackUploadFile` | expression | **Send files:** the run's Heym Drive files, such as `$files.file_ids` or `$drive.id` |
 
 ## Output
 
 Posting operations output `channel`, `ts`, `threadTs` and `text`, so a later Slack step can reply in the same thread or update the message.
 
 **Read messages** outputs `transcript`: the messages oldest first, one `[time] name: text` per line, ready for an [LLM](./llm-node.md) to summarize. It also outputs the raw `messages` list and `count`.
+
+**Download files** saves up to ten files to [Heym Drive](../tabs/drive-tab.md) and outputs `files` (each with `id`, `slack_file_id`, `filename`, `mime_type`, `size_bytes` and `download_url`), `file_ids`, `count`, and the message's `text`, `channel`, `ts` and `user`. The first file's fields are also at the top, so `$files.filename` works for a single file. Give `$files.file_ids` to an [Agent](./agent-node.md) in its user message and it reads the files with file analysis. A file Slack only links to (for example a Google Drive link) or a file larger than the Drive limit stops the step with a message.
+
+**Send files** shares up to ten Drive files in one Slack message and outputs `channel`, `threadTs`, `files` and `count`. It sends only the run's own files: the output of Download files, a [Drive](./drive-node.md) node's **Get** (for example `$drive.id`), a [Converter](./converter-node.md) or a Code node, or a file uploaded through the File Upload trigger. A Drive id typed straight into Files is refused, so other Drive files are posted only through a visible Drive step.
 
 Messages are posted in Slack's own formatting. Markdown that a model writes, such as `**bold**`, `## Heading`, `[text](url)` or `- item`, is converted before posting, so an LLM's answer can go into a message as it is.
 
@@ -77,7 +85,9 @@ Branch on the answer with a [Condition](./condition-node.md) or [Switch](./switc
 5. For a [Slack Trigger](./slack-trigger-node.md), copy the credential's **Event Subscriptions Request URL** too. Every Slack Trigger on the credential hears messages, DMs and mentions through it.
 6. Invite the bot to private channels it should post in (`/invite @Heym`).
 
-The same Slack Bot credential also verifies [Slack Trigger](./slack-trigger-node.md) events. A flow that listens with it ignores the bot's own posts and edits, so replying in the channel it listens to does not start it again.
+Download files needs the `files:read` scope and Send files needs `files:write`. The manifest includes both; an app created from an older manifest must add them and be reinstalled to the workspace.
+
+The same Slack Bot credential also verifies [Slack Trigger](./slack-trigger-node.md) events. A flow that listens with it ignores the bot's own posts, uploads and edits, so replying in the channel it listens to does not start it again.
 
 ## Example: approval with an outcome in the same thread
 

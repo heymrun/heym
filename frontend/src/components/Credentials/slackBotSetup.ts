@@ -5,6 +5,8 @@ export const SLACK_BOT_SCOPES: readonly string[] = [
   "channels:read",
   "chat:write",
   "chat:write.public",
+  "files:read",
+  "files:write",
   "groups:history",
   "groups:read",
   "im:history",

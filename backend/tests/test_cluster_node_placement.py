@@ -47,6 +47,16 @@ class NodePlacementTests(unittest.TestCase):
             node = {"type": "code", "data": {"codeFiles": files}}
             self.assertEqual(node_placement(node), Placement.ANYWHERE)
 
+    def test_slack_file_operations_are_pinned_to_main(self) -> None:
+        for operation in ("downloadFile", "sendFile"):
+            node = {"type": "slack", "data": {"slackOperation": operation}}
+            self.assertEqual(node_placement(node), Placement.MAIN_ONLY)
+
+    def test_other_slack_operations_run_anywhere(self) -> None:
+        for data in ({}, {"slackOperation": "sendMessage"}, {"slackOperation": "getMessages"}):
+            node = {"type": "slack", "data": data}
+            self.assertEqual(node_placement(node), Placement.ANYWHERE)
+
     def test_unknown_node_type_is_pinned_to_main(self) -> None:
         self.assertEqual(node_placement({"type": "acmePlugin", "data": {}}), Placement.MAIN_ONLY)
 

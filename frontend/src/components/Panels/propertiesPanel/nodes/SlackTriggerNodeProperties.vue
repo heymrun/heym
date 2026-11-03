@@ -77,6 +77,20 @@ function copyEventsUrl(): void {
         <p class="text-xs text-muted-foreground">
           DMs need the app's Messages tab and the message.im event; the Slack Bot manifest sets both.
         </p>
+        <label class="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            :checked="!!selectedNode.data.slackEventFilesOnly"
+            @change="updateNodeData('slackEventFilesOnly', ($event.target as HTMLInputElement).checked)"
+          >
+          <span>Only messages with files</span>
+        </label>
+        <p
+          v-if="selectedNode.data.slackEventFilesOnly"
+          class="text-xs text-muted-foreground"
+        >
+          A Slack node with Download files after this trigger saves them to Heym Drive.
+        </p>
       </div>
 
       <div
@@ -132,6 +146,7 @@ function copyEventsUrl(): void {
           <div>${{ selectedNode.data.label }}.event.type — event type</div>
           <div>${{ selectedNode.data.label }}.event.text — message text</div>
           <div>${{ selectedNode.data.label }}.event.user — Slack user ID</div>
+          <div>${{ selectedNode.data.label }}.event.files — files shared with the message</div>
           <div>${{ selectedNode.data.label }}.headers — HTTP headers</div>
         </div>
       </div>
