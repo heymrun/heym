@@ -20,9 +20,8 @@ the ``HEYM_PYTHON_TOOL_SANDBOX`` environment variable:
 
 The user code is never bind-mounted or written to a shared location: the JSON
 payload (including the code) is streamed to the runner over stdin and the result
-is read from stdout. The runner module (``python_tool_runner.py``) is baked into
-the backend image, so the Docker backend just invokes it inside a sibling
-container of the same image.
+is read from stdout. The sandbox receives the runner module's source in the same
+payload, so it does not depend on where an image keeps the backend files.
 """
 
 import json
@@ -41,9 +40,16 @@ from app.services.sandbox.errors import SandboxTimeoutError
 logger = logging.getLogger(__name__)
 
 _RUNNER_FILENAME = "python_tool_runner.py"
-# Path of the runner module inside the backend image (Dockerfile: COPY backend/ .
-# with WORKDIR /app -> backend/app/services/python_tool_runner.py = /app/...).
-_DEFAULT_CONTAINER_RUNNER_PATH = "/app/app/services/python_tool_runner.py"
+# Ships the runner source, as the Code node does: image layouts differ (/app, /app/backend).
+_BOOTSTRAP = (
+    "import io,sys,json;"
+    "p=json.loads(sys.stdin.read());"
+    "r=p.pop('runner');"
+    "sys.stdin=io.StringIO(json.dumps(p));"
+    "g={'__name__':'__heym_tool_runner__'};"
+    "exec(compile(r,'python_tool_runner.py','exec'),g);"
+    "g['main']()"
+)
 
 
 def _sandbox_mode() -> str:
@@ -56,6 +62,12 @@ def _sandbox_mode() -> str:
 
 def _runner_local_path() -> str:
     return str(Path(__file__).resolve().parent / _RUNNER_FILENAME)
+
+
+def _sandbox_payload(payload_json: str) -> str:
+    payload = json.loads(payload_json)
+    payload["runner"] = Path(_runner_local_path()).read_text(encoding="utf-8")
+    return json.dumps(payload)
 
 
 def _parse_runner_output(stdout: str | None) -> object:
@@ -115,7 +127,7 @@ def _tool_spec(image: str, name: str) -> SandboxSpec:
         name=name,
         image=image,
         entrypoint="python",
-        args=(os.environ.get("HEYM_PYTHON_TOOL_RUNNER_PATH", _DEFAULT_CONTAINER_RUNNER_PATH),),
+        args=("-c", _BOOTSTRAP),
         network=os.environ.get("HEYM_PYTHON_TOOL_NETWORK", "none"),
         user=os.environ.get("HEYM_PYTHON_TOOL_USER", "65534:65534"),
         tmpfs=(Tmpfs("/tmp", "rw,noexec,nosuid", "64m"),),
@@ -137,7 +149,9 @@ def _execute_docker(payload_json: str, timeout_seconds: float, image: str) -> st
     """Run the tool runner in a hardened, throwaway sandbox and return its stdout."""
     name = f"heym-pytool-{uuid.uuid4().hex}"
     try:
-        result = get_sandbox_manager().run(_tool_spec(image, name), payload_json, timeout_seconds)
+        result = get_sandbox_manager().run(
+            _tool_spec(image, name), _sandbox_payload(payload_json), timeout_seconds
+        )
     except SandboxTimeoutError:
         raise TimeoutError(f"Tool execution timed out after {timeout_seconds} seconds") from None
     if result.stderr:

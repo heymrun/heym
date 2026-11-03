@@ -1161,7 +1161,8 @@
   },
   "pytool": {
     "args": [
-      "/app/app/services/python_tool_runner.py"
+      "-c",
+      "import io,sys,json;p=json.loads(sys.stdin.read());r=p.pop('runner');sys.stdin=io.StringIO(json.dumps(p));g={'__name__':'__heym_tool_runner__'};exec(compile(r,'python_tool_runner.py','exec'),g);g['main']()"
     ],
     "entrypoint": "python",
     "env": [
@@ -1227,7 +1228,8 @@
   },
   "pytool_custom": {
     "args": [
-      "/app/app/services/python_tool_runner.py"
+      "-c",
+      "import io,sys,json;p=json.loads(sys.stdin.read());r=p.pop('runner');sys.stdin=io.StringIO(json.dumps(p));g={'__name__':'__heym_tool_runner__'};exec(compile(r,'python_tool_runner.py','exec'),g);g['main']()"
     ],
     "entrypoint": "python",
     "env": [

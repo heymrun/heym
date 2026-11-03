@@ -8,9 +8,11 @@ import os
 import socket
 import subprocess
 import threading
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from app.services.sandbox.ca_bundle import ca_mounts
 from app.services.sandbox.errors import SandboxTimeoutError
 from app.services.sandbox.spec import (
     OperatorMount,
@@ -203,7 +205,7 @@ class DockerBackend:
     def run(self, spec: SandboxSpec, stdin: str | None, timeout_seconds: float) -> SandboxResult:
         """Run one container to completion; remove it and raise on timeout."""
         proc = subprocess.Popen(
-            render_docker_argv(spec),
+            render_docker_argv(self.with_ca_files(spec)),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -222,7 +224,25 @@ class DockerBackend:
 
     def process_command(self, spec: SandboxSpec) -> ProcessCommand:
         """``docker run`` argv for callers that spawn and supervise the process."""
-        return ProcessCommand(argv=render_docker_argv(spec), env={}, name=spec.name)
+        return ProcessCommand(
+            argv=render_docker_argv(self.with_ca_files(spec)), env={}, name=spec.name
+        )
+
+    def with_ca_files(self, spec: SandboxSpec) -> SandboxSpec:
+        """``spec`` plus the CA files its environment names; one that cannot be mounted is left out."""
+        mounts: list[WorkspaceMount] = []
+        for mount in ca_mounts(spec, shared_workspace=self.uses_shared_workspace()):
+            try:
+                docker_mount_args(mount)
+            except (RuntimeError, OSError) as exc:
+                logger.warning(
+                    "CA file %s stays out of sandbox %s: %s", mount.target, spec.name, exc
+                )
+                continue
+            mounts.append(mount)
+        if not mounts:
+            return spec
+        return replace(spec, workspace_mounts=spec.workspace_mounts + tuple(mounts))
 
     def force_remove(self, name: str | None) -> None:
         """Remove a container that may have outlived its client."""

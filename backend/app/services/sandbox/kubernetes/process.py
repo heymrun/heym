@@ -23,6 +23,7 @@ from app.services.sandbox.kubernetes.attach import (
     AttachSession,
     exit_code_from_status,
     open_attach,
+    open_gated_attach,
 )
 from app.services.sandbox.kubernetes.client import KubeApiError, KubeClient
 from app.services.sandbox.kubernetes.config import KubeConfig
@@ -90,7 +91,7 @@ def run_attached(
             return START_FAILURE_RETURNCODE
         status_code: int | None = None
         if started.state == "running":
-            session = open_attach(client, name)
+            session = open_gated_attach(client, name) if start_gate else open_attach(client, name)
             try:
                 if start_gate:
                     session.send_stdin(b"\n")

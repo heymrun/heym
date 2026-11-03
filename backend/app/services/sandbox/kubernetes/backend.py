@@ -16,8 +16,14 @@ from typing import Any
 import httpx
 from websockets.exceptions import InvalidHandshake
 
+from app.services.sandbox.ca_bundle import ca_mounts
 from app.services.sandbox.errors import SandboxConfigError, SandboxTimeoutError
-from app.services.sandbox.kubernetes.attach import AttachSession, exchange, open_attach
+from app.services.sandbox.kubernetes.attach import (
+    AttachSession,
+    exchange,
+    open_attach,
+    open_gated_attach,
+)
 from app.services.sandbox.kubernetes.client import KubeApiError, KubeClient
 from app.services.sandbox.kubernetes.config import KubeConfig, KubeConfigError
 from app.services.sandbox.kubernetes.lifecycle import wait_started, wait_terminated
@@ -40,6 +46,7 @@ from app.services.sandbox.spec import (
     ProcessCommand,
     SandboxResult,
     SandboxSpec,
+    WorkspaceMount,
 )
 
 logger = logging.getLogger(__name__)
@@ -160,10 +167,29 @@ class KubernetesBackend:
             self._placements[claims] = placement_node(self._client, set(claims), self.self_pod())
         return tuple(volumes), self._placements[claims]
 
+    def with_ca_files(self, spec: SandboxSpec) -> SandboxSpec:
+        """``spec`` plus the CA files its environment names; one off the claim is left out."""
+        mounts: list[WorkspaceMount] = []
+        for mount in ca_mounts(spec, shared_workspace=True):
+            try:
+                resolve_volume(
+                    claim_mounts(self.self_pod() or {}), mount.host_path, mount.target, True
+                )
+            except SandboxConfigError as exc:
+                logger.warning(
+                    "CA file %s stays out of sandbox %s: %s", mount.target, spec.name, exc
+                )
+                continue
+            mounts.append(mount)
+        if not mounts:
+            return spec
+        return replace(spec, workspace_mounts=spec.workspace_mounts + tuple(mounts))
+
     def manifest(self, spec: SandboxSpec, timeout_seconds: float | None) -> dict[str, Any]:
         """The pod manifest for ``spec``; one-shot runs get a deadline from their timeout."""
         if spec.deadline_seconds is None and timeout_seconds is not None:
             spec = replace(spec, deadline_seconds=timeout_seconds + ONE_SHOT_DEADLINE_GRACE_SECONDS)
+        spec = self.with_ca_files(spec)
         volumes, node = self.pod_volumes(spec)
         context = self.pod_context()
         if node:
@@ -179,6 +205,10 @@ class KubernetesBackend:
     def _run_pod(
         self, spec: SandboxSpec, stdin: str | None, timeout_seconds: float
     ) -> SandboxResult:
+        # The program starts only once attached, so stdout and stderr stay apart.
+        gated = spec.entrypoint is not None
+        if gated:
+            spec = replace(spec, start_gate=True)
         manifest = self.manifest(spec, timeout_seconds)
         self._client.create_pod(manifest)
         try:
@@ -186,28 +216,32 @@ class KubernetesBackend:
             if started.state == "failed":
                 return SandboxResult(START_FAILURE_RETURNCODE, "", f"kubernetes: {started.reason}")
             stdout, stderr, status_code = b"", b"", None
-            attached = False
-            if started.state == "running":
-                session = self._attach(spec.name)
-                if session is not None:
-                    attached = True
-                    try:
-                        stdout, stderr, status_code = exchange(
-                            session,
-                            stdin.encode("utf-8") if stdin is not None else None,
-                            time.monotonic() + timeout_seconds,
-                        )
-                    except TimeoutError:
-                        raise SandboxTimeoutError(
-                            f"sandbox pod {spec.name} ran past {timeout_seconds:.0f} seconds"
-                        ) from None
-                    finally:
-                        session.close()
+            session = self._attach(spec.name, gated) if started.state == "running" else None
+            if session is not None:
+                payload = stdin.encode("utf-8") if stdin is not None else b""
+                try:
+                    stdout, stderr, status_code = exchange(
+                        session,
+                        b"\n" + payload if gated else payload,
+                        time.monotonic() + timeout_seconds,
+                    )
+                except TimeoutError:
+                    raise SandboxTimeoutError(
+                        f"sandbox pod {spec.name} ran past {timeout_seconds:.0f} seconds"
+                    ) from None
+                finally:
+                    session.close()
             finished = wait_terminated(self._client, spec.name)
-            if not attached and not stdout:
-                stdout = self._client.pod_log(spec.name).encode("utf-8")
+            if session is None:
+                log = self._client.pod_log(spec.name).encode("utf-8")
+                if gated:
+                    stderr = log
+                else:
+                    stdout = log
             code = finished.code if finished.code is not None else status_code
             if code is None:
+                if session is None and gated:
+                    raise RuntimeError(f"could not attach to sandbox pod {spec.name}")
                 raise RuntimeError(
                     f"sandbox pod {spec.name} finished without an exit status ({finished.reason})"
                 )
@@ -219,10 +253,12 @@ class KubernetesBackend:
         finally:
             self.force_remove(spec.name)
 
-    def _attach(self, name: str) -> AttachSession | None:
-        """Attach, or None when the container finished before the attach arrived."""
+    def _attach(self, name: str, gated: bool) -> AttachSession | None:
+        """Attach, or None when the attach was refused or the container is already gone."""
         try:
-            return open_attach(self._client, name)
+            return (
+                open_gated_attach(self._client, name) if gated else open_attach(self._client, name)
+            )
         except (InvalidHandshake, OSError) as exc:
             logger.info("Attach to sandbox pod %s failed (%s); reading its log instead", name, exc)
             return None

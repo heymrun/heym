@@ -361,3 +361,27 @@ class QueueTraceLoggingTests(unittest.IsolatedAsyncioTestCase):
                     db.commit.assert_not_awaited()
                 else:
                     db.commit.assert_awaited_once()
+
+
+class MaintenanceRetargetTests(unittest.IsolatedAsyncioTestCase):
+    async def _maintain(self, *, cluster_enabled: bool) -> AsyncMock:
+        from app.services import cron_scheduler
+
+        retarget = AsyncMock(return_value=2)
+        with (
+            patch.object(cron_scheduler.workflow_concurrency, "maintain", AsyncMock()),
+            patch.object(run_queue, "expire_late_rows", AsyncMock(return_value=0)),
+            patch.object(run_queue, "expire_stranded_claims", AsyncMock(return_value=[])),
+            patch.object(run_queue, "retarget_unclaimable_rows", retarget),
+            patch.object(run_queue, "release_waiting_for_main", AsyncMock(return_value=0)),
+            patch.object(cron_scheduler.registry, "list_instances", AsyncMock(return_value=[])),
+            patch.object(cron_scheduler.settings, "cluster_enabled", cluster_enabled),
+        ):
+            await cron_scheduler.CronScheduler()._maintain_run_queue()
+        return retarget
+
+    async def test_cluster_maintenance_moves_runs_off_unavailable_instances(self) -> None:
+        (await self._maintain(cluster_enabled=True)).assert_awaited_once()
+
+    async def test_single_instance_never_retargets(self) -> None:
+        (await self._maintain(cluster_enabled=False)).assert_not_awaited()
