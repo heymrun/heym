@@ -687,7 +687,7 @@ class CronScheduler:
             logger.exception("Error reclaiming execution_history TOAST space: %s", e)
 
     async def _maintain_run_queue(self) -> None:
-        """Retire stale queued runs, run the concurrency pass, and release waiting_for_main.
+        """Retire stale queued runs, run the concurrency pass, and rehome or release queued runs.
 
         Runs on the leader. The run queue now carries concurrency-queued runs on a
         single instance too, so only the hand-back to a returning main stays
@@ -710,6 +710,9 @@ class CronScheduler:
                 await run_queue.notify_done(execution_id)
             if not settings.cluster_enabled:
                 return
+            retargeted = await run_queue.retarget_unclaimable_rows()
+            if retargeted:
+                logger.info("Moved %d queued runs off instances that cannot take work", retargeted)
             instances = await registry.list_instances()
             main = registry.find_main(instances)
             if main is not None and registry.is_live(main, now=datetime.now(timezone.utc)):

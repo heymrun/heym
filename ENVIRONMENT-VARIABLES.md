@@ -94,6 +94,8 @@ Every sandbox (Agent Python tools, skills, the Code node and its formatter, file
 
 On Kubernetes every sandbox is one pod under Pod Security `restricted`: non-root, all capabilities dropped, no privilege escalation, RuntimeDefault seccomp, and no ServiceAccount token. It needs Kubernetes 1.30+ and a CNI that enforces NetworkPolicy: before the first sandbox that must be offline, Heym starts a test pod and refuses offline sandboxes if that pod can still connect. A sandbox's workspace is mounted as a `subPath` of the PersistentVolumeClaim behind the backend's own workspace directory, never the whole claim. With a `ReadWriteOnce` claim, sandboxes run on the backend's node. `HEYM_MCP_STDIO_FILES_VOLUME` names a PersistentVolumeClaim there and `HEYM_MCP_STDIO_FILES_SUBPATH` its `subPath`; `HEYM_MCP_STDIO_FILES_HOST_DIR` is refused. Requirements, RBAC and example manifests: [deploy/kubernetes](deploy/kubernetes/README.md).
 
+Custom CA bundles need no extra setting. When `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS` or `CODEX_CA_CERTIFICATE` names a file, every sandbox that receives the variable also gets that file, read-only at the same path. A backend running on the host binds the file itself. A backend in a container or pod copies it to `_ca/` under `HEYM_CODEX_WORKSPACE_DIR` and mounts only that copy, so the workspace volume must be present; without it the sandbox runs without the file and the backend logs a warning.
+
 ## Playwright custom code sandbox
 
 The Playwright node's **Run Code** mode (`playwrightCode`) is off by default. When enabled it runs in a hardened throwaway sibling container (Compose / GHCR) or, for native `./run.sh`, falls back to `subprocess`. Step-based Playwright nodes are unaffected.

@@ -1,4 +1,7 @@
+import json
 import os
+import subprocess
+import sys
 import tempfile
 import unittest
 import uuid
@@ -230,9 +233,47 @@ class PythonToolSandboxModeTest(unittest.TestCase):
         self.assertNotIn("docker.sock", " ".join(cmd))
         self.assertNotIn("-v", cmd)
         self.assertNotIn("--volume", cmd)
-        # Image then runner script are the final arguments.
-        self.assertEqual(cmd[-2], "heym-backend")
-        self.assertTrue(cmd[-1].endswith("python_tool_runner.py"))
+        # The image runs the bootstrap, not a file path that depends on the image layout.
+        self.assertEqual(cmd[-3:], ["heym-backend", "-c", executor._BOOTSTRAP])
+        self.assertNotIn("/app/", " ".join(cmd[-2:]))
+
+    def test_bootstrap_runs_the_shipped_runner_from_stdin(self) -> None:
+        payload = json.dumps(
+            {
+                "code": "def add(a, b):\n    return a + b\n",
+                "function_name": "add",
+                "arguments": {"a": 2, "b": 5},
+            }
+        )
+        with tempfile.TemporaryDirectory() as cwd:
+            proc = subprocess.run(
+                [sys.executable, "-I", "-c", executor._BOOTSTRAP],
+                input=executor._sandbox_payload(payload),
+                capture_output=True,
+                text=True,
+                cwd=cwd,
+                timeout=30,
+            )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(executor._parse_runner_output(proc.stdout), 7)
+
+    def test_bootstrap_keeps_the_runner_restrictions(self) -> None:
+        payload = json.dumps(
+            {
+                "code": "def f():\n    return open('/etc/hostname').read()\n",
+                "function_name": "f",
+                "arguments": {},
+            }
+        )
+        proc = subprocess.run(
+            [sys.executable, "-I", "-c", executor._BOOTSTRAP],
+            input=executor._sandbox_payload(payload),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        with self.assertRaises(ValueError):
+            executor._parse_runner_output(proc.stdout)
 
 
 if __name__ == "__main__":

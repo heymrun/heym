@@ -39,7 +39,7 @@ class BridgeTest(unittest.TestCase):
         stdout, stderr = io.BytesIO(), io.BytesIO()
         with (
             patch.object(process, "wait_started", return_value=PodStart("running")),
-            patch.object(process, "open_attach", return_value=session),
+            patch.object(process, "open_gated_attach", return_value=session),
             patch.object(process, "wait_terminated", return_value=PodExit(0)),
         ):
             code = process.run_attached(

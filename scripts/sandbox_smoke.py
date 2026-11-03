@@ -274,6 +274,29 @@ def playwright_isolated() -> str:
 # Codex and OpenCode nodes
 
 
+def sandbox_ca_bundle() -> str:
+    import hashlib
+
+    import certifi
+
+    from app.services.code_python_executor import execute_code
+
+    bundle = SCRATCH / "corp-ca" / "corp-ca.pem"
+    bundle.parent.mkdir()
+    bundle.write_bytes(Path(certifi.where()).read_bytes())
+    expected = hashlib.sha256(bundle.read_bytes()).hexdigest()
+    source = (
+        "import hashlib, os\n"
+        "def main(params):\n"
+        "    with open(os.environ['SSL_CERT_FILE'], 'rb') as handle:\n"
+        "        return hashlib.sha256(handle.read()).hexdigest()\n"
+    )
+    with patch.dict(os.environ, {"SSL_CERT_FILE": str(bundle)}):
+        result = execute_code(source, "", {}, False)
+    assert result.result == expected, result
+    return f"{bundle} readable in the sandbox"
+
+
 def backend_name() -> str:
     """The selected sandbox backend; plain Docker on code that predates the manager."""
     try:
@@ -343,6 +366,7 @@ if __name__ == "__main__":
         ("agent skill + drive files toggle", skill_drive_files),
         ("mcp stdio", mcp_stdio),
         ("playwright custom code", playwright_isolated),
+        ("sandbox ca bundle", sandbox_ca_bundle),
         ("codex", lambda: coding_agent("codex", ".codex-home", "CODEX_HOME")),
         ("opencode", lambda: coding_agent("opencode", ".oc-home", "HOME")),
     ]

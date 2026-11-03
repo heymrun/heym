@@ -29,6 +29,8 @@ Placement is decided from the workflow's nodes before the run starts. A run stay
 | File Upload trigger | The upload lands on main's disk |
 | Send Email | Corporate SMTP relays commonly allowlist one source address |
 | Plugin nodes | A plugin is installed on one instance's disk |
+| Code node reading Drive files | The files are read from Heym Drive on main's disk |
+| Slack file operations | Downloaded and sent files live in Heym Drive |
 
 **Everything else is distributed** — including the Code node, Playwright and Agent Python tools. Every instance runs the same image with its own sandbox backend (a Docker socket, or Kubernetes API access), so a sandbox is not a reason to keep a run on main, and those are the most CPU-hungry nodes in the product.
 
@@ -51,6 +53,8 @@ So with a strong main and a smaller worker, start nearer 60/40 than the machines
 Weights are renormalized across the instances that are currently live and enabled. With `main=70, A=15, B=15`, if A goes offline the split becomes 70/85 and 15/85 between main and B, and returns to 70/15/15 when A comes back.
 
 **An instance that comes back is not owed the runs it missed.** Time spent Offline, Disabled or on a mismatched version is not counted against it, so a worker that spends a night unavailable rejoins at the pool's current position and the split reads 70/30 again from its first run — it does not absorb every run until it has caught up. A worker that was available the whole time still catches up, which is what makes main's percentage a ceiling.
+
+**Queued runs follow the instances that can take them.** A run is assigned an instance when it is queued. If that instance goes Offline, is disabled, is set to 0 or shows Mismatch before it claims the run, the leader moves the run to an instance that can take work, usually within a minute. Scaling a worker away therefore does not strand its queue. A run the instance had already claimed when it stopped is marked as failed, not retried.
 
 ### A new instance joins at zero
 

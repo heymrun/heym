@@ -270,6 +270,53 @@ async def release_waiting_for_main(main_instance_id: str) -> int:
         return result.rowcount or 0
 
 
+async def retarget_unclaimable_rows() -> int:
+    """Move queued ANYWHERE rows off instances that can no longer take work.
+
+    A row gets its instance when it is enqueued. Without this, the backlog of a
+    worker that went offline, was drained to weight 0, disabled, or scaled away
+    waits for it until the misfire window skips every run. A row with nowhere
+    better to go stays where it is.
+    """
+    instances = await registry.list_instances()
+    eligible = [
+        i.id for i in registry.candidate_instances(instances, now=datetime.now(timezone.utc))
+    ]
+    if not eligible:
+        return 0
+    async with async_session_maker() as db:
+        rows = (
+            await db.execute(
+                select(WorkflowRunQueue.execution_id, WorkflowRunQueue.target_instance_id).where(
+                    WorkflowRunQueue.status == STATUS_QUEUED,
+                    WorkflowRunQueue.placement == "anywhere",
+                    WorkflowRunQueue.target_instance_id.is_not(None),
+                    WorkflowRunQueue.target_instance_id.not_in(eligible),
+                )
+            )
+        ).all()
+    moved = 0
+    for execution_id, previous in rows:
+        target = await choose_target("anywhere")
+        if target is None or target == previous:
+            continue
+        async with async_session_maker() as db:
+            result = await db.execute(
+                update(WorkflowRunQueue)
+                .where(
+                    WorkflowRunQueue.execution_id == execution_id,
+                    WorkflowRunQueue.status == STATUS_QUEUED,
+                    WorkflowRunQueue.target_instance_id == previous,
+                )
+                .values(target_instance_id=target)
+            )
+            await db.commit()
+        if result.rowcount:
+            moved += 1
+            await notify_queue(target)
+    return moved
+
+
 async def notify_queue(target_instance_id: str) -> None:
     async with async_session_maker() as db:
         await db.execute(

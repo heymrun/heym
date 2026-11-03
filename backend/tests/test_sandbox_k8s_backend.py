@@ -35,7 +35,7 @@ class RunTest(unittest.TestCase):
         backend = _backend()
         with (
             patch.object(kube_backend, "wait_started", return_value=PodStart("running")),
-            patch.object(kube_backend, "open_attach") as attach,
+            patch.object(kube_backend, "open_gated_attach") as attach,
             patch.object(kube_backend, "exchange", return_value=(b"out", b"err", 0)) as exchange,
             patch.object(kube_backend, "wait_terminated", return_value=PodExit(0)),
         ):
@@ -43,7 +43,8 @@ class RunTest(unittest.TestCase):
         self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "out", "err"))
         manifest = backend._client.create_pod.call_args.args[0]
         self.assertEqual(manifest["spec"]["activeDeadlineSeconds"], 35)
-        self.assertEqual(exchange.call_args.args[1], b"payload")
+        self.assertEqual(exchange.call_args.args[1], b"\npayload")
+        self.assertEqual(manifest["spec"]["containers"][0]["command"][:2], ["sh", "-c"])
         attach.return_value.close.assert_called_once()
         backend._client.delete_pod.assert_called_once_with("heym-pytool-1")
 
@@ -53,7 +54,7 @@ class RunTest(unittest.TestCase):
             patch.object(
                 kube_backend, "wait_started", return_value=PodStart("failed", "ImagePullBackOff: x")
             ),
-            patch.object(kube_backend, "open_attach") as attach,
+            patch.object(kube_backend, "open_gated_attach") as attach,
         ):
             result = backend.run(_spec(), None, 5)
         self.assertTrue(result.start_failed)
@@ -61,25 +62,70 @@ class RunTest(unittest.TestCase):
         attach.assert_not_called()
         backend._client.delete_pod.assert_called_once()
 
-    def test_container_gone_before_attach_falls_back_to_the_log(self) -> None:
+    def test_gate_died_before_attach_reports_its_log_as_stderr(self) -> None:
         from websockets.exceptions import InvalidHandshake
+
+        backend = _backend()
+        backend._client.pod_log.return_value = "sh: 1: head: not found"
+        with (
+            patch.object(kube_backend, "wait_started", return_value=PodStart("running")),
+            patch.object(kube_backend, "open_gated_attach", side_effect=InvalidHandshake("500")),
+            patch.object(kube_backend, "wait_terminated", return_value=PodExit(127)),
+        ):
+            result = backend.run(_spec(), None, 5)
+        self.assertEqual(
+            (result.returncode, result.stdout, result.stderr), (127, "", "sh: 1: head: not found")
+        )
+        backend._client.delete_pod.assert_called_once()
+
+    def test_attach_refused_on_a_waiting_gate_raises(self) -> None:
+        from websockets.exceptions import InvalidHandshake
+
+        backend = _backend()
+        with (
+            patch.object(kube_backend, "wait_started", return_value=PodStart("running")),
+            patch.object(kube_backend, "open_gated_attach", side_effect=InvalidHandshake("403")),
+            patch.object(
+                kube_backend, "wait_terminated", return_value=PodExit(None, "did not finish")
+            ),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "could not attach"):
+                backend.run(_spec(), "payload", 5)
+        backend._client.delete_pod.assert_called_once()
+
+    def test_attached_run_never_reads_the_merged_log(self) -> None:
+        backend = _backend()
+        with (
+            patch.object(kube_backend, "wait_started", return_value=PodStart("running")),
+            patch.object(kube_backend, "open_gated_attach"),
+            patch.object(kube_backend, "exchange", return_value=(b"", b"warning", 0)),
+            patch.object(kube_backend, "wait_terminated", return_value=PodExit(0)),
+        ):
+            result = backend.run(_spec(), "payload", 5)
+        self.assertEqual((result.stdout, result.stderr), ("", "warning"))
+        backend._client.pod_log.assert_not_called()
+
+    def test_spec_without_entrypoint_keeps_the_log_fallback(self) -> None:
+        from dataclasses import replace
 
         backend = _backend()
         backend._client.pod_log.return_value = "early output"
         with (
-            patch.object(kube_backend, "wait_started", return_value=PodStart("running")),
-            patch.object(kube_backend, "open_attach", side_effect=InvalidHandshake("500")),
+            patch.object(kube_backend, "wait_started", return_value=PodStart("terminated")),
+            patch.object(kube_backend, "open_attach") as attach,
             patch.object(kube_backend, "wait_terminated", return_value=PodExit(0)),
         ):
-            result = backend.run(_spec(), None, 5)
+            result = backend.run(replace(_spec(), entrypoint=None), None, 5)
         self.assertEqual((result.returncode, result.stdout), (0, "early output"))
-        backend._client.delete_pod.assert_called_once()
+        attach.assert_not_called()
+        manifest = backend._client.create_pod.call_args.args[0]
+        self.assertNotIn("command", manifest["spec"]["containers"][0])
 
     def test_timeout_deletes_and_raises(self) -> None:
         backend = _backend()
         with (
             patch.object(kube_backend, "wait_started", return_value=PodStart("running")),
-            patch.object(kube_backend, "open_attach"),
+            patch.object(kube_backend, "open_gated_attach"),
             patch.object(kube_backend, "exchange", side_effect=TimeoutError),
         ):
             with self.assertRaises(SandboxTimeoutError):

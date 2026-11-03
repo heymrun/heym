@@ -2,14 +2,18 @@ import json
 import threading
 import time
 import unittest
+from unittest.mock import MagicMock, patch
 
+from websockets.exceptions import InvalidHandshake
 from websockets.sync.server import serve
 
+from app.services.sandbox.kubernetes import attach as attach_module
 from app.services.sandbox.kubernetes.attach import (
     SUBPROTOCOL,
     exchange,
     exit_code_from_status,
     open_attach,
+    open_gated_attach,
 )
 from app.services.sandbox.kubernetes.client import KubeClient
 from app.services.sandbox.kubernetes.config import KubeConfig
@@ -60,3 +64,29 @@ class AttachTest(unittest.TestCase):
         self.assertEqual(exit_code_from_status(b'{"status": "Success"}'), 0)
         self.assertEqual(exit_code_from_status(json.dumps(_FAILURE).encode()), 3)
         self.assertIsNone(exit_code_from_status(b"not json"))
+
+
+class GatedAttachTest(unittest.TestCase):
+    def test_a_hung_handshake_is_retried_with_a_short_timeout(self) -> None:
+        session = MagicMock()
+        with patch.object(
+            attach_module, "open_attach", side_effect=[TimeoutError("handshake"), session]
+        ) as opener:
+            self.assertIs(open_gated_attach(MagicMock(), "p"), session)
+        self.assertEqual(opener.call_count, 2)
+        for call in opener.call_args_list:
+            self.assertEqual(
+                call.kwargs["open_timeout"], attach_module.GATED_HANDSHAKE_TIMEOUT_SECONDS
+            )
+
+    def test_gives_up_after_the_last_attempt(self) -> None:
+        with patch.object(attach_module, "open_attach", side_effect=TimeoutError("handshake")) as o:
+            with self.assertRaises(TimeoutError):
+                open_gated_attach(MagicMock(), "p")
+        self.assertEqual(o.call_count, attach_module.GATED_ATTACH_ATTEMPTS)
+
+    def test_a_refused_attach_is_not_retried(self) -> None:
+        with patch.object(attach_module, "open_attach", side_effect=InvalidHandshake("403")) as o:
+            with self.assertRaises(InvalidHandshake):
+                open_gated_attach(MagicMock(), "p")
+        self.assertEqual(o.call_count, 1)

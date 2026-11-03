@@ -52,7 +52,26 @@ class AttachSession:
         self._connection.close()
 
 
-def open_attach(client: KubeClient, pod_name: str) -> AttachSession:
+GATED_HANDSHAKE_TIMEOUT_SECONDS = 10.0
+GATED_ATTACH_ATTEMPTS = 3
+
+
+def open_gated_attach(client: KubeClient, pod_name: str) -> AttachSession:
+    """Attach to a pod waiting at its start gate, retrying a handshake that hangs.
+
+    An attach that arrives just as the container starts can go unanswered. Behind the
+    gate the program has not started, so a fresh attempt loses nothing.
+    """
+    for attempt in range(1, GATED_ATTACH_ATTEMPTS + 1):
+        try:
+            return open_attach(client, pod_name, open_timeout=GATED_HANDSHAKE_TIMEOUT_SECONDS)
+        except TimeoutError:
+            if attempt == GATED_ATTACH_ATTEMPTS:
+                raise
+    raise AssertionError("unreachable")
+
+
+def open_attach(client: KubeClient, pod_name: str, *, open_timeout: float = 30) -> AttachSession:
     """Attach to the sandbox container of ``pod_name``."""
     url = client.attach_url(pod_name)
     token = client.config.bearer_token()
@@ -62,7 +81,7 @@ def open_attach(client: KubeClient, pod_name: str) -> AttachSession:
         additional_headers={"Authorization": f"Bearer {token}"} if token else None,
         subprotocols=[SUBPROTOCOL],
         max_size=None,
-        open_timeout=30,
+        open_timeout=open_timeout,
         ping_interval=None,
         proxy=None,
     )

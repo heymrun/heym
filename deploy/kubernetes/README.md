@@ -29,6 +29,33 @@ pods mount one subPath of it per run. With `ReadWriteMany` they can run on any n
 With `ReadWriteOnce` they are pinned to the backend's node. `ReadWriteOncePod` does
 not work.
 
+## Custom CA bundles
+
+Mount your CA bundle into the backend pod and point `SSL_CERT_FILE` (or
+`REQUESTS_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`) at it. Heym copies the file to
+`codex-workspaces/_ca/` on the claim and mounts that copy read-only at the same
+path in every sandbox that receives the variable. With a `ReadWriteOnce` claim,
+those sandboxes run on the backend's node.
+
+A CA does not open the network. Sandbox egress reaches public addresses only, so an
+internal package mirror, proxy or API needs its own rule, for example:
+
+    apiVersion: networking.k8s.io/v1
+    kind: NetworkPolicy
+    metadata:
+      name: heym-sandbox-egress-internal-mirror
+    spec:
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/managed-by: heym
+          heym.run/network: egress
+      policyTypes: [Egress]
+      egress:
+        - to:
+            - ipBlock: {cidr: 10.20.30.40/32}
+          ports:
+            - {protocol: TCP, port: 443}
+
 ## A dedicated sandbox namespace
 
 Set `HEYM_SANDBOX_K8S_NAMESPACE` to run sandboxes elsewhere, label that namespace
@@ -89,6 +116,11 @@ workspace directory for Code node dependencies: its own `ReadWriteOnce` claim wo
 because those directories only live for one run. `overlays/orbstack-cluster` adds one
 worker; `scripts/k8s-cluster-smoke.sh` checks that queued runs land on it and that
 their sandbox pods are the worker's.
+
+Start workers with uvicorn directly, as `overlays/orbstack-cluster/worker.yaml` does.
+The image entrypoint runs database migrations, and those belong to main. Give each
+worker a unique, stable `HEYM_INSTANCE_ID`; a StatefulSet pod name works. Runs queued
+for a worker that stops are moved to another instance by the leader.
 
 ## Local test on OrbStack
 
