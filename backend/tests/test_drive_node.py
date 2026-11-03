@@ -152,12 +152,13 @@ def _run_drive_workflow(
     drive_data: dict,
     owner_id: uuid.UUID,
     db_mock: MagicMock,
+    executor: object | None = None,
 ) -> dict:
     """Execute a textInput → drive workflow and return the drive node output."""
     from app.services.workflow_executor import WorkflowExecutor
 
     nodes, edges = _make_workflow(drive_data)
-    executor = WorkflowExecutor(nodes=nodes, edges=edges)
+    executor = executor or WorkflowExecutor(nodes=nodes, edges=edges)
     executor.trace_user_id = owner_id
 
     with (
@@ -838,6 +839,54 @@ class DriveNodeTeamSharingTests(unittest.TestCase):
         self.assertEqual(nr["status"], "success")
         self.assertTrue(nr["output"]["is_shared"])
         self.assertEqual(nr["output"]["shared_by_team"], "Ops")
+
+    def test_get_lets_later_steps_open_the_file(self) -> None:
+        from app.services.workflow_executor import WorkflowExecutor
+
+        owner_id = uuid.uuid4()
+        file_id = uuid.uuid4()
+        file_row = SimpleNamespace(
+            id=file_id,
+            owner_id=owner_id,
+            filename="notes.docx",
+            mime_type="application/msword",
+            size_bytes=7,
+            storage_path=f"{owner_id}/{file_id}/notes.docx",
+        )
+        nodes, edges = _make_workflow(
+            {"label": "drive", "driveOperation": "get", "driveFileId": str(file_id)}
+        )
+        executor = WorkflowExecutor(nodes=nodes, edges=edges)
+        self.assertNotIn(file_id, executor.file_scope.file_ids)
+
+        nr = _run_drive_workflow(
+            {"label": "drive", "driveOperation": "get", "driveFileId": str(file_id)},
+            owner_id,
+            _make_db_mock(file_row),
+            executor=executor,
+        )
+
+        self.assertEqual(nr["status"], "success")
+        self.assertIn(file_id, executor.file_scope.file_ids)
+
+    def test_a_failed_get_and_other_operations_open_nothing(self) -> None:
+        from app.services.workflow_executor import WorkflowExecutor
+
+        owner_id = uuid.uuid4()
+        file_id = uuid.uuid4()
+        file_row = SimpleNamespace(
+            id=file_id,
+            owner_id=owner_id,
+            filename="notes.docx",
+            storage_path=f"{owner_id}/{file_id}/notes.docx",
+        )
+        for operation, row in (("get", None), ("delete", file_row)):
+            with self.subTest(operation=operation):
+                data = {"label": "drive", "driveOperation": operation, "driveFileId": str(file_id)}
+                nodes, edges = _make_workflow(data)
+                executor = WorkflowExecutor(nodes=nodes, edges=edges)
+                _run_drive_workflow(data, owner_id, _make_db_mock(row), executor=executor)
+                self.assertEqual(executor.file_scope.file_ids, frozenset())
 
     def test_set_password_cannot_manage_team_shared_file(self) -> None:
         owner_id = uuid.uuid4()
@@ -1745,3 +1794,13 @@ class DriveNodeSaveTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RunFileScopeTests(unittest.TestCase):
+    def test_including_files_adds_ids_once_and_skips_non_ids(self) -> None:
+        from app.services.file_sandbox.scope import RunFileScope
+
+        file_id = uuid.uuid4()
+        scope = RunFileScope().including_files([file_id, str(file_id), "not-an-id", None])
+        self.assertEqual(scope.file_ids, frozenset({file_id}))
+        self.assertIs(scope.including_files([file_id]), scope)

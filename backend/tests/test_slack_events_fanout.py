@@ -91,6 +91,33 @@ class EventScopeTests(unittest.TestCase):
         self.assertFalse(self._matches("channel", CHANNEL_MESSAGE))
 
 
+class FilesOnlyTests(unittest.TestCase):
+    FILE = {"id": "F0CASE001", "name": "claim.pdf"}
+
+    def test_only_messages_with_files_start_it(self) -> None:
+        data = {"slackEventScope": "channel", "slackEventChannel": "C01"}
+        shared = {**CHANNEL_MESSAGE, "subtype": "file_share", "files": [self.FILE]}
+        on = {**data, "slackEventFilesOnly": True}
+        self.assertTrue(slack_api._event_matches(on, {"event": shared}))
+        self.assertFalse(slack_api._event_matches(on, {"event": CHANNEL_MESSAGE}))
+        self.assertFalse(slack_api._event_matches(on, {"event": {**CHANNEL_MESSAGE, "files": []}}))
+        self.assertTrue(slack_api._event_matches(data, {"event": CHANNEL_MESSAGE}))
+
+    def test_files_only_applies_to_every_event_scope(self) -> None:
+        on = {"slackEventFilesOnly": True}
+        self.assertFalse(slack_api._event_matches(on, {"event": {"type": "reaction_added"}}))
+        self.assertTrue(slack_api._event_matches(on, {"event": {**DM, "files": [self.FILE]}}))
+
+    def test_the_apps_own_upload_is_an_echo(self) -> None:
+        upload = {**CHANNEL_MESSAGE, "user": "U0BOT1", "subtype": "file_share"}
+        authorizations = [{"user_id": "U0BOT1", "is_bot": True}]
+        self.assertTrue(slack_api._is_bot_echo({"event": upload, "authorizations": authorizations}))
+        person = {"event": CHANNEL_MESSAGE, "authorizations": authorizations}
+        self.assertFalse(slack_api._is_bot_echo(person))
+        not_bot = [{"user_id": "U0BOT1", "is_bot": False}]
+        self.assertFalse(slack_api._is_bot_echo({"event": upload, "authorizations": not_bot}))
+
+
 class FirstDeliveryTests(unittest.TestCase):
     def test_a_redelivered_event_is_handled_once(self) -> None:
         event_id = uuid.uuid4().hex

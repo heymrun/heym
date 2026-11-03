@@ -75,7 +75,7 @@ NODE_PLACEMENT: dict[str, Placement] = {
     "sendEmail": _MAIN,
     "sentry": _ANY,
     "set": _ANY,
-    "slack": _ANY,
+    "slack": _ANY,  # narrowed to MAIN_ONLY by _slack_placement for its Drive file operations
     "slackTrigger": _ANY,
     "sticky": _ANY,
     "supabase": _ANY,
@@ -99,7 +99,7 @@ def _agent_placement(data: dict) -> Placement:
     sub-workflow tools have no local file dependency. The file sandbox turns on
     only for a Drive file whose content is on this instance, and the nodes that
     put Drive files into a run (upload trigger, drive, googleDrive, converter,
-    code with codeFiles) already pin it to the main instance.
+    code with codeFiles, slack downloadFile) already pin it to the main instance.
     """
     if data.get("skills"):
         return _MAIN
@@ -114,9 +114,19 @@ def _code_placement(data: dict) -> Placement:
     return _MAIN if str(files or "").strip() else _ANY
 
 
+# Slack node operations that read or write Heym Drive (see slack_files.py).
+_SLACK_FILE_OPERATIONS = frozenset({"downloadFile", "sendFile"})
+
+
+def _slack_placement(data: dict) -> Placement:
+    """A Slack node pins the run only when it downloads files into Drive or sends Drive files."""
+    return _MAIN if data.get("slackOperation") in _SLACK_FILE_OPERATIONS else _ANY
+
+
 _CONDITIONAL: dict[str, Callable[[dict], Placement]] = {
     "agent": _agent_placement,
     "code": _code_placement,
+    "slack": _slack_placement,
 }
 
 

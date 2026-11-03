@@ -11,7 +11,9 @@ export type SlackFieldKey =
   | "slackOutcomeTitle"
   | "slackEmoji"
   | "slackLimit"
-  | "slackAllowedUsers";
+  | "slackAllowedUsers"
+  | "slackFile"
+  | "slackUploadFile";
 
 /** One expression field of a Slack operation, in the order the panel shows it. */
 export interface SlackFieldSpec {
@@ -46,6 +48,13 @@ export const slackOperationGroups: OperationOptionGroup[] = [
       { value: "requestApproval", label: "Request approval" },
       { value: "sendButtons", label: "Send message with buttons" },
       { value: "sendForm", label: "Send form" },
+    ],
+  },
+  {
+    label: "Files",
+    options: [
+      { value: "downloadFile", label: "Download files" },
+      { value: "sendFile", label: "Send files" },
     ],
   },
   {
@@ -148,6 +157,27 @@ export function slackFieldsFor(operation: string): SlackFieldSpec[] {
       ];
     case "findUser":
       return [USER];
+    case "downloadFile":
+      return [
+        {
+          key: "slackFile",
+          label: "Message or files",
+          placeholder: "$slackEvent.event",
+          hint: "A Slack message brings all its files and its text. A message or file link, a file id (F0123…) or a list of files works too. Files are saved to Heym Drive.",
+        },
+      ];
+    case "sendFile":
+      return [
+        CHANNEL,
+        THREAD,
+        {
+          key: "slackUploadFile",
+          label: "Files",
+          placeholder: "$files.file_ids",
+          hint: "The run's Drive files: from Download files, a Drive node's Get ($drive.id), a Converter or Code node. An id, a file from an earlier step, or a list.",
+        },
+        { ...MESSAGE, label: "Message", hint: "Optional. Shown with the files." },
+      ];
     default:
       return [CHANNEL, THREAD, MESSAGE];
   }

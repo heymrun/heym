@@ -73,14 +73,24 @@ def new_action_key() -> str:
     return secrets.token_urlsafe(18)
 
 
-def call_slack(token: str, method: str, payload: dict | None = None, *, read: bool = False) -> dict:
-    """Call one Web API method. Read methods go as query parameters, writes as JSON."""
+def call_slack(
+    token: str,
+    method: str,
+    payload: dict | None = None,
+    *,
+    read: bool = False,
+    form: bool = False,
+) -> dict:
+    """Call one Web API method. Read methods go as query parameters, writes as JSON, and
+    `form` methods (the file upload ones accept no JSON) as a form."""
     client = ssrf_guard.get_guarded_http_client()
     url = f"{SLACK_API_BASE}/{method}"
     headers = {"Authorization": f"Bearer {token}"}
     try:
         if read:
             response = client.get(url, params=payload or {}, headers=headers)
+        elif form:
+            response = client.post(url, data=payload or {}, headers=headers)
         else:
             response = client.post(
                 url,

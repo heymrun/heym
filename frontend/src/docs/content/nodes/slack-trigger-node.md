@@ -17,6 +17,7 @@ The **Slack Trigger** node is a zero-input entry point that receives Slack Event
 | `credentialId` | UUID | `slack_trigger` credential, or a `slack_bot` credential with a signing secret |
 | `slackEventScope` | string | What starts a run: `all` (default, every event), `messages` (a person's message in a channel or DM), `directMessages` (DMs to the bot), `mentions` (the bot is mentioned), `channel` (messages in one channel) |
 | `slackEventChannel` | string | Channel ID for the `channel` scope, e.g. `C0123ABCD` |
+| `slackEventFilesOnly` | boolean | **Only messages with files**: a run starts only when the message carries files. Follow the trigger with a [Slack](./slack-node.md) node's **Download files** to save them to Heym Drive. |
 
 ## One Slack app, many workflows
 
@@ -66,6 +67,7 @@ After the node triggers, downstream nodes can access:
 | `$nodeLabel.event.user` | Slack user ID who triggered the event |
 | `$nodeLabel.event.channel` | Channel ID |
 | `$nodeLabel.event.ts` | Event timestamp |
+| `$nodeLabel.event.files` | Files shared with the message, when it has any |
 | `$nodeLabel.headers` | Sanitized HTTP headers from Slack |
 | `$nodeLabel.triggered_by` | Trigger source label (`"Slack"`) |
 | `$nodeLabel.trigger_node_id` | Canvas node ID that received the Slack event |

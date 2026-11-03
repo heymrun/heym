@@ -6,6 +6,7 @@ from importlib import import_module
 
 import httpx
 
+from app.services.file_sandbox.scope import grant_run_files
 from app.services.node_execution.base import NodeExecutionContext
 
 
@@ -548,6 +549,8 @@ def execute(ctx: NodeExecutionContext) -> object:
                         raise ValueError(f"Drive Node: file not found on disk: {file_row.filename}")
                     file_bytes = disk_path.read_bytes()
                     output["file_base64"] = _base64.b64encode(file_bytes).decode()
+                # A file this step fetched is the run's own: Agent, Code and Slack may open it.
+                grant_run_files(self, [file_row.id])
 
             elif operation != "getAll":
                 raise ValueError(f"Drive Node: unknown operation '{operation}'")

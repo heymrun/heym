@@ -118,6 +118,8 @@ Reference the base64 content downstream: `$fetchImage.file_base64`
 
 Images returned via `file_base64` are displayed inline in the debug panel when you run the workflow.
 
+A file a **Get** step fetched belongs to the run from then on: a later [Agent](./agent-node.md) can analyze it, a Code node can read it through **Files**, and a [Slack](./slack-node.md) node can send it with **Send files** (`$fetchImage.id`).
+
 ## Example — List Drive Files
 
 ```json

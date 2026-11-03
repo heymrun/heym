@@ -227,13 +227,15 @@ In workflow expressions:
   - `credentialId`: UUID of a `slack_trigger` credential, or a `slack_bot` credential that has a signing secret
   - `slackEventScope` (optional, default `"all"`): `"all"` (every event) | `"messages"` (a person's message in a channel or DM; no duplicate for mentions) | `"directMessages"` (DMs to the bot, `channel_type` `im`) | `"mentions"` (`app_mention`) | `"channel"` (messages in `slackEventChannel`)
   - `slackEventChannel`: channel id (`C…`) for `slackEventScope: "channel"`
-- **Request URL**: `<Heym URL>/api/slack/events/<credentialId>` is one URL per Slack app that starts every Slack Trigger on that credential, each filtered by its own scope; `/api/slack/webhook/<node id>` starts only that node. With a `slack_bot` credential the bot's own posts and edits never start a run.
+  - `slackEventFilesOnly` (bool, optional): only messages that carry files start a run; follow it with a `slack` node `downloadFile` (`slackFile: "$slackEvent.event"`) to save them to Drive
+- **Request URL**: `<Heym URL>/api/slack/events/<credentialId>` is one URL per Slack app that starts every Slack Trigger on that credential, each filtered by its own scope; `/api/slack/webhook/<node id>` starts only that node. With a `slack_bot` credential the bot's own posts, uploads and edits never start a run.
 - **Output fields available downstream**:
   - `$<label>.event` — full Slack event object
   - `$<label>.event.channel_type` — `"im"` for a DM, `"channel"` or `"group"` otherwise
   - `$<label>.event.type` — event type (e.g., `"message"`, `"reaction_added"`)
   - `$<label>.event.text` — message text (when applicable)
   - `$<label>.event.user` — Slack user ID who triggered the event
+  - `$<label>.event.files` — files shared with the message (download them with the `slack` node's `downloadFile`)
   - `$<label>.headers` — sanitized HTTP headers from Slack
 
 **Example node JSON:**
@@ -1804,7 +1806,7 @@ Notes:
 - **Data fields**:
   - `label`: Node identifier
   - `credentialId`: UUID of a `slack` or `slack_bot` credential
-  - `slackOperation` (slack_bot only, default `sendMessage`): `sendMessage` | `sendDirectMessage` | `sendForm` | `sendButtons` | `requestApproval` | `replyInThread` | `updateMessage` | `postOutcome` | `addReaction` | `deleteMessage` | `getMessages` | `findUser`
+  - `slackOperation` (slack_bot only, default `sendMessage`): `sendMessage` | `sendDirectMessage` | `sendForm` | `sendButtons` | `requestApproval` | `replyInThread` | `updateMessage` | `postOutcome` | `addReaction` | `deleteMessage` | `getMessages` | `findUser` | `downloadFile` | `sendFile`
   - `slackChannel`: `#name`, channel id (`C…`), or a person (user id `U…` or email) to post in their DM; supports expressions such as `$slackEvent.event.channel`
   - `slackUser`: person for `sendDirectMessage` / `findUser`: user id or email
   - `message`: message text in Slack mrkdwn (`*bold*`, `_italic_`, `<url|text>`), supports expressions. Markdown from a model (`**bold**`, `## Title`, `[text](url)`, `- item`) is converted to mrkdwn before posting, so `$draft.text` can go in as it is.
@@ -1817,6 +1819,8 @@ Notes:
   - `slackOutcomeStatus` (`postOutcome`): `success` | `failure` | `warning` | `info`, or an expression such as `$approval.approval` (approved → success, rejected → failure, changes_requested → warning); `slackOutcomeTitle`: headline of the outcome card
   - `slackEmoji` (`addReaction`): emoji name such as `white_check_mark`
   - `slackLimit` (`getMessages`): number of messages, default 20
+  - `slackFile` (`downloadFile`): the Slack message whose files to download, usually `$slackEvent.event` (all its files plus its text); also a message link, a file link, a file id `F…`, a file object or a list of these
+  - `slackUploadFile` (`sendFile`): the run's Heym Drive files (from Download files, a `drive` node `get`, a Converter or Code node, or the File Upload trigger): an id, a file object with `id`, or a list, e.g. `$files.file_ids` or `$drive.id`; a Drive id typed in directly is refused, so put a `drive` `get` node before it for an existing Drive file; `sendFile` also uses `slackChannel`, optional `slackThreadTs` and optional `message` (shown with the files)
 - **Outputs**:
   - Posting operations: `$label.channel`, `$label.ts`, `$label.threadTs`, `$label.text`
   - `requestApproval`, `sendButtons`, `sendForm` PAUSE the run until someone answers in Slack (or decides the review in Heym), then output the posting fields plus `$label.answeredBy.id`, `$label.answeredBy.name`, `$label.answeredIn` (`slack` | `heym`) and:
@@ -1825,8 +1829,10 @@ Notes:
     - form: `$label.values.<field name>`
   - `getMessages`: `$label.transcript` (the messages oldest first, one `[time] name: text` per line: give this to an LLM to summarize), `$label.messages` (list of `{ts, threadTs, user, text, replyCount}`), `$label.count`
   - `findUser`: `$label.id`, `$label.realName`, `$label.email`, `$label.title`, `$label.timezone`
+  - `downloadFile`: saves the files to Heym Drive and outputs `$label.files` (list of `{id, slack_file_id, filename, mime_type, size_bytes, download_url}`), `$label.file_ids` (Drive ids), `$label.count`, the message's `$label.text`, `$label.channel`, `$label.ts`, `$label.user`, and the first file's fields at the top (`$label.id`, `$label.filename`). Put `$label.file_ids` in an agent's `userMessage` and the agent opens the files with file analysis; also usable as a Code node's `codeFiles` or Converter's file.
+  - `sendFile`: `$label.channel`, `$label.threadTs`, `$label.files` (list of `{slack_file_id, title, id}`), `$label.count`. Slack does not return the message ts for an upload.
 - **Branch after an answer** with a condition or switch on `$label.approval` or `$label.choice.value`.
-- **Interactivity**: approvals, buttons and forms need the Slack app's Interactivity Request URL set to `<Heym URL>/api/slack/interactions/<credentialId>` and the signing secret on the `slack_bot` credential. Bot scopes: `chat:write`, `chat:write.public`, `im:write`, `users:read`, `users:read.email`, `channels:read`, `groups:read`, `channels:history`, `groups:history`, `reactions:write`.
+- **Interactivity**: approvals, buttons and forms need the Slack app's Interactivity Request URL set to `<Heym URL>/api/slack/interactions/<credentialId>` and the signing secret on the `slack_bot` credential. Bot scopes: `chat:write`, `chat:write.public`, `im:write`, `users:read`, `users:read.email`, `channels:read`, `groups:read`, `channels:history`, `groups:history`, `im:history`, `app_mentions:read`, `reactions:write`, `files:read` (`downloadFile`), `files:write` (`sendFile`).
 
 **Example: request approval, then close the loop in the same thread**
 ```json

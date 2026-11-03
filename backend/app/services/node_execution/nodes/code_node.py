@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import json
-import re
 import uuid
 
 from app.services.code_python_executor import execute_code
+from app.services.file_sandbox.scope import file_refs as _file_ids
 from app.services.node_execution.base import NodeExecutionContext
 
 
@@ -57,20 +57,6 @@ def _resolve_parameters(ctx: NodeExecutionContext) -> dict:
     if not isinstance(resolved, dict):
         raise ValueError('Parameters must be a JSON object, for example {"name": "Ada"}.')
     return resolved
-
-
-def _file_ids(value: object) -> list[str]:
-    """Normalize a resolved Files value: an id, ids separated by commas or lines, a list,
-    or objects with an ``id`` (a Drive file, ``$Upload.file``)."""
-    if isinstance(value, dict):
-        value = value.get("id") or value.get("file_id") or ""
-    if isinstance(value, list):
-        ids: list[str] = []
-        for item in value:
-            ids.extend(_file_ids(item))
-        return list(dict.fromkeys(ids))
-    text = str(value or "")
-    return list(dict.fromkeys(part.strip() for part in re.split(r"[,\n]", text) if part.strip()))
 
 
 def _resolve_file_refs(ctx: NodeExecutionContext) -> list[str]:

@@ -106,7 +106,20 @@ def _is_bot_echo(body: dict[str, Any]) -> bool:
     event = body.get("event")
     if not isinstance(event, dict):
         return False
-    return bool(event.get("bot_id")) or event.get("subtype") in _ECHO_SUBTYPES
+    if event.get("bot_id") or event.get("subtype") in _ECHO_SUBTYPES:
+        return True
+    # A file the app uploads can arrive as the bot user's own file_share message.
+    user = event.get("user")
+    return bool(user) and user in _app_bot_users(body)
+
+
+def _app_bot_users(body: dict[str, Any]) -> set[str]:
+    """The bot user ids this delivery was made for (Slack lists them in `authorizations`)."""
+    users: set[str] = set()
+    for item in body.get("authorizations") or []:
+        if isinstance(item, dict) and item.get("is_bot") and item.get("user_id"):
+            users.add(str(item["user_id"]))
+    return users
 
 
 # Message subtypes that are still a person writing; joins, topic changes and the like are not.
@@ -120,11 +133,16 @@ def _event_matches(node_data: dict[str, Any], body: dict[str, Any]) -> bool:
     `all` (the default, and what older nodes have) starts on every event. The other scopes
     start on a person's message: `messages` anywhere the bot hears, `directMessages` in a
     DM with the bot, `mentions` when the bot is mentioned, `channel` in `slackEventChannel`.
+    `slackEventFilesOnly` also requires the message to carry files.
     """
+    event = body.get("event")
+    if node_data.get("slackEventFilesOnly") and not (
+        isinstance(event, dict) and isinstance(event.get("files"), list) and event["files"]
+    ):
+        return False
     scope = str(node_data.get("slackEventScope") or "all")
     if scope == "all":
         return True
-    event = body.get("event")
     if not isinstance(event, dict):
         return False
     if scope == "mentions":

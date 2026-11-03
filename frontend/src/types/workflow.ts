@@ -525,9 +525,14 @@ export interface NodeData {
   slackOutcomeTitle?: string;
   slackEmoji?: string;
   slackLimit?: string;
+  /** slack downloadFile: a message, a link, a file id or a list; sendFile: Drive files. */
+  slackFile?: string;
+  slackUploadFile?: string;
   /** slackTrigger: which events start a run (default all) and the channel for `channel`. */
   slackEventScope?: string;
   slackEventChannel?: string;
+  /** slackTrigger: only messages that carry files start a run. */
+  slackEventFilesOnly?: boolean;
   duration?: number;
   cronExpression?: string;
   pollIntervalMinutes?: number;
