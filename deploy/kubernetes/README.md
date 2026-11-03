@@ -10,7 +10,9 @@ runs as its own pod through the Kubernetes API.
 - A CNI that enforces NetworkPolicy. Heym checks this before the first offline
   sandbox and refuses to run offline sandboxes when a test pod can still connect.
 - A kubelet `podPidsLimit`. Pods have no per-pod PID limit field, so this is the only
-  fork-bomb guard besides memory, CPU and the deadline.
+  fork-bomb guard besides memory, CPU and the deadline. Heym cannot check it: a
+  container's `/sys/fs/cgroup/pids.max` is its own cgroup's, not the pod's. Talos
+  ships without one.
 
 ## Install
 
@@ -34,6 +36,40 @@ Set `HEYM_SANDBOX_K8S_NAMESPACE` to run sandboxes elsewhere, label that namespac
 Role in Heym's namespace that grants `get` on `pods`. Workspace sandboxes then need
 a claim named `heym-data` in the sandbox namespace bound to the same RWX share
 (a second, statically provisioned PersistentVolume).
+
+## OpenShift
+
+    kubectl apply -k deploy/kubernetes/overlays/openshift
+
+OVN-Kubernetes evaluates egress policy after the DNS Service is translated to a DNS
+pod, and OpenShift's DNS pods listen on 5353, not 53. With the base policy, networked
+sandboxes reach the internet by IP but every name lookup times out. The overlay
+changes only that rule:
+
+- It allows UDP and TCP 5353, the DNS pods' port, not the Service's 53.
+- It selects the DNS namespace by `kubernetes.io/metadata.name: openshift-dns`.
+  `network.openshift.io/policy-group: dns` is not set on every cluster.
+- The public `ipBlock` rule keeps excluding private, link-local and CGNAT ranges.
+
+## Cilium with kube-proxy replacement
+
+The base gives the backend pod no egress policy. If you add one, a plain `ipBlock`
+cannot allow the API server: the Service address is rewritten to a node's `:6443`
+before policy applies, and that address carries Cilium's `kube-apiserver` identity.
+Allow it with a `CiliumNetworkPolicy`:
+
+    apiVersion: cilium.io/v2
+    kind: CiliumNetworkPolicy
+    metadata:
+      name: heym-kube-apiserver
+    spec:
+      endpointSelector:
+        matchLabels:
+          app.kubernetes.io/name: heym
+      egress:
+        - toEntities: [kube-apiserver]
+          toPorts:
+            - ports: [{port: "6443", protocol: TCP}]
 
 ## Scheduling
 
