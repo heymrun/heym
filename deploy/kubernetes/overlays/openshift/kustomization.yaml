@@ -1,0 +1,31 @@
+# OpenShift (OVN-Kubernetes): the base with the sandbox DNS rule OVN needs.
+#
+# OVN evaluates egress policy after the Service is translated to a DNS pod, and
+# OpenShift's DNS pods listen on 5353 behind the dns-default Service's port 53. A
+# rule for port 53 never matches, so networked sandboxes time out on every name
+# while connections by IP still work. The rule below allows the pod port instead.
+#
+# The namespace is selected by kubernetes.io/metadata.name, which Kubernetes sets on
+# every namespace. network.openshift.io/policy-group: dns is not present on every
+# cluster.
+#
+# The public ipBlock rule from the base stays as it is, private, link-local and
+# CGNAT ranges excluded.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: heym
+resources:
+  - ../../base
+patches:
+  - target: {kind: NetworkPolicy, name: heym-sandbox-egress}
+    patch: |-
+      - op: replace
+        path: /spec/egress/0
+        value:
+          to:
+            - namespaceSelector:
+                matchLabels:
+                  kubernetes.io/metadata.name: openshift-dns
+          ports:
+            - {protocol: UDP, port: 5353}
+            - {protocol: TCP, port: 5353}
