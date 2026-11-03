@@ -56,7 +56,8 @@ changes only that rule:
 The base gives the backend pod no egress policy. If you add one, a plain `ipBlock`
 cannot allow the API server: the Service address is rewritten to a node's `:6443`
 before policy applies, and that address carries Cilium's `kube-apiserver` identity.
-Allow it with a `CiliumNetworkPolicy`:
+Allow it with a `CiliumNetworkPolicy`. It also selects workers, which start sandbox
+pods too (see Load distribution):
 
     apiVersion: cilium.io/v2
     kind: CiliumNetworkPolicy
@@ -64,8 +65,10 @@ Allow it with a `CiliumNetworkPolicy`:
       name: heym-kube-apiserver
     spec:
       endpointSelector:
-        matchLabels:
-          app.kubernetes.io/name: heym
+        matchExpressions:
+          - key: app.kubernetes.io/name
+            operator: In
+            values: [heym, heym-worker]
       egress:
         - toEntities: [kube-apiserver]
           toPorts:
