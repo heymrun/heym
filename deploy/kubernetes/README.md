@@ -1,5 +1,7 @@
 # Heym on Kubernetes
 
+Deploy Heym on Kubernetes without a Docker socket. Run every sandbox as its own pod, with guides for storage, networking, and workers.
+
 Example manifests for running Heym without a Docker socket. Every sandbox (Python
 tools, skills, the Code node, file analysis, Playwright, MCP stdio, Codex, OpenCode)
 runs as its own pod through the Kubernetes API.

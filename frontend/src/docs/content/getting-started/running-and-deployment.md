@@ -314,6 +314,8 @@ Your original data directory is untouched by this procedure, so it remains your 
 
 ## Kubernetes
 
+See [Kubernetes Deployment](./kubernetes.md) for the full manifest installation guide, Helm chart, storage, custom CA bundles, OpenShift and Cilium policies, sandbox scheduling, workers, and local OrbStack tests.
+
 Heym runs on clusters without a Docker daemon (containerd-only nodes, Talos, Bottlerocket, OpenShift). When the backend runs in a pod with a ServiceAccount, every sandbox (Agent Python tools, skills, the Code node, file analysis, custom Playwright, MCP `stdio`, Codex and OpenCode) runs as its own pod through the Kubernetes API: non-root, all capabilities dropped, no ServiceAccount token, Pod Security `restricted`. Docker deployments keep running sandboxes as sibling containers; nothing changes for them.
 
 Start from the example manifests in [`deploy/kubernetes`](https://github.com/heymrun/heym/tree/main/deploy/kubernetes); on OpenShift, use `overlays/openshift`. They need:
