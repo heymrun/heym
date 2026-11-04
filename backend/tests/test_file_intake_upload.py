@@ -150,6 +150,12 @@ class UploadGuardTests(unittest.IsolatedAsyncioTestCase):
 
 
 class UploadHappyPathTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        for method in ("record_started", "record_finished"):
+            mock = patch(f"app.services.execution_cancellation.active_execution_registry.{method}")
+            mock.start()
+            self.addCleanup(mock.stop)
+
     async def test_valid_upload_stores_runs_and_consumes(self) -> None:
         slot = _make_slot(allowed_mime=["audio/*"])
         workflow = SimpleNamespace(
@@ -174,12 +180,22 @@ class UploadHappyPathTests(unittest.IsolatedAsyncioTestCase):
             outputs={"text": "hello"}, node_results=[], status="success", execution_time_ms=12.0
         )
 
+        from app.services.execution_cancellation import get_active_execution_handle
+
+        def tracked_run(**kwargs: object) -> SimpleNamespace:
+            run_id = uuid.UUID(str(kwargs["execution_id"]))
+            handle = get_active_execution_handle(run_id)
+            self.assertIsNotNone(handle)
+            self.assertIs(handle.event, kwargs["cancel_event"])
+            self.assertEqual(handle.workflow_id, workflow.id)
+            return exec_result
+
         with (
             patch(
                 "app.api.file_intake.file_storage.store_file",
                 new=AsyncMock(return_value=stored),
             ),
-            patch("app.api.file_intake.execute_workflow", return_value=exec_result),
+            patch("app.api.file_intake.execute_workflow", side_effect=tracked_run),
             patch("app.api.mcp.get_credentials_context_for_user", new=AsyncMock(return_value={})),
             patch("app.api.workflows.collect_referenced_workflows", new=AsyncMock(return_value={})),
             patch(
@@ -199,6 +215,9 @@ class UploadHappyPathTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["file"]["name"], "rec.mp3")
         self.assertEqual(result["file"]["id"], str(stored.id))
         self.assertEqual(slot.uploaded_file_id, stored.id)
+        history = next(args[0] for args, _ in db.add.call_args_list if hasattr(args[0], "outputs"))
+        self.assertEqual(result["run_id"], str(history.id))
+        self.assertIsNone(get_active_execution_handle(history.id))
         self.assertIn("upload_accepted", _added_events(db))
         db.commit.assert_awaited()
 
@@ -378,3 +397,100 @@ class TokenNeverStoredPlaintextTest(unittest.TestCase):
         token = file_intake_service.generate_token()
         self.assertNotEqual(hash_secret(token), token)
         self.assertEqual(len(hash_secret(token)), 64)
+
+
+class StreamedUploadTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        for method in ("record_started", "record_finished"):
+            mock = patch(f"app.services.execution_cancellation.active_execution_registry.{method}")
+            mock.start()
+            self.addCleanup(mock.stop)
+
+    async def test_stream_owns_its_session_and_completes_after_the_listener_leaves(self) -> None:
+        await self._streamed_upload(cancel=False)
+
+    async def test_a_cancelled_file_run_still_records_history_and_clears_running(self) -> None:
+        await self._streamed_upload(cancel=True)
+
+    async def _streamed_upload(self, *, cancel: bool) -> None:
+        import asyncio
+        import threading
+
+        from app.services import result_stream
+
+        slot = _make_slot(initial_inputs={"companyName": "Example"})
+        workflow = SimpleNamespace(
+            id=slot.workflow_id,
+            owner_id=uuid.uuid4(),
+            nodes=[{"id": "n1", "type": "fileUploadTrigger", "data": {"label": "audio"}}],
+            edges=[],
+        )
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.execute.side_effect = [_select_result(slot), _update_result(1), _select_result(workflow)]
+        run_db = AsyncMock()
+        run_db.add = MagicMock()
+        run_db.get.return_value = slot
+        manager = MagicMock()
+        manager.__aenter__ = AsyncMock(return_value=run_db)
+        manager.__aexit__ = AsyncMock()
+        started = threading.Event()
+        finish = threading.Event()
+        stored = SimpleNamespace(
+            id=uuid.uuid4(), filename="a.csv", mime_type="text/csv", size_bytes=3
+        )
+
+        def execute(**kwargs: object) -> SimpleNamespace:
+            self.assertEqual(kwargs["inputs"]["body"], {"companyName": "Example"})
+            started.set()
+            finish.wait(timeout=2)
+            if cancel:
+                from app.services.workflow_executor import WorkflowCancelledError
+
+                raise WorkflowCancelledError("Workflow execution cancelled")
+            return SimpleNamespace(
+                outputs={"done": True}, node_results=[], status="success", execution_time_ms=1.0
+            )
+
+        with (
+            patch("app.api.file_intake.async_session_maker", return_value=manager),
+            patch("app.api.file_intake.file_storage.store_file", AsyncMock(return_value=stored)),
+            patch("app.api.file_intake.execute_workflow", side_effect=execute),
+            patch("app.api.mcp.get_credentials_context_for_user", AsyncMock(return_value={})),
+            patch("app.api.workflows.collect_referenced_workflows", AsyncMock(return_value={})),
+            patch(
+                "app.services.global_variables_service.get_global_variables_context",
+                AsyncMock(return_value={}),
+            ),
+        ):
+            response = await upload_to_slot(
+                "t",
+                _make_request({"accept": "text/event-stream"}),
+                _make_upload(b"abc", "a.csv", "text/csv"),
+                db,
+            )
+            iterator = response.body_iterator
+            self.assertEqual(await anext(iterator), ": heartbeat\n\n")
+            try:
+                self.assertTrue(await asyncio.to_thread(started.wait, 1))
+                await iterator.aclose()
+                tasks = set(result_stream._RUNNING)
+            finally:
+                finish.set()
+            await asyncio.gather(*tasks)
+        self.assertTrue(run_db.add.called)
+        self.assertEqual(
+            slot.run_id,
+            str(
+                next(
+                    args[0].id
+                    for args, _ in run_db.add.call_args_list
+                    if hasattr(args[0], "outputs")
+                )
+            ),
+        )
+        history = next(
+            args[0] for args, _ in run_db.add.call_args_list if hasattr(args[0], "outputs")
+        )
+        self.assertEqual(history.status, "cancelled" if cancel else "success")
+        manager.__aexit__.assert_awaited_once()

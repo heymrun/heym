@@ -11,17 +11,20 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.db.models import ExecutionHistory, FileUploadSlot, User, Workflow
-from app.db.session import get_db
+from app.db.session import async_session_maker, get_db
 from app.services import file_intake_service, file_storage
+from app.services.execution_cancellation import clear_execution, register_execution
 from app.services.hitl_service import build_public_base_url
+from app.services.result_stream import stream_result
 from app.services.secret_tokens import hash_secret
 from app.services.upload_limits import read_upload_file_limited
-from app.services.workflow_executor import execute_workflow
+from app.services.workflow_executor import ExecutionResult, WorkflowCancelledError, execute_workflow
 
 router = APIRouter(prefix="/file-intake", tags=["file-intake"])
 
@@ -65,13 +68,14 @@ async def get_slot_status(
     return result
 
 
-@router.post("/u/{token}")
+@router.post("/u/{token}", response_model=None)
 async def upload_to_slot(
     token: str,
     request: Request,
     file: UploadFile,
     db: AsyncSession = Depends(get_db),
-) -> dict:
+) -> dict | StreamingResponse:
+    """Consume an upload slot and run, optionally streaming a heartbeat and final result."""
     ip = _client_ip(request)
     ua = request.headers.get("user-agent")
     token_hash = hash_secret(token)
@@ -200,61 +204,102 @@ async def upload_to_slot(
     global_variables_context = await get_global_variables_context(db, workflow.owner_id)
     workflow_cache = await collect_referenced_workflows(db, nodes, actor_user_id=workflow.owner_id)
 
-    execution_result = await asyncio.to_thread(
-        execute_workflow,
-        workflow_id=workflow.id,
-        nodes=nodes,
-        edges=workflow.edges,
-        inputs={"headers": {}, "query": {}, "body": dict(slot.initial_inputs or {})},
-        workflow_cache=workflow_cache,
-        test_run=False,
-        credentials_context=credentials_context,
-        global_variables_context=global_variables_context,
-        trace_user_id=workflow.owner_id,
-        actor_user_id=workflow.owner_id,
-        cancel_event=None,
-    )
+    if "text/event-stream" in request.headers.get("accept", ""):
+        await db.commit()
+    execution_id = uuid.uuid4()
+    run_inputs = {"headers": {}, "query": {}, "body": dict(slot.initial_inputs or {})}
 
-    history = ExecutionHistory(
-        workflow_id=workflow.id,
-        inputs={
-            "file": file_payload,
-            **({"body": slot.initial_inputs} if slot.initial_inputs else {}),
-        },
-        outputs=execution_result.outputs,
-        node_results=execution_result.node_results,
-        status=execution_result.status,
-        execution_time_ms=execution_result.execution_time_ms,
-        trigger_source=file_intake_service.upload_trigger_source(slot.mint_source),
-    )
-    db.add(history)
-    await db.flush()
-
-    slot.run_id = str(history.id)
-    await file_intake_service.write_audit(
-        db,
-        event="upload_accepted",
-        slot_id=slot.id,
-        workflow_id=workflow.id,
-        client_ip=ip,
-        user_agent=ua,
-        file_name=stored.filename,
-        file_size=stored.size_bytes,
-        mime=mime,
-    )
-    if execution_result.status not in ("success", "completed"):
-        await file_intake_service.write_audit(
-            db,
-            event="run_failed",
-            slot_id=slot.id,
+    async def complete_upload(db: AsyncSession, slot: FileUploadSlot) -> dict:
+        cancel_event = register_execution(
             workflow_id=workflow.id,
-            client_ip=ip,
+            execution_id=execution_id,
+            inputs=run_inputs,
+            trigger_source=file_intake_service.upload_trigger_source(slot.mint_source),
+            actor_user_id=workflow.owner_id,
+            recoverable=False,
         )
-    await db.commit()
+        try:
+            try:
+                execution_result = await asyncio.to_thread(
+                    execute_workflow,
+                    workflow_id=workflow.id,
+                    nodes=nodes,
+                    edges=workflow.edges,
+                    inputs={"headers": {}, "query": {}, "body": dict(slot.initial_inputs or {})},
+                    workflow_cache=workflow_cache,
+                    test_run=False,
+                    credentials_context=credentials_context,
+                    global_variables_context=global_variables_context,
+                    trace_user_id=workflow.owner_id,
+                    actor_user_id=workflow.owner_id,
+                    cancel_event=cancel_event,
+                    execution_id=str(execution_id),
+                )
+            except WorkflowCancelledError as exc:
+                execution_result = ExecutionResult(
+                    workflow_id=workflow.id,
+                    status="cancelled",
+                    outputs={"error": str(exc)},
+                    execution_time_ms=0.0,
+                )
 
-    return {
-        "run_id": str(history.id),
-        "status": execution_result.status,
-        "file": file_payload,
-        "output": execution_result.outputs,
-    }
+            history = ExecutionHistory(
+                id=execution_id,
+                workflow_id=workflow.id,
+                inputs={
+                    "file": file_payload,
+                    **({"body": slot.initial_inputs} if slot.initial_inputs else {}),
+                },
+                outputs=execution_result.outputs,
+                node_results=execution_result.node_results,
+                status=execution_result.status,
+                execution_time_ms=execution_result.execution_time_ms,
+                trigger_source=file_intake_service.upload_trigger_source(slot.mint_source),
+            )
+            db.add(history)
+            await db.flush()
+
+            slot.run_id = str(history.id)
+            await file_intake_service.write_audit(
+                db,
+                event="upload_accepted",
+                slot_id=slot.id,
+                workflow_id=workflow.id,
+                client_ip=ip,
+                user_agent=ua,
+                file_name=stored.filename,
+                file_size=stored.size_bytes,
+                mime=mime,
+            )
+            if execution_result.status not in ("success", "completed"):
+                await file_intake_service.write_audit(
+                    db,
+                    event="run_failed",
+                    slot_id=slot.id,
+                    workflow_id=workflow.id,
+                    client_ip=ip,
+                )
+            await db.commit()
+
+            return {
+                "run_id": str(history.id),
+                "status": execution_result.status,
+                "file": file_payload,
+                "output": execution_result.outputs,
+            }
+        finally:
+            clear_execution(execution_id, handle=getattr(cancel_event, "_execution_handle", None))
+
+    if "text/event-stream" in request.headers.get("accept", ""):
+        slot_id = slot.id
+
+        async def detached_run() -> dict:
+            async with async_session_maker() as run_db:
+                run_slot = await run_db.get(FileUploadSlot, slot_id)
+                if run_slot is None:
+                    raise HTTPException(status_code=404, detail="Upload slot not found")
+                await run_db.commit()
+                return await complete_upload(run_db, run_slot)
+
+        return stream_result(detached_run())
+    return await complete_upload(db, slot)

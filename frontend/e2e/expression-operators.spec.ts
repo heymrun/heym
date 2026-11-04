@@ -43,6 +43,7 @@ const GLOBAL_LINK = "https://x.com/heym/status/1";
 
 const SAMPLE_MAPPINGS = [
   { key: "text", value: "  Heym Workflow  " },
+  { key: "email", value: `$dict({"from": "Leandoo Benachrichtigungen <HELLO@leandoo.com>"})` },
   { key: "url", value: "https://heym.run/docs?q=a b" },
   { key: "jsonText", value: '{"name": "ada", "age": 36}' },
   { key: "num", value: "$int(7)" },
@@ -53,6 +54,8 @@ const SAMPLE_MAPPINGS = [
 
 const OPERATOR_CASES: OperatorCase[] = [
   // Strings
+  { key: "strFromContains", expression: '$sample.email.from.lower().contains("hello@leandoo.com")', expected: true },
+  { key: "strFromDoesNotContain", expression: '$sample.email.from.lower().contains("other@example.com")', expected: false },
   { key: "strTrim", expression: "$sample.text.trim()", expected: "Heym Workflow" },
   { key: "strUpper", expression: "$sample.text.trim().upper()", expected: "HEYM WORKFLOW" },
   { key: "strLength", expression: "$sample.text.length", expected: 17 },

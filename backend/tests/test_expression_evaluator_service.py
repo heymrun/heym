@@ -2043,7 +2043,7 @@ class TestGlobalScopeReservedKeyword(unittest.TestCase):
             alias_reserved_context_names("a.link.replace('global', 'x')"),
             "a.link.replace('global', 'x')",
         )
-        self.assertEqual(alias_reserved_context_names("a.global"), "a.global")
+        self.assertEqual(alias_reserved_context_names("a.global"), "a.__heymKeyword_global")
         self.assertEqual(alias_reserved_context_names("a.b.upper()"), "a.b.upper()")
 
     def test_dotstr_methods_resolve_on_global_scope(self) -> None:
@@ -2299,3 +2299,83 @@ class TestDotBoolComparisonsAndPreview(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestReservedAttributeNames(unittest.TestCase):
+    """Email's `from` and other keyword keys retain normal dotted-field behavior."""
+
+    SENDER = "Leandoo Benachrichtigungen <HELLO@leandoo.com>"
+    CONTEXT = {"imapTrigger": {"email": {"from": SENDER}}}
+
+    def test_sender_contains_agrees_in_preview_execution_and_conditions(self) -> None:
+        executor = WorkflowExecutor(nodes=[], edges=[])
+        service = ExpressionEvaluatorService()
+        for address, expected in [("hello@leandoo.com", True), ("other@example.com", False)]:
+            expression = f'$imapTrigger.email.from.lower().contains("{address}")'
+            with self.subTest(expression=expression):
+                response = service.evaluate(expression, self.CONTEXT)
+                self.assertIs(response.result, expected)
+                self.assertEqual(response.result_type, "boolean")
+                self.assertTrue(response.preserved_type)
+                self.assertIsNone(response.error)
+                self.assertIs(
+                    executor.resolve_expression(expression, self.CONTEXT, preserve_type=True),
+                    expected,
+                )
+                self.assertIs(
+                    executor.resolve_arithmetic_expression(
+                        expression, self.CONTEXT, preserve_type=True
+                    ),
+                    expected,
+                )
+                self.assertIs(executor.evaluate_condition(expression, self.CONTEXT), expected)
+
+    def test_selected_sender_and_message_template_preserve_strings(self) -> None:
+        executor = WorkflowExecutor(nodes=[], edges=[])
+        expression = "$imapTrigger.email.from.lower()"
+        response = ExpressionEvaluatorService().evaluate(expression, self.CONTEXT)
+        self.assertEqual(response.result, self.SENDER.lower())
+        self.assertEqual(response.result_type, "string")
+        self.assertEqual(
+            executor.evaluate_message_template(f"Sender: {expression}", self.CONTEXT),
+            f"Sender: {self.SENDER.lower()}",
+        )
+
+    def test_all_python_keyword_fields_are_supported(self) -> None:
+        import keyword
+
+        for name in keyword.kwlist:
+            expression = f"$data.{name}.lower().contains('sender')"
+            with self.subTest(name=name):
+                response = ExpressionEvaluatorService().evaluate(
+                    expression, {"data": {name: "SENDER"}}
+                )
+                self.assertIs(response.result, True)
+
+    def test_reserved_fields_keep_missing_value_and_nested_item_behavior(self) -> None:
+        service = ExpressionEvaluatorService()
+        cases = [
+            ("$data.from.orEmpty()", {"data": {}}, ""),
+            ("$data.from.class.lower()", {"data": {"from": {"class": "SENDER"}}}, "sender"),
+            ("$data.from.replace('from', 'class')", {"data": {"from": "from"}}, "class"),
+            ("$data.map('item.from.lower()')", {"data": [{"from": "SENDER"}]}, ["sender"]),
+            ("$data.from == $data.class", {"data": {"from": "sender", "class": "sender"}}, True),
+        ]
+        for expression, context, expected in cases:
+            with self.subTest(expression=expression):
+                self.assertEqual(service.evaluate(expression, context).result, expected)
+
+    def test_literals_and_existing_alias_shaped_keys_are_not_reinterpreted(self) -> None:
+        service = ExpressionEvaluatorService()
+        expression = '$data.from.contains("__heymKeyword_from")'
+        self.assertIs(
+            service.evaluate(expression, {"data": {"from": "__heymKeyword_from"}}).result,
+            True,
+        )
+        self.assertIsNone(
+            service.evaluate("$data.__heymKeyword_from", {"data": {"from": "sender"}}).result
+        )
+        self.assertEqual(
+            alias_reserved_context_names('data.from.replace("data.class", "from")'),
+            'data.__heymKeyword_from.replace("data.class", "from")',
+        )

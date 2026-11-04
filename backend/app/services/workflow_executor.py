@@ -663,7 +663,8 @@ HTTP_TIMEOUT = 300.0
 @lru_cache(maxsize=2048)
 def _parse_expression_tree(expr: str) -> ast.AST:
     """Cache parsed ASTs for repeated workflow expressions."""
-    return SimpleEval.parse(expression_syntax.alias_reserved_context_names(expr))
+    parsed = SimpleEval.parse(expression_syntax.alias_reserved_context_names(expr))
+    return expression_syntax.restore_reserved_attribute_names(parsed, expr)
 
 
 def _is_valid_expression_syntax(expr: str) -> bool:

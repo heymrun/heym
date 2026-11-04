@@ -364,6 +364,7 @@ class RunWidgetTests(unittest.IsolatedAsyncioTestCase):
             response = await dash_api.run_widget(
                 widget_id=self.widget.id,
                 body=WidgetRunRequest(inputs=inputs),
+                request=SimpleNamespace(headers={}),
                 current_user=self.viewer,
                 db=db,
             )
@@ -406,6 +407,12 @@ class RunWidgetTests(unittest.IsolatedAsyncioTestCase):
 
 
 class RunWidgetWorkflowTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        for method in ("record_started", "record_finished"):
+            mock = patch(f"app.services.execution_cancellation.active_execution_registry.{method}")
+            mock.start()
+            self.addCleanup(mock.stop)
+
     async def test_it_runs_as_the_owner_from_the_dashboard_and_is_recorded(self) -> None:
         owner = uuid.uuid4()
         workflow = SimpleNamespace(
@@ -415,7 +422,16 @@ class RunWidgetWorkflowTests(unittest.IsolatedAsyncioTestCase):
         history = SimpleNamespace(id=uuid.uuid4())
         db = MagicMock(commit=AsyncMock())
         inputs = {"headers": {}, "query": {}, "body": {"vendor": "Acme"}}
-        dispatch = AsyncMock(return_value=result)
+        from app.services.execution_cancellation import get_active_execution_handle
+
+        async def tracked_dispatch(**kwargs: object) -> object:
+            handle = get_active_execution_handle(kwargs["execution_id"])
+            self.assertIsNotNone(handle)
+            self.assertEqual(handle.workflow_id, workflow.id)
+            self.assertIs(handle.event, kwargs["cancel_event"])
+            return result
+
+        dispatch = AsyncMock(side_effect=tracked_dispatch)
 
         with (
             patch.object(
@@ -436,8 +452,11 @@ class RunWidgetWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["trigger_source"], "dashboard")
         self.assertEqual(kwargs["credentials_owner_id"], owner)
         self.assertEqual(kwargs["actor_user_id"], owner)
-        record.assert_awaited_once_with(db, workflow, result, inputs)
+        record.assert_awaited_once_with(
+            db, workflow, result, inputs, execution_id=kwargs["execution_id"]
+        )
         self.assertEqual((ran, recorded), (result, history))
+        self.assertIsNone(get_active_execution_handle(kwargs["execution_id"]))
         db.commit.assert_awaited()
 
 
