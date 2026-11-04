@@ -27,6 +27,7 @@ export const DOCS_MANIFEST: Record<string, DocCategory> = {
       { slug: "migrate-to-heym", title: "Migrate to Heym" },
       { slug: "core-concepts", title: "Core Concepts" },
       { slug: "running-and-deployment", title: "Running & Deployment" },
+      { slug: "kubernetes", title: "Kubernetes Deployment" },
     ],
   },
   nodes: {

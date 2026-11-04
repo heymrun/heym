@@ -97,6 +97,8 @@ That also defines the upgrade order. Upgrading main first marks every worker inc
 
 **Worker instances have a different outbound IP.** Any API that allowlists source addresses sees the new one. Send Email runs on main for exactly this reason; for the HTTP node, either give the cluster a single NAT egress address or allowlist every instance.
 
+For Kubernetes workers, see [Kubernetes Deployment → Load distribution](../getting-started/kubernetes.md#load-distribution).
+
 ## Adding a worker on another machine
 
 `docker-compose.worker.yml` in the repository root runs a worker on its own host. It has no database and no UI: it reaches the main instance's PostgreSQL and takes its share of the background runs.

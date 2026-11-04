@@ -22,7 +22,7 @@ The node also requires a **GitHub** credential for cloning private repositories,
 Execution isolation is chosen by `HEYM_OPENCODE_CLI_COMMAND`, exactly like the Codex node:
 
 - **Local development (`run.sh`)** leaves it at the default `opencode`, so OpenCode runs as a host subprocess against the cloned workspace — no Docker required, no extra flags.
-- **Docker deployments (`deploy.sh` and the single GHCR image)** set it to `/usr/local/bin/heym-opencode-docker`, a wrapper that runs `opencode run` inside a **hardened, throwaway sibling container** that mounts only this run's workspace and its `.oc-home` directory from the OpenCode workspace volume. On [Kubernetes](../getting-started/running-and-deployment.md#kubernetes) the same wrapper runs it as a restricted pod.
+- **Docker deployments (`deploy.sh` and the single GHCR image)** set it to `/usr/local/bin/heym-opencode-docker`, a wrapper that runs `opencode run` inside a **hardened, throwaway sibling container** that mounts only this run's workspace and its `.oc-home` directory from the OpenCode workspace volume. On [Kubernetes](../getting-started/kubernetes.md) the same wrapper runs it as a restricted pod.
 
 The hardened runner container drops all Linux capabilities, sets `no-new-privileges`, uses a read-only root with a tmpfs `/tmp`, and applies pid/memory/CPU limits. Network egress is allowed (OpenCode must reach the model gateway). The **GitHub token is never placed inside the container** — all git and GitHub operations run host-side, so only the OpenCode API key and repository files are ever inside.
 

@@ -42,7 +42,7 @@ Hands-on training sessions tailored to your team's skill level and use cases:
 
 ## Kubernetes Deployment
 
-The standard [Running & Deployment](../getting-started/running-and-deployment.md) guide covers Docker Compose for single-server production setups. Enterprise customers receive assistance with production Kubernetes deployments for high availability and horizontal scaling:
+The [Running & Deployment](../getting-started/running-and-deployment.md) guide covers Docker Compose for single-server production setups. The [Kubernetes Deployment](../getting-started/kubernetes.md) guide covers manifests, Helm, storage, network policies, and workers. Enterprise customers receive assistance with production Kubernetes deployments for high availability and horizontal scaling:
 
 - **Multiple worker nodes** — Distributing Heym backend workers across multiple Kubernetes nodes for redundancy and load balancing
 - **Sidecar containers** — Configuring sidecar patterns for log collection, monitoring agents, service meshes (Istio, Linkerd), and secret injection (Vault)
