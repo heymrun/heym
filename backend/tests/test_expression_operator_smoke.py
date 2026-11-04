@@ -35,6 +35,8 @@ from app.services.workflow_executor import (
 )
 
 SAMPLE_TEXT = "  Heym Workflow  "
+SAMPLE_SENDER = "Leandoo Benachrichtigungen <HELLO@leandoo.com>"
+SAMPLE_EMAIL = {"from": SAMPLE_SENDER}
 SAMPLE_URL = "https://heym.run/docs?q=a b"
 SAMPLE_JSON_TEXT = '{"name": "ada", "age": 36}'
 FIXED_DATE = "2026-03-05T14:30:00"
@@ -48,6 +50,7 @@ SAMPLE_USERS = [{"name": "alice", "active": True}, {"name": "bob", "active": Fal
 
 SAMPLE_MAPPINGS: list[dict[str, str]] = [
     {"key": "text", "value": SAMPLE_TEXT},
+    {"key": "email", "value": f"$dict({SAMPLE_EMAIL!r})"},
     {"key": "url", "value": SAMPLE_URL},
     {"key": "jsonText", "value": SAMPLE_JSON_TEXT},
     {"key": "encoded", "value": "SGV5bQ=="},
@@ -89,6 +92,8 @@ OPERATOR_CASES: list[tuple[str, str, Expected]] = [
     ("strStartswith", "$sample.text.trim().startswith('Heym')", True),
     ("strEndswith", "$sample.text.trim().endswith('Workflow')", True),
     ("strContains", "$sample.text.contains('Work')", True),
+    ("strFromContains", '$sample.email.from.lower().contains("hello@leandoo.com")', True),
+    ("strFromDoesNotContain", '$sample.email.from.lower().contains("other@example.com")', False),
     ("strIndexOf", "$sample.text.trim().indexOf('Work')", 5),
     ("strReverse", "$sample.text.trim().reverse()", "wolfkroW myeH"),
     ("strSplit", "$sample.text.trim().split(' ')", ["Heym", "Workflow"]),
@@ -231,6 +236,7 @@ CONTEXT_ROOTS = ("sample", "vars", "global")
 def _sample_fixture() -> dict[str, Any]:
     return {
         "text": SAMPLE_TEXT,
+        "email": dict(SAMPLE_EMAIL),
         "url": SAMPLE_URL,
         "jsonText": SAMPLE_JSON_TEXT,
         "encoded": "SGV5bQ==",

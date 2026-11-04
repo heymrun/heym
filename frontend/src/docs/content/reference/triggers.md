@@ -83,7 +83,9 @@ The [File Upload Trigger](../nodes/file-upload-trigger-node.md) mints a TTL-boun
 upload slot when the workflow is invoked through the API, MCP, or canvas. Uploading multipart form
 data to `POST /api/file-intake/u/{token}` consumes the slot, stores the file as a Drive file, and
 starts the workflow synchronously. Input includes `file`, `uploaded_at`,
-`triggered_by: "file_upload"`, and upload metadata.
+`triggered_by: "file_upload"`, and upload metadata. Set `Accept: text/event-stream`
+to receive [heartbeats and the final result](./sse-streaming.md#file-uploads-and-run-widgets)
+without leaving a long-running request silent.
 
 ### Telegram
 

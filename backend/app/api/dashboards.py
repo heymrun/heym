@@ -11,6 +11,7 @@ from dataclasses import asdict
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
@@ -114,6 +115,7 @@ from app.services.page_params import (
     MAX_RECORD_LENGTH,
     is_valid_record,
 )
+from app.services.result_stream import stream_result
 from app.services.widget_page_record import (
     detail_page_context,
     example_record,
@@ -1147,9 +1149,10 @@ async def get_widget_data(
 async def run_widget(
     widget_id: uuid.UUID,
     body: WidgetRunRequest,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> WidgetRunResponse:
+) -> WidgetRunResponse | StreamingResponse:
     """Run a run widget's workflow with the values of its start fields, or with none.
 
     Anyone who can open the dashboard may run it, as anyone may drop a file on a file
@@ -1172,6 +1175,26 @@ async def run_widget(
         )
     fields = {field["key"] for field in start_input_fields(workflow.nodes, workflow.edges)}
     values = {key: value for key, value in body.inputs.items() if key in fields}
+    if "text/event-stream" in request.headers.get("accept", ""):
+        from app.db.session import async_session_maker
+
+        owner_id = dashboard.owner_id
+        await db.commit()
+
+        async def detached_run() -> WidgetRunResponse:
+            async with async_session_maker() as run_db:
+                result, history_entry = await run_widget_workflow(
+                    run_db, workflow, owner_id, {"headers": {}, "query": {}, "body": values}
+                )
+                return WidgetRunResponse(
+                    run_id=history_entry.id if history_entry is not None else None,
+                    status=str(result.status),
+                    output=result.outputs
+                    if isinstance(result.outputs, dict)
+                    else {"result": result.outputs},
+                )
+
+        return stream_result(detached_run())
     result, history_entry = await run_widget_workflow(
         db, workflow, dashboard.owner_id, {"headers": {}, "query": {}, "body": values}
     )

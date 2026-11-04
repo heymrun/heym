@@ -1,6 +1,7 @@
 import asyncio
 import copy
 import logging
+import threading
 import uuid
 from concurrent.futures import CancelledError
 from datetime import datetime, timezone
@@ -16,11 +17,13 @@ from app.db.session import async_session_maker
 from app.models.dashboard_schemas import WidgetDataResponse
 from app.services.cluster.dispatch import dispatch_workflow
 from app.services.dashboard_widget_policy import dashboard_widget_blocked_nodes_error
+from app.services.execution_cancellation import clear_execution, register_execution
 from app.services.highlight.highlight_builder import build_highlight_payload
 from app.services.hitl_widget_filter import filter_payload, hitl_widget_filter
 from app.services.node_analytics_rollup import pending_on_first_write
 from app.services.page_params import page_inputs
 from app.services.workflow_executor import (
+    ExecutionResult,
     WorkflowCancelledError,
     WorkflowTimeoutError,
     _to_json_compatible,
@@ -63,7 +66,12 @@ def _is_hitl_chart_workflow(nodes: list[dict[str, Any]] | None) -> bool:
 
 
 async def _record_widget_execution(
-    db: AsyncSession, workflow: Workflow, result, inputs: dict[str, Any]
+    db: AsyncSession,
+    workflow: Workflow,
+    result,
+    inputs: dict[str, Any],
+    *,
+    execution_id: uuid.UUID | None = None,
 ) -> ExecutionHistory | None:
     """Record an execution-history row + analytics snapshot for a widget run.
 
@@ -85,6 +93,7 @@ async def _record_widget_execution(
                 enriched_inputs=inputs,
                 execution_result=result,
                 trigger_source="dashboard",
+                history_entry_id=execution_id,
                 credentials_owner_id=workflow.owner_id,
                 trace_user_id=workflow.owner_id,
                 public_base_url=build_default_public_base_url(),
@@ -101,7 +110,7 @@ async def _record_widget_execution(
             return paused_entry
 
         history_entry = ExecutionHistory(
-            id=uuid.uuid4(),
+            id=execution_id or uuid.uuid4(),
             workflow_id=workflow.id,
             inputs=inputs,
             outputs=result.outputs,
@@ -509,6 +518,31 @@ async def run_widget_workflow(
     run_as_user_id: uuid.UUID,
     inputs: dict[str, Any],
 ) -> tuple[Any, ExecutionHistory | None]:
+    """Track a dashboard run from execution through history persistence."""
+    execution_id = uuid.uuid4()
+    cancel_event = register_execution(
+        workflow_id=workflow.id,
+        execution_id=execution_id,
+        inputs=inputs,
+        trigger_source="dashboard",
+        actor_user_id=run_as_user_id,
+    )
+    try:
+        return await _run_widget_workflow(
+            db, workflow, run_as_user_id, inputs, execution_id, cancel_event
+        )
+    finally:
+        clear_execution(execution_id, handle=getattr(cancel_event, "_execution_handle", None))
+
+
+async def _run_widget_workflow(
+    db: AsyncSession,
+    workflow: Workflow,
+    run_as_user_id: uuid.UUID,
+    inputs: dict[str, Any],
+    execution_id: uuid.UUID,
+    cancel_event: threading.Event,
+) -> tuple[Any, ExecutionHistory | None]:
     """Run an ordinary workflow from a run widget, as the dashboard owner, and record the run.
 
     ``inputs`` are the execute endpoint's shape (``headers``, ``query``, ``body``); a start
@@ -520,26 +554,38 @@ async def run_widget_workflow(
         credentials_context,
         global_variables_context,
     ) = await _load_widget_execution_context(db, workflow, run_as_user_id)
-    result = await dispatch_workflow(
-        workflow_id=workflow.id,
-        nodes=nodes,
-        edges=workflow.edges or [],
-        inputs=inputs,
-        workflow_cache=workflow_cache,
-        test_run=False,
-        trigger_source="dashboard",
-        credentials_owner_id=run_as_user_id,
-        run_in_thread=True,
-        credentials_context=credentials_context,
-        global_variables_context=global_variables_context,
-        trace_user_id=run_as_user_id,
-        actor_user_id=run_as_user_id,
-        concurrency_limit=workflow.concurrency_limit,
-    )
+    await db.commit()
+    try:
+        result = await dispatch_workflow(
+            execution_id=execution_id,
+            cancel_event=cancel_event,
+            workflow_id=workflow.id,
+            nodes=nodes,
+            edges=workflow.edges or [],
+            inputs=inputs,
+            workflow_cache=workflow_cache,
+            test_run=False,
+            trigger_source="dashboard",
+            credentials_owner_id=run_as_user_id,
+            run_in_thread=True,
+            credentials_context=credentials_context,
+            global_variables_context=global_variables_context,
+            trace_user_id=run_as_user_id,
+            actor_user_id=run_as_user_id,
+            concurrency_limit=workflow.concurrency_limit,
+        )
+    except WorkflowCancelledError as exc:
+        result = ExecutionResult(
+            workflow_id=workflow.id,
+            status="cancelled",
+            outputs={"error": str(exc)},
+            execution_time_ms=0.0,
+        )
+
     history_entry = (
         None
         if getattr(result, "history_written", False) is True
-        else await _record_widget_execution(db, workflow, result, inputs)
+        else await _record_widget_execution(db, workflow, result, inputs, execution_id=execution_id)
     )
     background_finalize = bool(getattr(result, "allow_downstream_pending", False))
     if not background_finalize and result.status != "pending":
