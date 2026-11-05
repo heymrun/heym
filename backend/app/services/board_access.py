@@ -30,6 +30,8 @@ __all__ = [
     "board_members",
     "board_permission",
     "board_permissions",
+    "reachable_board_ids",
+    "shared_board_permissions",
 ]
 
 
@@ -62,6 +64,32 @@ def accessible_board_ids(user_id: uuid.UUID) -> Select:
     return select(Board.id).where(
         or_(Board.owner_id == user_id, Board.id.in_(select(grants.c.board_id)))
     )
+
+
+async def shared_board_permissions(db: AsyncSession, user_id: uuid.UUID) -> dict[uuid.UUID, str]:
+    """Map every board shared with ``user_id`` to the caller's strongest grant."""
+    grants: dict[uuid.UUID, list[str]] = {}
+    for board_id, permission in (await db.execute(_grants(user_id))).all():
+        grants.setdefault(board_id, []).append(permission)
+    return {
+        board_id: permission
+        for board_id, permissions in grants.items()
+        if (permission := strongest_permission(permissions)) is not None
+    }
+
+
+async def reachable_board_ids(
+    db: AsyncSession, board_ids: set[uuid.UUID], user_id: uuid.UUID
+) -> set[uuid.UUID]:
+    """The ids among ``board_ids`` that ``user_id`` owns or has been shared."""
+    if not board_ids:
+        return set()
+    owned = await db.execute(
+        select(Board.id).where(Board.id.in_(board_ids), Board.owner_id == user_id)
+    )
+    grants = _grants(user_id).subquery()
+    shared = await db.execute(select(grants.c.board_id).where(grants.c.board_id.in_(board_ids)))
+    return set(owned.scalars().all()) | set(shared.scalars().all())
 
 
 async def board_permission(db: AsyncSession, board: Board, user_id: uuid.UUID) -> str | None:

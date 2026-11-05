@@ -1,6 +1,7 @@
 """Board access on a real PostgreSQL: owner, direct shares, team shares, none."""
 
 import unittest
+import uuid
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -91,3 +92,23 @@ class BoardAccessPostgresTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(by_id[self.owner.id].permission, "owner")
         self.assertEqual(by_id[self.reader.id].permission, "write")
         self.assertEqual(by_id[self.writer.id].name, "writer")
+
+    async def test_shared_permissions_and_reachable_ids_for_work(self) -> None:
+        async with AsyncSession(self.engine) as db:
+            shared = await board_access.shared_board_permissions(db, self.reader.id)
+            self.assertEqual(shared.get(self.board.id), "write")
+            self.assertEqual(await board_access.shared_board_permissions(db, self.owner.id), {})
+            missing = uuid.uuid4()
+            wanted = {self.board.id, missing}
+            self.assertEqual(
+                await board_access.reachable_board_ids(db, wanted, self.owner.id), {self.board.id}
+            )
+            self.assertEqual(
+                await board_access.reachable_board_ids(db, wanted, self.reader.id), {self.board.id}
+            )
+            self.assertEqual(
+                await board_access.reachable_board_ids(db, wanted, self.outsider.id), set()
+            )
+            self.assertEqual(
+                await board_access.reachable_board_ids(db, set(), self.owner.id), set()
+            )
