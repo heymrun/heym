@@ -18,8 +18,10 @@ AGENT_CAPABILITIES = (
     "workflow and by node type), recent executions, the run history of one "
     "workflow (how many times it ran, statuses, when, and the details of a single run), and "
     "which executions are running right now (with elapsed time, current node, and a link to "
-    "each live run); read and resolve human-in-the-loop reviews; list and act on agentic "
-    "kanban boards, cards and comments; list dashboards (Heym Work's pages) with the widgets "
+    "each live run); read and resolve human-in-the-loop reviews; manage kanban boards and "
+    "their columns; create, edit, assign, prioritize, schedule, move, reorder and delete "
+    "tasks, and find them by assignee, column, priority, due date, label or review state; "
+    "list dashboards (Heym Work's pages) with the widgets "
     "on each and which dashboard a workflow is on, create a dashboard, build several new "
     "widgets on a dashboard at once, change several widgets in one go, add a new widget to a "
     "dashboard and build its workflow, or put an existing workflow on a dashboard as a widget, "
@@ -110,9 +112,10 @@ AGENT_SKILLS: tuple[AgentSkillInfo, ...] = (
     AgentSkillInfo(
         "boards",
         "Kanban boards",
-        "List and act on agentic kanban boards, cards and comments.",
-        ("kanban", "boards"),
-        ("Move the onboarding card to Done.",),
+        "Manage kanban boards, columns and tasks: assign, prioritize, schedule, move and filter "
+        "tasks.",
+        ("kanban", "boards", "tasks"),
+        ("Move the onboarding card to Done.", "Show my overdue tasks on the Legal board."),
     ),
     AgentSkillInfo(
         "dashboards",
