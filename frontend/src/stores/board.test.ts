@@ -114,4 +114,23 @@ describe("board store", () => {
     expect(boardApi.getState).toHaveBeenCalledTimes(2);
     store.stopPolling();
   });
+
+  it("keeps checking for changes while no run is active", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(boardApi.getState).mockResolvedValue(board([]));
+      const store = useBoardStore();
+      await store.openBoard("b");
+      // Any reload of a board without active runs must leave the change check running.
+      await store.refreshActiveBoard();
+      expect(boardApi.revision).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(boardApi.revision).toHaveBeenCalledTimes(2);
+      store.stopPolling();
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(boardApi.revision).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

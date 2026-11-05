@@ -49,11 +49,16 @@ export const useBoardStore = defineStore("board", () => {
     return grouped;
   });
 
-  function stopPolling(): void {
+  function stopRunPolling(): void {
     if (pollTimer !== null) {
       clearInterval(pollTimer);
       pollTimer = null;
     }
+  }
+
+  /** Stop both the active-run poll and the change check (the board was left or closed). */
+  function stopPolling(): void {
+    stopRunPolling();
     if (revisionTimer !== null) {
       clearInterval(revisionTimer);
       revisionTimer = null;
@@ -90,7 +95,7 @@ export const useBoardStore = defineStore("board", () => {
         void refreshActiveBoard();
       }, POLL_INTERVAL_MS);
     } else if (!shouldPoll) {
-      stopPolling();
+      stopRunPolling();
     }
   }
 
@@ -129,7 +134,7 @@ export const useBoardStore = defineStore("board", () => {
       activeBoard.value = await boardApi.getState(activeBoard.value.id);
       syncPolling();
     } catch {
-      stopPolling();
+      stopRunPolling();
     }
   }
 
