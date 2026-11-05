@@ -568,10 +568,12 @@ test("keeps desktop card drag and drop working", async ({ page }) => {
     .toBe(planning.id);
 });
 
-test("moves a card to the top whenever it is updated", async ({ page }) => {
-  const { boardId, cardId, columns } = await createBoardWithCard(page, "Older card");
+test("keeps a card's place when it is updated and keeps a dragged order", async ({ page }) => {
+  const mapperCredentialId = await setUpMapperCredential(page);
+  const { boardId, cardId, columns } = await createBoardWithCard(page, "Older card", {
+    mapperCredentialId,
+  });
   const backlog = columns.find((column) => column.name === "Backlog")!;
-  await page.waitForTimeout(20);
   const newerCard = await (
     await page.request.post(`/api/boards/${boardId}/cards`, {
       data: { title: "Newer card", column_id: backlog.id },
@@ -580,6 +582,7 @@ test("moves a card to the top whenever it is updated", async ({ page }) => {
 
   await page.goto(`/?tab=board&board=${boardId}`);
   const cards = page.getByTestId(`board-column-cards-${backlog.id}`).locator("[data-board-card]");
+  // A new card goes on top of its column.
   await expect(cards.nth(0)).toContainText("Newer card");
   await expect(cards.nth(1)).toContainText("Older card");
 
@@ -589,9 +592,72 @@ test("moves a card to the top whenever it is updated", async ({ page }) => {
   await expect(page.getByTestId("card-description-saved")).toBeVisible();
   await page.keyboard.press("Escape");
 
+  // Editing a card no longer moves it.
+  await expect(cards.nth(0)).toContainText("Newer card");
+  await expect(cards.nth(1)).toContainText("Older card");
+
+  // Drop the older card above the newer one; the order survives a reload.
+  const dataTransfer = await page.evaluateHandle(() => new DataTransfer());
+  await page.getByTestId(`board-card-${cardId}`).dispatchEvent("dragstart", { dataTransfer });
+  await page.getByTestId("board-column-Backlog").dispatchEvent("drop", { dataTransfer });
+  await expect(cards.nth(0)).toContainText("Older card");
+  await page.reload();
   await expect(cards.nth(0)).toContainText("Older card");
   await expect(cards.nth(1)).toContainText("Newer card");
   await expect(page.getByTestId(`board-card-${newerCard.id}`)).toBeVisible();
+});
+
+test("sets a card's assignee, priority, due date and labels and shows them", async ({ page }) => {
+  const mapperCredentialId = await setUpMapperCredential(page);
+  const { boardId, cardId } = await createBoardWithCard(page, "NDA for Acme", {
+    mapperCredentialId,
+  });
+  const members = await (await page.request.get(`/api/boards/${boardId}/members`)).json() as
+    { user_id: string; name: string | null; email: string }[];
+  const owner = members[0];
+
+  await page.goto(`/?tab=board&board=${boardId}`);
+  await page.getByTestId(`board-card-${cardId}`).click();
+  await page.getByTestId("card-field-assignee").locator("select").selectOption(owner.user_id);
+  await page.getByTestId("card-field-priority").locator("select").selectOption("urgent");
+  await page.getByTestId("card-field-due").fill("2020-01-15");
+  await page.getByTestId("card-field-labels").fill("Acme, NDA");
+  await page.getByTestId("card-fields-save").click();
+  await expect(page.getByText("Details saved")).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  await expect(page.getByTestId(`board-card-priority-${cardId}`)).toContainText("Urgent");
+  await expect(page.getByTestId(`board-card-due-${cardId}`)).toHaveAttribute("data-due", "overdue");
+  await expect(page.getByTestId(`board-card-assignee-${cardId}`)).toContainText(
+    owner.name || owner.email,
+  );
+  await expect(page.getByTestId(`board-card-label-${cardId}`)).toHaveCount(2);
+
+  const state = await (await page.request.get(`/api/boards/${boardId}`)).json();
+  const saved = (state.cards as { id: string; fields: { priority: string; labels: string[] } }[])
+    .find((card) => card.id === cardId)!;
+  expect(saved.fields.priority).toBe("urgent");
+  expect(saved.fields.labels).toEqual(["Acme", "NDA"]);
+});
+
+test("refuses to overwrite a card someone else changed", async ({ page }) => {
+  const mapperCredentialId = await setUpMapperCredential(page);
+  const { boardId, cardId } = await createBoardWithCard(page, "Shared card", {
+    mapperCredentialId,
+  });
+  await page.goto(`/?tab=board&board=${boardId}`);
+  await page.getByTestId(`board-card-${cardId}`).click();
+  await page.getByTestId("card-field-priority").locator("select").selectOption("low");
+
+  // Someone else sets the priority while the dialog is open.
+  const other = await page.request.patch(`/api/boards/${boardId}/cards/${cardId}`, {
+    data: { priority: "high" },
+  });
+  expect(other.ok()).toBeTruthy();
+
+  await page.getByTestId("card-fields-save").click();
+  await expect(page.getByText("This card was changed by someone else.")).toBeVisible();
+  await expect(page.getByTestId("card-field-priority").locator("select")).toHaveValue("high");
 });
 
 test("runs a column workflow chain to completion when a card enters", async ({ page }) => {

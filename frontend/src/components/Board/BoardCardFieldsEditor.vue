@@ -150,6 +150,7 @@ async function save(): Promise<void> {
       <Select
         v-model="form.assigneeUserId"
         :options="assigneeOptions"
+        placeholder=""
         :disabled="readOnly"
         data-testid="card-field-assignee"
       />
@@ -159,6 +160,7 @@ async function save(): Promise<void> {
       <Select
         v-model="form.priority"
         :options="priorityOptions"
+        placeholder=""
         :disabled="readOnly"
         data-testid="card-field-priority"
       />
