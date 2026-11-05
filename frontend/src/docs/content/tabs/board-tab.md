@@ -62,7 +62,9 @@ can manage boards in plain language, with the same permissions as the Board tab:
   assignee ("my tasks"), column, priority, due date (overdue, today, this week), label or
   review state;
 - create a board (Chat turns off automatic advancing for a plain task board), rename it or
-  change its settings, and delete it after you confirm its name (owner only);
+  change its settings, and delete it after you confirm its name (owner only). A board Chat
+  creates uses the chat's credential and model as its Agentic Kanban Model; ask Chat to
+  give its model to one of your boards that has none, such as a board made before this;
 - add, rename, reorder and delete columns;
 - add, edit, assign, move, reorder and delete cards;
 - comment on a card, as you. A comment on a card waiting at the planning step answers its

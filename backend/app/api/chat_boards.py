@@ -55,6 +55,7 @@ from app.services.board_card_fields import CardFilter, read_fields
 
 Priority = Literal["low", "medium", "high", "urgent"]
 CREATE_BOARD_TOOL = "create_board"
+UPDATE_BOARD_TOOL = "update_board"
 RunStatus = Literal["idle", "running", "pending", "success", "failed"]
 MAX_TASKS = 500
 CONTENT_PREVIEW = 400
@@ -66,6 +67,14 @@ REVIEW_CANCELLED_NOTE = (
 PLANNING_ANSWER_NOTE = (
     "The task was waiting at the planning step. This comment answered its questions, so the "
     "task moves on to the next column."
+)
+NO_CHAT_MODEL_NOTE = (
+    "The board was created without an Agentic Kanban Model: this chat's credential could not be "
+    "used for it. Set one in the board's settings in Heym."
+)
+NO_CHAT_MODEL_ERROR = (
+    "This chat has no model to give the board. Set its Agentic Kanban Model in the board's "
+    "settings in Heym."
 )
 OWNER_ONLY_ERROR = (
     "Only the board's owner can change its name, description or settings, or delete it"
@@ -122,6 +131,11 @@ class UpdateBoardArgs(BoardArgs):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = None
     auto_advance: bool | None = None
+    use_chat_model: bool = Field(
+        default=False,
+        description="True sets the board's Agentic Kanban Model to this chat's credential and "
+        "model, for a board that has none.",
+    )
 
 
 class DeleteBoardArgs(BoardArgs):
@@ -330,6 +344,13 @@ async def _tasks(
     }
 
 
+def _kanban_model(board: Board) -> str | None:
+    """The model that maps the board's cards; without one the Board tab cannot add or move them."""
+    if board.mapper_credential_id is None or not board.mapper_model:
+        return None
+    return board.mapper_model
+
+
 def _board_entry(board: Board, permission: str, base: str) -> dict[str, Any]:
     return {
         "id": str(board.id),
@@ -337,6 +358,7 @@ def _board_entry(board: Board, permission: str, base: str) -> dict[str, Any]:
         "description": board.description,
         "permission": permission,
         "auto_advance": board.auto_advance,
+        "agentic_kanban_model": _kanban_model(board),
         "url": board_url(base, board.id),
     }
 
@@ -543,19 +565,33 @@ async def _create_board(
         request.mapper_credential_id, request.mapper_model = None, None
         summary = await boards_api.create_board(request=request, db=db, current_user=user)
     board = await db.get(Board, summary.id)
-    return {"created": True, "board": _board_entry(board, PERMISSION_OWNER, base)}
+    result: dict[str, Any] = {"created": True, "board": _board_entry(board, PERMISSION_OWNER, base)}
+    if result["board"]["agentic_kanban_model"] is None:
+        result["note"] = NO_CHAT_MODEL_NOTE
+    return result
 
 
 async def _update_board(
-    db: AsyncSession, user: User, args: UpdateBoardArgs, base: str
+    db: AsyncSession,
+    user: User,
+    args: UpdateBoardArgs,
+    base: str,
+    chat_llm: tuple[uuid.UUID, str] | None = None,
 ) -> dict[str, Any]:
     await _owned_board(db, user, args.board_id)
     fields = args.model_fields_set & {"name", "description", "auto_advance"}
-    if not fields:
-        return {"error": "Nothing to change: pass name, description or auto_advance"}
+    changes: dict[str, Any] = args.model_dump(include=fields)
+    if args.use_chat_model:
+        if chat_llm is None:
+            return {"error": NO_CHAT_MODEL_ERROR}
+        changes["mapper_credential_id"], changes["mapper_model"] = chat_llm
+    if not changes:
+        return {
+            "error": "Nothing to change: pass name, description, auto_advance or use_chat_model"
+        }
     await boards_api.update_board(
         board_id=args.board_id,
-        request=BoardUpdateRequest(**args.model_dump(include=fields)),
+        request=BoardUpdateRequest(**changes),
         db=db,
         current_user=user,
     )
@@ -818,14 +854,15 @@ _TOOLS: dict[str, tuple[type[_Args], str, str, Handler]] = {
     "create_board": (
         CreateBoardArgs,
         "Create a board owned by the user, with the columns Backlog, Planning, Development and "
-        "Done, mapping cards with this chat's model. Set auto_advance false for a plain team "
-        "task board.",
+        "Done, mapping cards with this chat's model (agentic_kanban_model in the result). Set "
+        "auto_advance false for a plain team task board.",
         "Creating board...",
         _create_board,
     ),
     "update_board": (
         UpdateBoardArgs,
-        "Change a board's name, description or auto_advance. Owner only.",
+        "Change a board's name, description or auto_advance, or with use_chat_model true give "
+        "a board without an agentic_kanban_model this chat's model. Owner only.",
         "Updating board...",
         _update_board,
     ),
@@ -941,7 +978,8 @@ async def call_board_tool(
 ) -> dict[str, Any]:
     """Validate a board action and run it through the board routes.
 
-    ``chat_llm`` is the chat's credential id and model; a board the chat creates uses them.
+    ``chat_llm`` is the chat's credential id and model: a board the chat creates uses them, and
+    ``update_board`` with ``use_chat_model`` gives them to a board that has none.
     """
     model, _description, _label, handler = _TOOLS[name]
     try:
@@ -956,6 +994,8 @@ async def call_board_tool(
     try:
         if name == CREATE_BOARD_TOOL:
             return await _create_board(db, user, args, public_base_url, chat_llm)
+        if name == UPDATE_BOARD_TOOL:
+            return await _update_board(db, user, args, public_base_url, chat_llm)
         return await handler(db, user, args, public_base_url)
     except HTTPException as exc:
         return {"error": _detail(exc.detail)}

@@ -1,15 +1,16 @@
 """Board chat tools against a real PostgreSQL: access, filters, changes, safeguards."""
 
+import json
 import unittest
 import uuid
 from datetime import date, timedelta
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api import chat_boards
-from app.db.models import Board, BoardCard, BoardCardActivity
+from app.api import ai_assistant, chat_boards
+from app.db.models import Board, BoardCard, BoardCardActivity, Credential, CredentialType
 from tests.board_pg_support import (
     cleanup,
     connect_or_skip,
@@ -331,3 +332,110 @@ class ChatBoardToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(answered["chain_started"])
         self.assertIn("planning step", answered["note"])
         self.assertEqual(answered["task"]["run_status"], "running")
+
+
+class ChatCreatedBoardModelTests(unittest.IsolatedAsyncioTestCase):
+    """A board the chat creates, through the real chat stream, stores the chat's model."""
+
+    async def asyncSetUp(self) -> None:
+        self.engine = await connect_or_skip(self)
+        self.owner = await make_user(self.engine, "chat-owner")
+        self.users = [self.owner]
+        async with AsyncSession(self.engine, expire_on_commit=False) as db:
+            self.credential = Credential(
+                owner_id=self.owner.id,
+                name="OpenAI",
+                type=CredentialType.openai,
+                encrypted_config="unused",
+            )
+            db.add(self.credential)
+            await db.commit()
+
+    async def asyncTearDown(self) -> None:
+        await cleanup(self.engine, self.users)
+
+    def _client(self) -> MagicMock:
+        call = MagicMock()
+        call.id = "call"
+        call.function.name = "create_board"
+        call.function.arguments = json.dumps({"name": "Team tasks", "auto_advance": False})
+        usage = MagicMock(prompt_tokens=1, completion_tokens=1, total_tokens=2)
+        client = MagicMock()
+        client.chat.completions.create.side_effect = [
+            MagicMock(
+                choices=[MagicMock(message=MagicMock(content=None, tool_calls=[call]))], usage=usage
+            ),
+            MagicMock(
+                choices=[MagicMock(message=MagicMock(content="Done.", tool_calls=None))],
+                usage=usage,
+            ),
+        ]
+        return client
+
+    async def test_the_board_maps_cards_with_the_chats_credential_and_model(self) -> None:
+        async with AsyncSession(self.engine, expire_on_commit=False) as db:
+            credential = await db.get(Credential, self.credential.id)
+            with patch.object(ai_assistant, "record_run_history"):
+                async for _chunk in ai_assistant.stream_dashboard_chat(
+                    self._client(),
+                    "gpt-5-mini",
+                    "system",
+                    [{"role": "user", "content": "Create a team board"}],
+                    db,
+                    self.owner,
+                    "OpenAI",
+                    BASE,
+                    None,
+                    None,
+                    None,
+                    credential,
+                ):
+                    pass
+        async with AsyncSession(self.engine) as db:
+            board = (
+                await db.execute(select(Board).where(Board.owner_id == self.owner.id))
+            ).scalar_one()
+        self.assertEqual(board.name, "Team tasks")
+        self.assertEqual(board.mapper_credential_id, self.credential.id)
+        self.assertEqual(board.mapper_model, "gpt-5-mini")
+
+    async def call(self, tool, /, chat_llm=None, user=None, **args):
+        async with AsyncSession(self.engine, expire_on_commit=False) as db:
+            return await chat_boards.call_board_tool(
+                db, user or self.owner, tool, args, BASE, chat_llm
+            )
+
+    async def test_a_board_without_a_model_gets_the_chats_model_on_request(self) -> None:
+        board, _columns = await make_board(self.engine, self.owner, name="Older board")
+        listed = await self.call("list_boards")
+        self.assertIsNone(listed["boards"][0]["agentic_kanban_model"])
+
+        updated = await self.call(
+            "update_board",
+            chat_llm=(self.credential.id, "gpt-5-mini"),
+            board_id=str(board.id),
+            use_chat_model=True,
+        )
+        self.assertTrue(updated["updated"], updated)
+        self.assertEqual(updated["board"]["agentic_kanban_model"], "gpt-5-mini")
+        async with AsyncSession(self.engine) as db:
+            stored = await db.get(Board, board.id)
+        self.assertEqual(stored.mapper_credential_id, self.credential.id)
+        self.assertEqual(stored.mapper_model, "gpt-5-mini")
+
+    async def test_use_chat_model_needs_a_chat_model_and_the_owner(self) -> None:
+        board, _columns = await make_board(self.engine, self.owner, name="Older board")
+        without = await self.call("update_board", board_id=str(board.id), use_chat_model=True)
+        self.assertIn("no model to give the board", without["error"])
+
+        other = await make_user(self.engine, "chat-writer")
+        self.users.append(other)
+        await share_board(self.engine, board, other, "write")
+        refused = await self.call(
+            "update_board",
+            chat_llm=(self.credential.id, "gpt-5-mini"),
+            user=other,
+            board_id=str(board.id),
+            use_chat_model=True,
+        )
+        self.assertIn("owner", refused["error"])

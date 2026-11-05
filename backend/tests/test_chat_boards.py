@@ -70,6 +70,7 @@ class RegistrationTests(unittest.TestCase):
             "auto_advance false",
             "add_board_task_comment",
             "A comment never approves a review",
+            "use_chat_model",
         ):
             self.assertIn(needle, prompt)
 
@@ -176,7 +177,14 @@ class CreateBoardModelTests(unittest.IsolatedAsyncioTestCase):
     async def test_a_board_the_chat_creates_maps_cards_with_the_chats_model(self) -> None:
         credential_id = uuid.uuid4()
         summary = SimpleNamespace(id=uuid.uuid4())
-        board = SimpleNamespace(id=summary.id, name="Team", description=None, auto_advance=False)
+        board = SimpleNamespace(
+            id=summary.id,
+            name="Team",
+            description=None,
+            auto_advance=False,
+            mapper_credential_id=credential_id,
+            mapper_model="gpt-4o",
+        )
         db = AsyncMock()
         db.get = AsyncMock(return_value=board)
         with patch.object(
@@ -194,12 +202,21 @@ class CreateBoardModelTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request.mapper_credential_id, credential_id)
         self.assertEqual(request.mapper_model, "gpt-4o")
         self.assertTrue(result["created"])
+        self.assertEqual(result["board"]["agentic_kanban_model"], "gpt-4o")
+        self.assertNotIn("note", result)
 
     async def test_without_a_usable_credential_the_board_is_still_created(self) -> None:
         from fastapi import HTTPException
 
         summary = SimpleNamespace(id=uuid.uuid4())
-        board = SimpleNamespace(id=summary.id, name="Team", description=None, auto_advance=True)
+        board = SimpleNamespace(
+            id=summary.id,
+            name="Team",
+            description=None,
+            auto_advance=True,
+            mapper_credential_id=None,
+            mapper_model=None,
+        )
         db = AsyncMock()
         db.get = AsyncMock(return_value=board)
         create = AsyncMock(side_effect=[HTTPException(400, "Credential not found"), summary])
@@ -214,3 +231,5 @@ class CreateBoardModelTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertTrue(result["created"])
         self.assertIsNone(create.await_args_list[1].kwargs["request"].mapper_credential_id)
+        self.assertIsNone(result["board"]["agentic_kanban_model"])
+        self.assertIn("Agentic Kanban Model", result["note"])
