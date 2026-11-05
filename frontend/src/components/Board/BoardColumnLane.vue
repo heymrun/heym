@@ -58,6 +58,16 @@ function blocksCrossColumnMove(cardId: string, targetColumnId: string): boolean 
   return true;
 }
 
+// Moving a card that waits for a review cancels that review (it is never approved), so the
+// person moving it confirms first.
+function confirmsPendingMove(cardId: string, targetColumnId: string): boolean {
+  const card = boardStore.activeBoard?.cards.find((c) => c.id === cardId);
+  if (!card || card.column_id === targetColumnId || card.run_status !== "pending") return true;
+  return window.confirm(
+    "This card is waiting for a review. Moving it cancels that review; it does not approve it. Move it anyway?",
+  );
+}
+
 function containsPoint(clientX: number, clientY: number): boolean {
   const rect = lane.value?.getBoundingClientRect();
   if (!rect) return false;
@@ -80,6 +90,7 @@ function onCardTouchDrag(event: Event): void {
   touchDragOver.value = detail.phase !== "end" && isOverLane;
   if (detail.phase === "end" && isOverLane) {
     if (blocksCrossColumnMove(detail.cardId, props.column.id)) return;
+    if (!confirmsPendingMove(detail.cardId, props.column.id)) return;
     void boardStore.moveCard(
       detail.cardId,
       props.column.id,
@@ -140,6 +151,7 @@ function onDrop(event: DragEvent): void {
   const cardId = event.dataTransfer?.getData("text/board-card");
   if (!cardId) return;
   if (blocksCrossColumnMove(cardId, props.column.id)) return;
+  if (!confirmsPendingMove(cardId, props.column.id)) return;
   void boardStore.moveCard(cardId, props.column.id, dropIndexFromClientY(event.clientY));
 }
 
