@@ -2,12 +2,22 @@
 
 import uuid
 
-from sqlalchemy import delete, text
+from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from app.config import settings
-from app.db.models import Board, BoardColumn, BoardShare, BoardTeamShare, Team, TeamMember, User
+from app.db.models import (
+    Board,
+    BoardColumn,
+    BoardShare,
+    BoardTeamShare,
+    ExecutionHistory,
+    Team,
+    TeamMember,
+    User,
+    Workflow,
+)
 from app.db.session import engine as app_engine
 
 DEFAULT_COLUMNS = ("Backlog", "Planning", "Development", "Done")
@@ -77,10 +87,13 @@ async def share_board_with_team(
 
 
 async def cleanup(engine: AsyncEngine, users: list[User], teams: list[Team] = ()) -> None:
-    """Delete boards owned by ``users``, then ``teams``, then the users, and dispose."""
+    """Delete what ``users`` own (boards, workflows), ``teams``, the users; then dispose."""
     async with AsyncSession(engine) as db:
         ids = [u.id for u in users]
         await db.execute(delete(Board).where(Board.owner_id.in_(ids)))
+        owned = select(Workflow.id).where(Workflow.owner_id.in_(ids))
+        await db.execute(delete(ExecutionHistory).where(ExecutionHistory.workflow_id.in_(owned)))
+        await db.execute(delete(Workflow).where(Workflow.owner_id.in_(ids)))
         for team in teams:
             await db.execute(delete(Team).where(Team.id == team.id))
         await db.execute(delete(User).where(User.id.in_(ids)))

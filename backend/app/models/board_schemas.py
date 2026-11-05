@@ -1,9 +1,62 @@
 """Pydantic schemas for the agentic kanban board API."""
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
+from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from app.services.board_card_fields import normalize_labels
+
+CardPriority = Literal["low", "medium", "high", "urgent"]
+
+
+class CardLinkModel(BaseModel):
+    workflow_id: uuid.UUID
+    execution_id: uuid.UUID | None = None
+
+
+class CardFieldsRequest(BaseModel):
+    """Typed card fields; a field left out keeps its value, null clears it."""
+
+    assignee_user_id: uuid.UUID | None = None
+    priority: CardPriority | None = None
+    due_date: date | None = None
+    labels: list[str] | None = Field(default=None, max_length=50)
+    links: list[CardLinkModel] | None = Field(default=None, max_length=10)
+
+    @field_validator("labels")
+    @classmethod
+    def _normalize_labels(cls, value: list[str] | None) -> list[str] | None:
+        return None if value is None else normalize_labels(value)
+
+
+class CardLinkResponse(BaseModel):
+    workflow_id: uuid.UUID | None = None
+    workflow_name: str | None = None
+    execution_id: uuid.UUID | None = None
+    execution_status: str | None = None
+    # The reader cannot open the linked workflow; nothing about it is shown.
+    hidden: bool = False
+
+
+class CardFieldsResponse(BaseModel):
+    assignee_user_id: uuid.UUID | None = None
+    priority: CardPriority | None = None
+    due_date: date | None = None
+    labels: list[str] = Field(default_factory=list)
+    links: list[CardLinkResponse] = Field(default_factory=list)
+
+
+class BoardMemberResponse(BaseModel):
+    user_id: uuid.UUID
+    name: str | None = None
+    email: str
+    permission: str
+
+
+class BoardRevisionResponse(BaseModel):
+    revision: str
 
 
 class BoardColumnWorkflowResponse(BaseModel):
@@ -31,6 +84,9 @@ class BoardCardResponse(BaseModel):
     position: int
     run_status: str
     card_metadata: dict = Field(default_factory=dict)
+    fields: CardFieldsResponse = Field(default_factory=CardFieldsResponse)
+    # Fingerprint of title, content and fields; send it back to refuse stale writes.
+    edit_version: str = ""
     created_at: datetime
     updated_at: datetime
 
@@ -94,18 +150,20 @@ class ColumnUpdateRequest(BaseModel):
     workflow_ids: list[uuid.UUID] | None = None
 
 
-class CardCreateRequest(BaseModel):
+class CardCreateRequest(CardFieldsRequest):
     title: str
     content: str = ""
     column_id: uuid.UUID | None = None
     position: int | None = None
 
 
-class CardUpdateRequest(BaseModel):
+class CardUpdateRequest(CardFieldsRequest):
     title: str | None = None
     content: str | None = None
     card_metadata: dict | None = None
     position: int | None = None
+    # The edit_version the client read; a different current one answers 409.
+    expected_edit_version: str | None = None
 
 
 class CardMoveRequest(BaseModel):
