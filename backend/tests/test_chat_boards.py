@@ -149,3 +149,47 @@ class SummaryTests(unittest.TestCase):
             s("create_board_column", {"created": True, "column": {"name": "Review"}}),
             "Added column 'Review'",
         )
+
+
+class CreateBoardModelTests(unittest.IsolatedAsyncioTestCase):
+    async def test_a_board_the_chat_creates_maps_cards_with_the_chats_model(self) -> None:
+        credential_id = uuid.uuid4()
+        summary = SimpleNamespace(id=uuid.uuid4())
+        board = SimpleNamespace(id=summary.id, name="Team", description=None, auto_advance=False)
+        db = AsyncMock()
+        db.get = AsyncMock(return_value=board)
+        with patch.object(
+            chat_boards.boards_api, "create_board", AsyncMock(return_value=summary)
+        ) as create:
+            result = await chat_boards.call_board_tool(
+                db,
+                SimpleNamespace(id=uuid.uuid4()),
+                "create_board",
+                {"name": "Team", "auto_advance": False},
+                "http://h",
+                (credential_id, "gpt-4o"),
+            )
+        request = create.await_args.kwargs["request"]
+        self.assertEqual(request.mapper_credential_id, credential_id)
+        self.assertEqual(request.mapper_model, "gpt-4o")
+        self.assertTrue(result["created"])
+
+    async def test_without_a_usable_credential_the_board_is_still_created(self) -> None:
+        from fastapi import HTTPException
+
+        summary = SimpleNamespace(id=uuid.uuid4())
+        board = SimpleNamespace(id=summary.id, name="Team", description=None, auto_advance=True)
+        db = AsyncMock()
+        db.get = AsyncMock(return_value=board)
+        create = AsyncMock(side_effect=[HTTPException(400, "Credential not found"), summary])
+        with patch.object(chat_boards.boards_api, "create_board", create):
+            result = await chat_boards.call_board_tool(
+                db,
+                SimpleNamespace(id=uuid.uuid4()),
+                "create_board",
+                {"name": "Team"},
+                "http://h",
+                (uuid.uuid4(), "gpt-4o"),
+            )
+        self.assertTrue(result["created"])
+        self.assertIsNone(create.await_args_list[1].kwargs["request"].mapper_credential_id)

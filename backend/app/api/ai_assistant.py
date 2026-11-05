@@ -5233,8 +5233,10 @@ async def stream_dashboard_chat(
                         + "\n\n"
                     )
                     step_start = time.time()
+                    # A board the chat creates maps cards with the chat's own model.
+                    chat_llm = (selected_credential.id, model) if selected_credential else None
                     result = json.dumps(
-                        await call_board_tool(db, user, name, args, public_base_url)
+                        await call_board_tool(db, user, name, args, public_base_url, chat_llm)
                     )
                     step_ms = round((time.time() - step_start) * 1000, 2)
                     run_steps.append(

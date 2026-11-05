@@ -53,6 +53,7 @@ from app.services.board_access import (
 from app.services.board_card_fields import CardFilter, read_fields
 
 Priority = Literal["low", "medium", "high", "urgent"]
+CREATE_BOARD_TOOL = "create_board"
 RunStatus = Literal["idle", "running", "pending", "success", "failed"]
 MAX_TASKS = 500
 CONTENT_PREVIEW = 400
@@ -508,15 +509,27 @@ async def _owned_board(db: AsyncSession, user: User, board_id: uuid.UUID) -> Boa
 
 
 async def _create_board(
-    db: AsyncSession, user: User, args: CreateBoardArgs, base: str
+    db: AsyncSession,
+    user: User,
+    args: CreateBoardArgs,
+    base: str,
+    chat_llm: tuple[uuid.UUID, str] | None = None,
 ) -> dict[str, Any]:
-    summary = await boards_api.create_board(
-        request=BoardCreateRequest(
-            name=args.name.strip(), description=args.description, auto_advance=args.auto_advance
-        ),
-        db=db,
-        current_user=user,
+    """A new board that maps cards with the chat's own credential and model, as the agents of a
+    workflow the chat builds do, so the board works without a trip to its settings."""
+    request = BoardCreateRequest(
+        name=args.name.strip(), description=args.description, auto_advance=args.auto_advance
     )
+    if chat_llm is not None:
+        request.mapper_credential_id, request.mapper_model = chat_llm
+    try:
+        summary = await boards_api.create_board(request=request, db=db, current_user=user)
+    except HTTPException as exc:
+        if chat_llm is None or exc.status_code != status.HTTP_400_BAD_REQUEST:
+            raise
+        # The chat's credential cannot map cards for this user: create the board without it.
+        request.mapper_credential_id, request.mapper_model = None, None
+        summary = await boards_api.create_board(request=request, db=db, current_user=user)
     board = await db.get(Board, summary.id)
     return {"created": True, "board": _board_entry(board, PERMISSION_OWNER, base)}
 
@@ -762,7 +775,8 @@ _TOOLS: dict[str, tuple[type[_Args], str, str, Handler]] = {
     "create_board": (
         CreateBoardArgs,
         "Create a board owned by the user, with the columns Backlog, Planning, Development and "
-        "Done. Set auto_advance false for a plain team task board.",
+        "Done, mapping cards with this chat's model. Set auto_advance false for a plain team "
+        "task board.",
         "Creating board...",
         _create_board,
     ),
@@ -872,8 +886,12 @@ async def call_board_tool(
     name: str,
     arguments: dict[str, Any] | None,
     public_base_url: str,
+    chat_llm: tuple[uuid.UUID, str] | None = None,
 ) -> dict[str, Any]:
-    """Validate a board action and run it through the board routes."""
+    """Validate a board action and run it through the board routes.
+
+    ``chat_llm`` is the chat's credential id and model; a board the chat creates uses them.
+    """
     model, _description, _label, handler = _TOOLS[name]
     try:
         args = model.model_validate(arguments or {})
@@ -885,6 +903,8 @@ async def call_board_tool(
             )
         }
     try:
+        if name == CREATE_BOARD_TOOL:
+            return await _create_board(db, user, args, public_base_url, chat_llm)
         return await handler(db, user, args, public_base_url)
     except HTTPException as exc:
         return {"error": _detail(exc.detail)}

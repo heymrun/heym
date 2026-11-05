@@ -7,7 +7,7 @@ import type { BoardCard, BoardMember, CardPriority } from "@/types/board";
 import type { CardFieldForm } from "@/lib/boardCardFields";
 import Button from "@/components/ui/Button.vue";
 import Input from "@/components/ui/Input.vue";
-import Select from "@/components/ui/Select.vue";
+import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 import { useToast } from "@/composables/useToast";
 import { fieldChanges, formFromCard, PRIORITY_LABELS } from "@/lib/boardCardFields";
 import { boardApi } from "@/services/api";
@@ -27,6 +27,19 @@ const form = ref<CardFieldForm>(formFromCard(props.card));
 const saving = ref(false);
 
 const changes = computed(() => fieldChanges(props.card, form.value));
+// The searchable select clears to undefined; the form keeps "" for "not set".
+const assignee = computed({
+  get: (): string => form.value.assigneeUserId,
+  set: (value: string | undefined): void => {
+    form.value.assigneeUserId = value ?? "";
+  },
+});
+const priority = computed({
+  get: (): string => form.value.priority,
+  set: (value: string | undefined): void => {
+    form.value.priority = (value ?? "") as CardPriority | "";
+  },
+});
 const dirty = computed<boolean>(() => Object.keys(changes.value).length > 0);
 
 // A reload (the dialog polls while a run is active) must not wipe unsaved edits.
@@ -100,30 +113,34 @@ async function save(): Promise<void> {
   >
     <label class="flex flex-col gap-1 text-xs text-muted-foreground">
       Assignee
-      <Select
-        v-model="form.assigneeUserId"
+      <SearchableSelect
+        id="card-field-assignee"
+        v-model="assignee"
         :options="assigneeOptions"
-        placeholder=""
+        placeholder="Unassigned"
+        search-placeholder="Search people…"
         :disabled="readOnly"
-        data-testid="card-field-assignee"
       />
     </label>
     <label class="flex flex-col gap-1 text-xs text-muted-foreground">
       Priority
-      <Select
-        v-model="form.priority"
+      <SearchableSelect
+        id="card-field-priority"
+        v-model="priority"
         :options="priorityOptions"
-        placeholder=""
+        placeholder="None"
+        search-placeholder="Search…"
         :disabled="readOnly"
-        data-testid="card-field-priority"
       />
     </label>
     <label class="flex flex-col gap-1 text-xs text-muted-foreground">
       Due date
+      <!-- The picker icon sits at the right edge, and is light on the dark theme. -->
       <Input
         v-model="form.dueDate"
         type="date"
         :disabled="readOnly"
+        class="[&::-webkit-calendar-picker-indicator]:ml-auto [&::-webkit-calendar-picker-indicator]:cursor-pointer dark:[color-scheme:dark]"
         data-testid="card-field-due"
       />
     </label>

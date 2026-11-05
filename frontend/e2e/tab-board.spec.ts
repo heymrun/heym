@@ -618,8 +618,10 @@ test("sets a card's assignee, priority, due date and labels and shows them", asy
 
   await page.goto(`/?tab=board&board=${boardId}`);
   await page.getByTestId(`board-card-${cardId}`).click();
-  await page.getByTestId("card-field-assignee").locator("select").selectOption(owner.user_id);
-  await page.getByTestId("card-field-priority").locator("select").selectOption("urgent");
+  await page.locator("#card-field-assignee").click();
+  await page.getByRole("option", { name: owner.name || owner.email, exact: true }).click();
+  await page.locator("#card-field-priority").click();
+  await page.getByRole("option", { name: "Urgent", exact: true }).click();
   await page.getByTestId("card-field-due").fill("2020-01-15");
   await page.getByTestId("card-field-labels").fill("Acme, NDA");
   await page.getByTestId("card-fields-save").click();
@@ -647,7 +649,8 @@ test("refuses to overwrite a card someone else changed", async ({ page }) => {
   });
   await page.goto(`/?tab=board&board=${boardId}`);
   await page.getByTestId(`board-card-${cardId}`).click();
-  await page.getByTestId("card-field-priority").locator("select").selectOption("low");
+  await page.locator("#card-field-priority").click();
+  await page.getByRole("option", { name: "Low", exact: true }).click();
 
   // Someone else sets the priority while the dialog is open.
   const other = await page.request.patch(`/api/boards/${boardId}/cards/${cardId}`, {
@@ -657,7 +660,7 @@ test("refuses to overwrite a card someone else changed", async ({ page }) => {
 
   await page.getByTestId("card-fields-save").click();
   await expect(page.getByText("This card was changed by someone else.")).toBeVisible();
-  await expect(page.getByTestId("card-field-priority").locator("select")).toHaveValue("high");
+  await expect(page.locator("#card-field-priority")).toHaveValue("High");
 });
 
 test("runs a column workflow chain to completion when a card enters", async ({ page }) => {

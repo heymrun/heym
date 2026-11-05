@@ -24,7 +24,7 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
       label: "New in Heym",
       introTitle: "New in this release",
       introDescription: "Kanban boards become team task boards, managed the same way everywhere.",
-      tourEnabled: false,
+      tourEnabled: true,
       sectionOrder: ["board-task-fields"],
     },
     sections: [{
