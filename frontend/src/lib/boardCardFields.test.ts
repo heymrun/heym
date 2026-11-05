@@ -1,0 +1,131 @@
+import { describe, expect, it } from "vitest";
+
+import type { BoardCard, CardFields } from "@/types/board";
+import {
+  cardMatches,
+  dueState,
+  emptyCardFields,
+  fieldChanges,
+  formFromCard,
+  localDate,
+  parseLabels,
+  PRIORITY_LABELS,
+} from "@/lib/boardCardFields";
+
+const today = "2026-11-05";
+
+function card(partial: Partial<CardFields>, extra: Partial<BoardCard> = {}): BoardCard {
+  return {
+    id: "c",
+    board_id: "b",
+    column_id: "col",
+    title: "T",
+    content: "",
+    position: 0,
+    run_status: "idle",
+    card_metadata: {},
+    created_at: "",
+    updated_at: "",
+    edit_version: "v",
+    fields: { ...emptyCardFields(), ...partial },
+    ...extra,
+  };
+}
+
+describe("dueState", () => {
+  it("names overdue, today, soon and later", () => {
+    expect(dueState("2026-11-04", today)).toBe("overdue");
+    expect(dueState("2026-11-05", today)).toBe("today");
+    expect(dueState("2026-11-11", today)).toBe("soon");
+    expect(dueState("2026-11-12", today)).toBe("later");
+    expect(dueState(null, today)).toBeNull();
+  });
+});
+
+describe("cardMatches", () => {
+  const me = "u1";
+  const context = { userId: me, today };
+
+  it("filters by assignee", () => {
+    const mine = card({ assignee_user_id: me });
+    expect(cardMatches(mine, { assignee: "me" }, context)).toBe(true);
+    expect(cardMatches(mine, { assignee: "unassigned" }, context)).toBe(false);
+    expect(cardMatches(card({}), { assignee: "unassigned" }, context)).toBe(true);
+    expect(cardMatches(mine, { assignee: "u2" }, context)).toBe(false);
+    expect(cardMatches(mine, { assignee: "me" }, { userId: null, today })).toBe(false);
+  });
+
+  it("filters by priority, label, column and review state", () => {
+    const tagged = card({ priority: "high", labels: ["Acme"] });
+    expect(cardMatches(tagged, { priority: "high", label: "acme" }, context)).toBe(true);
+    expect(cardMatches(tagged, { priority: "low" }, context)).toBe(false);
+    expect(cardMatches(tagged, { columnIds: ["other"] }, context)).toBe(false);
+    expect(cardMatches(tagged, { columnIds: ["col"] }, context)).toBe(true);
+    const waiting = card({}, { run_status: "pending" });
+    expect(cardMatches(waiting, { runStatus: "pending" }, context)).toBe(true);
+    expect(cardMatches(tagged, { runStatus: "pending" }, context)).toBe(false);
+  });
+
+  it("filters by due window and leaves the last column out of overdue", () => {
+    const late = card({ due_date: "2026-11-01" });
+    expect(cardMatches(late, { due: "overdue" }, context)).toBe(true);
+    expect(cardMatches(late, { due: "overdue" }, { ...context, doneColumnIds: ["col"] })).toBe(
+      false,
+    );
+    expect(cardMatches(card({ due_date: today }), { due: "today" }, context)).toBe(true);
+    expect(cardMatches(card({ due_date: "2026-11-08" }), { due: "week" }, context)).toBe(true);
+    expect(cardMatches(late, { due: "week" }, context)).toBe(false);
+    expect(cardMatches(card({}), { due: "week" }, context)).toBe(false);
+  });
+});
+
+describe("localDate", () => {
+  it("formats a date as YYYY-MM-DD in local time", () => {
+    expect(localDate(new Date(2026, 10, 5, 23, 30))).toBe("2026-11-05");
+  });
+});
+
+describe("parseLabels", () => {
+  it("trims, drops empties and repeats in any case", () => {
+    expect(parseLabels(" Acme, acme ,NDA,, ")).toEqual(["Acme", "NDA"]);
+  });
+});
+
+describe("fieldChanges", () => {
+  it("sends only the fields that changed", () => {
+    const current = card({ priority: "low", labels: ["Acme"] });
+    const form = formFromCard(current);
+    expect(fieldChanges(current, form)).toEqual({});
+    form.priority = "urgent";
+    form.dueDate = "2026-11-10";
+    expect(fieldChanges(current, form)).toEqual({ priority: "urgent", due_date: "2026-11-10" });
+  });
+
+  it("clears with null and compares labels and visible links", () => {
+    const current = card({
+      assignee_user_id: "u1",
+      labels: ["Acme"],
+      links: [
+        {
+          workflow_id: "w1",
+          workflow_name: "Draft",
+          execution_id: null,
+          execution_status: null,
+          hidden: false,
+        },
+        { workflow_id: null, workflow_name: null, execution_id: null, execution_status: null, hidden: true },
+      ],
+    });
+    const form = formFromCard(current);
+    expect(form.links).toEqual([{ workflow_id: "w1", execution_id: "" }]);
+    form.assigneeUserId = "";
+    form.labels = " Acme ";
+    expect(fieldChanges(current, form)).toEqual({ assignee_user_id: null });
+    form.links = [];
+    expect(fieldChanges(current, form)).toEqual({ assignee_user_id: null, links: [] });
+  });
+});
+
+it("labels every priority, most urgent first", () => {
+  expect(Object.keys(PRIORITY_LABELS)).toEqual(["urgent", "high", "medium", "low"]);
+});
