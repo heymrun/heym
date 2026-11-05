@@ -11,6 +11,7 @@ export interface BoardSummary {
   mapper_credential_id: string | null;
   mapper_credential_name: string | null;
   permission: BoardPermission;
+  auto_advance: boolean;
   updated_at: string;
 }
 
@@ -32,6 +33,43 @@ export interface BoardColumn {
 
 export type CardRunStatus = "idle" | "running" | "pending" | "success" | "failed";
 
+export type CardPriority = "low" | "medium" | "high" | "urgent";
+
+/** A card's link to a workflow, or one of its runs; hidden when the viewer cannot open it. */
+export interface CardLink {
+  workflow_id: string | null;
+  workflow_name: string | null;
+  execution_id: string | null;
+  execution_status: string | null;
+  hidden: boolean;
+}
+
+export interface CardFields {
+  assignee_user_id: string | null;
+  priority: CardPriority | null;
+  /** YYYY-MM-DD */
+  due_date: string | null;
+  labels: string[];
+  links: CardLink[];
+}
+
+/** Someone who can open a board, and so can be assigned its cards. */
+export interface BoardMember {
+  user_id: string;
+  name: string | null;
+  email: string;
+  permission: BoardPermission;
+}
+
+/** Typed fields a write sets; a key left out keeps its value, null clears it. */
+export interface CardFieldsPayload {
+  assignee_user_id?: string | null;
+  priority?: CardPriority | null;
+  due_date?: string | null;
+  labels?: string[] | null;
+  links?: { workflow_id: string; execution_id?: string | null }[] | null;
+}
+
 export interface BoardCard {
   id: string;
   board_id: string;
@@ -41,6 +79,9 @@ export interface BoardCard {
   position: number;
   run_status: CardRunStatus;
   card_metadata: Record<string, unknown>;
+  fields: CardFields;
+  /** Send back as expected_edit_version; a changed card answers 409. */
+  edit_version: string;
   created_at: string;
   updated_at: string;
 }
@@ -53,6 +94,7 @@ export interface BoardState {
   mapper_credential_id: string | null;
   mapper_credential_name: string | null;
   permission: BoardPermission;
+  auto_advance: boolean;
   columns: BoardColumn[];
   cards: BoardCard[];
   has_active_runs: boolean;
@@ -97,6 +139,7 @@ export interface BoardCreatePayload {
   description?: string | null;
   mapper_model?: string | null;
   mapper_credential_id?: string | null;
+  auto_advance?: boolean;
 }
 
 export interface BoardUpdatePayload {
@@ -104,6 +147,7 @@ export interface BoardUpdatePayload {
   description?: string | null;
   mapper_model?: string | null;
   mapper_credential_id?: string | null;
+  auto_advance?: boolean;
 }
 
 export interface ColumnUpdatePayload {
@@ -114,18 +158,19 @@ export interface ColumnUpdatePayload {
   workflow_ids?: string[];
 }
 
-export interface CardCreatePayload {
+export interface CardCreatePayload extends CardFieldsPayload {
   title: string;
   content?: string;
   column_id?: string;
   position?: number;
 }
 
-export interface CardUpdatePayload {
+export interface CardUpdatePayload extends CardFieldsPayload {
   title?: string;
   content?: string;
   card_metadata?: Record<string, unknown>;
   position?: number;
+  expected_edit_version?: string;
 }
 
 export interface CardAttachment {
