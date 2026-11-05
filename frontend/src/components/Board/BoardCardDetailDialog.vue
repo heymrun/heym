@@ -21,11 +21,12 @@ import Dialog from "@/components/ui/Dialog.vue";
 import Button from "@/components/ui/Button.vue";
 import Textarea from "@/components/ui/Textarea.vue";
 import UserAvatar from "@/components/ui/UserAvatar.vue";
-import type { CardActivity, CardAttachment, CardDetail, CardRun } from "@/types/board";
+import type { BoardCard, CardActivity, CardAttachment, CardDetail, CardRun } from "@/types/board";
 import { boardApi } from "@/services/api";
 import { useBoardStore } from "@/stores/board";
 import { playSuccessSound } from "@/utils/audio";
 import { useToast } from "@/composables/useToast";
+import BoardCardFieldsEditor from "./BoardCardFieldsEditor.vue";
 
 const props = defineProps<{ open: boolean; cardId: string | null }>();
 const emit = defineEmits<{ (e: "close"): void }>();
@@ -181,6 +182,11 @@ watch(activeBoardCardStatus, (status) => {
 });
 
 onUnmounted(stopPolling);
+
+async function onFieldsSaved(card: BoardCard): Promise<void> {
+  if (detail.value) detail.value = { ...detail.value, card };
+  await boardStore.refreshActiveBoard();
+}
 
 const descriptionDirty = computed<boolean>(
   () => detail.value !== null && editedContent.value !== detail.value.card.content,
@@ -408,6 +414,20 @@ async function openLiveRun(run: CardRun): Promise<void> {
       v-else-if="detail"
       class="flex flex-col gap-3 p-1 text-sm"
     >
+      <section>
+        <h3 class="mb-1 text-xs font-semibold uppercase text-muted-foreground">
+          Details
+        </h3>
+        <BoardCardFieldsEditor
+          v-if="boardStore.activeBoard"
+          :board-id="boardStore.activeBoard.id"
+          :card="detail.card"
+          :members="boardStore.members"
+          :read-only="!boardStore.canWrite"
+          @saved="onFieldsSaved"
+        />
+      </section>
+
       <section>
         <h3 class="mb-1 text-xs font-semibold uppercase text-muted-foreground">
           Description

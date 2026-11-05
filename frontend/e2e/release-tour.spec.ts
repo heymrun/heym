@@ -51,3 +51,38 @@ test("opens every shipped feature from the launcher", async ({ page }) => {
     tour.getByRole("heading", { name: RELEASE_CATALOG.slides[0].title }),
   ).toBeVisible();
 });
+
+test("every feature's animation fits inside its frame", async ({ page }, testInfo) => {
+  await prepareAuthenticatedPage(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+  await page.getByRole("button", { name: "New in Heym — open the release tour" }).click();
+  const tour = page.getByRole("dialog", { name: /New in Heym/ });
+  await tour.getByRole("button", { name: "Start tour" }).click();
+  const frame = tour.getByTestId("release-tour-visual");
+
+  for (const [index, slide] of RELEASE_CATALOG.slides.entries()) {
+    await tour.getByRole("button", { name: `Go to ${slide.title}`, exact: true }).click();
+    await expect(tour.getByRole("heading", { name: slide.title })).toBeVisible();
+    // Sample the loop a few times: some animations grow from one step to the next.
+    for (let sample = 0; sample < 4; sample += 1) {
+      await page.waitForTimeout(800);
+      const overflow = await frame.evaluate((root) => {
+        const box = root.getBoundingClientRect();
+        return Array.from(root.querySelectorAll("*"))
+          .map((element) => ({ element, rect: element.getBoundingClientRect() }))
+          .filter(({ rect }) => rect.width > 0 && rect.height > 0)
+          .filter(
+            ({ rect }) =>
+              rect.top < box.top - 1 ||
+              rect.left < box.left - 1 ||
+              rect.bottom > box.bottom + 1 ||
+              rect.right > box.right + 1,
+          )
+          .map(({ element }) => (element.textContent ?? element.tagName).trim().slice(0, 40));
+      });
+      expect(overflow, `${slide.title}, sample ${sample}`).toEqual([]);
+    }
+    await frame.screenshot({ path: testInfo.outputPath(`visual-${index}.png`), animations: "disabled" });
+  }
+});

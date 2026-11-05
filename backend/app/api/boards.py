@@ -1,5 +1,6 @@
 """Agentic kanban board API: boards, columns, cards, moves, runs, comments, sharing."""
 
+import hashlib
 import uuid
 
 from fastapi import (
@@ -11,7 +12,8 @@ from fastapi import (
     UploadFile,
     status,
 )
-from sqlalchemy import delete, func, or_, select
+from pydantic import BaseModel
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
@@ -38,6 +40,8 @@ from app.models.board_schemas import (
     BoardColumnResponse,
     BoardColumnWorkflowResponse,
     BoardCreateRequest,
+    BoardMemberResponse,
+    BoardRevisionResponse,
     BoardShareRequest,
     BoardShareResponse,
     BoardStateResponse,
@@ -49,6 +53,7 @@ from app.models.board_schemas import (
     CardAttachmentResponse,
     CardCreateRequest,
     CardDetailResponse,
+    CardFieldsResponse,
     CardMoveRequest,
     CardRunResponse,
     CardUpdateRequest,
@@ -58,6 +63,21 @@ from app.models.board_schemas import (
 )
 from app.services import board_run_service
 from app.services.audit_log import audit
+from app.services.board_access import (
+    accessible_board_ids,
+    board_member_ids,
+    board_members,
+    board_permission,
+    board_permissions,
+)
+from app.services.board_card_fields import (
+    ASSIGNEE_KEY,
+    DUE_DATE_KEY,
+    FIELD_KEYS,
+    edit_version,
+    merge_metadata,
+    read_fields,
+)
 from app.services.credential_access import get_accessible_credential
 from app.services.file_storage import (
     build_download_url,
@@ -93,34 +113,7 @@ async def _get_owned_board(db: AsyncSession, board_id: uuid.UUID, user: User) ->
 
 async def _board_permission(db: AsyncSession, board: Board, user: User) -> str | None:
     """The caller's access to a board: "owner", "write", "read", or None when it is not shared."""
-    if board.owner_id == user.id:
-        return "owner"
-    permissions = list(
-        (
-            await db.execute(
-                select(BoardShare.permission).where(
-                    BoardShare.board_id == board.id, BoardShare.user_id == user.id
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-    permissions += list(
-        (
-            await db.execute(
-                select(BoardTeamShare.permission)
-                .join(TeamMember, TeamMember.team_id == BoardTeamShare.team_id)
-                .where(BoardTeamShare.board_id == board.id, TeamMember.user_id == user.id)
-            )
-        )
-        .scalars()
-        .all()
-    )
-    if not permissions:
-        return None
-    # The most permissive share wins.
-    return "write" if "write" in permissions else "read"
+    return await board_permission(db, board, user.id)
 
 
 async def _get_board_for_user(
@@ -194,6 +187,29 @@ async def _reindex_cards(db: AsyncSession, column_id: uuid.UUID) -> None:
         card.position = index
 
 
+async def _place_card(
+    db: AsyncSession, card: BoardCard, column_id: uuid.UUID, index: int | None
+) -> None:
+    """Put ``card`` at ``index`` of ``column_id`` (the top when None) and renumber the column
+    0..n-1, so every app shows the same order."""
+    others = list(
+        (
+            await db.execute(
+                select(BoardCard)
+                .where(BoardCard.column_id == column_id, BoardCard.id != card.id)
+                .order_by(BoardCard.position, BoardCard.updated_at)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    target = 0 if index is None else max(0, min(index, len(others)))
+    others.insert(target, card)
+    for position, item in enumerate(others):
+        if item.position != position:
+            item.position = position
+
+
 async def _column_workflow_responses(
     db: AsyncSession, column_ids: list[uuid.UUID]
 ) -> dict[uuid.UUID, list[BoardColumnWorkflowResponse]]:
@@ -217,7 +233,12 @@ async def _column_workflow_responses(
     return grouped
 
 
+CARD_CHANGED_MESSAGE = "This card was changed by someone else. Showing the latest version."
+
+
 def _card_response(card: BoardCard, *, actively_running: bool = False) -> BoardCardResponse:
+    metadata = card.card_metadata or {}
+    values = read_fields(metadata)
     return BoardCardResponse(
         id=card.id,
         board_id=card.board_id,
@@ -226,10 +247,37 @@ def _card_response(card: BoardCard, *, actively_running: bool = False) -> BoardC
         content=card.content,
         position=card.position,
         run_status="running" if actively_running else card.run_status,
-        card_metadata=card.card_metadata or {},
+        card_metadata=metadata,
+        fields=CardFieldsResponse(
+            assignee_user_id=values.assignee_user_id,
+            priority=values.priority,
+            due_date=values.due_date,
+            labels=list(values.labels),
+        ),
+        edit_version=edit_version(card.title, card.content, metadata),
         created_at=card.created_at,
         updated_at=card.updated_at,
     )
+
+
+async def _field_updates(db: AsyncSession, board: Board, request: BaseModel) -> dict[str, object]:
+    """The typed fields ``request`` sets, validated, in their stored form."""
+    updates: dict[str, object] = {}
+    for key in request.model_fields_set & set(FIELD_KEYS):
+        value = getattr(request, key)
+        if value is None:
+            updates[key] = None
+        elif key == ASSIGNEE_KEY:
+            if value not in await board_member_ids(db, board):
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST, "The assignee must be a member of this board"
+                )
+            updates[key] = str(value)
+        elif key == DUE_DATE_KEY:
+            updates[key] = value.isoformat()
+        else:
+            updates[key] = value
+    return updates
 
 
 async def _active_board_execution_ids(
@@ -291,6 +339,7 @@ def _board_summary(
         mapper_credential_id=board.mapper_credential_id,
         mapper_credential_name=cred_name,
         permission=permission,
+        auto_advance=board.auto_advance,
         updated_at=board.updated_at,
     )
 
@@ -300,31 +349,13 @@ async def list_boards(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[BoardSummaryResponse]:
-    shared_board_ids = set(
-        (await db.execute(select(BoardShare.board_id).where(BoardShare.user_id == current_user.id)))
-        .scalars()
-        .all()
-    ) | set(
-        (
-            await db.execute(
-                select(BoardTeamShare.board_id)
-                .join(TeamMember, TeamMember.team_id == BoardTeamShare.team_id)
-                .where(TeamMember.user_id == current_user.id)
-            )
-        )
-        .scalars()
-        .all()
-    )
     result = await db.execute(
         select(Board)
-        .where(
-            or_(Board.owner_id == current_user.id, Board.id.in_(shared_board_ids))
-            if shared_board_ids
-            else Board.owner_id == current_user.id
-        )
+        .where(Board.id.in_(accessible_board_ids(current_user.id)))
         .order_by(Board.created_at)
     )
     boards = result.scalars().all()
+    permissions = await board_permissions(db, boards, current_user.id)
     summaries: list[BoardSummaryResponse] = []
     for board in boards:
         column_count = (
@@ -336,7 +367,7 @@ async def list_boards(
             await db.execute(select(func.count(BoardCard.id)).where(BoardCard.board_id == board.id))
         ).scalar() or 0
         cred_name = await _mapper_credential_name(db, board)
-        permission = await _board_permission(db, board, current_user) or "read"
+        permission = permissions.get(board.id, "read")
         summaries.append(
             _board_summary(
                 board,
@@ -363,6 +394,7 @@ async def create_board(
         description=request.description,
         mapper_model=request.mapper_model,
         mapper_credential_id=request.mapper_credential_id,
+        auto_advance=request.auto_advance,
     )
     db.add(board)
     await db.flush()
@@ -419,6 +451,7 @@ async def get_board_state(
         mapper_credential_id=board.mapper_credential_id,
         mapper_credential_name=cred_name,
         permission=permission,
+        auto_advance=board.auto_advance,
         columns=[
             BoardColumnResponse(
                 id=column.id,
@@ -439,6 +472,60 @@ async def get_board_state(
     )
 
 
+@router.get("/{board_id}/members", response_model=list[BoardMemberResponse])
+async def list_board_members(
+    board_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[BoardMemberResponse]:
+    """Everyone who can open the board, for assigning cards."""
+    board, _ = await _get_board_for_user(db, board_id, current_user, write=False)
+    return [
+        BoardMemberResponse(
+            user_id=member.user_id,
+            name=member.name,
+            email=member.email,
+            permission=member.permission,
+        )
+        for member in await board_members(db, board)
+    ]
+
+
+@router.get("/{board_id}/revision", response_model=BoardRevisionResponse)
+async def get_board_revision(
+    board_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> BoardRevisionResponse:
+    """A fingerprint of the board's state; screens poll it and reload only when it changes."""
+    board, _ = await _get_board_for_user(db, board_id, current_user, write=False)
+    columns = (
+        await db.execute(
+            select(func.count(BoardColumn.id), func.max(BoardColumn.updated_at)).where(
+                BoardColumn.board_id == board.id
+            )
+        )
+    ).one()
+    cards = (
+        await db.execute(
+            select(func.count(BoardCard.id), func.max(BoardCard.updated_at)).where(
+                BoardCard.board_id == board.id
+            )
+        )
+    ).one()
+    links = (
+        await db.execute(
+            select(func.count(BoardColumnWorkflow.id))
+            .join(BoardColumn, BoardColumn.id == BoardColumnWorkflow.column_id)
+            .where(BoardColumn.board_id == board.id)
+        )
+    ).scalar() or 0
+    source = "|".join(
+        str(part) for part in (board.updated_at, columns[0], columns[1], cards[0], cards[1], links)
+    )
+    return BoardRevisionResponse(revision=hashlib.sha256(source.encode()).hexdigest()[:16])
+
+
 @router.patch("/{board_id}", response_model=BoardSummaryResponse)
 async def update_board(
     board_id: uuid.UUID,
@@ -452,6 +539,8 @@ async def update_board(
         board.name = request.name
     if request.description is not None:
         board.description = request.description
+    if request.auto_advance is not None:
+        board.auto_advance = request.auto_advance
     if "mapper_model" in fields_set:
         board.mapper_model = request.mapper_model
     if "mapper_credential_id" in fields_set:
@@ -505,11 +594,12 @@ async def create_column(
     count = (
         await db.execute(select(func.count(BoardColumn.id)).where(BoardColumn.board_id == board.id))
     ).scalar() or 0
-    position = request.position if request.position is not None else count
-    column = BoardColumn(
-        board_id=board.id, name=request.name, position=position, color=request.color
-    )
+    column = BoardColumn(board_id=board.id, name=request.name, position=count, color=request.color)
     db.add(column)
+    if request.position is not None:
+        # Insert at the requested slot and keep positions a dense 0..n-1 sequence.
+        await db.flush()
+        await _reorder_columns(db, board, column, request.position)
     await db.commit()
     await db.refresh(column)
     audit(
@@ -551,6 +641,8 @@ async def update_column(
     if "ai_instructions" in fields_set:
         column.ai_instructions = request.ai_instructions
     if request.workflow_ids is not None:
+        # A chain change alone touches no column field; bump it so the revision moves.
+        column.updated_at = func.now()
         # Check that all workflows are accessible to the user (owned or shared)
         for workflow_id in set(request.workflow_ids):
             workflow = await get_accessible_workflow(db, workflow_id, current_user.id)
@@ -603,19 +695,71 @@ async def update_column(
 async def delete_column(
     board_id: uuid.UUID,
     column_id: uuid.UUID,
+    move_cards_to_column_id: uuid.UUID | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> None:
+    """Delete a column. Its cards block the delete unless ``move_cards_to_column_id`` names
+    another column of the board: they then move to its top, without running its chain."""
     board, _ = await _get_board_for_user(db, board_id, current_user, write=True)
     column = await _get_board_column(db, board, column_id)
-    card_count = (
-        await db.execute(select(func.count(BoardCard.id)).where(BoardCard.column_id == column.id))
-    ).scalar() or 0
-    if card_count:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Move or delete the cards in this column first",
+    cards = list(
+        (
+            await db.execute(
+                select(BoardCard)
+                .where(BoardCard.column_id == column.id)
+                .order_by(BoardCard.position, BoardCard.updated_at)
+            )
         )
+        .scalars()
+        .all()
+    )
+    if cards:
+        if move_cards_to_column_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Move or delete the cards in this column first",
+            )
+        if move_cards_to_column_id == column.id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Choose another column for the cards",
+            )
+        target = await _get_board_column(db, board, move_cards_to_column_id)
+        if any(card.run_status in ACTIVE_RUN_STATUSES for card in cards):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="A card in this column is running or waiting for a review",
+            )
+        others = list(
+            (
+                await db.execute(
+                    select(BoardCard)
+                    .where(BoardCard.column_id == target.id)
+                    .order_by(BoardCard.position, BoardCard.updated_at)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for card in cards:
+            card.column_id = target.id
+            db.add(
+                BoardCardActivity(
+                    card_id=card.id,
+                    kind="event",
+                    author_type="system",
+                    content=(
+                        f"Moved from {column.name} to {target.name} when {column.name} was deleted"
+                    ),
+                    data={"from_column_id": str(column.id), "to_column_id": str(target.id)},
+                )
+            )
+        for position, card in enumerate([*cards, *others]):
+            card.position = position
+        # The cards must point at the target before the column row goes, or the foreign
+        # key's ON DELETE CASCADE removes them with it.
+        await db.flush()
     await db.delete(column)
     # Keep positions a dense 0..n-1 sequence — the planning gate is positional.
     remaining = list(
@@ -639,6 +783,7 @@ async def delete_column(
         target_name=board.name,
         column_id=column_id,
         column_name=column.name,
+        moved_cards=len(cards),
     )
     await db.commit()
 
@@ -690,24 +835,20 @@ async def create_card(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="Board has no columns"
             )
-    if request.position is not None:
-        position = request.position
-    else:
-        count = (
-            await db.execute(
-                select(func.count(BoardCard.id)).where(BoardCard.column_id == column.id)
-            )
-        ).scalar() or 0
-        position = count
     card = BoardCard(
+        id=uuid.uuid4(),
         board_id=board.id,
         column_id=column.id,
         title=request.title,
         content=request.content,
-        position=position,
+        position=0,
     )
+    updates = await _field_updates(db, board, request)
+    if updates:
+        card.card_metadata = merge_metadata({}, updates=updates)
     db.add(card)
     await db.flush()
+    await _place_card(db, card, column.id, request.position)
     db.add(
         BoardCardActivity(
             card_id=card.id,
@@ -806,15 +947,26 @@ async def update_card(
 ) -> BoardCardResponse:
     board, _ = await _get_board_for_user(db, board_id, current_user, write=True)
     card = await _get_board_card(db, board, card_id)
+    expected = request.expected_edit_version
+    if expected is not None and expected != edit_version(
+        card.title, card.content, card.card_metadata
+    ):
+        current = _card_response(card)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"message": CARD_CHANGED_MESSAGE, "card": current.model_dump(mode="json")},
+        )
+    updates = await _field_updates(db, board, request)
     if request.title is not None:
         card.title = request.title
     if request.content is not None:
         card.content = request.content
-    if request.card_metadata is not None:
-        card.card_metadata = request.card_metadata
+    if request.card_metadata is not None or updates:
+        card.card_metadata = merge_metadata(
+            card.card_metadata, raw=request.card_metadata, updates=updates
+        )
     if request.position is not None:
-        card.position = request.position
-        await _reindex_cards(db, card.column_id)
+        await _place_card(db, card, card.column_id, request.position)
     await db.commit()
     await db.refresh(card)
     audit(
@@ -825,6 +977,7 @@ async def update_card(
         target_name=board.name,
         card_id=card.id,
         card_title=card.title,
+        fields=",".join(sorted(request.model_fields_set)) or None,
     )
     return _card_response(card)
 
@@ -935,10 +1088,12 @@ async def move_card(
     source = await _get_board_column(db, board, card.column_id) if column_changed else target
 
     old_column_id = card.column_id
+    current_index = card.position
     card.column_id = target.id
-    if request.position is not None:
-        card.position = request.position
-    await _reindex_cards(db, target.id)
+    index = request.position
+    if index is None and not column_changed:
+        index = current_index
+    await _place_card(db, card, target.id, index)
     if column_changed:
         await _reindex_cards(db, old_column_id)
         db.add(

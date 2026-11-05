@@ -381,11 +381,11 @@ describe("shipped release registry", () => {
     const catalog = buildReleaseTourCatalog(RELEASE_REGISTRY);
 
     expect(catalog?.slides.map((slide) => slide.id)).toEqual([
+      "board-task-fields",
       "file-analysis",
       "planning-widgets",
       "a2a-agent",
       "agent-suite",
-      "chat-evals",
     ]);
   });
 
@@ -401,7 +401,7 @@ describe("shipped release registry", () => {
     expect(tours.map((tour) => tour.tourVisual)).toContain("file-analysis");
     expect(tours.map((tour) => tour.tourVisual)).toContain("planning-widgets");
     expect(tours.map((tour) => tour.tourVisual)).toContain("agent-suite");
-    expect(tours.map((tour) => tour.tourVisual)).toContain("chat-evals");
+    expect(tours.map((tour) => tour.tourVisual)).toContain("board-task-fields");
     for (const tour of tours) {
       expect(TOUR_VISUALS[tour.tourVisual], `missing visual for "${tour.tourVisual}"`)
         .toBeDefined();

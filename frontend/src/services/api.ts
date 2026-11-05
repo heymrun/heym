@@ -172,6 +172,7 @@ import type {
   BoardCard,
   BoardColumn,
   BoardCreatePayload,
+  BoardMember,
   BoardShare,
   BoardTeamShare,
   BoardUpdatePayload,
@@ -1993,8 +1994,21 @@ export const boardApi = {
     );
     return response.data;
   },
-  deleteColumn: async (boardId: string, columnId: string): Promise<void> => {
-    await api.delete(`/boards/${boardId}/columns/${columnId}`);
+  /** Delete a column; a column with cards needs `moveCardsTo`, another column of the board. */
+  deleteColumn: async (boardId: string, columnId: string, moveCardsTo?: string): Promise<void> => {
+    await api.delete(`/boards/${boardId}/columns/${columnId}`, {
+      params: moveCardsTo ? { move_cards_to_column_id: moveCardsTo } : undefined,
+    });
+  },
+  /** Everyone who can open the board, for assigning cards. */
+  members: async (boardId: string): Promise<BoardMember[]> => {
+    const response = await api.get<BoardMember[]>(`/boards/${boardId}/members`);
+    return response.data;
+  },
+  /** A fingerprint of the board's state; reload the board only when it changes. */
+  revision: async (boardId: string): Promise<string> => {
+    const response = await api.get<{ revision: string }>(`/boards/${boardId}/revision`);
+    return response.data.revision;
   },
   emptyColumn: async (boardId: string, columnId: string): Promise<void> => {
     await api.delete(`/boards/${boardId}/columns/${columnId}/cards`);

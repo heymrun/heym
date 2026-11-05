@@ -26,7 +26,13 @@ from app.api.analytics import (
     compute_analytics_stats,
     upsert_workflow_analytics_snapshot,
 )
-from app.api.boards import create_card as create_board_card
+from app.api.chat_boards import (
+    BOARD_TOOL_NAMES,
+    BOARD_TOOL_SCHEMAS,
+    board_tool_label,
+    call_board_tool,
+    summarize_board_tool,
+)
 from app.api.chat_dashboard_builds import (
     DASHBOARD_BUILD_TOOL_NAMES,
     DASHBOARD_BUILD_TOOL_SCHEMAS,
@@ -66,11 +72,6 @@ from app.api.workflows import (
 )
 from app.db.models import (
     LLM_CREDENTIAL_TYPES,
-    Board,
-    BoardCard,
-    BoardCardActivity,
-    BoardCardRun,
-    BoardColumn,
     CodexFollowupRequest,
     Credential,
     CredentialType,
@@ -84,7 +85,6 @@ from app.db.models import (
     WorkflowTeamShare,
 )
 from app.db.session import get_db
-from app.models.board_schemas import CardCreateRequest
 from app.models.schemas import DataTableColumnDef, DataTableCreate
 from app.services import file_intake_service, template_service
 from app.services.active_execution_overview import build_active_execution_overview
@@ -601,8 +601,8 @@ DASHBOARD_CHAT_SYSTEM_PROMPT = """You are an assistant that helps the user with 
 6. When the user asks for details of what ran or what came in (e.g. what ran, show details, list recent runs), use get_recent_executions with the appropriate time_range and optionally limit. Summarize the list (workflow name, time, status, brief output) in the user's language.
 6e. When the user asks about the runs of one specific workflow (how many times it ran, whether it failed, when it last ran, what its last status was, why a run failed), use list_workflows to find the workflow_id, then get_workflow_run_history(workflow_id) for metadata: total_runs, status_counts, first_run_at, last_run_at, last_run, avg_execution_time_ms and a page of runs. Answer from that metadata first. Only if the user wants the content of a run, or the reason for a failure, call get_workflow_run_history again with the execution_id of the relevant run (from runs or last_run) to read its inputs, outputs and per-node trace; look at nodes with status error. Use the status argument to list only failed runs, and offset when has_more is true. Do not use get_recent_executions for a question about one named workflow: it only returns the latest runs across all workflows, so the workflow may be missing.
 6a. When the user asks about scheduled cron runs, the calendar, or when workflows will run (today, this week, this month, upcoming times), use get_schedule_events with view_window day, week, or month, optional reference_date (YYYY-MM-DD), include_shared false for owned-only or true to include shared workflows, or start_iso/end_iso for a custom range. Summarize events (workflow name and time) in the user's language.
-6b. When the user asks about kanban boards or their tasks (which boards exist, how many boards, what jobs/tasks are on a board, their status, what is running/pending/failed/done, or what is in a column), use list_boards for an overview and get_board_tasks (optional board_id to scope, optional status filter) for the tasks. For a specific task/card (what it is, its description, the comments/conversation on it, what happened, its output or error), use get_card_detail with the card_id from get_board_tasks. Answer from the results in the user's language; do not execute workflows for these questions.
-6c. When the user naturally asks to add or create a kanban task/card, use create_board_task; this is a board action, not a request to create a workflow, and no command prefix is needed. Pass the user's requested title and optional description. If the user clearly names a board, call list_boards first to resolve its exact board_id. If no board is specified, call create_board_task without board_id: it will create the task when there is exactly one board, or return requires_board_selection with the available boards when there are several. For requires_board_selection, emit one heym-clarify question of type single whose options are the returned board names, then stop and wait. After the user selects a board, call list_boards again to resolve the selected name to its board_id, then call create_board_task exactly once. If a named board is missing or ambiguous, use the same single-choice board selection. Never ask which column to use: create_board_task always places the task in the first column.
+6b. Kanban boards: list_boards lists the boards the user owns or that are shared with them, with their permission. get_board reads one board's columns and tasks; get_board_tasks lists tasks across boards. Both take the filters assignee (me, unassigned or a user_id), column_name or column_id, priority, due (overdue, today, week), label and run_status, where pending means the task waits for a review. get_card_detail reads one task with its comments and runs. list_board_members turns a person's name into the user_id that assignee filters and assignments take. Answer status questions from these tools in the user's language; do not execute workflows for them.
+6c. Board changes are direct actions, not workflow builds, and need no command prefix. Resolve every board, column, task and person with the read tools; never guess an id. create_board_task adds a task to the first column unless the user names a column, with optional assignee_user_id, priority, due_date (YYYY-MM-DD) and labels. Without board_id it uses the only board the user can write to or returns requires_board_selection; then emit one heym-clarify question of type single whose options are the returned board names, stop, and after the answer resolve the name with list_boards and call create_board_task once. update_board_task changes only the fields you pass (null clears one), and assigns or reassigns. move_board_task moves or reorders a task (position 0 is the top). Moving into a column with workflows starts them; moving a task that waits for a review cancels that review and never approves it, so say so. add_board_task_comment posts a comment on a task as the user; post only what the user asked to say. On a task waiting at the planning step the comment answers the agent's questions and the task moves on (chain_started): say so. A comment never approves a review. Approve or reject reviews only with the review tools. create_board, update_board, create_board_column, update_board_column and delete_board_column manage boards and columns; when the user wants a plain team task board, create it with auto_advance false so tasks stay where people put them. A board's agentic_kanban_model is the model that maps its cards; while it is null the Board tab cannot add or move cards there. create_board sets it to this chat's model; when a board the user owns has none, offer update_board with use_chat_model true, and if a result carries a note, tell the user. Delete a task, column or board only when the user asked for exactly that; delete_board needs confirm_name equal to the board's name, so ask the user to confirm the name first. A board with permission read cannot be changed: say so.
 6d. When the user asks what is running right now (e.g. "what is running?", "how many workflows are active?", "is anything still going?", "which node is it on?", "how long has it been running?"), use get_active_executions. It takes no arguments and returns count, running_count, pending_count, and one entry per in-progress run with workflow_name, running_for (human-readable elapsed time), current_nodes (the node or nodes executing right now), last_completed_node, and url. Answer with the count first, then one line per run: workflow name, how long it has been running, the current node label, and the url as a markdown link. If count is 0, say plainly that nothing is running right now. Entries with status "pending" are not executing; they are waiting for human review (pending_kind hitl or codex), so say that instead of reporting them as running. Entries with status "queued" are not executing either; they are waiting for a concurrency slot of their workflow, at queue_position of queue_size, so say they are queued and where they stand. Do not use get_recent_executions for this question: that tool lists finished runs.
 7. When a workflow is waiting for human review (HITL review, with review_url or kind "hitl") and the user says to approve, continue, edit, or refuse it, use resolve_hitl_review. Prefer the latest pending request_id or review_url from recent tool results in the conversation. Never call resolve_hitl_review for Codex follow-up pauses (with answer_url or kind "codex"): Codex questions cannot be resolved via resolve_hitl_review.
 8. When the user asks you to wait, monitor, or check again for a workflow that is still running or pending, use wait_for_execution_update instead of repeatedly polling yourself. Default to 5 seconds between checks and at most 5 checks unless the user explicitly asks otherwise.
@@ -623,7 +623,7 @@ Respond in the same language the user uses. Be concise and helpful. When you run
 
 If a tool returns an error or no relevant data, do not invent an answer. Say clearly that you do not have that information (e.g. "I don't have this information"). Base your answers only on data from the tools (workflows, analytics, execution results); when you do not know something, say so.
 
-When the user asks for something you cannot do with your tools (e.g. console logs, server logs) AND no workflow matches, say clearly that you do not have access to that, then offer what you can do in a short numbered list. Always include: (1) I can show recent runs, (2) I can show what is running right now (with elapsed time and current node), (3) I can show analytics stats and where workflows fail or slow down, (4) I can show scheduled cron times (day/week/month), (5) I can run a workflow and show its result, (6) I can list workflows and you can talk about them or ask me to run one, (7) I can list your teams, (8) I can inspect your data tables, add or remove columns, and read, add, update or delete rows, (9) I can list your dashboards and the widgets on each, and add, rename, delete or tidy widgets. End with something like: Which would you like?
+When the user asks for something you cannot do with your tools (e.g. console logs, server logs) AND no workflow matches, say clearly that you do not have access to that, then offer what you can do in a short numbered list. Always include: (1) I can show recent runs, (2) I can show what is running right now (with elapsed time and current node), (3) I can show analytics stats and where workflows fail or slow down, (4) I can show scheduled cron times (day/week/month), (5) I can run a workflow and show its result, (6) I can list workflows and you can talk about them or ask me to run one, (7) I can list your teams, (8) I can inspect your data tables, add or remove columns, and read, add, update or delete rows, (9) I can list your dashboards and the widgets on each, and add, rename, delete or tidy widgets, (10) I can show, add, assign, move and update tasks on your kanban boards. End with something like: Which would you like?
 
 11. When the user asks about teams (e.g. "my teams", "which teams am I in?", "who is in team X?"), use get_teams. Optionally pass team_name to filter by name.
 12. When the user asks about Heym features, nodes, expressions, workflows, or how to use the platform, use search_documentation. Call search_documentation at most 2 times per user message. Use one comprehensive query first (e.g. "canvas features", "portal"). Only call again with a different query if the first returns no relevant docs. In your response, cite the documentation with markdown links: [Document Title](/docs/category/slug). Example: [LLM Node](/docs/nodes/llm-node). When the documentation contains a video tag (e.g. `<video src="/features/showcase/..."`), include it in your response so the user can watch a demo directly in chat. Respond in the user's language.
@@ -1048,80 +1048,6 @@ DASHBOARD_CHAT_TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "list_boards",
-            "description": "List the user's agentic kanban boards. Use when the user asks which boards exist, how many boards there are, or for an overview of boards. Returns id, name, description, column_count, card_count, and how many cards are active/succeeded/failed for each board.",
-            "parameters": {"type": "object", "properties": {}},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "create_board_task",
-            "description": "Create a task/card on a kanban board from a natural-language request. Pass title and optional description. Pass board_id when the user identified a board (resolve names with list_boards); otherwise omit it. With one board, omission selects it automatically. With multiple boards, omission returns requires_board_selection and board options without creating anything. The task is always placed in the board's first column.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "board_id": {
-                        "type": "string",
-                        "description": "Optional UUID of the selected board. Omit when the user did not specify a board.",
-                    },
-                    "title": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 500,
-                        "description": "Task/card title requested by the user.",
-                    },
-                    "description": {
-                        "type": "string",
-                        "description": "Optional task/card description or details requested by the user.",
-                    },
-                },
-                "required": ["title"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_board_tasks",
-            "description": "List the tasks (cards) on kanban boards with their column and run status (idle, running, pending, success, failed). Use when the user asks what jobs/tasks are on a board, their status, what is running/failed/done, or what is in a column. Optional board_id to scope to one board (get it from list_boards); omit to include all boards. Optional status to filter (idle|running|pending|success|failed).",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "board_id": {
-                        "type": "string",
-                        "description": "Optional UUID of a board to scope to. Omit for all boards.",
-                    },
-                    "status": {
-                        "type": "string",
-                        "enum": ["idle", "running", "pending", "success", "failed"],
-                        "description": "Optional run status filter.",
-                    },
-                },
-                "required": [],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_card_detail",
-            "description": "Read the full detail of one kanban card/task: its description/content, run status, board and column, the comment thread, the activity timeline, and its workflow runs (with outputs and errors). Use when the user asks about a specific task/card — what it is, what was said on it, what happened, its output or error. Get the card_id from get_board_tasks.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "card_id": {
-                        "type": "string",
-                        "description": "UUID of the card to read (from get_board_tasks).",
-                    },
-                },
-                "required": ["card_id"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "list_alerts",
             "description": "List the user's alerts (threshold rules over a time window on errors, duration, LLM cost, or execution count). Use when the user asks what alerts exist, which alerts are configured for a workflow, which alerts are currently firing, or whether something is being monitored (e.g. 'what alerts do I have?', 'hangi alertlerim var?', 'is there an alert on the invoice workflow?'). Returns each alert's condition, current state, and last observed value.",
             "parameters": {
@@ -1238,6 +1164,7 @@ DASHBOARD_CHAT_TOOLS = [
     *DASHBOARD_TOOL_SCHEMAS,
     *DASHBOARD_BUILD_TOOL_SCHEMAS,
     *DATA_TABLE_TOOL_SCHEMAS,
+    *BOARD_TOOL_SCHEMAS,
 ]
 
 
@@ -1401,248 +1328,6 @@ async def get_credential_for_user(
     db: AsyncSession,
 ) -> Credential | None:
     return await get_accessible_credential(db, credential_id, user.id)
-
-
-async def list_boards_for_chat(db: AsyncSession, user_id: uuid.UUID) -> dict:
-    """Read-only overview of the user's kanban boards for the chat assistant."""
-    boards = (
-        (
-            await db.execute(
-                select(Board).where(Board.owner_id == user_id).order_by(Board.created_at)
-            )
-        )
-        .scalars()
-        .all()
-    )
-    out = []
-    for board in boards:
-        column_count = (
-            await db.execute(
-                select(func.count(BoardColumn.id)).where(BoardColumn.board_id == board.id)
-            )
-        ).scalar() or 0
-        statuses = (
-            (await db.execute(select(BoardCard.run_status).where(BoardCard.board_id == board.id)))
-            .scalars()
-            .all()
-        )
-        status_counts: dict[str, int] = {}
-        for stat in statuses:
-            status_counts[stat] = status_counts.get(stat, 0) + 1
-        out.append(
-            {
-                "id": str(board.id),
-                "name": board.name,
-                "description": board.description,
-                "column_count": column_count,
-                "card_count": len(statuses),
-                "status_counts": status_counts,
-            }
-        )
-    return {"count": len(out), "boards": out}
-
-
-async def create_board_task_for_chat(
-    db: AsyncSession,
-    user: User,
-    title: str,
-    description: str | None = None,
-    board_id: str | None = None,
-) -> dict:
-    """Create a chat-requested card in the selected board's first column."""
-    if not isinstance(title, str) or not title.strip():
-        return {"error": "Task title is required"}
-    clean_title = title.strip()
-    if len(clean_title) > 500:
-        return {"error": "Task title must be 500 characters or fewer"}
-    if description is not None and not isinstance(description, str):
-        return {"error": "Task description must be text"}
-
-    board: Board | None = None
-    if board_id:
-        try:
-            selected_board_id = uuid.UUID(board_id)
-        except (ValueError, TypeError):
-            return {"error": "Invalid board_id"}
-        board = (
-            await db.execute(
-                select(Board).where(
-                    Board.id == selected_board_id,
-                    Board.owner_id == user.id,
-                )
-            )
-        ).scalar_one_or_none()
-        if board is None:
-            return {"error": "Board not found"}
-    else:
-        boards = (
-            (
-                await db.execute(
-                    select(Board).where(Board.owner_id == user.id).order_by(Board.created_at)
-                )
-            )
-            .scalars()
-            .all()
-        )
-        if not boards:
-            return {"error": "No boards available"}
-        if len(boards) > 1:
-            return {
-                "requires_board_selection": True,
-                "count": len(boards),
-                "boards": [
-                    {
-                        "id": str(candidate.id),
-                        "name": candidate.name,
-                        "description": candidate.description,
-                    }
-                    for candidate in boards
-                ],
-            }
-        board = boards[0]
-
-    try:
-        card = await create_board_card(
-            board_id=board.id,
-            request=CardCreateRequest(
-                title=clean_title,
-                content=description.strip() if description else "",
-            ),
-            db=db,
-            current_user=user,
-        )
-    except HTTPException as exc:
-        return {"error": str(exc.detail)}
-    return {
-        "created": True,
-        "task": {
-            "id": str(card.id),
-            "title": card.title,
-            "description": card.content,
-        },
-        "board": {"id": str(board.id), "name": board.name},
-        "placement": {"column": "first", "column_id": str(card.column_id)},
-    }
-
-
-async def get_board_tasks_for_chat(
-    db: AsyncSession,
-    user_id: uuid.UUID,
-    board_id: str | None = None,
-    status: str | None = None,
-) -> dict:
-    """Read-only list of board cards with column + run status for the chat assistant."""
-    filters = [Board.owner_id == user_id]
-    if board_id:
-        try:
-            filters.append(Board.id == uuid.UUID(board_id))
-        except (ValueError, TypeError):
-            return {"error": "Invalid board_id"}
-    boards = (await db.execute(select(Board).where(*filters))).scalars().all()
-    board_ids = [b.id for b in boards]
-    if not board_ids:
-        return {"count": 0, "tasks": []}
-    board_names = {b.id: b.name for b in boards}
-    columns = (
-        (await db.execute(select(BoardColumn).where(BoardColumn.board_id.in_(board_ids))))
-        .scalars()
-        .all()
-    )
-    column_names = {c.id: c.name for c in columns}
-    query = select(BoardCard).where(BoardCard.board_id.in_(board_ids))
-    if status:
-        query = query.where(BoardCard.run_status == status)
-    cards = (await db.execute(query.order_by(BoardCard.position).limit(500))).scalars().all()
-    tasks = [
-        {
-            "id": str(card.id),
-            "title": card.title,
-            "status": card.run_status,
-            "board": board_names.get(card.board_id),
-            "column": column_names.get(card.column_id),
-        }
-        for card in cards
-    ]
-    return {"count": len(tasks), "tasks": tasks}
-
-
-async def get_card_detail_for_chat(db: AsyncSession, user_id: uuid.UUID, card_id: str) -> dict:
-    """Read-only detail of one board card (content, comments, activity, runs)."""
-    try:
-        cid = uuid.UUID(card_id)
-    except (ValueError, TypeError):
-        return {"error": "Invalid card_id"}
-    card = (
-        await db.execute(
-            select(BoardCard)
-            .join(Board, Board.id == BoardCard.board_id)
-            .where(BoardCard.id == cid, Board.owner_id == user_id)
-        )
-    ).scalar_one_or_none()
-    if card is None:
-        return {"error": "Card not found"}
-    column = await db.get(BoardColumn, card.column_id)
-    board = await db.get(Board, card.board_id)
-    activities = (
-        (
-            await db.execute(
-                select(BoardCardActivity)
-                .where(BoardCardActivity.card_id == cid)
-                .order_by(BoardCardActivity.created_at)
-            )
-        )
-        .scalars()
-        .all()
-    )
-    runs = (
-        (
-            await db.execute(
-                select(BoardCardRun)
-                .where(BoardCardRun.card_id == cid)
-                .order_by(BoardCardRun.started_at.desc())
-                .limit(20)
-            )
-        )
-        .scalars()
-        .all()
-    )
-    return {
-        "id": str(card.id),
-        "title": card.title,
-        "content": card.content,
-        "status": card.run_status,
-        "board": board.name if board else None,
-        "column": column.name if column else None,
-        "comments": [
-            {
-                "author": a.author_type,
-                "content": a.content,
-                "created_at": a.created_at.isoformat() if a.created_at else None,
-            }
-            for a in activities
-            if a.kind == "comment"
-        ],
-        "activity": [
-            {
-                "kind": a.kind,
-                "author": a.author_type,
-                "content": a.content,
-                "created_at": a.created_at.isoformat() if a.created_at else None,
-            }
-            for a in activities
-        ],
-        "runs": [
-            {
-                "workflow": r.workflow_name,
-                "status": r.status,
-                "output": r.output or {},
-                "error": r.error,
-                "started_at": r.started_at.isoformat() if r.started_at else None,
-                "finished_at": r.finished_at.isoformat() if r.finished_at else None,
-            }
-            for r in runs
-        ],
-    }
 
 
 MAX_CHAT_TABLE_COLUMNS = 50
@@ -3726,20 +3411,6 @@ def _summarize_tool_result(tool_name: str, result_json: str) -> str:
         if isinstance(data, dict) and "total" in data:
             return f"{int(data.get('total') or 0)} scheduled occurrence(s)"
         return result_json[:200] + ("..." if len(result_json) > 200 else "")
-    if tool_name == "list_boards":
-        if isinstance(data, dict) and "count" in data:
-            return f"{int(data.get('count') or 0)} board(s) listed"
-        return result_json[:150] + ("..." if len(result_json) > 150 else "")
-    if tool_name == "create_board_task":
-        if isinstance(data, dict) and data.get("error"):
-            return f"Error: {str(data.get('error'))[:150]}"
-        if isinstance(data, dict) and data.get("requires_board_selection"):
-            return f"Board selection required ({int(data.get('count') or 0)} available)"
-        if isinstance(data, dict) and data.get("created"):
-            task = data.get("task") or {}
-            board = data.get("board") or {}
-            return f"Created task {task.get('title')!r} on board {board.get('name')!r}"
-        return result_json[:200] + ("..." if len(result_json) > 200 else "")
     if tool_name == "list_data_tables":
         if isinstance(data, dict) and "count" in data:
             return f"{int(data.get('count') or 0)} data table(s) listed"
@@ -3758,20 +3429,8 @@ def _summarize_tool_result(tool_name: str, result_json: str) -> str:
         return summarize_dashboard_build_tool(tool_name, data)
     if tool_name in DATA_TABLE_TOOL_NAMES:
         return summarize_data_table_tool(tool_name, data)
-    if tool_name == "get_board_tasks":
-        if isinstance(data, dict) and "error" in data:
-            return f"Error: {str(data.get('error'))[:150]}"
-        if isinstance(data, dict) and "count" in data:
-            return f"{int(data.get('count') or 0)} task(s) listed"
-        return result_json[:200] + ("..." if len(result_json) > 200 else "")
-    if tool_name == "get_card_detail":
-        if isinstance(data, dict) and "error" in data:
-            return f"Error: {str(data.get('error'))[:150]}"
-        if isinstance(data, dict) and "title" in data:
-            runs = data.get("runs") or []
-            comments = data.get("comments") or []
-            return f"Card {data.get('title')!r}: {data.get('status')}, {len(comments)} comment(s), {len(runs)} run(s)"
-        return result_json[:200] + ("..." if len(result_json) > 200 else "")
+    if tool_name in BOARD_TOOL_NAMES:
+        return summarize_board_tool(tool_name, data if isinstance(data, dict) else {})
     return result_json[:200] + ("..." if len(result_json) > 200 else "")
 
 
@@ -5484,80 +5143,6 @@ async def stream_dashboard_chat(
                         run_steps[-1]["execution_time_ms"],
                         status=_chat_tool_lifecycle_status(name, result),
                     )
-                elif name == "list_boards":
-                    step_label = "Listing boards..."
-                    yield (
-                        "data: "
-                        + json.dumps(
-                            {
-                                "type": "tool_start",
-                                "id": tc.id,
-                                "name": name,
-                                "label": step_label,
-                                "args": args,
-                            }
-                        )
-                        + "\n\n"
-                    )
-                    step_start = time.time()
-                    result = json.dumps(await list_boards_for_chat(db, user_id))
-                    step_ms = round((time.time() - step_start) * 1000, 2)
-                    run_steps.append(
-                        {
-                            "label": step_label,
-                            "tool": name,
-                            "request": {},
-                            "response_summary": _summarize_tool_result(name, result),
-                            "execution_time_ms": step_ms,
-                        }
-                    )
-                    yield _tool_end_yield(
-                        tc.id,
-                        run_steps[-1]["response_summary"],
-                        run_steps[-1]["execution_time_ms"],
-                        status=_chat_tool_lifecycle_status(name, result),
-                    )
-                elif name == "create_board_task":
-                    step_label = "Adding task to board..."
-                    yield (
-                        "data: "
-                        + json.dumps(
-                            {
-                                "type": "tool_start",
-                                "id": tc.id,
-                                "name": name,
-                                "label": step_label,
-                                "args": args,
-                            }
-                        )
-                        + "\n\n"
-                    )
-                    step_start = time.time()
-                    result = json.dumps(
-                        await create_board_task_for_chat(
-                            db,
-                            user,
-                            title=args.get("title") or "",
-                            description=args.get("description"),
-                            board_id=args.get("board_id") or None,
-                        )
-                    )
-                    step_ms = round((time.time() - step_start) * 1000, 2)
-                    run_steps.append(
-                        {
-                            "label": step_label,
-                            "tool": name,
-                            "request": args,
-                            "response_summary": _summarize_tool_result(name, result),
-                            "execution_time_ms": step_ms,
-                        }
-                    )
-                    yield _tool_end_yield(
-                        tc.id,
-                        run_steps[-1]["response_summary"],
-                        run_steps[-1]["execution_time_ms"],
-                        status=_chat_tool_lifecycle_status(name, result),
-                    )
                 elif name == "list_data_tables":
                     step_label = "Checking data tables..."
                     yield (
@@ -5632,8 +5217,8 @@ async def stream_dashboard_chat(
                         run_steps[-1]["execution_time_ms"],
                         status=_chat_tool_lifecycle_status(name, result),
                     )
-                elif name == "get_board_tasks":
-                    step_label = "Reading board tasks..."
+                elif name in BOARD_TOOL_NAMES:
+                    step_label = board_tool_label(name)
                     yield (
                         "data: "
                         + json.dumps(
@@ -5648,13 +5233,10 @@ async def stream_dashboard_chat(
                         + "\n\n"
                     )
                     step_start = time.time()
+                    # A board the chat creates maps cards with the chat's own model.
+                    chat_llm = (selected_credential.id, model) if selected_credential else None
                     result = json.dumps(
-                        await get_board_tasks_for_chat(
-                            db,
-                            user_id,
-                            board_id=args.get("board_id") or None,
-                            status=args.get("status") or None,
-                        )
+                        await call_board_tool(db, user, name, args, public_base_url, chat_llm)
                     )
                     step_ms = round((time.time() - step_start) * 1000, 2)
                     run_steps.append(
@@ -5669,42 +5251,7 @@ async def stream_dashboard_chat(
                     yield _tool_end_yield(
                         tc.id,
                         run_steps[-1]["response_summary"],
-                        run_steps[-1]["execution_time_ms"],
-                        status=_chat_tool_lifecycle_status(name, result),
-                    )
-                elif name == "get_card_detail":
-                    step_label = "Reading card detail..."
-                    yield (
-                        "data: "
-                        + json.dumps(
-                            {
-                                "type": "tool_start",
-                                "id": tc.id,
-                                "name": name,
-                                "label": step_label,
-                                "args": args,
-                            }
-                        )
-                        + "\n\n"
-                    )
-                    step_start = time.time()
-                    result = json.dumps(
-                        await get_card_detail_for_chat(db, user_id, args.get("card_id", "") or "")
-                    )
-                    step_ms = round((time.time() - step_start) * 1000, 2)
-                    run_steps.append(
-                        {
-                            "label": step_label,
-                            "tool": name,
-                            "request": args,
-                            "response_summary": _summarize_tool_result(name, result),
-                            "execution_time_ms": step_ms,
-                        }
-                    )
-                    yield _tool_end_yield(
-                        tc.id,
-                        run_steps[-1]["response_summary"],
-                        run_steps[-1]["execution_time_ms"],
+                        step_ms,
                         status=_chat_tool_lifecycle_status(name, result),
                     )
                 elif name in DATA_TABLE_TOOL_NAMES:

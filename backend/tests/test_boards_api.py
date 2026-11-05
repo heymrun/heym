@@ -157,6 +157,7 @@ class TestBoardActiveExecutionStatus(unittest.IsolatedAsyncioTestCase):
             id=card.board_id,
             name="Recovery board",
             description=None,
+            auto_advance=True,
             mapper_model=None,
             mapper_credential_id=None,
         )
@@ -347,12 +348,12 @@ class TestColumnEndpoints(unittest.IsolatedAsyncioTestCase):
         column.board_id = board.id
 
         db = AsyncMock()
-        # 1: board, 2: column, 3: card count
+        # 1: board, 2: column, 3: the column's cards
         db.execute = AsyncMock(
             side_effect=[
                 _result_with(scalar=board),
                 _result_with(scalar=column),
-                _result_with(scalar_one=3),
+                _result_with(scalars_list=[MagicMock()]),
             ]
         )
 
@@ -389,7 +390,7 @@ class TestColumnEndpoints(unittest.IsolatedAsyncioTestCase):
 
 
 class TestCardEndpoints(unittest.IsolatedAsyncioTestCase):
-    async def test_create_card_defaults_to_first_column_bottom(self):
+    async def test_create_card_defaults_to_first_column_top(self):
         user = _User()
         board = MagicMock()
         board.id = uuid.uuid4()
@@ -401,12 +402,12 @@ class TestCardEndpoints(unittest.IsolatedAsyncioTestCase):
         db = AsyncMock()
         db.add = MagicMock()
         _wire_db_inserts(db)
-        # 1: board, 2: first column by position, 3: card count in column
+        # 1: board, 2: first column by position, 3: the column's other cards (placement)
         db.execute = AsyncMock(
             side_effect=[
                 _result_with(scalar=board),
                 _result_with(scalar=first_column),
-                _result_with(scalar_one=2),
+                _result_with(scalars_list=[]),
             ]
         )
 
@@ -418,7 +419,7 @@ class TestCardEndpoints(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(response.column_id, first_column.id)
-        self.assertEqual(response.position, 2)
+        self.assertEqual(response.position, 0)
         self.assertEqual(response.run_status, "idle")
 
     async def test_comment_creates_user_activity(self):
@@ -820,7 +821,6 @@ class TestBoardAccess(unittest.IsolatedAsyncioTestCase):
             side_effect=[
                 _result_with(scalar=board),
                 _result_with(scalars_list=["write"]),
-                _result_with(scalars_list=[]),
             ]
         )
 
@@ -837,7 +837,6 @@ class TestBoardAccess(unittest.IsolatedAsyncioTestCase):
             db.execute = AsyncMock(
                 side_effect=[
                     _result_with(scalar=board),
-                    _result_with(scalars_list=[]),
                     _result_with(scalars_list=["read"]),
                 ]
             )
@@ -857,7 +856,6 @@ class TestBoardAccess(unittest.IsolatedAsyncioTestCase):
         db.execute = AsyncMock(
             side_effect=[
                 _result_with(scalar=board),
-                _result_with(scalars_list=[]),
                 _result_with(scalars_list=[]),
             ]
         )

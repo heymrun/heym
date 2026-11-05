@@ -22,11 +22,54 @@ and workflow runs.
 - The gear icon in the board header opens the board settings: name, description
   (shown under the header) and the Agentic Kanban Model.
 - Columns are fully editable: add, rename, recolor, reorder, or delete them from the
-  column settings (a column must be empty before it can be deleted).
-- Cards are ordered vertically by priority — drag to reorder.
-- You can also create a card from the [Chat tab](./chat-tab.md) with a natural-language
-  request. Chat asks you to select a board when needed and always adds the card to that
-  board's first column.
+  column settings (a column must be empty before it can be deleted here; from Chat or MCP
+  its cards can be moved to another column first).
+- Cards keep the order you drag them into. A new card, and a card moved into another
+  column, goes to the top of that column. The order is the same in Heym Work and over MCP.
+- **Advance cards automatically** in the board settings is on by default. Turn it off for
+  a plain team task board: cards then stay in the column people put them in, and column
+  workflows still run when a card enters their column.
+- You can also manage the board from the [Chat tab](./chat-tab.md) or any MCP client; see
+  [From Chat and MCP](#from-chat-and-mcp).
+
+## Card details
+
+Open a card to set its **Details**:
+
+- **Assignee** — anyone who can open the board: its owner, and the people and team
+  members it is shared with.
+- **Priority** — Urgent, High, Medium or Low.
+- **Due date** — the card shows it as a chip, amber when it is due today and red when it
+  is overdue.
+- **Labels** — up to ten short labels, such as a client or a project.
+
+Column workflows receive these fields in the card's `metadata` (`assignee_user_id`,
+`priority`, `due_date`, `labels`).
+
+If someone else changes the card while you edit it, saving shows a notice and loads their
+version instead of overwriting it. An open board checks for changes made elsewhere (by a
+teammate, in Heym Work, from Chat or MCP) every few seconds and redraws.
+
+Moving a card that waits for a review asks first: the move cancels that review. A move
+never approves a review; reviews are approved only from the review itself.
+
+## From Chat and MCP
+
+The [Chat tab](./chat-tab.md), Heym Work's chat, and any MCP client through `heym_chat`
+can manage boards in plain language, with the same permissions as the Board tab:
+
+- list boards, read a board's columns and cards, and list cards across boards filtered by
+  assignee ("my tasks"), column, priority, due date (overdue, today, this week), label or
+  review state;
+- create a board (Chat turns off automatic advancing for a plain task board), rename it or
+  change its settings, and delete it after you confirm its name (owner only). A board Chat
+  creates uses the chat's credential and model as its Agentic Kanban Model; ask Chat to
+  give its model to one of your boards that has none, such as a board made before this;
+- add, rename, reorder and delete columns;
+- add, edit, assign, move, reorder and delete cards;
+- comment on a card, as you. A comment on a card waiting at the planning step answers its
+  agent's questions, and the card moves on, as in the card's own comment box. A comment
+  never approves a review.
 
 ## Sharing a board
 

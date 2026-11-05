@@ -17,6 +17,33 @@ import type { ReleaseEntry } from "@/features/release-tour/releaseTour.types";
  */
 export const RELEASE_REGISTRY: ReleaseEntry[] = [
   {
+    releaseId: "2026.25",
+    publishedAt: new Date("2026-11-05T12:00:00Z"),
+    headline: "Assign, prioritize and schedule board cards from Heym, Heym Work, Chat and MCP",
+    releaseTour: {
+      label: "New in Heym",
+      introTitle: "New in this release",
+      introDescription: "Kanban boards become team task boards, managed the same way everywhere.",
+      tourEnabled: true,
+      sectionOrder: ["board-task-fields"],
+    },
+    sections: [{
+      id: "board-task-fields",
+      title: "Assign, prioritize and schedule board cards",
+      publishedAt: new Date("2026-11-05T12:00:00Z"),
+      blocks: [{
+        type: "prose",
+        markdown: "Open a card on the **Board** tab to give it an assignee, a priority, a due date and labels such as a client or project. The card shows them at a glance, and overdue work turns red. The order you drag cards into is kept, in Heym and in Heym Work. A board can also stop moving cards on its own: turn off **Advance cards automatically** in its settings for a plain team task board. Chat and any MCP client through `heym_chat` can now create and change boards, columns and cards, assign, move and comment on tasks, and list what is overdue or waiting for a review. Moving or commenting on a card never approves a review.",
+      }],
+      tour: {
+        description: "Give cards an owner, a priority and a due date, and manage them from Heym, Heym Work, Chat or MCP.",
+        useCases: ["See who works on which contract and what is overdue", "Ask Chat to move a task to Review and assign it to a colleague", "Keep a plain task board whose cards stay where people put them"],
+        tourVisual: "board-task-fields",
+        docTarget: { categoryId: "tabs", slug: "board-tab", title: "Board" },
+      },
+    }],
+  },
+  {
     releaseId: "2026.24",
     publishedAt: new Date("2026-10-30T12:00:00Z"),
     headline: "Open large files in a sandbox, plan schedules and map database relationships",
@@ -115,7 +142,7 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
       introDescription:
         "A quick look at what changed since your last update. Takes about a minute.",
       tourEnabled: true,
-      sectionOrder: ["agent-suite", "chat-evals"],
+      sectionOrder: ["agent-suite"],
     },
     sections: [
       {
@@ -150,38 +177,6 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
           },
         },
       },
-      {
-        id: "chat-evals",
-        title: "Create and run eval suites from Chat",
-        publishedAt: new Date("2026-10-26T12:00:00Z"),
-        blocks: [
-          {
-            type: "prose",
-            markdown:
-              "Ask **Chat** for an eval suite in plain words, for example *\"make a prompt suite for my support prompt and compare gpt-4o with gpt-4.1-mini\"*. Chat writes the test cases with their expected answers. It asks which credential and models to use, or uses your only one. Then it saves the suite in **Evals**, runs it, and reports each model's pass count and the cases that failed.",
-          },
-          {
-            type: "prose",
-            markdown:
-              "For an **agent suite**, Chat picks the agent and writes the run inputs itself. It can run the workflow and save those runs as the baseline, take the baseline from the agent's latest runs, or store the numbers you give it. The same works from an MCP client through `heym_chat`.",
-          },
-        ],
-        tour: {
-          description:
-            "Describe the suite you want. Chat writes the test cases, picks the credential with you, and runs it.",
-          useCases: [
-            "Compare two models on a prompt without building the suite by hand",
-            "Build an agent's baseline from fresh runs when it has none yet",
-            "Re-run a suite from an MCP client and read what failed",
-          ],
-          tourVisual: "chat-evals",
-          docTarget: {
-            categoryId: "tabs",
-            slug: "chat-tab",
-            title: "Chat",
-          },
-        },
-      }
     ],
   },
 ];

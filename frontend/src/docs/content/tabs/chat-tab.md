@@ -19,7 +19,7 @@ You can also start a conversation from the chat box on the [Workflows tab](./wor
 - **Workspace template context** – Shared workflow and node templates in your workspace are included as context, so Chat can answer questions about available templates
 - **Long-running agent** – Chat keeps working on the backend even if the browser closes, so you can come back from another device and continue the same conversation
 - **Workflow creation** – Ask Chat to create or change a workflow, and it saves the workflow, test-runs it with sample inputs, fixes what failed, and finishes when a run passes. See [Creating Workflows](#creating-workflows)
-- **Kanban task creation** – Ask naturally to add a task or create a card. Chat adds it to the first column of the requested board; when you have multiple boards and do not name one, Chat presents a board picker before creating the card
+- **Kanban boards** – Ask naturally to add, assign, move, update or comment on a task, list your overdue tasks or what waits for a review, or create and arrange boards and columns. When you have multiple boards and do not name one, Chat presents a board picker before creating a card. See [Board › From Chat and MCP](./board-tab.md#from-chat-and-mcp)
 - **Queued follow-ups** – Send more messages while an answer is streaming. Queued messages are persisted, can be edited or deleted before they start, and run in order after the active response
 - **Planning pauses** – When Chat needs planning details, it asks clarification questions and pauses queued follow-ups until you answer. After the planning answer finishes, queued messages resume
 - **Credentials** – When a workflow Chat creates or edits needs a credential, Chat asks which one to use, offers to create a new one in the conversation, or lets you continue without. You can also ask Chat to create a credential or to update one you own; it opens the credential form in the conversation. The model sees the credential's name and type, never its values, for credentials you own and ones shared with you. LLM and Agent nodes Chat adds run on the credential and model selected for the chat, shared credentials included; when Chat edits a workflow, its existing LLM and Agent nodes keep their credential and model. See [AI Assistant › Credentials](../reference/ai-assistant.md#credentials)
@@ -84,12 +84,15 @@ Each conversation keeps a working folder, so follow-ups reuse what was already r
 
 When you ask Chat to build a workflow around a file, it inspects the real file first so the workflow uses the right sheet, column and page names, then tests the workflow with that file.
 
-## Creating Kanban Tasks
+## Managing Kanban Tasks
 
-Ask Chat in ordinary language, for example, “Add a task called Fix login bug” or
-“Create a new card Update documentation on the Launch board.” You can include a
-description in the same request. Chat always creates the card in the selected board's
-first column.
+Ask Chat in ordinary language, for example, “Add a task called Fix login bug”,
+“Assign the NDA card to Ada, due Friday, high priority”, “Move it to Review”, “Comment on
+the NDA card that the signed copy is in Drive” or “What is overdue on the Legal board?”
+You can include a description in the same request. Comments are posted as you; one on a
+card waiting at the planning step answers its agent's questions and lets it move on. Chat
+creates a card in the selected board's first column unless you name a column, and it
+never approves a review by moving a card.
 
 If your workspace has several boards and you do not identify one, Chat pauses with a
 single-choice board picker. Select a board to finish creating the card. No slash command
