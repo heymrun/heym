@@ -820,7 +820,6 @@ class TestBoardAccess(unittest.IsolatedAsyncioTestCase):
             side_effect=[
                 _result_with(scalar=board),
                 _result_with(scalars_list=["write"]),
-                _result_with(scalars_list=[]),
             ]
         )
 
@@ -837,7 +836,6 @@ class TestBoardAccess(unittest.IsolatedAsyncioTestCase):
             db.execute = AsyncMock(
                 side_effect=[
                     _result_with(scalar=board),
-                    _result_with(scalars_list=[]),
                     _result_with(scalars_list=["read"]),
                 ]
             )
@@ -857,7 +855,6 @@ class TestBoardAccess(unittest.IsolatedAsyncioTestCase):
         db.execute = AsyncMock(
             side_effect=[
                 _result_with(scalar=board),
-                _result_with(scalars_list=[]),
                 _result_with(scalars_list=[]),
             ]
         )

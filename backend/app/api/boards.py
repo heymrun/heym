@@ -11,7 +11,7 @@ from fastapi import (
     UploadFile,
     status,
 )
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
@@ -58,6 +58,11 @@ from app.models.board_schemas import (
 )
 from app.services import board_run_service
 from app.services.audit_log import audit
+from app.services.board_access import (
+    accessible_board_ids,
+    board_permission,
+    board_permissions,
+)
 from app.services.credential_access import get_accessible_credential
 from app.services.file_storage import (
     build_download_url,
@@ -93,34 +98,7 @@ async def _get_owned_board(db: AsyncSession, board_id: uuid.UUID, user: User) ->
 
 async def _board_permission(db: AsyncSession, board: Board, user: User) -> str | None:
     """The caller's access to a board: "owner", "write", "read", or None when it is not shared."""
-    if board.owner_id == user.id:
-        return "owner"
-    permissions = list(
-        (
-            await db.execute(
-                select(BoardShare.permission).where(
-                    BoardShare.board_id == board.id, BoardShare.user_id == user.id
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-    permissions += list(
-        (
-            await db.execute(
-                select(BoardTeamShare.permission)
-                .join(TeamMember, TeamMember.team_id == BoardTeamShare.team_id)
-                .where(BoardTeamShare.board_id == board.id, TeamMember.user_id == user.id)
-            )
-        )
-        .scalars()
-        .all()
-    )
-    if not permissions:
-        return None
-    # The most permissive share wins.
-    return "write" if "write" in permissions else "read"
+    return await board_permission(db, board, user.id)
 
 
 async def _get_board_for_user(
@@ -300,31 +278,13 @@ async def list_boards(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[BoardSummaryResponse]:
-    shared_board_ids = set(
-        (await db.execute(select(BoardShare.board_id).where(BoardShare.user_id == current_user.id)))
-        .scalars()
-        .all()
-    ) | set(
-        (
-            await db.execute(
-                select(BoardTeamShare.board_id)
-                .join(TeamMember, TeamMember.team_id == BoardTeamShare.team_id)
-                .where(TeamMember.user_id == current_user.id)
-            )
-        )
-        .scalars()
-        .all()
-    )
     result = await db.execute(
         select(Board)
-        .where(
-            or_(Board.owner_id == current_user.id, Board.id.in_(shared_board_ids))
-            if shared_board_ids
-            else Board.owner_id == current_user.id
-        )
+        .where(Board.id.in_(accessible_board_ids(current_user.id)))
         .order_by(Board.created_at)
     )
     boards = result.scalars().all()
+    permissions = await board_permissions(db, boards, current_user.id)
     summaries: list[BoardSummaryResponse] = []
     for board in boards:
         column_count = (
@@ -336,7 +296,7 @@ async def list_boards(
             await db.execute(select(func.count(BoardCard.id)).where(BoardCard.board_id == board.id))
         ).scalar() or 0
         cred_name = await _mapper_credential_name(db, board)
-        permission = await _board_permission(db, board, current_user) or "read"
+        permission = permissions.get(board.id, "read")
         summaries.append(
             _board_summary(
                 board,
