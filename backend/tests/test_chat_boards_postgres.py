@@ -3,11 +3,13 @@
 import unittest
 import uuid
 from datetime import date, timedelta
+from unittest.mock import patch
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import chat_boards
-from app.db.models import Board, BoardCard
+from app.db.models import Board, BoardCard, BoardCardActivity
 from tests.board_pg_support import (
     cleanup,
     connect_or_skip,
@@ -271,3 +273,61 @@ class ChatBoardToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(asked["count"], 2)
         only = await self.call(self.writer, "create_board_task", title="Brief")
         self.assertTrue(only["created"], only)
+
+    async def test_a_writer_comments_on_a_task_as_themselves(self) -> None:
+        created = await self.add(self.owner, "NDA")
+        card_id = created["task"]["id"]
+        commented = await self.call(
+            self.writer, "add_board_task_comment", card_id=card_id, content="  Sent to **Acme**  "
+        )
+        self.assertTrue(commented["commented"], commented)
+        self.assertEqual(commented["comment"]["content"], "Sent to **Acme**")
+        self.assertEqual(commented["comment"]["author"], self.writer.name)
+        self.assertEqual(commented["task"]["title"], "NDA")
+        self.assertNotIn("chain_started", commented)
+        async with AsyncSession(self.engine) as db:
+            stored = (
+                await db.execute(
+                    select(BoardCardActivity).where(
+                        BoardCardActivity.card_id == uuid.UUID(card_id),
+                        BoardCardActivity.kind == "comment",
+                    )
+                )
+            ).scalar_one()
+        self.assertEqual((stored.author_type, stored.author_user_id), ("user", self.writer.id))
+        detail = await self.call(self.reader, "get_card_detail", card_id=card_id)
+        self.assertEqual(
+            [(c["author"], c["content"]) for c in detail["comments"]],
+            [(self.writer.name, "Sent to **Acme**")],
+        )
+
+    async def test_reader_and_outsider_cannot_comment(self) -> None:
+        created = await self.add(self.owner, "NDA")
+        card_id = created["task"]["id"]
+        denied = await self.call(
+            self.reader, "add_board_task_comment", card_id=card_id, content="Hi"
+        )
+        self.assertIn("Read-only", denied["error"])
+        hidden = await self.call(
+            self.outsider, "add_board_task_comment", card_id=card_id, content="Hi"
+        )
+        self.assertIn("not found", hidden["error"].lower())
+
+    async def test_answering_a_task_at_the_planning_step_says_it_moves_on(self) -> None:
+        created = await self.add(self.owner, "NDA")
+        card_id = created["task"]["id"]
+
+        async def release(db, *, card, column, board):
+            card.run_status = "running"
+            await db.commit()
+            return True
+
+        with patch.object(
+            chat_boards.boards_api.board_run_service, "answer_card_comment", side_effect=release
+        ):
+            answered = await self.call(
+                self.owner, "add_board_task_comment", card_id=card_id, content="Use the 2025 terms"
+            )
+        self.assertTrue(answered["chain_started"])
+        self.assertIn("planning step", answered["note"])
+        self.assertEqual(answered["task"]["run_status"], "running")

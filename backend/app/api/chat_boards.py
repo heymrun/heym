@@ -13,11 +13,11 @@ from __future__ import annotations
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import date, datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException, status
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -40,6 +40,7 @@ from app.models.board_schemas import (
     CardUpdateRequest,
     ColumnCreateRequest,
     ColumnUpdateRequest,
+    CommentCreateRequest,
 )
 from app.services.board_access import (
     PERMISSION_OWNER,
@@ -58,8 +59,13 @@ RunStatus = Literal["idle", "running", "pending", "success", "failed"]
 MAX_TASKS = 500
 CONTENT_PREVIEW = 400
 MAX_ACTIVITY = 30
+MAX_COMMENT = 20_000
 REVIEW_CANCELLED_NOTE = (
     "The card was waiting for a review. Moving it cancelled that review; it was not approved."
+)
+PLANNING_ANSWER_NOTE = (
+    "The task was waiting at the planning step. This comment answered its questions, so the "
+    "task moves on to the next column."
 )
 OWNER_ONLY_ERROR = (
     "Only the board's owner can change its name, description or settings, or delete it"
@@ -169,6 +175,12 @@ class UpdateTaskArgs(TaskFieldArgs):
     card_id: uuid.UUID
     title: str | None = Field(default=None, min_length=1, max_length=500)
     description: str | None = None
+
+
+class CommentTaskArgs(CardArgs):
+    content: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=MAX_COMMENT)
+    ] = Field(description="The comment, posted as the user. Markdown is rendered.")
 
 
 class MoveTaskArgs(CardArgs):
@@ -727,6 +739,37 @@ async def _move_task(db: AsyncSession, user: User, args: MoveTaskArgs, base: str
     return result
 
 
+async def _comment_task(
+    db: AsyncSession, user: User, args: CommentTaskArgs, base: str
+) -> dict[str, Any]:
+    card, board = await _reachable_card(db, user, args.card_id, write=True)
+    was_running = card.run_status == "running"
+    # The Board tab's route: a comment on a task waiting at the planning step answers it.
+    comment = await boards_api.create_card_comment(
+        board_id=board.id,
+        card_id=card.id,
+        request=CommentCreateRequest(content=args.content),
+        db=db,
+        current_user=user,
+    )
+    task = await _task_result(db, card.id)
+    result: dict[str, Any] = {
+        "commented": True,
+        "task": task,
+        "comment": {
+            "id": str(comment.id),
+            "author": user.name or user.email,
+            "content": comment.content,
+            "created_at": comment.created_at.isoformat() if comment.created_at else None,
+        },
+        "url": board_url(base, board.id),
+    }
+    if not was_running and task["run_status"] == "running":
+        result["chain_started"] = True
+        result["note"] = PLANNING_ANSWER_NOTE
+    return result
+
+
 async def _delete_task(db: AsyncSession, user: User, args: CardArgs, base: str) -> dict[str, Any]:
     card, board = await _reachable_card(db, user, args.card_id, write=True)
     title = card.title
@@ -836,6 +879,14 @@ _TOOLS: dict[str, tuple[type[_Args], str, str, Handler]] = {
         "Moving task...",
         _move_task,
     ),
+    "add_board_task_comment": (
+        CommentTaskArgs,
+        "Add a comment to a task, posted as the user; markdown is rendered. On a task waiting "
+        "at the planning step, whose agent asked questions in its comments, the comment is "
+        "the answer and the task moves on (chain_started). A comment never approves a review.",
+        "Commenting on task...",
+        _comment_task,
+    ),
     "delete_board_task": (
         CardArgs,
         "Delete a task, only when the user asked to delete it.",
@@ -932,6 +983,8 @@ def summarize_board_tool(name: str, result: dict[str, Any]) -> str:
         return f"Created task {task.get('title')!r} on board {board!r}"
     if name == "update_board_task":
         return f"Updated task {task.get('title')!r}"
+    if name == "add_board_task_comment":
+        return f"Commented on task {task.get('title')!r}"
     if name == "delete_board_task":
         return f"Deleted task {task.get('title')!r}"
     verb = "Created" if result.get("created") else "Deleted" if result.get("deleted") else "Updated"

@@ -41,6 +41,7 @@ class RegistrationTests(unittest.TestCase):
                 "create_board_task",
                 "update_board_task",
                 "move_board_task",
+                "add_board_task_comment",
                 "delete_board_task",
             },
         )
@@ -67,6 +68,8 @@ class RegistrationTests(unittest.TestCase):
             "type single",
             "confirm_name",
             "auto_advance false",
+            "add_board_task_comment",
+            "A comment never approves a review",
         ):
             self.assertIn(needle, prompt)
 
@@ -74,6 +77,7 @@ class RegistrationTests(unittest.TestCase):
         from app.services.heym_agent import profile
 
         self.assertIn("assign, prioritize, schedule, move", profile.AGENT_CAPABILITIES)
+        self.assertIn("comment on", profile.AGENT_CAPABILITIES)
 
 
 class DispatchTests(unittest.IsolatedAsyncioTestCase):
@@ -84,6 +88,19 @@ class DispatchTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("error", result)
         self.assertIn("card_id", result["error"])
+
+    async def test_a_blank_comment_is_refused_without_db(self) -> None:
+        db = AsyncMock()
+        for content in ("", "   \n"):
+            result = await chat_boards.call_board_tool(
+                db,
+                SimpleNamespace(id=uuid.uuid4()),
+                "add_board_task_comment",
+                {"card_id": str(uuid.uuid4()), "content": content},
+                "http://h",
+            )
+            self.assertIn("content", result["error"])
+        db.execute.assert_not_called()
         db.execute.assert_not_awaited()
 
     async def test_stream_dispatches_board_tools(self) -> None:
@@ -148,6 +165,10 @@ class SummaryTests(unittest.TestCase):
         self.assertEqual(
             s("create_board_column", {"created": True, "column": {"name": "Review"}}),
             "Added column 'Review'",
+        )
+        self.assertEqual(
+            s("add_board_task_comment", {"commented": True, "task": {"title": "NDA"}}),
+            "Commented on task 'NDA'",
         )
 
 

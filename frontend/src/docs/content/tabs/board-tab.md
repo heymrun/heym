@@ -64,7 +64,10 @@ can manage boards in plain language, with the same permissions as the Board tab:
 - create a board (Chat turns off automatic advancing for a plain task board), rename it or
   change its settings, and delete it after you confirm its name (owner only);
 - add, rename, reorder and delete columns;
-- add, edit, assign, move, reorder and delete cards.
+- add, edit, assign, move, reorder and delete cards;
+- comment on a card, as you. A comment on a card waiting at the planning step answers its
+  agent's questions, and the card moves on, as in the card's own comment box. A comment
+  never approves a review.
 
 ## Sharing a board
 
