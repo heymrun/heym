@@ -291,3 +291,53 @@ class OrderTests(KanbanPgCase):
                 current_user=self.owner,
             )
         self.assertEqual(await self.order(self.columns[0].id), ["a", "c", "b"])
+
+
+class ColumnDeleteTests(KanbanPgCase):
+    async def asyncSetUp(self) -> None:
+        await super().asyncSetUp()
+        self.board, self.columns = await make_board(self.engine, self.owner, auto_advance=False)
+        self.a = await self.card_in(self.board.id, self.columns[1].id, "a")
+        self.b = await self.card_in(self.board.id, self.columns[1].id, "b")
+        await self.card_in(self.board.id, self.columns[0].id, "z")
+
+    async def delete(self, move_to: uuid.UUID | None):
+        async with self.session() as db:
+            await boards_api.delete_column(
+                board_id=self.board.id,
+                column_id=self.columns[1].id,
+                move_cards_to_column_id=move_to,
+                db=db,
+                current_user=self.owner,
+            )
+
+    async def test_refuses_without_a_target(self) -> None:
+        with self.assertRaises(HTTPException) as ctx:
+            await self.delete(None)
+        self.assertEqual(ctx.exception.status_code, 409)
+
+    async def test_moves_cards_on_top_of_the_target_without_running_chains(self) -> None:
+        await self.delete(self.columns[0].id)
+        async with self.session() as db:
+            rows = await db.execute(
+                select(BoardCard.title, BoardCard.run_status)
+                .where(BoardCard.column_id == self.columns[0].id)
+                .order_by(BoardCard.position)
+            )
+            self.assertEqual(
+                [tuple(r) for r in rows.all()], [("b", "idle"), ("a", "idle"), ("z", "idle")]
+            )
+
+    async def test_refuses_while_a_card_waits_for_a_review(self) -> None:
+        async with self.session() as db:
+            card = await db.get(BoardCard, self.a)
+            card.run_status = "pending"
+            await db.commit()
+        with self.assertRaises(HTTPException) as ctx:
+            await self.delete(self.columns[0].id)
+        self.assertEqual(ctx.exception.status_code, 409)
+
+    async def test_target_must_be_another_column_of_the_board(self) -> None:
+        with self.assertRaises(HTTPException) as ctx:
+            await self.delete(self.columns[1].id)
+        self.assertEqual(ctx.exception.status_code, 400)

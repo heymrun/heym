@@ -798,19 +798,71 @@ async def update_column(
 async def delete_column(
     board_id: uuid.UUID,
     column_id: uuid.UUID,
+    move_cards_to_column_id: uuid.UUID | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> None:
+    """Delete a column. Its cards block the delete unless ``move_cards_to_column_id`` names
+    another column of the board: they then move to its top, without running its chain."""
     board, _ = await _get_board_for_user(db, board_id, current_user, write=True)
     column = await _get_board_column(db, board, column_id)
-    card_count = (
-        await db.execute(select(func.count(BoardCard.id)).where(BoardCard.column_id == column.id))
-    ).scalar() or 0
-    if card_count:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Move or delete the cards in this column first",
+    cards = list(
+        (
+            await db.execute(
+                select(BoardCard)
+                .where(BoardCard.column_id == column.id)
+                .order_by(BoardCard.position, BoardCard.updated_at)
+            )
         )
+        .scalars()
+        .all()
+    )
+    if cards:
+        if move_cards_to_column_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Move or delete the cards in this column first",
+            )
+        if move_cards_to_column_id == column.id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Choose another column for the cards",
+            )
+        target = await _get_board_column(db, board, move_cards_to_column_id)
+        if any(card.run_status in ACTIVE_RUN_STATUSES for card in cards):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="A card in this column is running or waiting for a review",
+            )
+        others = list(
+            (
+                await db.execute(
+                    select(BoardCard)
+                    .where(BoardCard.column_id == target.id)
+                    .order_by(BoardCard.position, BoardCard.updated_at)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for card in cards:
+            card.column_id = target.id
+            db.add(
+                BoardCardActivity(
+                    card_id=card.id,
+                    kind="event",
+                    author_type="system",
+                    content=(
+                        f"Moved from {column.name} to {target.name} when {column.name} was deleted"
+                    ),
+                    data={"from_column_id": str(column.id), "to_column_id": str(target.id)},
+                )
+            )
+        for position, card in enumerate([*cards, *others]):
+            card.position = position
+        # The cards must point at the target before the column row goes, or the foreign
+        # key's ON DELETE CASCADE removes them with it.
+        await db.flush()
     await db.delete(column)
     # Keep positions a dense 0..n-1 sequence — the planning gate is positional.
     remaining = list(
@@ -834,6 +886,7 @@ async def delete_column(
         target_name=board.name,
         column_id=column_id,
         column_name=column.name,
+        moved_cards=len(cards),
     )
     await db.commit()
 

@@ -348,12 +348,12 @@ class TestColumnEndpoints(unittest.IsolatedAsyncioTestCase):
         column.board_id = board.id
 
         db = AsyncMock()
-        # 1: board, 2: column, 3: card count
+        # 1: board, 2: column, 3: the column's cards
         db.execute = AsyncMock(
             side_effect=[
                 _result_with(scalar=board),
                 _result_with(scalar=column),
-                _result_with(scalar_one=3),
+                _result_with(scalars_list=[MagicMock()]),
             ]
         )
 
