@@ -35,22 +35,12 @@ export type CardRunStatus = "idle" | "running" | "pending" | "success" | "failed
 
 export type CardPriority = "low" | "medium" | "high" | "urgent";
 
-/** A card's link to a workflow, or one of its runs; hidden when the viewer cannot open it. */
-export interface CardLink {
-  workflow_id: string | null;
-  workflow_name: string | null;
-  execution_id: string | null;
-  execution_status: string | null;
-  hidden: boolean;
-}
-
 export interface CardFields {
   assignee_user_id: string | null;
   priority: CardPriority | null;
   /** YYYY-MM-DD */
   due_date: string | null;
   labels: string[];
-  links: CardLink[];
 }
 
 /** Someone who can open a board, and so can be assigned its cards. */
@@ -67,7 +57,6 @@ export interface CardFieldsPayload {
   priority?: CardPriority | null;
   due_date?: string | null;
   labels?: string[] | null;
-  links?: { workflow_id: string; execution_id?: string | null }[] | null;
 }
 
 export interface BoardCard {

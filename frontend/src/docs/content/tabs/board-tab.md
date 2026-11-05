@@ -40,14 +40,11 @@ Open a card to set its **Details**:
   members it is shared with.
 - **Priority** — Urgent, High, Medium or Low.
 - **Due date** — the card shows it as a chip, amber when it is due today and red when it
-  is overdue (a card in the last column is never overdue).
+  is overdue.
 - **Labels** — up to ten short labels, such as a client or a project.
-- **Linked workflows and runs** — workflows the card is about, each optionally with one of
-  its runs; the card shows the run's status. A link to a workflow you cannot open shows as
-  hidden and keeps its place when you edit the others.
 
 Column workflows receive these fields in the card's `metadata` (`assignee_user_id`,
-`priority`, `due_date`, `labels`, `links`).
+`priority`, `due_date`, `labels`).
 
 If someone else changes the card while you edit it, saving shows a notice and loads their
 version instead of overwriting it. An open board checks for changes made elsewhere (by a

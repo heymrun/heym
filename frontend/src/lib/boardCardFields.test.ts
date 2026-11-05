@@ -68,12 +68,9 @@ describe("cardMatches", () => {
     expect(cardMatches(tagged, { runStatus: "pending" }, context)).toBe(false);
   });
 
-  it("filters by due window and leaves the last column out of overdue", () => {
+  it("filters by due window, in every column", () => {
     const late = card({ due_date: "2026-11-01" });
     expect(cardMatches(late, { due: "overdue" }, context)).toBe(true);
-    expect(cardMatches(late, { due: "overdue" }, { ...context, doneColumnIds: ["col"] })).toBe(
-      false,
-    );
     expect(cardMatches(card({ due_date: today }), { due: "today" }, context)).toBe(true);
     expect(cardMatches(card({ due_date: "2026-11-08" }), { due: "week" }, context)).toBe(true);
     expect(cardMatches(late, { due: "week" }, context)).toBe(false);
@@ -103,28 +100,12 @@ describe("fieldChanges", () => {
     expect(fieldChanges(current, form)).toEqual({ priority: "urgent", due_date: "2026-11-10" });
   });
 
-  it("clears with null and compares labels and visible links", () => {
-    const current = card({
-      assignee_user_id: "u1",
-      labels: ["Acme"],
-      links: [
-        {
-          workflow_id: "w1",
-          workflow_name: "Draft",
-          execution_id: null,
-          execution_status: null,
-          hidden: false,
-        },
-        { workflow_id: null, workflow_name: null, execution_id: null, execution_status: null, hidden: true },
-      ],
-    });
+  it("clears with null and keeps labels that only differ in spacing", () => {
+    const current = card({ assignee_user_id: "u1", labels: ["Acme"] });
     const form = formFromCard(current);
-    expect(form.links).toEqual([{ workflow_id: "w1", execution_id: "" }]);
     form.assigneeUserId = "";
     form.labels = " Acme ";
     expect(fieldChanges(current, form)).toEqual({ assignee_user_id: null });
-    form.links = [];
-    expect(fieldChanges(current, form)).toEqual({ assignee_user_id: null, links: [] });
   });
 });
 

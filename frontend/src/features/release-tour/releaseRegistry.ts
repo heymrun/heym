@@ -33,7 +33,7 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
       publishedAt: new Date("2026-11-05T12:00:00Z"),
       blocks: [{
         type: "prose",
-        markdown: "Open a card on the **Board** tab to give it an assignee, a priority, a due date, labels such as a client or project, and links to the workflows or runs it is about. The card shows them at a glance, and overdue work turns red. The order you drag cards into is kept, in Heym and in Heym Work. A board can also stop moving cards on its own: turn off **Advance cards automatically** in its settings for a plain team task board. Chat and any MCP client through `heym_chat` can now create and change boards, columns and cards, assign and move tasks, and list what is overdue or waiting for a review. Moving a card never approves a review.",
+        markdown: "Open a card on the **Board** tab to give it an assignee, a priority, a due date and labels such as a client or project. The card shows them at a glance, and overdue work turns red. The order you drag cards into is kept, in Heym and in Heym Work. A board can also stop moving cards on its own: turn off **Advance cards automatically** in its settings for a plain team task board. Chat and any MCP client through `heym_chat` can now create and change boards, columns and cards, assign and move tasks, and list what is overdue or waiting for a review. Moving a card never approves a review.",
       }],
       tour: {
         description: "Give cards an owner, a priority and a due date, and manage them from Heym, Heym Work, Chat or MCP.",

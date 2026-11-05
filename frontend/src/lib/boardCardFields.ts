@@ -40,8 +40,6 @@ export interface FilterContext {
   userId: string | null;
   /** Today as YYYY-MM-DD in the viewer's time zone. */
   today: string;
-  /** Columns whose cards are never overdue: the board's last column. */
-  doneColumnIds?: string[];
 }
 
 /** The fields a card's editor holds; empty strings mean "not set". */
@@ -51,12 +49,10 @@ export interface CardFieldForm {
   dueDate: string;
   /** Comma-separated. */
   labels: string;
-  /** The links the viewer can see; hidden ones are kept by the server. */
-  links: { workflow_id: string; execution_id: string }[];
 }
 
 export function emptyCardFields(): CardFields {
-  return { assignee_user_id: null, priority: null, due_date: null, labels: [], links: [] };
+  return { assignee_user_id: null, priority: null, due_date: null, labels: [] };
 }
 
 export function localDate(date: Date): string {
@@ -79,9 +75,7 @@ export function dueState(due: string | null, today: string): DueState | null {
 
 function dueMatches(card: BoardCard, due: NonNullable<CardFilter["due"]>, context: FilterContext): boolean {
   const state = dueState(card.fields.due_date, context.today);
-  if (due === "overdue") {
-    return state === "overdue" && !(context.doneColumnIds ?? []).includes(card.column_id);
-  }
+  if (due === "overdue") return state === "overdue";
   if (due === "today") return state === "today";
   return state === "today" || state === "soon";
 }
@@ -123,9 +117,6 @@ export function formFromCard(card: BoardCard): CardFieldForm {
     priority: card.fields.priority ?? "",
     dueDate: card.fields.due_date ?? "",
     labels: card.fields.labels.join(", "),
-    links: card.fields.links
-      .filter((link) => !link.hidden && link.workflow_id)
-      .map((link) => ({ workflow_id: link.workflow_id ?? "", execution_id: link.execution_id ?? "" })),
   };
 }
 
@@ -144,15 +135,6 @@ export function fieldChanges(card: BoardCard, form: CardFieldForm): CardFieldsPa
   if (form.dueDate !== before.dueDate) changes.due_date = form.dueDate || null;
   const labels = parseLabels(form.labels);
   if (!sameList(labels, card.fields.labels)) changes.labels = labels;
-  const key = (link: { workflow_id: string; execution_id: string }): string =>
-    `${link.workflow_id}:${link.execution_id.trim()}`;
-  const links = form.links.filter((link) => link.workflow_id);
-  if (!sameList(links.map(key), before.links.map(key))) {
-    changes.links = links.map((link) => ({
-      workflow_id: link.workflow_id,
-      execution_id: link.execution_id.trim() || null,
-    }));
-  }
   return changes;
 }
 
