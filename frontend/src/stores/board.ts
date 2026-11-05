@@ -4,6 +4,7 @@ import { defineStore } from "pinia";
 import type {
   BoardCard,
   BoardCreatePayload,
+  BoardMember,
   BoardState,
   BoardSummary,
   BoardUpdatePayload,
@@ -12,13 +13,18 @@ import type {
 import { boardApi } from "@/services/api";
 
 const POLL_INTERVAL_MS = 2500;
+// How often an open board asks whether anyone else (Heym Work, Chat, MCP) changed it.
+const REVISION_INTERVAL_MS = 5000;
 
 export const useBoardStore = defineStore("board", () => {
   const boards = ref<BoardSummary[]>([]);
   const activeBoard = ref<BoardState | null>(null);
+  const members = ref<BoardMember[]>([]);
   const loading = ref(false);
   const error = ref<string | null>(null);
   let pollTimer: ReturnType<typeof setInterval> | null = null;
+  let revisionTimer: ReturnType<typeof setInterval> | null = null;
+  let lastRevision: string | null = null;
 
   // The agentic model is mandatory: board actions stay disabled until it is chosen.
   const mapperConfigured = computed<boolean>(() =>
@@ -36,12 +42,9 @@ export const useBoardStore = defineStore("board", () => {
     for (const card of activeBoard.value.cards) {
       (grouped[card.column_id] ??= []).push(card);
     }
+    // The server keeps positions dense, so every app shows the same order.
     for (const columnId of Object.keys(grouped)) {
-      grouped[columnId].sort((a, b) => {
-        const updatedAtDifference =
-          new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
-        return updatedAtDifference || a.position - b.position;
-      });
+      grouped[columnId].sort((a, b) => a.position - b.position);
     }
     return grouped;
   });
@@ -51,6 +54,33 @@ export const useBoardStore = defineStore("board", () => {
       clearInterval(pollTimer);
       pollTimer = null;
     }
+    if (revisionTimer !== null) {
+      clearInterval(revisionTimer);
+      revisionTimer = null;
+    }
+  }
+
+  /** Reload the open board when someone else changed it since the last check. */
+  async function checkRevision(): Promise<void> {
+    const board = activeBoard.value;
+    if (!board) return;
+    try {
+      const revision = await boardApi.revision(board.id);
+      if (activeBoard.value?.id !== board.id || revision === lastRevision) return;
+      lastRevision = revision;
+      await refreshActiveBoard();
+    } catch {
+      // A missed check is retried on the next tick.
+    }
+  }
+
+  function startRevisionPolling(): void {
+    if (revisionTimer !== null) return;
+    revisionTimer = setInterval(() => {
+      if (typeof document === "undefined" || document.visibilityState === "visible") {
+        void checkRevision();
+      }
+    }, REVISION_INTERVAL_MS);
   }
 
   function syncPolling(): void {
@@ -79,9 +109,13 @@ export const useBoardStore = defineStore("board", () => {
   async function openBoard(boardId: string): Promise<void> {
     loading.value = true;
     try {
+      // Read the revision first: a change made after it is caught by the next check.
+      lastRevision = await boardApi.revision(boardId).catch(() => null);
       activeBoard.value = await boardApi.getState(boardId);
+      members.value = await boardApi.members(boardId).catch(() => []);
       error.value = null;
       syncPolling();
+      startRevisionPolling();
     } catch (err) {
       error.value = err instanceof Error ? err.message : "Failed to load board";
     } finally {
@@ -139,10 +173,16 @@ export const useBoardStore = defineStore("board", () => {
     const card = board.cards.find((c) => c.id === cardId);
     if (!card) return;
     const previous = { column_id: card.column_id, position: card.position };
+    // The drop index counts the dragged card itself; the server places it among the others.
+    const currentIndex = (cardsByColumn.value[toColumnId] ?? []).findIndex((c) => c.id === cardId);
+    const target =
+      card.column_id === toColumnId && currentIndex !== -1 && currentIndex < position
+        ? position - 1
+        : position;
     card.column_id = toColumnId;
     card.position = position - 0.5; // optimistic slot between neighbors
     try {
-      await boardApi.moveCard(board.id, cardId, { to_column_id: toColumnId, position });
+      await boardApi.moveCard(board.id, cardId, { to_column_id: toColumnId, position: target });
       await refreshActiveBoard();
     } catch (err) {
       card.column_id = previous.column_id;
@@ -199,6 +239,7 @@ export const useBoardStore = defineStore("board", () => {
   return {
     boards,
     activeBoard,
+    members,
     loading,
     error,
     cardsByColumn,
@@ -208,6 +249,7 @@ export const useBoardStore = defineStore("board", () => {
     fetchBoards,
     openBoard,
     refreshActiveBoard,
+    checkRevision,
     createBoard,
     updateBoard,
     deleteBoard,
