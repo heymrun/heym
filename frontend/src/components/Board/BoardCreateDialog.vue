@@ -5,6 +5,7 @@ import Dialog from "@/components/ui/Dialog.vue";
 import Button from "@/components/ui/Button.vue";
 import Input from "@/components/ui/Input.vue";
 import { useBoardStore } from "@/stores/board";
+import BoardAutoAdvanceToggle from "./BoardAutoAdvanceToggle.vue";
 import BoardMapperControls from "./BoardMapperControls.vue";
 
 defineProps<{ open: boolean }>();
@@ -18,6 +19,7 @@ const name = ref("");
 const description = ref("");
 const credentialId = ref("");
 const model = ref("");
+const autoAdvance = ref(true);
 const saving = ref(false);
 
 // A board without its Agentic Kanban Model cannot run anything, so it is required up front.
@@ -34,11 +36,13 @@ async function submit(): Promise<void> {
       description: description.value.trim() || null,
       mapper_credential_id: credentialId.value,
       mapper_model: model.value,
+      auto_advance: autoAdvance.value,
     });
     name.value = "";
     description.value = "";
     credentialId.value = "";
     model.value = "";
+    autoAdvance.value = true;
     emit("created", board.id);
     emit("close");
   } finally {
@@ -70,6 +74,8 @@ async function submit(): Promise<void> {
         v-model:credential-id="credentialId"
         v-model:model="model"
       />
+
+      <BoardAutoAdvanceToggle v-model="autoAdvance" />
 
       <div class="flex justify-end gap-2">
         <Button

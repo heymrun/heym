@@ -5,6 +5,7 @@ import Dialog from "@/components/ui/Dialog.vue";
 import Button from "@/components/ui/Button.vue";
 import Input from "@/components/ui/Input.vue";
 import { useBoardStore } from "@/stores/board";
+import BoardAutoAdvanceToggle from "./BoardAutoAdvanceToggle.vue";
 import BoardMapperControls from "./BoardMapperControls.vue";
 import BoardShareSection from "./BoardShareSection.vue";
 
@@ -16,6 +17,7 @@ const name = ref("");
 const description = ref("");
 const credentialId = ref("");
 const model = ref("");
+const autoAdvance = ref(true);
 const saving = ref(false);
 
 watch(
@@ -27,6 +29,7 @@ watch(
     description.value = board.description ?? "";
     credentialId.value = board.mapper_credential_id ?? "";
     model.value = board.mapper_model ?? "";
+    autoAdvance.value = board.auto_advance;
   },
   { immediate: true },
 );
@@ -45,6 +48,7 @@ async function submit(): Promise<void> {
       description: description.value.trim() || null,
       mapper_credential_id: credentialId.value,
       mapper_model: model.value,
+      auto_advance: autoAdvance.value,
     });
     emit("close");
   } finally {
@@ -79,6 +83,8 @@ async function submit(): Promise<void> {
         v-model:credential-id="credentialId"
         v-model:model="model"
       />
+
+      <BoardAutoAdvanceToggle v-model="autoAdvance" />
 
       <BoardShareSection
         v-if="boardStore.activeBoard"
