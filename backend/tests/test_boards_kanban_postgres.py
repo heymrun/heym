@@ -5,6 +5,7 @@ import uuid
 from datetime import date
 
 from fastapi import HTTPException
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import boards as boards_api
@@ -228,3 +229,65 @@ class CardFieldApiTests(KanbanPgCase):
                     board_id=self.board.id, db=db, current_user=self.outsider
                 )
         self.assertEqual(ctx.exception.status_code, 404)
+
+
+class OrderTests(KanbanPgCase):
+    async def asyncSetUp(self) -> None:
+        await super().asyncSetUp()
+        self.board, self.columns = await make_board(self.engine, self.owner, auto_advance=False)
+
+    async def order(self, column_id: uuid.UUID) -> list[str]:
+        async with self.session() as db:
+            rows = await db.execute(
+                select(BoardCard.title)
+                .where(BoardCard.column_id == column_id)
+                .order_by(BoardCard.position)
+            )
+            return list(rows.scalars().all())
+
+    async def move(self, card_id: uuid.UUID, column_id: uuid.UUID, position: int | None = None):
+        async with self.session() as db:
+            return await boards_api.move_card(
+                board_id=self.board.id,
+                card_id=card_id,
+                request=CardMoveRequest(to_column_id=column_id, position=position),
+                db=db,
+                current_user=self.owner,
+            )
+
+    async def test_new_cards_go_on_top(self) -> None:
+        await self.card_in(self.board.id, self.columns[0].id, "a")
+        await self.card_in(self.board.id, self.columns[0].id, "b")
+        self.assertEqual(await self.order(self.columns[0].id), ["b", "a"])
+
+    async def test_moved_card_goes_on_top_or_to_the_given_index(self) -> None:
+        a = await self.card_in(self.board.id, self.columns[0].id, "a")
+        b = await self.card_in(self.board.id, self.columns[0].id, "b")
+        c = await self.card_in(self.board.id, self.columns[1].id, "c")
+        await self.move(a, self.columns[1].id)
+        self.assertEqual(await self.order(self.columns[1].id), ["a", "c"])
+        await self.move(b, self.columns[1].id, position=2)
+        self.assertEqual(await self.order(self.columns[1].id), ["a", "c", "b"])
+        await self.move(c, self.columns[1].id, position=0)
+        self.assertEqual(await self.order(self.columns[1].id), ["c", "a", "b"])
+        self.assertEqual(await self.order(self.columns[0].id), [])
+
+    async def test_same_column_move_without_position_keeps_the_place(self) -> None:
+        a = await self.card_in(self.board.id, self.columns[0].id, "a")
+        await self.card_in(self.board.id, self.columns[0].id, "b")
+        await self.move(a, self.columns[0].id)
+        self.assertEqual(await self.order(self.columns[0].id), ["b", "a"])
+
+    async def test_reorder_in_place_through_update(self) -> None:
+        ids = {}
+        for title in ("a", "b", "c"):
+            ids[title] = await self.card_in(self.board.id, self.columns[0].id, title)
+        async with self.session() as db:
+            await boards_api.update_card(
+                board_id=self.board.id,
+                card_id=ids["a"],
+                request=CardUpdateRequest(position=0),
+                db=db,
+                current_user=self.owner,
+            )
+        self.assertEqual(await self.order(self.columns[0].id), ["a", "c", "b"])

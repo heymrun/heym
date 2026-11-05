@@ -192,6 +192,29 @@ async def _reindex_cards(db: AsyncSession, column_id: uuid.UUID) -> None:
         card.position = index
 
 
+async def _place_card(
+    db: AsyncSession, card: BoardCard, column_id: uuid.UUID, index: int | None
+) -> None:
+    """Put ``card`` at ``index`` of ``column_id`` (the top when None) and renumber the column
+    0..n-1, so every app shows the same order."""
+    others = list(
+        (
+            await db.execute(
+                select(BoardCard)
+                .where(BoardCard.column_id == column_id, BoardCard.id != card.id)
+                .order_by(BoardCard.position, BoardCard.updated_at)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    target = 0 if index is None else max(0, min(index, len(others)))
+    others.insert(target, card)
+    for position, item in enumerate(others):
+        if item.position != position:
+            item.position = position
+
+
 async def _column_workflow_responses(
     db: AsyncSession, column_ids: list[uuid.UUID]
 ) -> dict[uuid.UUID, list[BoardColumnWorkflowResponse]]:
@@ -676,11 +699,12 @@ async def create_column(
     count = (
         await db.execute(select(func.count(BoardColumn.id)).where(BoardColumn.board_id == board.id))
     ).scalar() or 0
-    position = request.position if request.position is not None else count
-    column = BoardColumn(
-        board_id=board.id, name=request.name, position=position, color=request.color
-    )
+    column = BoardColumn(board_id=board.id, name=request.name, position=count, color=request.color)
     db.add(column)
+    if request.position is not None:
+        # Insert at the requested slot and keep positions a dense 0..n-1 sequence.
+        await db.flush()
+        await _reorder_columns(db, board, column, request.position)
     await db.commit()
     await db.refresh(column)
     audit(
@@ -861,27 +885,20 @@ async def create_card(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="Board has no columns"
             )
-    if request.position is not None:
-        position = request.position
-    else:
-        count = (
-            await db.execute(
-                select(func.count(BoardCard.id)).where(BoardCard.column_id == column.id)
-            )
-        ).scalar() or 0
-        position = count
     card = BoardCard(
+        id=uuid.uuid4(),
         board_id=board.id,
         column_id=column.id,
         title=request.title,
         content=request.content,
-        position=position,
+        position=0,
     )
     updates = await _field_updates(db, board, current_user, request, None)
     if updates:
         card.card_metadata = merge_metadata({}, updates=updates)
     db.add(card)
     await db.flush()
+    await _place_card(db, card, column.id, request.position)
     db.add(
         BoardCardActivity(
             card_id=card.id,
@@ -999,8 +1016,7 @@ async def update_card(
             card.card_metadata, raw=request.card_metadata, updates=updates
         )
     if request.position is not None:
-        card.position = request.position
-        await _reindex_cards(db, card.column_id)
+        await _place_card(db, card, card.column_id, request.position)
     await db.commit()
     await db.refresh(card)
     audit(
@@ -1122,10 +1138,12 @@ async def move_card(
     source = await _get_board_column(db, board, card.column_id) if column_changed else target
 
     old_column_id = card.column_id
+    current_index = card.position
     card.column_id = target.id
-    if request.position is not None:
-        card.position = request.position
-    await _reindex_cards(db, target.id)
+    index = request.position
+    if index is None and not column_changed:
+        index = current_index
+    await _place_card(db, card, target.id, index)
     if column_changed:
         await _reindex_cards(db, old_column_id)
         db.add(
