@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import type { BoardCard, CardFields } from "@/types/board";
 import {
+  cardBadgeModel,
   cardMatches,
   dueState,
   emptyCardFields,
   fieldChanges,
+  formatDueDate,
   formFromCard,
   localDate,
   parseLabels,
@@ -128,4 +130,47 @@ describe("fieldChanges", () => {
 
 it("labels every priority, most urgent first", () => {
   expect(Object.keys(PRIORITY_LABELS)).toEqual(["urgent", "high", "medium", "low"]);
+});
+
+describe("cardBadgeModel", () => {
+  const members = [
+    { user_id: "u1", name: "Ada", email: "ada@example.com", permission: "owner" as const },
+  ];
+
+  it("is empty for a card without fields", () => {
+    expect(cardBadgeModel(card({}), members, today)).toEqual({
+      assignee: null,
+      priority: null,
+      due: null,
+      labels: [],
+      moreLabels: 0,
+    });
+  });
+
+  it("names the assignee, the due state and the extra labels", () => {
+    const model = cardBadgeModel(
+      card({
+        assignee_user_id: "u1",
+        priority: "urgent",
+        due_date: "2026-11-04",
+        labels: ["Acme", "NDA", "Q4"],
+      }),
+      members,
+      today,
+    );
+    expect(model.assignee).toEqual({ userId: "u1", name: "Ada", email: "ada@example.com" });
+    expect(model.priority).toBe("urgent");
+    expect(model.due).toEqual({ date: "2026-11-04", label: "Nov 4", state: "overdue" });
+    expect(model.labels).toEqual(["Acme", "NDA"]);
+    expect(model.moreLabels).toBe(1);
+  });
+
+  it("keeps an assignee who is no longer a member", () => {
+    const model = cardBadgeModel(card({ assignee_user_id: "gone" }), members, today);
+    expect(model.assignee).toEqual({ userId: "gone", name: "Former member", email: null });
+  });
+});
+
+it("formats a due date without a time zone shift", () => {
+  expect(formatDueDate("2026-01-01")).toBe("Jan 1");
 });

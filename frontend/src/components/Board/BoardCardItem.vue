@@ -14,7 +14,9 @@ import {
 import type { BoardCard } from "@/types/board";
 import { useBoardCardTouchDrag } from "@/composables/useBoardCardTouchDrag";
 import { useToast } from "@/composables/useToast";
+import { localDate } from "@/lib/boardCardFields";
 import { useBoardStore } from "@/stores/board";
+import BoardCardBadges from "./BoardCardBadges.vue";
 
 const boardStore = useBoardStore();
 const { showToast } = useToast();
@@ -22,6 +24,7 @@ const { showToast } = useToast();
 const canAct = computed<boolean>(() => boardStore.mapperConfigured && boardStore.canWrite);
 
 const props = defineProps<{ card: BoardCard }>();
+const today = localDate(new Date());
 const emit = defineEmits<{
   (e: "open", cardId: string): void;
   (e: "clone", cardId: string): void;
@@ -268,5 +271,10 @@ function onCardClick(): void {
     >
       {{ card.content }}
     </p>
+    <BoardCardBadges
+      :card="card"
+      :members="boardStore.members"
+      :today="today"
+    />
   </div>
 </template>

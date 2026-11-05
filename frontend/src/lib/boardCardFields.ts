@@ -1,5 +1,6 @@
 import type {
   BoardCard,
+  BoardMember,
   CardFields,
   CardFieldsPayload,
   CardPriority,
@@ -153,4 +154,44 @@ export function fieldChanges(card: BoardCard, form: CardFieldForm): CardFieldsPa
     }));
   }
   return changes;
+}
+
+/** What a card shows under its title; empty parts are not drawn. */
+export interface CardBadgeModel {
+  assignee: { userId: string; name: string; email: string | null } | null;
+  priority: CardPriority | null;
+  due: { date: string; label: string; state: DueState } | null;
+  labels: string[];
+  moreLabels: number;
+}
+
+const DUE_FORMAT = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });
+
+/** "Nov 4" for 2026-11-04, read as a calendar day rather than a UTC instant. */
+export function formatDueDate(isoDate: string): string {
+  const [year, month, day] = isoDate.split("-").map(Number);
+  return DUE_FORMAT.format(new Date(year, month - 1, day));
+}
+
+export function cardBadgeModel(
+  card: BoardCard,
+  members: BoardMember[],
+  today: string,
+  maxLabels = 2,
+): CardBadgeModel {
+  const { assignee_user_id: assigneeId, due_date: due, labels } = card.fields;
+  const member = assigneeId ? members.find((item) => item.user_id === assigneeId) : undefined;
+  return {
+    assignee: assigneeId
+      ? {
+          userId: assigneeId,
+          name: member ? member.name || member.email : "Former member",
+          email: member?.email ?? null,
+        }
+      : null,
+    priority: card.fields.priority,
+    due: due ? { date: due, label: formatDueDate(due), state: dueState(due, today) ?? "later" } : null,
+    labels: labels.slice(0, maxLabels),
+    moreLabels: Math.max(0, labels.length - maxLabels),
+  };
 }
