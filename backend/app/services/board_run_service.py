@@ -8,7 +8,7 @@ from concurrent.futures import CancelledError
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import func, select, update
+from sqlalchemy import select, update
 
 from app.api.analytics import upsert_workflow_analytics_snapshot
 from app.api.workflows import (
@@ -874,6 +874,10 @@ async def answer_card_comment(db, *, card, column, board) -> bool:
     if answered is None:
         return False
 
+    # A board without auto-advance keeps the answered card in its column.
+    if not getattr(board, "auto_advance", True):
+        return False
+
     # Flip to running before the response returns so the board shows the card as active
     # right away; the next column's chain takes over from there.
     card.run_status = "running"
@@ -1017,6 +1021,17 @@ async def _auto_advance(
     """
     try:
         async with session_factory() as db:
+            enabled = (
+                await db.execute(select(Board.auto_advance).where(Board.id == board_id))
+            ).scalar_one_or_none()
+            if not enabled:
+                # The board keeps cards where people put them: settle a card a caller
+                # flipped to running for the cascade, and move nothing.
+                settled = await db.get(BoardCard, card_id)
+                if settled is not None and settled.run_status == "running":
+                    settled.run_status = "success"
+                    await db.commit()
+                return
             columns = (
                 (
                     await db.execute(
@@ -1041,15 +1056,9 @@ async def _auto_advance(
                 if card is None:
                     return
                 old_column_id = card.column_id
-                count = (
-                    await db.execute(
-                        select(func.count(BoardCard.id)).where(
-                            BoardCard.column_id == target.id, BoardCard.id != card_id
-                        )
-                    )
-                ).scalar() or 0
                 card.column_id = target.id
-                card.position = count
+                # Top of the new column, like a person's move; the reindex below makes it 0.
+                card.position = -1
                 await _reindex_column(db, old_column_id)
                 await _reindex_column(db, target.id)
                 db.add(

@@ -269,6 +269,7 @@ def _board_summary(
         mapper_credential_id=board.mapper_credential_id,
         mapper_credential_name=cred_name,
         permission=permission,
+        auto_advance=board.auto_advance,
         updated_at=board.updated_at,
     )
 
@@ -323,6 +324,7 @@ async def create_board(
         description=request.description,
         mapper_model=request.mapper_model,
         mapper_credential_id=request.mapper_credential_id,
+        auto_advance=request.auto_advance,
     )
     db.add(board)
     await db.flush()
@@ -379,6 +381,7 @@ async def get_board_state(
         mapper_credential_id=board.mapper_credential_id,
         mapper_credential_name=cred_name,
         permission=permission,
+        auto_advance=board.auto_advance,
         columns=[
             BoardColumnResponse(
                 id=column.id,
@@ -412,6 +415,8 @@ async def update_board(
         board.name = request.name
     if request.description is not None:
         board.description = request.description
+    if request.auto_advance is not None:
+        board.auto_advance = request.auto_advance
     if "mapper_model" in fields_set:
         board.mapper_model = request.mapper_model
     if "mapper_credential_id" in fields_set:

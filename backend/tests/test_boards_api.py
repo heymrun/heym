@@ -157,6 +157,7 @@ class TestBoardActiveExecutionStatus(unittest.IsolatedAsyncioTestCase):
             id=card.board_id,
             name="Recovery board",
             description=None,
+            auto_advance=True,
             mapper_model=None,
             mapper_credential_id=None,
         )

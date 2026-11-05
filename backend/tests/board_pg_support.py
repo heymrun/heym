@@ -8,6 +8,7 @@ from sqlalchemy.pool import NullPool
 
 from app.config import settings
 from app.db.models import Board, BoardColumn, BoardShare, BoardTeamShare, Team, TeamMember, User
+from app.db.session import engine as app_engine
 
 DEFAULT_COLUMNS = ("Backlog", "Planning", "Development", "Done")
 
@@ -85,3 +86,6 @@ async def cleanup(engine: AsyncEngine, users: list[User], teams: list[Team] = ()
         await db.execute(delete(User).where(User.id.in_(ids)))
         await db.commit()
     await engine.dispose()
+    # Code under test opens its own sessions (auto-advance); their pooled connections
+    # belong to this test's event loop and would fail, silently, in the next one.
+    await app_engine.dispose()

@@ -46,6 +46,7 @@ class BoardSummaryResponse(BaseModel):
     mapper_credential_name: str | None = None
     # The caller's access: "owner", "write" or "read" (shared boards).
     permission: str = "owner"
+    auto_advance: bool = True
     updated_at: datetime
 
 
@@ -57,6 +58,7 @@ class BoardStateResponse(BaseModel):
     mapper_credential_id: uuid.UUID | None = None
     mapper_credential_name: str | None = None
     permission: str = "owner"
+    auto_advance: bool = True
     columns: list[BoardColumnResponse]
     cards: list[BoardCardResponse]
     has_active_runs: bool
@@ -67,6 +69,7 @@ class BoardCreateRequest(BaseModel):
     description: str | None = None
     mapper_model: str | None = None
     mapper_credential_id: uuid.UUID | None = None
+    auto_advance: bool = True
 
 
 class BoardUpdateRequest(BaseModel):
@@ -74,6 +77,7 @@ class BoardUpdateRequest(BaseModel):
     description: str | None = None
     mapper_model: str | None = None
     mapper_credential_id: uuid.UUID | None = None
+    auto_advance: bool | None = None
 
 
 class ColumnCreateRequest(BaseModel):
