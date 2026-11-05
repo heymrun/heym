@@ -1,5 +1,6 @@
 """Agentic kanban board API: boards, columns, cards, moves, runs, comments, sharing."""
 
+import hashlib
 import uuid
 
 from fastapi import (
@@ -41,6 +42,7 @@ from app.models.board_schemas import (
     BoardColumnWorkflowResponse,
     BoardCreateRequest,
     BoardMemberResponse,
+    BoardRevisionResponse,
     BoardShareRequest,
     BoardShareResponse,
     BoardStateResponse,
@@ -631,6 +633,41 @@ async def list_board_members(
     ]
 
 
+@router.get("/{board_id}/revision", response_model=BoardRevisionResponse)
+async def get_board_revision(
+    board_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> BoardRevisionResponse:
+    """A fingerprint of the board's state; screens poll it and reload only when it changes."""
+    board, _ = await _get_board_for_user(db, board_id, current_user, write=False)
+    columns = (
+        await db.execute(
+            select(func.count(BoardColumn.id), func.max(BoardColumn.updated_at)).where(
+                BoardColumn.board_id == board.id
+            )
+        )
+    ).one()
+    cards = (
+        await db.execute(
+            select(func.count(BoardCard.id), func.max(BoardCard.updated_at)).where(
+                BoardCard.board_id == board.id
+            )
+        )
+    ).one()
+    links = (
+        await db.execute(
+            select(func.count(BoardColumnWorkflow.id))
+            .join(BoardColumn, BoardColumn.id == BoardColumnWorkflow.column_id)
+            .where(BoardColumn.board_id == board.id)
+        )
+    ).scalar() or 0
+    source = "|".join(
+        str(part) for part in (board.updated_at, columns[0], columns[1], cards[0], cards[1], links)
+    )
+    return BoardRevisionResponse(revision=hashlib.sha256(source.encode()).hexdigest()[:16])
+
+
 @router.patch("/{board_id}", response_model=BoardSummaryResponse)
 async def update_board(
     board_id: uuid.UUID,
@@ -746,6 +783,8 @@ async def update_column(
     if "ai_instructions" in fields_set:
         column.ai_instructions = request.ai_instructions
     if request.workflow_ids is not None:
+        # A chain change alone touches no column field; bump it so the revision moves.
+        column.updated_at = func.now()
         # Check that all workflows are accessible to the user (owned or shared)
         for workflow_id in set(request.workflow_ids):
             workflow = await get_accessible_workflow(db, workflow_id, current_user.id)

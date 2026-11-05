@@ -17,6 +17,7 @@ from app.models.board_schemas import (
     CardLinkModel,
     CardMoveRequest,
     CardUpdateRequest,
+    ColumnUpdateRequest,
 )
 from tests.board_pg_support import cleanup, connect_or_skip, make_board, make_user, share_board
 
@@ -341,3 +342,79 @@ class ColumnDeleteTests(KanbanPgCase):
         with self.assertRaises(HTTPException) as ctx:
             await self.delete(self.columns[1].id)
         self.assertEqual(ctx.exception.status_code, 400)
+
+
+class RevisionTests(KanbanPgCase):
+    async def revision(self, board_id: uuid.UUID) -> str:
+        async with self.session() as db:
+            response = await boards_api.get_board_revision(
+                board_id=board_id, db=db, current_user=self.owner
+            )
+            return response.revision
+
+    async def test_every_kind_of_change_moves_the_revision(self) -> None:
+        board, columns = await make_board(self.engine, self.owner, auto_advance=False)
+        first = await self.revision(board.id)
+        self.assertEqual(await self.revision(board.id), first)
+        seen = {first}
+
+        card_id = await self.card_in(board.id, columns[0].id, "a")
+        seen.add(await self.revision(board.id))
+        async with self.session() as db:
+            await boards_api.update_card(
+                board_id=board.id,
+                card_id=card_id,
+                request=CardUpdateRequest(priority="high"),
+                db=db,
+                current_user=self.owner,
+            )
+        seen.add(await self.revision(board.id))
+        async with self.session() as db:
+            await boards_api.update_column(
+                board_id=board.id,
+                column_id=columns[1].id,
+                request=ColumnUpdateRequest(name="Review"),
+                db=db,
+                current_user=self.owner,
+            )
+        seen.add(await self.revision(board.id))
+        async with self.session() as db:
+            await boards_api.delete_card(
+                board_id=board.id, card_id=card_id, db=db, current_user=self.owner
+            )
+        seen.add(await self.revision(board.id))
+        async with self.session() as db:
+            await boards_api.update_board(
+                board_id=board.id,
+                request=BoardUpdateRequest(name="Legal 2"),
+                db=db,
+                current_user=self.owner,
+            )
+        seen.add(await self.revision(board.id))
+        self.assertEqual(len(seen), 6)
+
+    async def test_a_chain_change_moves_the_revision(self) -> None:
+        board, columns = await make_board(self.engine, self.owner)
+        async with self.session() as db:
+            workflow = Workflow(name="Draft", owner_id=self.owner.id, nodes=[], edges=[])
+            db.add(workflow)
+            await db.commit()
+        before = await self.revision(board.id)
+        async with self.session() as db:
+            await boards_api.update_column(
+                board_id=board.id,
+                column_id=columns[1].id,
+                request=ColumnUpdateRequest(workflow_ids=[workflow.id]),
+                db=db,
+                current_user=self.owner,
+            )
+        self.assertNotEqual(await self.revision(board.id), before)
+
+    async def test_outsider_cannot_read_the_revision(self) -> None:
+        board, _ = await make_board(self.engine, self.owner)
+        outsider = await make_user(self.engine, "outsider")
+        self.users.append(outsider)
+        async with self.session() as db:
+            with self.assertRaises(HTTPException) as ctx:
+                await boards_api.get_board_revision(board_id=board.id, db=db, current_user=outsider)
+        self.assertEqual(ctx.exception.status_code, 404)
