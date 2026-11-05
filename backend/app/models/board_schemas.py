@@ -11,11 +11,6 @@ from app.services.board_card_fields import normalize_labels
 CardPriority = Literal["low", "medium", "high", "urgent"]
 
 
-class CardLinkModel(BaseModel):
-    workflow_id: uuid.UUID
-    execution_id: uuid.UUID | None = None
-
-
 class CardFieldsRequest(BaseModel):
     """Typed card fields; a field left out keeps its value, null clears it."""
 
@@ -23,7 +18,6 @@ class CardFieldsRequest(BaseModel):
     priority: CardPriority | None = None
     due_date: date | None = None
     labels: list[str] | None = Field(default=None, max_length=50)
-    links: list[CardLinkModel] | None = Field(default=None, max_length=10)
 
     @field_validator("labels")
     @classmethod
@@ -31,21 +25,11 @@ class CardFieldsRequest(BaseModel):
         return None if value is None else normalize_labels(value)
 
 
-class CardLinkResponse(BaseModel):
-    workflow_id: uuid.UUID | None = None
-    workflow_name: str | None = None
-    execution_id: uuid.UUID | None = None
-    execution_status: str | None = None
-    # The reader cannot open the linked workflow; nothing about it is shown.
-    hidden: bool = False
-
-
 class CardFieldsResponse(BaseModel):
     assignee_user_id: uuid.UUID | None = None
     priority: CardPriority | None = None
     due_date: date | None = None
     labels: list[str] = Field(default_factory=list)
-    links: list[CardLinkResponse] = Field(default_factory=list)
 
 
 class BoardMemberResponse(BaseModel):

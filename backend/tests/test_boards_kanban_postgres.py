@@ -9,12 +9,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import boards as boards_api
-from app.db.models import BoardCard, ExecutionHistory, Workflow
+from app.db.models import BoardCard, Workflow
 from app.models.board_schemas import (
     BoardCreateRequest,
     BoardUpdateRequest,
     CardCreateRequest,
-    CardLinkModel,
     CardMoveRequest,
     CardUpdateRequest,
     ColumnUpdateRequest,
@@ -179,42 +178,6 @@ class CardFieldApiTests(KanbanPgCase):
         first = await self.update(self.owner, title="v2")
         saved = await self.update(self.owner, title="v3", expected_edit_version=first.edit_version)
         self.assertEqual(saved.title, "v3")
-
-    async def test_links_are_checked_on_write_and_hidden_without_access(self) -> None:
-        async with self.session() as db:
-            workflow = Workflow(name="Draft NDA", owner_id=self.owner.id, nodes=[], edges=[])
-            db.add(workflow)
-            await db.flush()
-            run = ExecutionHistory(workflow_id=workflow.id, status="success")
-            db.add(run)
-            await db.commit()
-        card = await self.update(
-            self.owner, links=[CardLinkModel(workflow_id=workflow.id, execution_id=run.id)]
-        )
-        self.assertEqual(card.fields.links[0].workflow_name, "Draft NDA")
-        self.assertEqual(card.fields.links[0].execution_status, "success")
-        self.assertNotIn("links", card.card_metadata)
-        with self.assertRaises(HTTPException):
-            await self.update(self.writer, links=[CardLinkModel(workflow_id=workflow.id)])
-        async with self.session() as db:
-            state = await boards_api.get_board_state(
-                board_id=self.board.id, db=db, current_user=self.reader
-            )
-        link = next(c for c in state.cards if c.id == self.card_id).fields.links[0]
-        self.assertTrue(link.hidden)
-        self.assertIsNone(link.workflow_id)
-
-    async def test_a_writer_keeps_links_they_cannot_see(self) -> None:
-        async with self.session() as db:
-            private = Workflow(name="Owner only", owner_id=self.owner.id, nodes=[], edges=[])
-            shared = Workflow(name="Writer's", owner_id=self.writer.id, nodes=[], edges=[])
-            db.add_all([private, shared])
-            await db.commit()
-        await self.update(self.owner, links=[CardLinkModel(workflow_id=private.id)])
-        card = await self.update(self.writer, links=[CardLinkModel(workflow_id=shared.id)])
-        self.assertEqual(len(card.fields.links), 2)
-        self.assertEqual(card.fields.links[0].workflow_name, "Writer's")
-        self.assertTrue(card.fields.links[1].hidden)
 
     async def test_members_endpoint(self) -> None:
         async with self.session() as db:

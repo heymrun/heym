@@ -21,31 +21,23 @@ class NormalizeTests(unittest.TestCase):
 class ReadFieldsTests(unittest.TestCase):
     def test_reads_valid_values_and_ignores_broken_ones(self) -> None:
         user_id = uuid.uuid4()
-        workflow_id = uuid.uuid4()
         values = f.read_fields(
             {
                 "assignee_user_id": str(user_id),
                 "priority": "urgent",
                 "due_date": "2026-11-10",
-                "labels": ["Acme"],
-                "links": [{"workflow_id": str(workflow_id)}, {"workflow_id": "nope"}],
+                "labels": ["Acme", 3],
             }
         )
         self.assertEqual(values.assignee_user_id, user_id)
         self.assertEqual(values.priority, "urgent")
         self.assertEqual(values.due_date, date(2026, 11, 10))
         self.assertEqual(values.labels, ("Acme",))
-        self.assertEqual(values.links, (f.CardLinkValue(workflow_id),))
 
     def test_garbage_reads_as_empty(self) -> None:
         values = f.read_fields({"priority": "whenever", "due_date": "soon", "labels": "x"})
         self.assertEqual(values, f.CardFieldValues())
         self.assertEqual(f.read_fields(None), f.CardFieldValues())
-
-    def test_links_round_trip_through_metadata(self) -> None:
-        link = f.CardLinkValue(uuid.uuid4(), uuid.uuid4())
-        stored = f.links_to_metadata([link])
-        self.assertEqual(f.read_fields({"links": stored}).links, (link,))
 
 
 class MergeTests(unittest.TestCase):
@@ -106,11 +98,9 @@ class FilterTests(unittest.TestCase):
         self.assertFalse(self.match(f.CardFilter(due="week"), later))
         self.assertFalse(self.match(f.CardFilter(due="week"), f.CardFieldValues()))
 
-    def test_overdue_skips_done_column(self) -> None:
+    def test_overdue_counts_cards_in_every_column(self) -> None:
         overdue = f.CardFieldValues(due_date=date(2026, 11, 1))
-        done = uuid.uuid4()
-        card_filter = f.CardFilter(due="overdue", done_column_ids=frozenset({done}))
-        self.assertFalse(self.match(card_filter, overdue, column_id=done))
+        self.assertTrue(self.match(f.CardFilter(due="overdue"), overdue, column_id=uuid.uuid4()))
 
     def test_priority_label_column_and_run_status(self) -> None:
         values = f.CardFieldValues(priority="high", labels=("Acme",))

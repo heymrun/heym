@@ -28,7 +28,6 @@ from app.db.models import (
     BoardShare,
     BoardTeamShare,
     Credential,
-    ExecutionHistory,
     GeneratedFile,
     Team,
     TeamMember,
@@ -55,8 +54,6 @@ from app.models.board_schemas import (
     CardCreateRequest,
     CardDetailResponse,
     CardFieldsResponse,
-    CardLinkModel,
-    CardLinkResponse,
     CardMoveRequest,
     CardRunResponse,
     CardUpdateRequest,
@@ -77,11 +74,7 @@ from app.services.board_card_fields import (
     ASSIGNEE_KEY,
     DUE_DATE_KEY,
     FIELD_KEYS,
-    LINKS_KEY,
-    MAX_LINKS,
-    CardLinkValue,
     edit_version,
-    links_to_metadata,
     merge_metadata,
     read_fields,
 )
@@ -95,7 +88,7 @@ from app.services.file_storage import (
 from app.services.hitl_service import build_public_base_url
 from app.services.pending_review_cancel import cancel_pending_review_execution
 from app.services.upload_limits import read_upload_file_limited
-from app.services.workflow_access import get_accessible_workflow, workflow_access_clause
+from app.services.workflow_access import get_accessible_workflow
 
 router = APIRouter()
 
@@ -243,12 +236,7 @@ async def _column_workflow_responses(
 CARD_CHANGED_MESSAGE = "This card was changed by someone else. Showing the latest version."
 
 
-def _card_response(
-    card: BoardCard,
-    *,
-    actively_running: bool = False,
-    links: list[CardLinkResponse] | None = None,
-) -> BoardCardResponse:
+def _card_response(card: BoardCard, *, actively_running: bool = False) -> BoardCardResponse:
     metadata = card.card_metadata or {}
     values = read_fields(metadata)
     return BoardCardResponse(
@@ -259,14 +247,12 @@ def _card_response(
         content=card.content,
         position=card.position,
         run_status="running" if actively_running else card.run_status,
-        # Links are shown resolved in `fields`; their raw ids stay out of the response.
-        card_metadata={k: v for k, v in metadata.items() if k != LINKS_KEY},
+        card_metadata=metadata,
         fields=CardFieldsResponse(
             assignee_user_id=values.assignee_user_id,
             priority=values.priority,
             due_date=values.due_date,
             labels=list(values.labels),
-            links=links or [],
         ),
         edit_version=edit_version(card.title, card.content, metadata),
         created_at=card.created_at,
@@ -274,127 +260,7 @@ def _card_response(
     )
 
 
-async def _resolve_links(
-    db: AsyncSession, user: User, cards: list[BoardCard]
-) -> dict[uuid.UUID, list[CardLinkResponse]]:
-    """Each card's links as ``user`` may see them; no query when no card has links."""
-    by_card = {card.id: read_fields(card.card_metadata).links for card in cards}
-    workflow_ids = {link.workflow_id for links in by_card.values() for link in links}
-    if not workflow_ids:
-        return {}
-    reachable = dict(
-        (
-            await db.execute(
-                select(Workflow.id, Workflow.name).where(
-                    Workflow.id.in_(workflow_ids), workflow_access_clause(user.id)
-                )
-            )
-        ).all()
-    )
-    execution_ids = {
-        link.execution_id
-        for links in by_card.values()
-        for link in links
-        if link.execution_id is not None and link.workflow_id in reachable
-    }
-    executions: dict[uuid.UUID, tuple[uuid.UUID, str]] = {}
-    if execution_ids:
-        rows = await db.execute(
-            select(
-                ExecutionHistory.id, ExecutionHistory.workflow_id, ExecutionHistory.status
-            ).where(ExecutionHistory.id.in_(execution_ids))
-        )
-        executions = {row.id: (row.workflow_id, row.status) for row in rows.all()}
-    resolved: dict[uuid.UUID, list[CardLinkResponse]] = {}
-    for card_id, links in by_card.items():
-        items: list[CardLinkResponse] = []
-        for link in links:
-            if link.workflow_id not in reachable:
-                items.append(CardLinkResponse(hidden=True))
-                continue
-            execution = executions.get(link.execution_id) if link.execution_id else None
-            items.append(
-                CardLinkResponse(
-                    workflow_id=link.workflow_id,
-                    workflow_name=reachable[link.workflow_id],
-                    execution_id=link.execution_id,
-                    execution_status=execution[1]
-                    if execution and execution[0] == link.workflow_id
-                    else None,
-                )
-            )
-        resolved[card_id] = items
-    return resolved
-
-
-async def _card_out(
-    db: AsyncSession, user: User, card: BoardCard, *, actively_running: bool = False
-) -> BoardCardResponse:
-    links = await _resolve_links(db, user, [card])
-    return _card_response(card, actively_running=actively_running, links=links.get(card.id))
-
-
-async def _checked_links(
-    db: AsyncSession, user: User, links: list[CardLinkModel], card: BoardCard | None
-) -> list[dict[str, str | None]]:
-    """The links to store. Each must be reachable by the writer; links the writer cannot
-    see (someone else's) are kept rather than silently dropped."""
-    wanted: list[CardLinkValue] = []
-    for link in links:
-        workflow = (
-            await db.execute(
-                select(Workflow.id).where(
-                    Workflow.id == link.workflow_id, workflow_access_clause(user.id)
-                )
-            )
-        ).scalar_one_or_none()
-        if workflow is None:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Linked workflow not found")
-        if link.execution_id is not None:
-            owner = (
-                await db.execute(
-                    select(ExecutionHistory.workflow_id).where(
-                        ExecutionHistory.id == link.execution_id
-                    )
-                )
-            ).scalar_one_or_none()
-            if owner != link.workflow_id:
-                raise HTTPException(
-                    status.HTTP_400_BAD_REQUEST, "Linked execution not found for that workflow"
-                )
-        value = CardLinkValue(link.workflow_id, link.execution_id)
-        if value not in wanted:
-            wanted.append(value)
-    if card is not None:
-        stored = read_fields(card.card_metadata).links
-        unlisted = {link.workflow_id for link in stored} - {link.workflow_id for link in wanted}
-        if unlisted:
-            reachable = set(
-                (
-                    await db.execute(
-                        select(Workflow.id).where(
-                            Workflow.id.in_(unlisted), workflow_access_clause(user.id)
-                        )
-                    )
-                )
-                .scalars()
-                .all()
-            )
-            wanted += [
-                link
-                for link in stored
-                if link.workflow_id in unlisted and link.workflow_id not in reachable
-            ]
-    if len(wanted) > MAX_LINKS:
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST, f"A card can have at most {MAX_LINKS} links"
-        )
-    return links_to_metadata(wanted)
-
-
-async def _field_updates(
-    db: AsyncSession, board: Board, user: User, request: BaseModel, card: BoardCard | None
-) -> dict[str, object]:
+async def _field_updates(db: AsyncSession, board: Board, request: BaseModel) -> dict[str, object]:
     """The typed fields ``request`` sets, validated, in their stored form."""
     updates: dict[str, object] = {}
     for key in request.model_fields_set & set(FIELD_KEYS):
@@ -409,8 +275,6 @@ async def _field_updates(
             updates[key] = str(value)
         elif key == DUE_DATE_KEY:
             updates[key] = value.isoformat()
-        elif key == LINKS_KEY:
-            updates[key] = await _checked_links(db, user, value, card)
         else:
             updates[key] = value
     return updates
@@ -577,7 +441,6 @@ async def get_board_state(
     )
     cards = cards_result.scalars().all()
     active_executions = await _active_board_execution_ids(db, [card.id for card in cards])
-    links = await _resolve_links(db, current_user, list(cards))
     workflows_by_column = await _column_workflow_responses(db, [c.id for c in columns])
     cred_name = await _mapper_credential_name(db, board)
     return BoardStateResponse(
@@ -602,12 +465,7 @@ async def get_board_state(
             for column in columns
         ],
         cards=[
-            _card_response(
-                card,
-                actively_running=card.id in active_executions,
-                links=links.get(card.id),
-            )
-            for card in cards
+            _card_response(card, actively_running=card.id in active_executions) for card in cards
         ],
         has_active_runs=bool(active_executions)
         or any(card.run_status in ACTIVE_RUN_STATUSES for card in cards),
@@ -985,7 +843,7 @@ async def create_card(
         content=request.content,
         position=0,
     )
-    updates = await _field_updates(db, board, current_user, request, None)
+    updates = await _field_updates(db, board, request)
     if updates:
         card.card_metadata = merge_metadata({}, updates=updates)
     db.add(card)
@@ -1012,7 +870,7 @@ async def create_card(
         card_title=card.title,
         column_id=column.id,
     )
-    return await _card_out(db, current_user, card)
+    return _card_response(card)
 
 
 @router.get("/{board_id}/cards/{card_id}", response_model=CardDetailResponse)
@@ -1043,7 +901,7 @@ async def get_card_detail(
     active_executions = await _active_board_execution_ids(db, [card.id])
     active_execution_ids = active_executions.get(card.id, set())
     return CardDetailResponse(
-        card=await _card_out(db, current_user, card, actively_running=bool(active_execution_ids)),
+        card=_card_response(card, actively_running=bool(active_execution_ids)),
         activities=[
             CardActivityResponse(
                 id=a.id,
@@ -1093,12 +951,12 @@ async def update_card(
     if expected is not None and expected != edit_version(
         card.title, card.content, card.card_metadata
     ):
-        current = await _card_out(db, current_user, card)
+        current = _card_response(card)
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={"message": CARD_CHANGED_MESSAGE, "card": current.model_dump(mode="json")},
         )
-    updates = await _field_updates(db, board, current_user, request, card)
+    updates = await _field_updates(db, board, request)
     if request.title is not None:
         card.title = request.title
     if request.content is not None:
@@ -1121,7 +979,7 @@ async def update_card(
         card_title=card.title,
         fields=",".join(sorted(request.model_fields_set)) or None,
     )
-    return await _card_out(db, current_user, card)
+    return _card_response(card)
 
 
 @router.delete("/{board_id}/cards/{card_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -1317,7 +1175,7 @@ async def move_card(
         to_column=target.name,
     )
     await db.refresh(card)
-    return await _card_out(db, current_user, card)
+    return _card_response(card)
 
 
 @router.post("/{board_id}/cards/{card_id}/run", response_model=BoardCardResponse)
@@ -1372,7 +1230,7 @@ async def run_card_chain(
         auto_advance=allow_advance,
     )
     await db.refresh(card)
-    return await _card_out(db, current_user, card)
+    return _card_response(card)
 
 
 # ─── Card attachments ────────────────────────────────────────────────────────────────

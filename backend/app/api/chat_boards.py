@@ -36,7 +36,6 @@ from app.models.board_schemas import (
     BoardCreateRequest,
     BoardUpdateRequest,
     CardCreateRequest,
-    CardLinkModel,
     CardMoveRequest,
     CardUpdateRequest,
     ColumnCreateRequest,
@@ -78,7 +77,7 @@ class TaskFilterArgs(_Args):
     column_name: str | None = Field(default=None, description="A column name, in any case.")
     priority: Priority | None = None
     due: Literal["overdue", "today", "week"] | None = Field(
-        default=None, description="overdue leaves out tasks in the board's last column."
+        default=None, description="overdue: due before today; week: due within seven days."
     )
     label: str | None = Field(default=None, description="A label such as a client or project.")
     run_status: RunStatus | None = Field(
@@ -151,11 +150,6 @@ class TaskFieldArgs(_Args):
     priority: Priority | None = None
     due_date: date | None = Field(default=None, description="YYYY-MM-DD; null clears it.")
     labels: list[str] | None = Field(default=None, max_length=10)
-    links: list[CardLinkModel] | None = Field(
-        default=None,
-        max_length=10,
-        description="Workflows the task relates to, each optionally with one of its executions.",
-    )
 
 
 class CreateTaskArgs(TaskFieldArgs):
@@ -245,7 +239,6 @@ def _task_entry(
         "priority": values.priority,
         "due_date": values.due_date.isoformat() if values.due_date else None,
         "labels": list(values.labels),
-        "link_count": len(values.links),
         "updated_at": card.updated_at.isoformat() if card.updated_at else None,
     }
 
@@ -267,11 +260,6 @@ def _card_filter(args: TaskFilterArgs, columns: Sequence[BoardColumn]) -> CardFi
         wanted = args.column_name.strip().casefold()
         named = {c.id for c in columns if c.name.casefold() == wanted}
         column_ids = named if column_ids is None else column_ids & named
-    last_columns: dict[uuid.UUID, BoardColumn] = {}
-    for column in columns:
-        current = last_columns.get(column.board_id)
-        if current is None or column.position > current.position:
-            last_columns[column.board_id] = column
     return CardFilter(
         assignee=args.assignee,
         column_ids=frozenset(column_ids) if column_ids is not None else None,
@@ -279,7 +267,6 @@ def _card_filter(args: TaskFilterArgs, columns: Sequence[BoardColumn]) -> CardFi
         due=args.due,
         label=args.label,
         run_status=args.run_status,
-        done_column_ids=frozenset(c.id for c in last_columns.values()),
     )
 
 
@@ -623,7 +610,7 @@ async def _delete_column(
 
 
 def _field_payload(args: TaskFieldArgs) -> dict[str, Any]:
-    keys = args.model_fields_set & {"assignee_user_id", "priority", "due_date", "labels", "links"}
+    keys = args.model_fields_set & {"assignee_user_id", "priority", "due_date", "labels"}
     return {key: getattr(args, key) for key in keys}
 
 
@@ -815,7 +802,7 @@ _TOOLS: dict[str, tuple[type[_Args], str, str, Handler]] = {
     "create_board_task": (
         CreateTaskArgs,
         "Create a task with an optional description, column, position and fields "
-        "(assignee_user_id, priority, due_date, labels, links). Without board_id it uses the "
+        "(assignee_user_id, priority, due_date, labels). Without board_id it uses the "
         "only board the user can write to, or returns requires_board_selection.",
         "Adding task to board...",
         _create_task,
