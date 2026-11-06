@@ -86,6 +86,7 @@ import {
   s3OperationOptions,
   supabaseOperationOptions,
 } from "./operationOptions";
+import { useGoogleMeetExpressionFields } from "./nodes/googleMeetExpressionFields";
 import { useCodeExpressionFields } from "./nodes/codeExpressionFields";
 import { randomUUID } from "@/lib/uuid";
 
@@ -155,6 +156,7 @@ export function usePropertiesPanelController() {
     jira: "node-jira",
     linear: "node-linear",
     googleSheets: "node-google-sheets",
+    googleMeet: "node-google-meet",
     googleDrive: "node-google-drive",
     bigquery: "node-google-sheets",
     supabase: "node-datatable",
@@ -601,6 +603,7 @@ export function usePropertiesPanelController() {
   ];
   const crawlerUrlInputRef = ref<ExpandableFieldRef | null>(null);
   const consoleLogMessageInputRef = ref<ExpandableFieldRef | null>(null);
+  const googleMeetExpressionFields = useGoogleMeetExpressionFields(computed(() => workflowStore.selectedNode));
   const codeParametersInputRef = ref<ExpandableFieldRef | null>(null);
   const codeExpressionFields = useCodeExpressionFields(codeParametersInputRef);
   const codeFilesInputRef = codeExpressionFields.filesRef;
@@ -2186,6 +2189,7 @@ export function usePropertiesPanelController() {
     rabbitmqMessageBodyInputRef.value?.closeExpandDialog();
     crawlerUrlInputRef.value?.closeExpandDialog();
     consoleLogMessageInputRef.value?.closeExpandDialog();
+    googleMeetExpressionFields.closeAll();
     codeExpressionFields.closeAll();
     closeConverterExpressionDialogs();
     closeHeymExpressionDialogs();
@@ -2831,6 +2835,14 @@ export function usePropertiesPanelController() {
         } else {
           setTimeout(() => tryOpenDialog(attempts + 1), 100);
         }
+      };
+      nextTick(() => tryOpenDialog());
+    } else if (nodeType === "googleMeet") {
+      const tryOpenDialog = (attempts = 0): void => {
+        if (attempts > 20 || workflowStore.selectedNode?.type !== "googleMeet") return;
+        const focus = workflowStore.focusField;
+        const index = Math.max(0, googleMeetExpressionFields.fields.value.findIndex((field) => field.key === focus));
+        if (!googleMeetExpressionFields.openAt(index)) setTimeout(() => tryOpenDialog(attempts + 1), 100);
       };
       nextTick(() => tryOpenDialog());
     } else if (nodeType === "code") {
@@ -9298,6 +9310,7 @@ export function usePropertiesPanelController() {
     codeParametersInputRef,
     codeFilesInputRef,
     codeExpressionFields,
+    googleMeetExpressionFields,
     converterExpressionFieldCount,
     converterExpressionFieldIndex,
     setConverterExpressionInputRef,

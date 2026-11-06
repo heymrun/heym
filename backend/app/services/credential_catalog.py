@@ -63,6 +63,7 @@ NODE_CREDENTIAL_FIELDS: dict[str, tuple[CredentialField, ...]] = {
     "discordTrigger": (_field("credentialId", CredentialType.discord_trigger),),
     "github": (_field("credentialId", CredentialType.github),),
     "googleDrive": (_field("credentialId", CredentialType.google_drive),),
+    "googleMeet": (_field("credentialId", CredentialType.google_meet),),
     "googleDriveTrigger": (_field("credentialId", CredentialType.google_drive),),
     "googleSheets": (_field("credentialId", CredentialType.google_sheets),),
     "googleSheetsTrigger": (_field("credentialId", CredentialType.google_sheets),),
@@ -142,6 +143,7 @@ CREDENTIAL_TYPE_PURPOSE: dict[CredentialType, str] = {
         "Google OAuth client for Google Drive; Google Drive and Google Drive Trigger nodes, "
         "Drive API over http for operations the node lacks"
     ),
+    CredentialType.google_meet: "Google OAuth client for Calendar events and availability; Google Meet node",
     CredentialType.bigquery: "Google OAuth client for BigQuery; BigQuery node",
     CredentialType.supabase: "Supabase project URL and key; Supabase node",
     CredentialType.notion: (
@@ -172,6 +174,7 @@ _DEFAULT_HEADER_KEYS: dict[CredentialType, str | None] = {
     CredentialType.elevenlabs: "xi-api-key",
     CredentialType.google_sheets: "Authorization",
     CredentialType.google_drive: "Authorization",
+    CredentialType.google_meet: "Authorization",
     CredentialType.github: "Authorization",
     CredentialType.notion: "Authorization",
     CredentialType.sentry: "Authorization",

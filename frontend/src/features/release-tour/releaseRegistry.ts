@@ -17,6 +17,28 @@ import type { ReleaseEntry } from "@/features/release-tour/releaseTour.types";
  */
 export const RELEASE_REGISTRY: ReleaseEntry[] = [
   {
+    releaseId: "2026.26",
+    publishedAt: new Date("2026-11-06T12:00:00Z"),
+    headline: "Find free times and send Google Meet calendar invitations",
+    releaseTour: {
+      label: "New in Heym", introTitle: "New in this release",
+      introDescription: "Turn your Google Calendar into a booking workflow.",
+      tourEnabled: true,
+      sectionOrder: ["google-meet"],
+    },
+    sections: [{
+      id: "google-meet", title: "Book time with Google Meet",
+      blocks: [{ type: "prose", markdown: "Connect a **Google Meet (OAuth2)** credential with Google login, then add a **Google Meet** node to read available calendar times or create, update and delete invitations. Reads default from now through the first day of next month; optional dates support shorter ranges or up to 60 days. Title, description, attendee emails, time zone and meeting times accept expressions and Agent autofill. For **Book a calendar with me**, show your free times, accept the visitor's selected time and email, and send the invitation from your connected account. The website includes **Available Time Slots** and **Book a Calendar with Me** templates." }],
+      tour: {
+        description: "Find available calendar times and send Meet invitations from your Google account.",
+        useCases: ["Show when customers can book a call", "Invite a visitor using the email and time from your form", "Reschedule or cancel meetings and notify guests"],
+        tourVisual: "google-meet",
+        docTarget: { categoryId: "nodes", slug: "google-meet-node", title: "Google Meet" },
+      },
+    }],
+  },
+
+  {
     releaseId: "2026.25",
     publishedAt: new Date("2026-11-05T12:00:00Z"),
     headline: "Assign, prioritize and schedule board cards from Heym, Heym Work, Chat and MCP",
@@ -126,54 +148,6 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
             categoryId: "reference",
             slug: "a2a",
             title: "A2A",
-          },
-        },
-      },
-    ],
-  },
-  {
-    releaseId: "2026.22",
-    publishedAt: new Date("2026-10-26T12:00:00Z"),
-    headline:
-      "Work on one canvas together, limit how many runs execute at once, and check agents against their real runs, from Evals or from Chat",
-    releaseTour: {
-      label: "New in Heym",
-      introTitle: "New in this release",
-      introDescription:
-        "A quick look at what changed since your last update. Takes about a minute.",
-      tourEnabled: true,
-      sectionOrder: ["agent-suite"],
-    },
-    sections: [
-      {
-        id: "agent-suite",
-        title: "Agent suites: check an agent against its real runs",
-        publishedAt: new Date("2026-10-26T12:00:00Z"),
-        blocks: [
-          {
-            type: "prose",
-            markdown:
-              "In **Evals**, choose **New Suite** and then **Agent suite**, and pick a workflow's agent node. The suite reads the agent's last runs from Traces and shows its latency, USD cost, tokens and tool calls, with every tool, MCP tool, sub-agent, sub-workflow and skill it called and how often.",
-          },
-          {
-            type: "prose",
-            markdown:
-              "Mark each one **Must call** or **Must not call**, and keep the upper bounds for latency, cost, tokens and tool calls that start 20% above the baseline. **Results** runs the workflow as many times as you choose, with the last run's inputs or inputs an AI model writes, scores every run against the checks and links each failed run to its trace. The suite picker now lists prompt and agent suites together, with their type, and is searchable.",
-          },
-        ],
-        tour: {
-          description:
-            "Pick an agent, see its baseline from real runs, and fail any run that calls the wrong tool or costs too much.",
-          useCases: [
-            "Make sure a support agent always searches the docs before answering",
-            "Catch an agent that starts sending email it should only draft",
-            "Notice when a prompt change makes runs slower or more expensive",
-          ],
-          tourVisual: "agent-suite",
-          docTarget: {
-            categoryId: "tabs",
-            slug: "evals-tab",
-            title: "Evals",
           },
         },
       },

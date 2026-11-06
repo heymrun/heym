@@ -45,6 +45,7 @@ NODE_PLACEMENT: dict[str, Placement] = {
     "fileUploadTrigger": _MAIN,
     "github": _ANY,
     "googleDrive": _MAIN,
+    "googleMeet": _ANY,
     "googleDriveTrigger": _ANY,  # polling runs on the leader; the run keeps no local state
     "googleSheets": _ANY,
     "googleSheetsTrigger": _ANY,  # polling runs on the leader; the run keeps no local state

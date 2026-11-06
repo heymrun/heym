@@ -108,6 +108,19 @@ class TestBuildNodeToolSchemas(unittest.TestCase):
         fields_by_node = {
             "discord-1": ["message", "username", "avatarUrl"],
             "github-1": ["githubOwner", "githubRepo", "githubTitle"],
+            "googleMeet-1": [
+                "gmCalendarId",
+                "gmTimeZone",
+                "gmStartDate",
+                "gmEndDate",
+                "gmEventId",
+                "gmTitle",
+                "gmDescription",
+                "gmStartTime",
+                "gmEndTime",
+                "gmAttendees",
+                "gmLocation",
+            ],
             "linear-1": [
                 "linearTeamId",
                 "linearProjectId",

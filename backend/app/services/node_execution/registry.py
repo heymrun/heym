@@ -32,6 +32,7 @@ _HANDLER_MODULES: dict[str, str] = {
     "fileUploadTrigger": "file_upload_trigger_node",
     "github": "github_node",
     "googleDrive": "google_drive_node",
+    "googleMeet": "google_meet_node",
     "googleDriveTrigger": "google_drive_trigger_node",
     "googleSheets": "google_sheets_node",
     "googleSheetsTrigger": "google_sheets_trigger_node",

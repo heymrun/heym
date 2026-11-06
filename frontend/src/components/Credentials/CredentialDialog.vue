@@ -154,6 +154,7 @@ const rabbitmqPassword = ref("");
 const rabbitmqVhost = ref("/");
 const cohereApiKey = ref("");
 const flaresolverrUrl = ref("");
+const appOrigin = window.location.origin;
 const gsClientId = ref("");
 const gsClientSecret = ref("");
 const gsOAuthConnected = ref(false);
@@ -165,6 +166,11 @@ const gdClientSecret = ref("");
 const gdOAuthConnected = ref(false);
 const gdOAuthConnecting = ref(false);
 const gdConnectedCredential = ref<import("@/types/credential").Credential | null>(null);
+const gmClientId = ref("");
+const gmClientSecret = ref("");
+const gmOAuthConnected = ref(false);
+const gmOAuthConnecting = ref(false);
+const gmConnectedCredential = ref<import("@/types/credential").Credential | null>(null);
 const bqClientId = ref("");
 const bqClientSecret = ref("");
 const bqOAuthConnected = ref(false);
@@ -238,6 +244,15 @@ const gdOAuth = useOAuthPopup(
   },
   { ...googleFlowConfig, windowName: "google-oauth" },
 );
+const gmOAuth = useOAuthPopup(
+  {
+    connecting: gmOAuthConnecting,
+    connected: gmOAuthConnected,
+    connectedCredential: gmConnectedCredential,
+    error,
+  },
+  { ...googleFlowConfig, windowName: "google-oauth" },
+);
 const bqOAuth = useOAuthPopup(
   {
     connecting: bqOAuthConnecting,
@@ -281,7 +296,7 @@ const notionOAuth = useOAuthPopup(
 );
 
 function resetOAuthFlows(): void {
-  for (const flow of [gsOAuth, gdOAuth, bqOAuth, linearOAuth, notionOAuth]) flow.reset();
+  for (const flow of [gsOAuth, gdOAuth, gmOAuth, bqOAuth, linearOAuth, notionOAuth]) flow.reset();
 }
 
 // Reuse the credential an earlier attempt in this dialog created: a second create fails
@@ -382,6 +397,7 @@ const typeOptions = [
   { value: "flaresolverr", label: CREDENTIAL_TYPE_LABELS.flaresolverr },
   { value: "google_sheets", label: CREDENTIAL_TYPE_LABELS.google_sheets },
   { value: "google_drive", label: CREDENTIAL_TYPE_LABELS.google_drive },
+  { value: "google_meet", label: CREDENTIAL_TYPE_LABELS.google_meet },
   { value: "bigquery", label: CREDENTIAL_TYPE_LABELS.bigquery },
   { value: "supabase", label: CREDENTIAL_TYPE_LABELS.supabase },
   { value: "clickhouse", label: CREDENTIAL_TYPE_LABELS.clickhouse },
@@ -618,6 +634,10 @@ watch(
         gdClientSecret.value = "";
         gdOAuthConnected.value = props.credential.masked_value === "connected" && props.credential.type === "google_drive";
         gdConnectedCredential.value = null;
+        gmClientId.value = "";
+        gmClientSecret.value = "";
+        gmOAuthConnected.value = props.credential.masked_value === "connected" && props.credential.type === "google_meet";
+        gmConnectedCredential.value = null;
         bqClientId.value = "";
         bqClientSecret.value = "";
         bqOAuthConnected.value = props.credential.masked_value === "connected" && props.credential.type === "bigquery";
@@ -739,6 +759,10 @@ watch(
         gdClientSecret.value = "";
         gdOAuthConnected.value = false;
         gdConnectedCredential.value = null;
+        gmClientId.value = "";
+        gmClientSecret.value = "";
+        gmOAuthConnected.value = false;
+        gmConnectedCredential.value = null;
         bqClientId.value = "";
         bqClientSecret.value = "";
         bqOAuthConnected.value = false;
@@ -900,6 +924,8 @@ const isValid = computed(() => {
   } else if (type.value === "google_sheets") {
     // Valid only when OAuth was completed (new) or when editing an existing credential
     return gsOAuthConnected.value || isEditing.value;
+  } else if (type.value === "google_meet") {
+    return gmOAuthConnected.value || isEditing.value;
   } else if (type.value === "google_drive") {
     return gdOAuthConnected.value || isEditing.value;
   } else if (type.value === "bigquery") {
@@ -1132,6 +1158,11 @@ function buildConfig(): CredentialConfig {
       client_id: gdClientId.value.trim(),
       client_secret: gdClientSecret.value.trim(),
     };
+  } else if (type.value === "google_meet") {
+    return {
+      client_id: gmClientId.value.trim(),
+      client_secret: gmClientSecret.value.trim(),
+    };
   } else if (type.value === "bigquery") {
     return {
       client_id: bqClientId.value.trim(),
@@ -1180,6 +1211,27 @@ async function startGoogleDriveOAuth(): Promise<void> {
   await gdOAuth.start(
     () => saveOAuthCredential("google_drive", gdOAuth),
     credentialsApi.googleDriveOAuthAuthorize,
+  );
+}
+
+async function startGoogleMeetOAuth(): Promise<void> {
+  if (!gmClientId.value.trim() || !gmClientSecret.value.trim()) {
+    error.value = "Enter Client ID and Client Secret before connecting.";
+    return;
+  }
+  if (!name.value.trim()) {
+    error.value = "Enter a name for this credential before connecting.";
+    return;
+  }
+
+  const authorize = credentialsApi.googleMeetOAuthAuthorize;
+  if (!authorize) {
+    error.value = "Open Heym to connect a Google Meet credential.";
+    return;
+  }
+  await gmOAuth.start(
+    () => saveOAuthCredential("google_meet", gmOAuth),
+    authorize,
   );
 }
 
@@ -1563,6 +1615,7 @@ async function handleSave(): Promise<void> {
       const hasConfigChange =
         type.value !== "google_sheets" &&
         type.value !== "google_drive" &&
+        type.value !== "google_meet" &&
         type.value !== "bigquery" &&
         !(type.value === "linear" && linearAuthMode.value === "oauth") &&
         !(type.value === "notion" && notionAuthMode.value === "oauth") &&
@@ -1638,6 +1691,9 @@ async function handleSave(): Promise<void> {
     } else if (type.value === "google_drive" && gdConnectedCredential.value) {
       // Credential was already created and tokens stored by the OAuth callback
       saved = gdConnectedCredential.value;
+    } else if (type.value === "google_meet" && gmConnectedCredential.value) {
+      // Credential was already created and tokens stored by the OAuth callback
+      saved = gmConnectedCredential.value;
     } else if (type.value === "bigquery" && bqConnectedCredential.value) {
       saved = bqConnectedCredential.value;
     } else if (type.value === "notion" && notionConnectedCredential.value) {
@@ -3383,6 +3439,95 @@ async function handleSave(): Promise<void> {
         </div>
       </template>
 
+      <template v-if="type === 'google_meet'">
+        <div class="space-y-2">
+          <Label for="cred-gm-client-id">Google Client ID</Label>
+          <Input
+            id="cred-gm-client-id"
+            v-model="gmClientId"
+            :placeholder="isEditing ? '(re-enter to update)' : '1234567890-abc.apps.googleusercontent.com'"
+            :disabled="saving || gmOAuthConnecting"
+          />
+          <p class="text-xs text-muted-foreground">
+            OAuth2 Client ID from your Google Cloud Console project (Calendar scope).
+          </p>
+        </div>
+
+        <div class="space-y-2">
+          <Label for="cred-gm-client-secret">Google Client Secret</Label>
+          <div class="relative">
+            <Input
+              id="cred-gm-client-secret"
+              v-model="gmClientSecret"
+              :type="showApiKey ? 'text' : 'password'"
+              :placeholder="isEditing ? '••••••• (re-enter to update)' : 'GOCSPX-...'"
+              :disabled="saving || gmOAuthConnecting"
+              class="pr-10"
+            />
+            <button
+              type="button"
+              class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              @click="showApiKey = !showApiKey"
+            >
+              <EyeOff
+                v-if="showApiKey"
+                class="w-4 h-4"
+              />
+              <Eye
+                v-else
+                class="w-4 h-4"
+              />
+            </button>
+          </div>
+          <p class="text-xs text-muted-foreground">
+            OAuth2 Client Secret from your Google Cloud Console project.
+          </p>
+        </div>
+
+        <p class="text-xs text-muted-foreground">
+          Enable the Google Calendar API in your Google Cloud project. Add
+          <code>{{ appOrigin }}/api/credentials/google-meet/oauth/callback</code>
+          as an authorized redirect URI. This account owns meetings and sends guest invitations.
+        </p>
+
+        <div class="rounded-md border p-3 space-y-2">
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-sm font-medium">
+                Google Account
+              </p>
+              <p
+                v-if="gmOAuthConnected"
+                class="text-xs text-green-600 dark:text-green-400"
+              >
+                Connected
+              </p>
+              <p
+                v-else
+                class="text-xs text-muted-foreground"
+              >
+                Not connected — click to authorize
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              :loading="gmOAuthConnecting"
+              :disabled="saving || gmOAuthConnecting || !gmClientId.trim() || !gmClientSecret.trim() || (gmOAuthConnected && !isEditing)"
+              @click="startGoogleMeetOAuth"
+            >
+              {{ gmOAuthConnected ? (isEditing ? 'Reconnect' : 'Connected') : 'Connect' }}
+            </Button>
+          </div>
+          <OAuthAuthorizeLink
+            v-if="gmOAuth.authUrl.value && !gmOAuthConnected"
+            :auth-url="gmOAuth.authUrl.value"
+            @open="gmOAuth.openAuthPage()"
+          />
+        </div>
+      </template>
+
       <template v-if="type === 'bigquery'">
         <div class="space-y-2">
           <Label for="cred-bq-client-id">Google Client ID</Label>
@@ -3771,7 +3916,7 @@ async function handleSave(): Promise<void> {
           :loading="saving"
           :disabled="!isValid"
         >
-          {{ isEditing ? 'Save Changes' : ((type === 'google_sheets' && gsOAuthConnected) || (type === 'google_drive' && gdOAuthConnected) || (type === 'bigquery' && bqOAuthConnected) ? 'Done' : 'Create') }}
+          {{ isEditing ? 'Save Changes' : ((type === 'google_sheets' && gsOAuthConnected) || (type === 'google_drive' && gdOAuthConnected) || (type === 'google_meet' && gmOAuthConnected) || (type === 'bigquery' && bqOAuthConnected) ? 'Done' : 'Create') }}
         </Button>
       </div>
     </form>
