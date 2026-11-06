@@ -14,7 +14,7 @@ from app.services.node_execution.nodes.playwright_node import (
     _build_playwright_script,
     _playwright_subprocess_inputs,
 )
-from app.services.playwright_code_generator import generate_playwright_code
+from app.services.playwright_code_generator import _heym_navigable_url, generate_playwright_code
 from app.services.workflow_executor import WorkflowExecutor
 
 
@@ -30,7 +30,8 @@ def _resolved_goto_urls(steps: list[dict], inputs: dict) -> list[object]:
     """Evaluate every generated ``page.goto(...)`` argument against the runner inputs."""
     code = generate_playwright_code(steps)
     args = re.findall(r"^\s*page\.goto\((.*)\)$", code, re.MULTILINE)
-    return [eval(arg, {"__builtins__": {}}, {"inputs": inputs}) for arg in args]  # noqa: S307
+    names = {"inputs": inputs, "_heym_navigable_url": _heym_navigable_url}
+    return [eval(arg, {"__builtins__": {}}, names) for arg in args]  # noqa: S307
 
 
 class PlaywrightGlobalNamespaceTests(unittest.TestCase):

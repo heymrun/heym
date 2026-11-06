@@ -21,7 +21,7 @@ class PlaywrightRefreshStepTests(unittest.TestCase):
             [{"action": "navigate", "url": "https://example.com"}, {"action": "refresh"}]
         )
         compile(code, "<generated>", "exec")
-        self.assertIn("page.goto('https://example.com')", code)
+        self.assertIn("page.goto(_heym_navigable_url('https://example.com'))", code)
         self.assertIn("page.reload()", code)
 
     def test_ai_step_loop_handles_refresh(self) -> None:

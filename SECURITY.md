@@ -128,3 +128,8 @@ vulnerabilities in Heym:
   Playwright step fields, where a `$` reference embedded in a step value was
   spliced into the generated script, and for contributing the remediation
   (GHSA-7qrv-28q7-w8rj).
+- [@amasolov](https://github.com/amasolov) for step-based Playwright navigating
+  to `file://` URLs inside the backend, which let any signed-in user read the
+  backend's files, including the Kubernetes ServiceAccount token that leads to
+  every stored credential, and for contributing the remediation
+  (GHSA-hmfh-wpg2-vff4).

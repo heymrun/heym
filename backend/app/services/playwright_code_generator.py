@@ -42,6 +42,36 @@ def _heym_urlopen_json(req: object, timeout: float) -> object:
         raise RuntimeError(http_error_message(err.code, str(err.reason), body)) from None
 
 
+def _heym_navigable_url(url: object) -> str:
+    """Return ``url`` if it is http or https, and raise otherwise.
+
+    Step-based scripts run in the backend, so ``page.goto("file:///...")`` would read the
+    backend's own files. The generated script calls this right before every ``page.goto``,
+    after templates and AI output are resolved. ``urlsplit`` drops leading whitespace and
+    tab/newline characters the way browsers do, and lowercases the scheme.
+
+    Playwright itself prefixes ``http://`` when a URL starts with ``localhost`` or
+    ``127.0.0.1`` (``helper.completeUserURL``: a raw, case-sensitive ``startsWith``), so
+    ``localhost:3000`` works today without a scheme. Do the same first, or those URLs
+    would parse with scheme ``localhost`` and be rejected. The result is always an http
+    URL, so the prefix cannot let another scheme through.
+    """
+    from urllib.parse import urlsplit
+
+    text = str(url)
+    if text.startswith(("localhost", "127.0.0.1")):
+        text = "http://" + text
+    try:
+        scheme = urlsplit(text).scheme
+    except ValueError:
+        scheme = ""
+    if scheme not in ("http", "https"):
+        raise ValueError(
+            f"Playwright navigate only allows http and https URLs (got scheme {scheme!r})"
+        )
+    return text
+
+
 class ResolvedStepValue(str):
     """A step field value whose templates were already resolved by the executor.
 
@@ -504,7 +534,7 @@ def _generate_step_lines(
 
     if action == "navigate":
         url_val = _expr_to_python(url, '"https://example.com"')
-        goto_args = f"{url_val}" + (f", {to_kw}" if to_kw else "")
+        goto_args = f"_heym_navigable_url({url_val})" + (f", {to_kw}" if to_kw else "")
         lines.append(f"page.goto({goto_args})")
     elif action == "refresh":
         reload_args = f"({to_kw})" if to_kw else "()"
@@ -679,7 +709,7 @@ def _generate_step_lines(
                 "        _nurl = str(_s.get('url', '') or '')",
                 "        if not _nurl:",
                 "            raise RuntimeError(f'AI step {_i} navigate: missing url')",
-                "        page.goto(_nurl)",
+                "        page.goto(_heym_navigable_url(_nurl))",
                 "        _step_done = True",
                 "    elif _a == 'getText':",
                 "        _gtk = _s.get('outputKey', 'text') or 'text'",
@@ -858,6 +888,8 @@ def generate_playwright_code(
         "from urllib.error import HTTPError",
         "from urllib.request import Request, urlopen",
         "from playwright.sync_api import sync_playwright",
+        "",
+        inspect.getsource(_heym_navigable_url).strip(),
         "",
     ]
     if has_ai_steps:

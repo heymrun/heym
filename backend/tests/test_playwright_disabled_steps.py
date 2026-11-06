@@ -52,7 +52,7 @@ class DisabledStepCodegenTests(unittest.TestCase):
             ]
         )
         compile(code, "<generated>", "exec")
-        self.assertIn("page.goto('https://example.com')", code)
+        self.assertIn("page.goto(_heym_navigable_url('https://example.com'))", code)
         self.assertNotIn("skipped.example", code)
         self.assertIn("page.reload()", code)
 

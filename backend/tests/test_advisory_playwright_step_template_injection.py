@@ -201,7 +201,7 @@ class StepFieldInjectionTests(unittest.TestCase):
     def test_a_whole_field_reference_to_a_crafted_value_stays_runtime_data(self) -> None:
         script = self.run_step({"action": "navigate", "url": "$src.p"})
         self.assertNotIn("__import__", _code_names(script))
-        self.assertIn("page.goto((inputs.get('src', {})).get('p',", script)
+        self.assertIn("page.goto(_heym_navigable_url((inputs.get('src', {})).get('p',", script)
 
     def test_a_reference_in_the_auth_check_selector_stays_data(self) -> None:
         node_data = {
@@ -279,7 +279,9 @@ class LegitimateTemplateTests(unittest.TestCase):
             {"playwrightSteps": [{"action": "navigate", "url": "$global.page"}]},
             global_variables_context={"page": "https://heym.run/docs"},
         )
-        self.assertIn("page.goto((inputs.get('global', {})).get('page',", script)
+        self.assertIn(
+            "page.goto(_heym_navigable_url((inputs.get('global', {})).get('page',", script
+        )
 
     def test_disabled_steps_are_left_untouched(self) -> None:
         disabled = {"action": "navigate", "url": "http://x/$src.p", "disabled": True}
