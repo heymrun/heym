@@ -3,10 +3,11 @@ import { computed, onMounted, ref } from "vue";
 import axios from "axios";
 
 import type { CredentialListItem } from "@/types/credential";
+import AgentFieldToggle from "@/components/ui/AgentFieldToggle.vue";
 import ExpressionInput from "@/components/ui/ExpressionInput.vue";
 import Label from "@/components/ui/Label.vue";
 import Select from "@/components/ui/Select.vue";
-import { GOOGLE_MEET_OPERATIONS } from "@/lib/googleMeetFields";
+import { GOOGLE_MEET_BUSY_TITLES_OPTION, GOOGLE_MEET_OPERATIONS } from "@/lib/googleMeetFields";
 import { credentialsApi } from "@/services/api";
 import { usePropertiesPanelContext } from "../usePropertiesPanelController";
 
@@ -110,17 +111,31 @@ onMounted(async (): Promise<void> => {
         {{ field.help }}
       </p>
     </div>
-    <p
-      v-if="selectedNode.data.gmOperation === 'read'"
-      class="text-xs text-muted-foreground"
-      data-testid="gm-availability-help"
+    <div
+      v-if="(selectedNode.data.gmOperation || 'read') === 'read'"
+      class="space-y-2"
+      data-testid="gm-busy-titles-option"
     >
-      Returns available_slots and busy_slots from now until next month's first day.
-      Override the dates for a shorter range or up to 60 days. Availability includes nights
-      and weekends; it reflects calendar conflicts, not working hours.
-    </p>
+      <div class="flex items-center gap-2">
+        <input
+          id="gm-include-busy-titles"
+          type="checkbox"
+          class="rounded border-border"
+          :checked="selectedNode.data.gmIncludeBusyTitles === true"
+          @change="updateNodeData(GOOGLE_MEET_BUSY_TITLES_OPTION.key, ($event.target as HTMLInputElement).checked)"
+        >
+        <Label for="gm-include-busy-titles">{{ GOOGLE_MEET_BUSY_TITLES_OPTION.label }}</Label>
+        <AgentFieldToggle
+          :node-id="selectedNode.id"
+          :field-key="GOOGLE_MEET_BUSY_TITLES_OPTION.key"
+        />
+      </div>
+      <p class="text-xs text-muted-foreground">
+        {{ GOOGLE_MEET_BUSY_TITLES_OPTION.help }}
+      </p>
+    </div>
     <p
-      v-else-if="selectedNode.data.gmOperation === 'update'"
+      v-if="selectedNode.data.gmOperation === 'update'"
       class="text-xs text-muted-foreground"
     >
       Empty fields keep their existing values. Supply both times to reschedule.
@@ -134,7 +149,7 @@ onMounted(async (): Promise<void> => {
       Use $input.email to invite a visitor who selected an available time.
     </p>
     <p
-      v-else
+      v-else-if="selectedNode.data.gmOperation === 'delete'"
       class="text-xs text-muted-foreground"
     >
       Guests receive cancellation emails.
