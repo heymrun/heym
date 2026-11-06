@@ -1,9 +1,16 @@
 import { describe, expect, it } from "vitest";
 
-import { GOOGLE_MEET_OPERATIONS, getGoogleMeetFields } from "@/lib/googleMeetFields";
+import { GOOGLE_MEET_BUSY_TITLES_OPTION, GOOGLE_MEET_OPERATIONS, getGoogleMeetFields } from "@/lib/googleMeetFields";
 import { NODE_DEFINITIONS } from "@/types/node";
 
 describe("Google Meet operation metadata", () => {
+  it("keeps busy titles disabled by default and available to agent autofill", () => {
+    expect(NODE_DEFINITIONS.googleMeet.defaultData.gmIncludeBusyTitles).toBe(false);
+    expect(GOOGLE_MEET_BUSY_TITLES_OPTION.defaultValue).toBe(false);
+    expect(GOOGLE_MEET_BUSY_TITLES_OPTION.key).toBe("gmIncludeBusyTitles");
+    expect(GOOGLE_MEET_BUSY_TITLES_OPTION.agentAutofill).toBe(true);
+    expect(GOOGLE_MEET_BUSY_TITLES_OPTION.expressionCapable).toBe(false);
+  });
   it("exposes availability dates instead of event fields for read", () => {
     expect(getGoogleMeetFields("read").map((field) => field.key)).toEqual([
       "gmCalendarId", "gmTimeZone", "gmStartDate", "gmEndDate",

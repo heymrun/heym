@@ -57,7 +57,30 @@ class TestGoogleMeetNode(unittest.TestCase):
 
     def test_read_defaults_do_not_resolve_blank_templates_into_inputs(self) -> None:
         execute(context({"credentialId": "credential", "gmOperation": "read", "gmEndDate": ""}))
-        self.service.read_availability.assert_called_once_with("primary", "", "", "UTC")
+        self.service.read_availability.assert_called_once_with(
+            "primary", "", "", "UTC", include_busy_titles=False
+        )
+
+    def test_busy_title_opt_in_accepts_boolean_and_agent_boolean_strings(self) -> None:
+        for value, expected in (
+            (True, True),
+            (False, False),
+            ("true", True),
+            ("false", False),
+            (None, False),
+        ):
+            with self.subTest(value=value):
+                self.service.reset_mock()
+                execute(context({"credentialId": "credential", "gmIncludeBusyTitles": value}))
+                self.assertIs(
+                    self.service.read_availability.call_args.kwargs["include_busy_titles"], expected
+                )
+
+    def test_invalid_title_opt_in_never_silently_enables_title_reads(self) -> None:
+        for value in ("anything", "1", 1, [], {}):
+            with self.subTest(value=value), self.assertRaises(HTTPException):
+                execute(context({"credentialId": "credential", "gmIncludeBusyTitles": value}))
+        self.service.read_availability.assert_not_called()
 
     def test_create_invites_parameter_email_from_connected_owner_account(self) -> None:
         ctx = context(

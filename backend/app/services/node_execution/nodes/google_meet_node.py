@@ -36,11 +36,26 @@ def execute(ctx: NodeExecutionContext) -> object:
         service = GoogleMeetService(credential_id, decrypt_config(credential.encrypted_config), db)
         calendar_id = resolve("gmCalendarId", "primary") or "primary"
         if operation == "read":
+            include_titles = ctx.node_data.get("gmIncludeBusyTitles", False)
+            if isinstance(include_titles, str):
+                value = include_titles.strip().lower()
+                if value not in {"true", "false", ""}:
+                    raise HTTPException(
+                        400, "Google Meet: Include Busy Event Titles must be true or false"
+                    )
+                include_titles = value == "true"
+            if include_titles is None:
+                include_titles = False
+            if not isinstance(include_titles, bool):
+                raise HTTPException(
+                    400, "Google Meet: Include Busy Event Titles must be true or false"
+                )
             return service.read_availability(
                 calendar_id,
                 resolve("gmStartDate"),
                 resolve("gmEndDate"),
                 (resolve("gmTimeZone", "UTC") or "UTC"),
+                include_busy_titles=include_titles,
             )
         if operation == "delete":
             return service.delete_event(calendar_id, resolve("gmEventId"))

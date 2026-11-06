@@ -113,6 +113,7 @@ class TestBuildNodeToolSchemas(unittest.TestCase):
                 "gmTimeZone",
                 "gmStartDate",
                 "gmEndDate",
+                "gmIncludeBusyTitles",
                 "gmEventId",
                 "gmTitle",
                 "gmDescription",

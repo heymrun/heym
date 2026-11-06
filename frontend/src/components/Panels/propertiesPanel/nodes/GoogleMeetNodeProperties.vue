@@ -3,10 +3,11 @@ import { computed, onMounted, ref } from "vue";
 import axios from "axios";
 
 import type { CredentialListItem } from "@/types/credential";
+import AgentFieldToggle from "@/components/ui/AgentFieldToggle.vue";
 import ExpressionInput from "@/components/ui/ExpressionInput.vue";
 import Label from "@/components/ui/Label.vue";
 import Select from "@/components/ui/Select.vue";
-import { GOOGLE_MEET_OPERATIONS } from "@/lib/googleMeetFields";
+import { GOOGLE_MEET_BUSY_TITLES_OPTION, GOOGLE_MEET_OPERATIONS } from "@/lib/googleMeetFields";
 import { credentialsApi } from "@/services/api";
 import { usePropertiesPanelContext } from "../usePropertiesPanelController";
 
@@ -108,6 +109,29 @@ onMounted(async (): Promise<void> => {
         class="text-xs text-muted-foreground"
       >
         {{ field.help }}
+      </p>
+    </div>
+    <div
+      v-if="(selectedNode.data.gmOperation || 'read') === 'read'"
+      class="space-y-2"
+      data-testid="gm-busy-titles-option"
+    >
+      <div class="flex items-center gap-2">
+        <input
+          id="gm-include-busy-titles"
+          type="checkbox"
+          class="rounded border-border"
+          :checked="selectedNode.data.gmIncludeBusyTitles === true"
+          @change="updateNodeData(GOOGLE_MEET_BUSY_TITLES_OPTION.key, ($event.target as HTMLInputElement).checked)"
+        >
+        <Label for="gm-include-busy-titles">{{ GOOGLE_MEET_BUSY_TITLES_OPTION.label }}</Label>
+        <AgentFieldToggle
+          :node-id="selectedNode.id"
+          :field-key="GOOGLE_MEET_BUSY_TITLES_OPTION.key"
+        />
+      </div>
+      <p class="text-xs text-muted-foreground">
+        {{ GOOGLE_MEET_BUSY_TITLES_OPTION.help }}
       </p>
     </div>
     <p

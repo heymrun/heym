@@ -292,6 +292,8 @@ See also [Google Sheets](../nodes/google-sheets-node.md), [DataTable](../nodes/d
 
 The [Google Meet node](../nodes/google-meet-node.md) reads available calendar intervals and creates, updates or deletes Calendar events with Meet links. Connect a **Google Meet (OAuth2)** credential with Google login. Reads default from now through the first day of next month; optional start/end dates support shorter windows or up to 60 calendar days. A calendar ID/email selects an accessible calendar. Title, description, times, time zone, location and attendee emails accept expressions and Agent autofill. Guest invitations, updates and cancellations are emailed through Google Calendar.
 
+The read-only **Include Busy Event Titles** option is off by default. Enable it to add `title` to `busy_slots` using visible Calendar event details. Overlapping events retain separate titles; hidden titles are `null`. The free-time calculation stays the same.
+
 For **Book a calendar with me**, show the owner's availability, accept a selected range and visitor email as inputs, recheck the range and create the invitation with the owner's credential.
 
 #### [Google Sheets](../nodes/google-sheets-node.md)

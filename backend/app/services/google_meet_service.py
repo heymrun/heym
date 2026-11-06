@@ -197,7 +197,13 @@ class GoogleMeetService:
         return data
 
     def read_availability(
-        self, calendar_id: str = "primary", start: str = "", end: str = "", time_zone: str = "UTC"
+        self,
+        calendar_id: str = "primary",
+        start: str = "",
+        end: str = "",
+        time_zone: str = "UTC",
+        *,
+        include_busy_titles: bool = False,
     ) -> dict[str, Any]:
         """Return free intervals, failing closed on per-calendar FreeBusy errors."""
         start_at, end_at = availability_window(start, end, time_zone)
@@ -259,6 +265,14 @@ class GoogleMeetService:
                 for a, b in values
             ]
 
+        busy_slots: list[dict[str, str | None]] = list(intervals(merged))
+        if include_busy_titles and merged:
+            from app.services.google_meet_busy_titles import label_busy_intervals, read_busy_events
+
+            busy_slots = label_busy_intervals(
+                merged, read_busy_events(self._request, calendar_id, lower, upper), zone
+            )
+
         return {
             "status": "success",
             "operation": "read",
@@ -267,7 +281,7 @@ class GoogleMeetService:
             "start": start_at.isoformat(),
             "end": end_at.isoformat(),
             "available_slots": intervals(free),
-            "busy_slots": intervals(merged),
+            "busy_slots": busy_slots,
             "count": len(free),
         }
 

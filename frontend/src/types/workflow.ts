@@ -1090,6 +1090,7 @@ export interface NodeData {
   gmTimeZone?: string;
   gmStartDate?: string;
   gmEndDate?: string;
+  gmIncludeBusyTitles?: boolean;
   gmEventId?: string;
   gmTitle?: string;
   gmDescription?: string;
