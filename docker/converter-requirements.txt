@@ -1,0 +1,6 @@
+# WeasyPrint, the PDF engine pandoc runs for the Converter node (`--pdf-engine=weasyprint`).
+# Installed into the image's system Python, so `weasyprint` is on PATH for pandoc whichever
+# way the backend starts. Debian's `weasyprint` package would also install Debian's own
+# Python and Pillow next to the image's Python. Its system libraries (Pango, HarfBuzz) come
+# from apt in the Dockerfiles.
+weasyprint==70.0

@@ -201,6 +201,23 @@ def skill_output_file() -> str:
     return "hello.txt generated"
 
 
+def skill_pdf() -> str:
+    # Skills render PDFs through pandoc, which runs `weasyprint` from PATH inside the sandbox.
+    from app.services.skill_python_executor import execute_skill_python
+
+    source = (
+        "import json, os, pypandoc\n"
+        "out = os.path.join(os.environ['_OUTPUT_DIR'], 'report.pdf')\n"
+        "pypandoc.convert_text('# Report\\n\\nRevenue grew.', 'pdf', format='markdown',\n"
+        "                      outputfile=out, extra_args=['--pdf-engine=weasyprint'])\n"
+        "print(json.dumps({'pdf': open(out, 'rb').read(4) == b'%PDF'}))\n"
+    )
+    result = execute_skill_python([{"path": "main.py", "content": source}], {"input": "x"}, 120)
+    assert result.output == {"pdf": True}, result.output
+    assert [f["filename"] for f in result.generated_files] == ["report.pdf"]
+    return "report.pdf rendered by pandoc and WeasyPrint"
+
+
 def skill_drive_files() -> str:
     from app.services.skill_python_executor import execute_skill_python
 
@@ -364,6 +381,7 @@ if __name__ == "__main__":
         ("chat file sandbox", chat_file_inspection),
         ("agent skill", skill_output_file),
         ("agent skill + drive files toggle", skill_drive_files),
+        ("agent skill pdf", skill_pdf),
         ("mcp stdio", mcp_stdio),
         ("playwright custom code", playwright_isolated),
         ("sandbox ca bundle", sandbox_ca_bundle),
