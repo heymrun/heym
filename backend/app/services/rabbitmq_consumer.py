@@ -1,7 +1,11 @@
 import asyncio
+import hashlib
+import hmac
 import json
 import logging
+import secrets
 import uuid
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import aio_pika
@@ -29,6 +33,25 @@ from app.services.pending_execution import (
 
 logger = logging.getLogger("rabbitmq_consumer")
 
+# Keys only this process's consumer map, which never leaves the process; a new leader
+# starts its consumers from scratch, so revisions never need to match across processes.
+_REVISION_KEY = secrets.token_bytes(32)
+
+
+def config_revision(config: dict[str, Any] | None) -> str:
+    """A short keyed digest of a credential's decrypted config, or "unavailable" without one.
+
+    It goes into the consumer key, so a consumer reconnects when the value changes and
+    only then. `updated_at` would also change on a rewrite that keeps the value (a key
+    rotation re-encrypting every row), and the ciphertext changes on every write because
+    Fernet uses a fresh IV. An HMAC rather than a plain hash: if a consumer key ever
+    reaches a log, a plain digest of a weak password could be checked against guesses.
+    """
+    if config is None:
+        return "unavailable"
+    encoded = json.dumps(config, sort_keys=True, default=str).encode("utf-8")
+    return hmac.new(_REVISION_KEY, encoded, hashlib.sha256).hexdigest()[:16]
+
 
 class ConsumerInfo:
     def __init__(
@@ -45,6 +68,11 @@ class ConsumerInfo:
         self.consumer_tag: str | None = None
         self.connection: aio_pika.abc.AbstractConnection | None = None
         self.channel: aio_pika.abc.AbstractChannel | None = None
+        self.queue: aio_pika.abc.AbstractQueue | None = None
+        # The event loop only holds tasks weakly. Without this reference a start task
+        # waiting on the broker could be garbage-collected mid-connect, and the consumer
+        # would stay registered without ever consuming.
+        self.start_task: asyncio.Task[None] | None = None
 
 
 class RabbitMQConsumerManager:
@@ -55,8 +83,22 @@ class RabbitMQConsumerManager:
         self._lock = asyncio.Lock()
         self._was_leader = False
 
-    def _get_consumer_key(self, workflow_id: uuid.UUID, node_id: str) -> str:
-        return f"{workflow_id}_{node_id}"
+    def _get_consumer_key(
+        self,
+        workflow_id: uuid.UUID,
+        node_id: str,
+        credential_id: str,
+        queue_name: str,
+        revision: str,
+    ) -> str:
+        """Identify a consumer by everything it connected with.
+
+        `_sync_consumers` stops consumers whose key disappears and starts new ones, so
+        a changed credential value, a different credential or a renamed queue reconnects
+        on the next sync. `connect_robust` would otherwise keep reconnecting with the
+        settings it started with.
+        """
+        return f"{workflow_id}_{node_id}_{credential_id}_{queue_name}_{revision}"
 
     async def start(self) -> None:
         if self._running:
@@ -107,50 +149,91 @@ class RabbitMQConsumerManager:
             await asyncio.sleep(30)
 
     async def _sync_consumers(self) -> None:
+        wanted: dict[str, tuple[ConsumerInfo, dict[str, Any] | None]] = {}
         async with async_session_maker() as db:
             workflows = await self._get_workflows_with_rabbitmq_receive(db)
-            current_keys = set()
+            receive_nodes = [
+                (workflow, node)
+                for workflow in workflows
+                for node in self._find_rabbitmq_receive_nodes(workflow.nodes)
+            ]
+            configs = await self._load_credential_configs(
+                db,
+                {node.get("data", {}).get("credentialId") or "" for _, node in receive_nodes},
+            )
 
-            for workflow in workflows:
-                receive_nodes = self._find_rabbitmq_receive_nodes(workflow.nodes)
-                for node in receive_nodes:
-                    node_id = node.get("id", "")
-                    node_data = node.get("data", {})
-                    credential_id = node_data.get("credentialId")
-                    queue_name = node_data.get("rabbitmqQueueName", "")
+        for workflow, node in receive_nodes:
+            node_id = node.get("id", "")
+            node_data = node.get("data", {})
+            credential_id = node_data.get("credentialId")
+            queue_name = node_data.get("rabbitmqQueueName", "")
 
-                    if not credential_id or not queue_name:
-                        continue
+            if not credential_id or not queue_name:
+                continue
 
-                    key = self._get_consumer_key(workflow.id, node_id)
-                    current_keys.add(key)
+            config = configs.get(credential_id)
+            key = self._get_consumer_key(
+                workflow.id, node_id, credential_id, queue_name, config_revision(config)
+            )
+            consumer_info = ConsumerInfo(
+                workflow_id=workflow.id,
+                credential_id=credential_id,
+                queue_name=queue_name,
+                node_id=node_id,
+            )
+            wanted[key] = (consumer_info, config)
 
-                    async with self._lock:
-                        if key not in self._consumers:
-                            consumer_info = ConsumerInfo(
-                                workflow_id=workflow.id,
-                                credential_id=credential_id,
-                                queue_name=queue_name,
-                                node_id=node_id,
-                            )
-                            self._consumers[key] = consumer_info
-                            asyncio.create_task(self._start_consumer(consumer_info))
-                            logger.info(
-                                "Registered RabbitMQ consumer for workflow %s, queue %s",
-                                workflow.id,
-                                queue_name,
-                            )
+        async with self._lock:
+            # Stop first: a reconnect replaces a consumer on the same queue, and the old
+            # one should not still be taking messages while the new one starts.
+            for key in set(self._consumers) - set(wanted):
+                consumer = self._consumers.pop(key)
+                await self._stop_consumer(consumer)
+                logger.info(
+                    "Unregistered RabbitMQ consumer for workflow %s, queue %s",
+                    consumer.workflow_id,
+                    consumer.queue_name,
+                )
 
-            async with self._lock:
-                keys_to_remove = set(self._consumers.keys()) - current_keys
-                for key in keys_to_remove:
-                    consumer = self._consumers.pop(key, None)
-                    if consumer:
-                        await self._stop_consumer(consumer)
-                        logger.info(
-                            "Unregistered RabbitMQ consumer for workflow %s",
-                            consumer.workflow_id,
-                        )
+            for key, (consumer_info, config) in wanted.items():
+                if key in self._consumers:
+                    continue
+                self._consumers[key] = consumer_info
+                consumer_info.start_task = asyncio.create_task(
+                    self._start_consumer(consumer_info, config)
+                )
+                logger.info(
+                    "Registered RabbitMQ consumer for workflow %s, queue %s",
+                    consumer_info.workflow_id,
+                    consumer_info.queue_name,
+                )
+
+    async def _load_credential_configs(
+        self, db: AsyncSession, credential_ids: set[str]
+    ) -> dict[str, dict[str, Any]]:
+        """Decrypted configs by credential id; missing or unreadable ones are left out."""
+        parsed: dict[uuid.UUID, str] = {}
+        for credential_id in credential_ids:
+            try:
+                parsed[uuid.UUID(credential_id)] = credential_id
+            except ValueError:
+                continue
+        if not parsed:
+            return {}
+
+        result = await db.execute(
+            select(Credential.id, Credential.encrypted_config).where(
+                Credential.id.in_(list(parsed))
+            )
+        )
+        configs: dict[str, dict[str, Any]] = {}
+        for credential_uuid, encrypted_config in result.all():
+            try:
+                configs[parsed[credential_uuid]] = decrypt_config(encrypted_config)
+            except Exception:
+                # Reported once, by _start_consumer, rather than on every sync.
+                continue
+        return configs
 
     async def _get_workflows_with_rabbitmq_receive(self, db: AsyncSession) -> list[Workflow]:
         result = await db.execute(select(Workflow))
@@ -177,22 +260,22 @@ class RabbitMQConsumerManager:
     async def _start_consumer(
         self,
         consumer_info: ConsumerInfo,
+        config: dict[str, Any] | None,
     ) -> None:
-        try:
-            async with async_session_maker() as db:
-                cred_result = await db.execute(
-                    select(Credential).where(Credential.id == consumer_info.credential_id)
-                )
-                credential = cred_result.scalar_one_or_none()
-                if not credential:
-                    logger.error(
-                        "Credential %s not found for workflow %s",
-                        consumer_info.credential_id,
-                        consumer_info.workflow_id,
-                    )
-                    return
+        """Connect with the config the consumer's key was computed from.
 
-                config = decrypt_config(credential.encrypted_config)
+        Reading the credential again here could pick up a newer value than the key
+        records, and the consumer would then never be replaced for that edit.
+        """
+        try:
+            if config is None:
+                logger.error(
+                    "Credential %s not found or unreadable for workflow %s",
+                    consumer_info.credential_id,
+                    consumer_info.workflow_id,
+                )
+                return
+
             host = config.get("rabbitmq_host", "localhost")
             port = int(config.get("rabbitmq_port", 5672))
             username = config.get("rabbitmq_username", "guest")
@@ -214,6 +297,7 @@ class RabbitMQConsumerManager:
             await channel.set_qos(prefetch_count=1)
 
             queue = await channel.get_queue(consumer_info.queue_name, ensure=False)
+            consumer_info.queue = queue
 
             async def on_message(message: AbstractIncomingMessage) -> None:
                 await self._handle_message(
@@ -237,21 +321,43 @@ class RabbitMQConsumerManager:
             )
 
     async def _stop_consumer(self, consumer_info: ConsumerInfo) -> None:
-        try:
-            if consumer_info.channel and not consumer_info.channel.is_closed:
-                if consumer_info.consumer_tag:
-                    await consumer_info.channel.cancel(consumer_info.consumer_tag)
-                await consumer_info.channel.close()
+        """Cancel the consumer, then close its channel and connection.
 
-            if consumer_info.connection and not consumer_info.connection.is_closed:
-                await consumer_info.connection.close()
+        Each step runs even if an earlier one fails. This used to call `channel.cancel()`,
+        which aio-pika channels don't have: the AttributeError skipped both closes, and
+        the old connection kept consuming next to its replacement.
+        """
+        start_task = consumer_info.start_task
+        if start_task is not None and not start_task.done():
+            # Still connecting: stop it, or it would finish after this and leave a
+            # connection nobody closes.
+            start_task.cancel()
+            await asyncio.gather(start_task, return_exceptions=True)
 
-        except Exception as e:
-            logger.error(
-                "Error stopping consumer for workflow %s: %s",
-                consumer_info.workflow_id,
-                e,
-            )
+        steps: list[tuple[str, Callable[[], Awaitable[object]]]] = []
+        queue, channel, connection = (
+            consumer_info.queue,
+            consumer_info.channel,
+            consumer_info.connection,
+        )
+        if queue is not None and consumer_info.consumer_tag and channel and not channel.is_closed:
+            tag = consumer_info.consumer_tag
+            steps.append(("cancel", lambda: queue.cancel(tag)))
+        if channel is not None and not channel.is_closed:
+            steps.append(("close channel", channel.close))
+        if connection is not None and not connection.is_closed:
+            steps.append(("close connection", connection.close))
+
+        for step, action in steps:
+            try:
+                await action()
+            except Exception as e:
+                logger.error(
+                    "Error stopping consumer for workflow %s (%s): %s",
+                    consumer_info.workflow_id,
+                    step,
+                    e,
+                )
 
     async def _handle_message(
         self,
