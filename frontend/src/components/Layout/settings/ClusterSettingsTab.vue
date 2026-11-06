@@ -30,11 +30,15 @@ const enabledTotal = computed<number>(() =>
 const canSave = computed<boolean>(() => enabledTotal.value > 0);
 
 /** The instances a run can actually be assigned to, mirroring the scheduler's
- *  own filter: enabled, weighted, live and compatible. */
+ *  own filter: enabled, weighted, live, compatible and credentials synced. */
 const eligible = computed<ClusterInstance[]>(() =>
   (config.value?.instances ?? []).filter(
     (instance: ClusterInstance) =>
-      instance.enabled && instance.weight > 0 && instance.live && instance.compatible,
+      instance.enabled &&
+      instance.weight > 0 &&
+      instance.live &&
+      instance.compatible &&
+      instance.credentials_synced,
   ),
 );
 

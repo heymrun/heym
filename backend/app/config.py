@@ -80,6 +80,13 @@ class Settings(BaseSettings):
     instance_name: str = Field(default="", validation_alias="HEYM_INSTANCE_NAME")
     instance_role: str = Field(default="main", validation_alias="HEYM_INSTANCE_ROLE")
     cluster_enabled: bool = Field(default=False, validation_alias="HEYM_CLUSTER_ENABLED")
+    # Credentials declared as labelled Kubernetes Secrets (services/k8s_credentials).
+    # Off by default: turning it on needs list/watch on Secrets in the namespace below.
+    k8s_credentials: bool = Field(default=False, validation_alias="HEYM_K8S_CREDENTIALS")
+    # Empty means the namespace Heym itself runs in.
+    k8s_credentials_namespace: str = Field(
+        default="", validation_alias="HEYM_K8S_CREDENTIALS_NAMESPACE"
+    )
     db_pool_size: int = Field(default=10, validation_alias="HEYM_DB_POOL_SIZE")
     db_max_overflow: int = Field(default=20, validation_alias="HEYM_DB_MAX_OVERFLOW")
     db_sync_pool_size: int = Field(default=5, validation_alias="HEYM_DB_SYNC_POOL_SIZE")
@@ -209,6 +216,33 @@ class Settings(BaseSettings):
                 'python -c "import secrets; print(secrets.token_hex(32))"'
             )
         return v
+
+    @model_validator(mode="after")
+    def k8s_credentials_refuse_subprocess_sandboxes(self) -> "Settings":
+        """Refuse Kubernetes credentials while user code can run inside the backend container.
+
+        The ServiceAccount token that reads Secrets is a file in this container, so a
+        `subprocess` sandbox could read it however well it scrubs the environment.
+        `auto` and `docker` fail closed instead of falling back to a subprocess.
+        """
+        if not self.k8s_credentials:
+            return self
+        modes = {
+            "HEYM_PYTHON_TOOL_SANDBOX": os.environ.get("HEYM_PYTHON_TOOL_SANDBOX", ""),
+            "HEYM_PLAYWRIGHT_SANDBOX": os.environ.get("HEYM_PLAYWRIGHT_SANDBOX", ""),
+            "HEYM_MCP_STDIO_SANDBOX": os.environ.get("HEYM_MCP_STDIO_SANDBOX")
+            or self.mcp_stdio_sandbox,
+        }
+        offending = sorted(
+            name for name, value in modes.items() if str(value).strip().lower() == "subprocess"
+        )
+        if offending:
+            raise ValueError(
+                "HEYM_K8S_CREDENTIALS cannot be enabled while "
+                f"{', '.join(offending)}=subprocess: user code would run next to the "
+                "ServiceAccount token that reads Secrets. Use auto or docker."
+            )
+        return self
 
     @property
     def effective_timezone(self) -> str:

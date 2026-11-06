@@ -22,7 +22,9 @@ from app.services.cluster.registry import InstanceView
 
 
 def _instance(instance_id: str, role: str, weight: int, *, age_seconds: float = 0) -> InstanceView:
+    beat = datetime.now(timezone.utc) - timedelta(seconds=age_seconds)
     return InstanceView(
+        credentials_synced_at=beat,
         id=instance_id,
         name=instance_id,
         role=role,
@@ -34,7 +36,7 @@ def _instance(instance_id: str, role: str, weight: int, *, age_seconds: float = 
         keys_fingerprint="keys",
         docker_ok=True,
         db_latency_ms=1.0,
-        heartbeat_at=datetime.now(timezone.utc) - timedelta(seconds=age_seconds),
+        heartbeat_at=beat,
     )
 
 

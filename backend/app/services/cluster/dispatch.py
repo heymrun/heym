@@ -51,6 +51,7 @@ from app.services.execution_cancellation import (
     register_execution,
     relinquish_execution,
 )
+from app.services.k8s_credentials.store import store as k8s_credential_store
 from app.services.workflow_executor import (
     WorkflowCancelledError,
     WorkflowTimeoutError,
@@ -519,7 +520,10 @@ class RunQueueWorker:
         while self._running:
             try:
                 await bus.wait_for_work()
-                while self._running:
+                # Until this process has synced its Kubernetes credentials, a run that
+                # needs one would fail partway. Leave the row for a synced process; the
+                # bus's fallback poll brings this loop back once the sync completes.
+                while self._running and k8s_credential_store.ready():
                     row = await run_queue.claim_next(identity.instance_id())
                     if row is None:
                         break

@@ -10,6 +10,8 @@ export interface ClusterInstance {
   db_latency_ms: number;
   live: boolean;
   compatible: boolean;
+  /** False while no process of the instance has synced its Kubernetes credentials. */
+  credentials_synced: boolean;
   heartbeat_at: string | null;
 }
 

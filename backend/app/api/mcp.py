@@ -59,7 +59,7 @@ from app.services import (
 )
 from app.services.cluster.dispatch import dispatch_workflow
 from app.services.credential_access import get_accessible_credential
-from app.services.credential_context import credential_context_value
+from app.services.credential_context import CredentialsContext, credential_context_value
 from app.services.credential_setup import record_elicitation_reply
 from app.services.encryption import decrypt_config
 from app.services.execution_cancellation import (
@@ -76,6 +76,7 @@ from app.services.hitl_service import (
     build_default_public_base_url,
     build_public_base_url,
 )
+from app.services.k8s_credentials.store import CredentialUnavailableError
 from app.services.mcp_elicitation import (
     MCP_SESSION_HEADER,
     MCPClientChannel,
@@ -709,10 +710,13 @@ async def get_credentials_context_for_user(db: AsyncSession, user_id: uuid.UUID)
         seen_ids.add(cred.id)
         all_credentials.append(cred)
 
-    context: dict[str, str] = {}
+    context = CredentialsContext()
     for cred in all_credentials:
         try:
             value = await credential_context_value(cred, decrypt_config(cred.encrypted_config))
+        except CredentialUnavailableError as exc:
+            context.unavailable[cred.name] = str(exc)
+            continue
         except Exception:
             continue
         if value is not None:

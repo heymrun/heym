@@ -10,13 +10,14 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.config import settings
 from app.db.models import ClusterInstance
 from app.db.session import async_session_maker
 from app.services.cluster import identity
+from app.services.k8s_credentials.store import store as k8s_credential_store
 from app.services.sandbox import get_sandbox_manager
 
 logger = logging.getLogger("cluster")
@@ -41,6 +42,8 @@ class InstanceView:
     docker_ok: bool
     db_latency_ms: float
     heartbeat_at: datetime
+    # None until a process of this instance has synced its Kubernetes credentials.
+    credentials_synced_at: datetime | None = None
 
 
 def is_live(instance: InstanceView, *, now: datetime) -> bool:
@@ -65,6 +68,17 @@ def is_live_now(instance: InstanceView, *, now: datetime, connected_ids: set[str
     if connected_ids is None:
         return True
     return instance.id in connected_ids
+
+
+def credentials_synced(instance: InstanceView, *, now: datetime) -> bool:
+    """Whether a process of this instance with synced Kubernetes credentials beat recently.
+
+    Read like liveness: the timestamp is refreshed on every heartbeat while synced, so
+    it goes stale when no process of the instance can serve a Secret-backed credential.
+    When the feature is off, every heartbeat counts as synced.
+    """
+    synced_at = instance.credentials_synced_at
+    return synced_at is not None and synced_at >= now - timedelta(seconds=LIVENESS_WINDOW_SECONDS)
 
 
 def is_compatible_with(instance: InstanceView, main: InstanceView) -> bool:
@@ -96,7 +110,11 @@ def candidate_instances(instances: list[InstanceView], *, now: datetime) -> list
     eligible = [
         i
         for i in instances
-        if i.enabled and i.weight > 0 and is_live(i, now=now) and is_compatible_with(i, main)
+        if i.enabled
+        and i.weight > 0
+        and is_live(i, now=now)
+        and credentials_synced(i, now=now)
+        and is_compatible_with(i, main)
     ]
     return sorted(eligible, key=lambda i: i.id)
 
@@ -166,21 +184,30 @@ async def write_heartbeat() -> None:
         db_latency_ms=latency_ms,
         heartbeat_at=datetime.now(timezone.utc),
     )
+    # Every process of the instance upserts this one row, but sync state is per process.
+    # GREATEST keeps the newest synced beat, so an unsynced sibling (None) can't clear it.
+    synced_at = values["heartbeat_at"] if k8s_credential_store.ready() else None
+    insert = pg_insert(ClusterInstance)
     # name, enabled and weight are owned by the admin UI: set on insert, never
     # overwritten by a heartbeat, or a restart would undo the operator's changes.
-    stmt = (
-        pg_insert(ClusterInstance)
-        .values(
+    stmt = insert.values(
+        **values,
+        credentials_synced_at=synced_at,
+        name=identity.instance_name(),
+        enabled=True,
+        # Main's 100 is deliberate, so it is never a candidate for seeding.
+        # A worker starts unweighted and unconfigured: automatic weighting
+        # gives it a share on the leader's next pass, once.
+        weight=100 if identity.is_main() else 0,
+        weight_configured=identity.is_main(),
+    ).on_conflict_do_update(
+        index_elements=[ClusterInstance.id],
+        set_={
             **values,
-            name=identity.instance_name(),
-            enabled=True,
-            # Main's 100 is deliberate, so it is never a candidate for seeding.
-            # A worker starts unweighted and unconfigured: automatic weighting
-            # gives it a share on the leader's next pass, once.
-            weight=100 if identity.is_main() else 0,
-            weight_configured=identity.is_main(),
-        )
-        .on_conflict_do_update(index_elements=[ClusterInstance.id], set_=values)
+            "credentials_synced_at": func.greatest(
+                ClusterInstance.credentials_synced_at, insert.excluded.credentials_synced_at
+            ),
+        },
     )
     async with async_session_maker() as db:
         await db.execute(stmt)
@@ -213,6 +240,7 @@ async def list_instances(*, use_cache: bool = False) -> list[InstanceView]:
                 docker_ok=row.docker_ok,
                 db_latency_ms=row.db_latency_ms,
                 heartbeat_at=row.heartbeat_at,
+                credentials_synced_at=row.credentials_synced_at,
             )
             for row in result.scalars().all()
         ]
