@@ -636,6 +636,7 @@ class CredentialType(str, Enum):
     clickhouse = "clickhouse"
     opencode = "opencode"
     google_drive = "google_drive"
+    google_meet = "google_meet"
     rag = "rag"
     decision = "decision"
     model_router = "model_router"

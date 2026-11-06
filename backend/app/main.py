@@ -45,6 +45,7 @@ from app.api import (
     folders,
     global_variables,
     google_drive_oauth,
+    google_meet_oauth,
     google_sheets,
     google_sheets_oauth,
     hitl,
@@ -369,6 +370,11 @@ app.include_router(
     google_sheets_oauth.router,
     prefix="/api/credentials/google-sheets/oauth",
     tags=["Google Sheets OAuth"],
+)
+app.include_router(
+    google_meet_oauth.router,
+    prefix="/api/credentials/google-meet/oauth",
+    tags=["Google Meet OAuth"],
 )
 app.include_router(
     google_drive_oauth.router,

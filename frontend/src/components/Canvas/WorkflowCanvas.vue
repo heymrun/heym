@@ -15,6 +15,7 @@ import { useRunbookPlayer } from "@/features/runbook/useRunbookPlayer";
 
 import type { NodeType, WorkflowEdge, WorkflowNode } from "@/types/workflow";
 
+import { NODE_DEFINITIONS } from "@/types/node";
 import CanvasNodeAiButton from "./CanvasNodeAiButton.vue";
 import CanvasNodeRunButton from "./CanvasNodeRunButton.vue";
 import BaseNode from "@/components/Nodes/BaseNode.vue";
@@ -1147,6 +1148,7 @@ function getDefaultNodeData(type: NodeType): WorkflowNode["data"] {
     jira: { label: "jira", credentialId: "", jiraOperation: "searchIssues", jiraProjectKey: "", jiraIssueKey: "", jiraIssueType: "Task", jiraIssueTypeId: "", jiraSummary: "", jiraDescription: "$input.text", jiraJql: "updated >= -30d ORDER BY updated DESC", jiraFields: "", jiraAssigneeAccountId: "", jiraLabels: "", jiraCommentBody: "$input.text", jiraCommentId: "", jiraTransitionId: "", jiraAttachmentId: "", jiraAttachmentFilename: "", jiraAttachmentBase64: "", jiraAttachmentMimeType: "", jiraIncludeBinary: false, jiraNotifySubject: "", jiraNotifyTextBody: "$input.text", jiraNotifyHtmlBody: "", jiraNotifyTo: "{\"assignee\":true}", jiraAccountId: "", jiraUsername: "", jiraUserEmail: "", jiraUserDisplayName: "", jiraUserProducts: "", jiraLimit: "50", jiraStartAt: "0", jiraNextPageToken: "" },
     linear: { label: "linear", credentialId: "", linearOperation: "listIssues", linearTeamId: "", linearProjectId: "", linearIssueId: "", linearIssueLinkUrl: "", linearTitle: "", linearDescription: "$input.text", linearStateId: "", linearAssigneeId: "", linearPriority: "", linearCommentId: "", linearCommentBody: "$input.text", linearParentCommentId: "", linearLimit: "50", linearReturnAll: false },
     googleSheets: { label: "googleSheets", credentialId: "", gsOperation: undefined, gsSpreadsheetId: "", gsSheetName: "Sheet1", gsStartRow: "1", gsUpdateRow: "1", gsMaxRows: "0", gsHasHeader: true, gsRowCount: "1", gsKeepHeader: false, gsAppendPlacement: "append", gsValuesInputMode: "raw", gsValuesSelectiveRows: "1", gsValuesSelectiveCols: "3", gsValues: "[]" },
+    googleMeet: { ...NODE_DEFINITIONS.googleMeet.defaultData },
     googleDrive: { label: "googleDrive", credentialId: "", gdOperation: undefined, gdFolderId: "", gdFileId: "", gdMaxResults: "100", gdQuery: "", gdIncludeTrashed: false, gdExportFormat: "", gdFilename: "", gdBase64Content: "", gdNewName: "", gdNewParentId: "", gdPermanentDelete: false },
     bigquery: { label: "bigquery", credentialId: "", bqOperation: undefined, bqProjectId: "", bqQuery: "", bqMaxResults: "1000", bqDatasetId: "", bqTableId: "", bqRowsInputMode: "raw", bqRows: "[]", bqMappings: [{ key: "field", value: "$input.text" }] },
     supabase: { label: "supabase", credentialId: "", supabaseOperation: undefined, supabaseSchema: "public", supabaseTable: "", supabaseSelectColumns: "*", supabaseFilter: "{}", supabaseLimit: "100", supabaseOrderBy: "", supabaseAscending: true, supabaseRows: "[]", supabaseOnConflict: "", supabaseData: "{}" },

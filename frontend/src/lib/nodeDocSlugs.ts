@@ -51,6 +51,7 @@ export const NODE_DOC_SLUGS: Record<NodeType, string> = {
   jira: "jira-node",
   linear: "linear-node",
   googleSheets: "google-sheets-node",
+  googleMeet: "google-meet-node",
   googleDrive: "google-drive-node",
   bigquery: "bigquery-node",
   supabase: "supabase-node",

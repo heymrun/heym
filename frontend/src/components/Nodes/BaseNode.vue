@@ -77,6 +77,7 @@ const nodeColorMap = {
   jira: "node-jira",
   linear: "node-linear",
   googleSheets: "node-google-sheets",
+  googleMeet: "node-google-meet",
   googleDrive: "node-google-drive",
   googleDriveTrigger: "node-google-drive",
   googleSheetsTrigger: "node-google-sheets",

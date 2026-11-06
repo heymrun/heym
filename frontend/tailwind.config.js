@@ -4,6 +4,7 @@ export default {
   content: ["./index.html", "./src/**/*.{vue,js,ts,jsx,tsx}"],
   safelist: [
     "border-node-input", "bg-node-input/10", "text-node-input",
+    "border-node-google-meet", "bg-node-google-meet/10", "text-node-google-meet",
     "border-node-cron", "bg-node-cron/10", "text-node-cron",
     "border-node-llm", "bg-node-llm/10", "text-node-llm",
     "border-node-agent", "bg-node-agent/10", "text-node-agent",
@@ -111,6 +112,7 @@ export default {
         node: {
           input: "hsl(var(--node-input))",
           cron: "hsl(var(--node-cron))",
+          "google-meet": "hsl(var(--node-google-meet))",
           llm: "hsl(var(--node-llm))",
           agent: "hsl(var(--node-agent))",
           codex: "hsl(var(--node-codex))",

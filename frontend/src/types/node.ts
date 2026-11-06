@@ -902,6 +902,21 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
       gsValues: "[]",
     },
   },
+  googleMeet: {
+    type: "googleMeet",
+    label: "Google Meet",
+    description: "Find available times and create, update or delete Google Meet invitations",
+    color: "node-google-meet",
+    icon: "CalendarClock",
+    inputs: 1,
+    outputs: 1,
+    defaultData: {
+      label: "googleMeet", credentialId: "", gmOperation: "read",
+      gmCalendarId: "primary", gmTimeZone: "UTC", gmStartDate: "", gmEndDate: "",
+      gmEventId: "", gmTitle: "", gmDescription: "", gmStartTime: "", gmEndTime: "",
+      gmAttendees: "", gmLocation: "",
+    },
+  },
   googleDrive: {
     type: "googleDrive",
     label: "Google Drive",

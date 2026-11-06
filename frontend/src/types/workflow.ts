@@ -218,6 +218,7 @@ export type NodeType =
   | "linear"
   | "googleSheets"
   | "googleDrive"
+  | "googleMeet"
   | "googleDriveTrigger"
   | "googleSheetsTrigger"
   | "bigquery"
@@ -1084,6 +1085,18 @@ export interface NodeData {
   gsValuesSelectiveRows?: string;
   gsValuesSelectiveCols?: string;
   gsValues?: string;
+  gmOperation?: "create" | "read" | "update" | "delete";
+  gmCalendarId?: string;
+  gmTimeZone?: string;
+  gmStartDate?: string;
+  gmEndDate?: string;
+  gmEventId?: string;
+  gmTitle?: string;
+  gmDescription?: string;
+  gmStartTime?: string;
+  gmEndTime?: string;
+  gmAttendees?: string | string[];
+  gmLocation?: string;
   gdOperation?: string;
   gdFolderId?: string;
   gdFileId?: string;
