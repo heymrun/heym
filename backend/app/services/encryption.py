@@ -5,6 +5,8 @@ import json
 from cryptography.fernet import Fernet
 
 from app.config import settings
+from app.services.k8s_credentials.store import is_pointer
+from app.services.k8s_credentials.store import store as k8s_credential_store
 
 
 def get_fernet() -> Fernet:
@@ -21,6 +23,14 @@ def encrypt_config(config: dict) -> str:
 
 
 def decrypt_config(encrypted_config: str) -> dict:
+    """The config a credential row holds, or, for a Secret-backed row, the Secret's.
+
+    Every read of a credential goes through here, so resolving the `k8s:` pointer in
+    this one place leaves the call sites unchanged. A Secret-backed credential with no
+    value in this process raises `CredentialUnavailableError` with the reason.
+    """
+    if is_pointer(encrypted_config):
+        return k8s_credential_store.config_for(encrypted_config)
     fernet = get_fernet()
     decrypted = fernet.decrypt(encrypted_config.encode())
     return json.loads(decrypted.decode())

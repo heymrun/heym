@@ -45,6 +45,8 @@ export interface Credential {
   masked_value: string | null;
   header_key: string | null;
   public_fields?: Record<string, string | null>;
+  /** `k8s:<namespace>/<secret-name>` when a Kubernetes Secret manages it (read-only). */
+  source?: string | null;
   created_at: string;
   updated_at?: string;
 }
@@ -56,6 +58,8 @@ export interface CredentialListItem {
   masked_value: string | null;
   header_key: string | null;
   public_fields?: Record<string, string | null>;
+  /** `k8s:<namespace>/<secret-name>` when a Kubernetes Secret manages it (read-only). */
+  source?: string | null;
   created_at: string;
   is_shared?: boolean;
   shared_by?: string | null;

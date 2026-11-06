@@ -54,6 +54,7 @@ from app.services.embedding import (
     embedding_config_from_credential,
 )
 from app.services.encryption import decrypt_config, encrypt_config, mask_api_key
+from app.services.k8s_credentials.store import CredentialUnavailableError
 from app.services.model_router import ModelRouterConfigError, parse_router_config
 from app.services.opencode_usage_service import fetch_opencode_usage
 from app.services.vector_store import VECTOR_STORE_BACKENDS
@@ -551,6 +552,32 @@ def get_masked_value(credential_type: CredentialType, config: dict) -> str | Non
     return None
 
 
+def display_config(credential: Credential) -> tuple[dict, str | None]:
+    """The config to describe a credential with, and the masked value to show for it.
+
+    A Secret-backed credential shows its Secret rather than the first characters of
+    its value, and lists even when this process has no value for it, so one deleted
+    Secret can't fail a whole page. Its public fields come from this process's copy.
+    """
+    if credential.source:
+        try:
+            config = decrypt_config(credential.encrypted_config)
+        except CredentialUnavailableError:
+            config = {}
+        return config, credential.source
+    config = decrypt_config(credential.encrypted_config)
+    return config, get_masked_value(credential.type, config)
+
+
+def refuse_secret_backed(credential: Credential) -> None:
+    """409 for any change to a credential managed by a Kubernetes Secret."""
+    if credential.source:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Managed by Kubernetes Secret {credential.source.removeprefix('k8s:')}",
+        )
+
+
 def get_header_key(credential_type: CredentialType, config: dict) -> str | None:
     if credential_type == CredentialType.header:
         return config.get("header_key")
@@ -825,8 +852,7 @@ async def list_credentials(
     seen_ids: set[uuid.UUID] = set()
     responses = []
     for cred in owned_credentials:
-        config = decrypt_config(cred.encrypted_config)
-        masked = get_masked_value(cred.type, config)
+        config, masked = display_config(cred)
         header_key = get_header_key(cred.type, config)
         responses.append(
             CredentialListResponse(
@@ -836,6 +862,7 @@ async def list_credentials(
                 masked_value=masked,
                 header_key=header_key,
                 public_fields=get_public_credential_fields(cred.type, config),
+                source=cred.source,
                 created_at=cred.created_at,
                 is_shared=False,
                 shared_by=None,
@@ -848,8 +875,7 @@ async def list_credentials(
         if cred.id in seen_ids:
             continue
         seen_ids.add(cred.id)
-        config = decrypt_config(cred.encrypted_config)
-        masked = get_masked_value(cred.type, config)
+        config, masked = display_config(cred)
         header_key = get_header_key(cred.type, config)
         responses.append(
             CredentialListResponse(
@@ -859,6 +885,7 @@ async def list_credentials(
                 masked_value=masked,
                 header_key=header_key,
                 public_fields=get_public_credential_fields(cred.type, config),
+                source=cred.source,
                 created_at=cred.created_at,
                 is_shared=True,
                 shared_by=owner_email,
@@ -870,8 +897,7 @@ async def list_credentials(
         if cred.id in seen_ids:
             continue
         seen_ids.add(cred.id)
-        config = decrypt_config(cred.encrypted_config)
-        masked = get_masked_value(cred.type, config)
+        config, masked = display_config(cred)
         header_key = get_header_key(cred.type, config)
         responses.append(
             CredentialListResponse(
@@ -881,6 +907,7 @@ async def list_credentials(
                 masked_value=masked,
                 header_key=header_key,
                 public_fields=get_public_credential_fields(cred.type, config),
+                source=cred.source,
                 created_at=cred.created_at,
                 is_shared=True,
                 shared_by=None,
@@ -969,8 +996,7 @@ async def list_credentials_by_type(
     seen_ids: set[uuid.UUID] = set()
     responses = []
     for cred in owned_credentials:
-        config = decrypt_config(cred.encrypted_config)
-        masked = get_masked_value(cred.type, config)
+        config, masked = display_config(cred)
         header_key = get_header_key(cred.type, config)
         responses.append(
             CredentialListResponse(
@@ -980,6 +1006,7 @@ async def list_credentials_by_type(
                 masked_value=masked,
                 header_key=header_key,
                 public_fields=get_public_credential_fields(cred.type, config),
+                source=cred.source,
                 created_at=cred.created_at,
                 is_shared=False,
                 shared_by=None,
@@ -992,8 +1019,7 @@ async def list_credentials_by_type(
         if cred.id in seen_ids:
             continue
         seen_ids.add(cred.id)
-        config = decrypt_config(cred.encrypted_config)
-        masked = get_masked_value(cred.type, config)
+        config, masked = display_config(cred)
         header_key = get_header_key(cred.type, config)
         responses.append(
             CredentialListResponse(
@@ -1003,6 +1029,7 @@ async def list_credentials_by_type(
                 masked_value=masked,
                 header_key=header_key,
                 public_fields=get_public_credential_fields(cred.type, config),
+                source=cred.source,
                 created_at=cred.created_at,
                 is_shared=True,
                 shared_by=owner_email,
@@ -1014,8 +1041,7 @@ async def list_credentials_by_type(
         if cred.id in seen_ids:
             continue
         seen_ids.add(cred.id)
-        config = decrypt_config(cred.encrypted_config)
-        masked = get_masked_value(cred.type, config)
+        config, masked = display_config(cred)
         header_key = get_header_key(cred.type, config)
         responses.append(
             CredentialListResponse(
@@ -1025,6 +1051,7 @@ async def list_credentials_by_type(
                 masked_value=masked,
                 header_key=header_key,
                 public_fields=get_public_credential_fields(cred.type, config),
+                source=cred.source,
                 created_at=cred.created_at,
                 is_shared=True,
                 shared_by=None,
@@ -1091,12 +1118,13 @@ async def _list_credentials_of_types(
         shared_by: str | None,
         shared_by_team: str | None,
     ) -> CredentialListResponse:
-        config = decrypt_config(cred.encrypted_config)
+        config, masked = display_config(cred)
         return CredentialListResponse(
             id=cred.id,
             name=cred.name,
             type=cred.type,
-            masked_value=get_masked_value(cred.type, config),
+            masked_value=masked,
+            source=cred.source,
             header_key=get_header_key(cred.type, config),
             public_fields=get_public_credential_fields(cred.type, config),
             created_at=cred.created_at,
@@ -1719,8 +1747,7 @@ async def get_credential(
             detail="Credential not found",
         )
 
-    config = decrypt_config(credential.encrypted_config)
-    masked = get_masked_value(credential.type, config)
+    config, masked = display_config(credential)
     header_key = get_header_key(credential.type, config)
 
     audit(
@@ -1736,6 +1763,7 @@ async def get_credential(
         name=credential.name,
         type=credential.type,
         masked_value=masked,
+        source=credential.source,
         header_key=header_key,
         public_fields=get_public_credential_fields(credential.type, config),
         created_at=credential.created_at,
@@ -1762,6 +1790,7 @@ async def update_credential(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Credential not found",
         )
+    refuse_secret_backed(credential)
 
     if credential_data.name is not None:
         existing = await db.execute(
@@ -1850,6 +1879,7 @@ async def delete_credential(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Credential not found",
         )
+    refuse_secret_backed(credential)
 
     audit(
         action="credential.delete",
@@ -2550,6 +2580,7 @@ async def create_credential_share(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Credential not found",
         )
+    refuse_secret_backed(credential)
 
     user_result = await db.execute(select(User).where(User.email == share_data.email))
     target_user = user_result.scalar_one_or_none()
@@ -2625,6 +2656,7 @@ async def delete_credential_share(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Credential not found",
         )
+    refuse_secret_backed(credential)
 
     share_result = await db.execute(
         select(CredentialShare).where(
@@ -2704,6 +2736,7 @@ async def create_credential_team_share(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Credential not found",
         )
+    refuse_secret_backed(credential)
     team_result = await db.execute(
         select(Team)
         .join(TeamMember, TeamMember.team_id == Team.id)
@@ -2769,6 +2802,7 @@ async def delete_credential_team_share(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Credential not found",
         )
+    refuse_secret_backed(credential)
     share_result = await db.execute(
         select(CredentialTeamShare).where(
             CredentialTeamShare.credential_id == credential_id,

@@ -149,6 +149,7 @@ class _Cred:
         self.name = name
         self.type = CredentialType.decision
         self.encrypted_config = "encrypted"
+        self.source = None
         self.created_at = datetime(2026, 9, 21, tzinfo=timezone.utc)
 
 

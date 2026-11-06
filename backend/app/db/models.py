@@ -6,6 +6,7 @@ from enum import Enum as PyEnum
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     Enum,
     Float,
@@ -24,7 +25,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSON, JSONB, UUID
 from sqlalchemy.engine import Connection
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, validates
 from sqlalchemy.sql.elements import ColumnElement
 
 
@@ -1109,9 +1110,27 @@ class GlobalVariableTeamShare(Base):
     team: Mapped["Team"] = relationship("Team")
 
 
+class CredentialWriteBackError(ValueError):
+    """A Secret-backed credential row was about to store something other than its pointer."""
+
+
+# A row holds a Fernet ciphertext, or, when `source` is set, exactly its Secret pointer.
+# Enforced twice: by `Credential._guard_secret_backed_row` on every ORM write, which
+# fails early and names the row, and by this constraint, which also covers raw SQL,
+# data migrations and admin scripts. The second half stops a row without `source`
+# from holding a pointer, so nothing but the watcher can make a row resolve from a Secret.
+CREDENTIAL_SOURCE_CHECK = (
+    "(source IS NULL AND encrypted_config NOT LIKE 'k8s:%') "
+    "OR (source IS NOT NULL AND encrypted_config = source)"
+)
+
+
 class Credential(Base):
     __tablename__ = "credentials"
-    __table_args__ = (UniqueConstraint("owner_id", "name", name="uq_credential_name"),)
+    __table_args__ = (
+        UniqueConstraint("owner_id", "name", name="uq_credential_name"),
+        CheckConstraint(CREDENTIAL_SOURCE_CHECK, name="ck_credentials_source_pointer"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     owner_id: Mapped[uuid.UUID] = mapped_column(
@@ -1122,6 +1141,9 @@ class Credential(Base):
         Enum(CredentialType, name="credential_type"), nullable=False
     )
     encrypted_config: Mapped[str] = mapped_column(Text, nullable=False)
+    # `k8s:<namespace>/<secret-name>` for a credential declared as a Kubernetes Secret.
+    # Such a row is read-only, and its value lives in memory only (services/k8s_credentials).
+    source: Mapped[str | None] = mapped_column(String(320), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -1133,6 +1155,39 @@ class Credential(Base):
     shares: Mapped[list["CredentialShare"]] = relationship(
         "CredentialShare", back_populates="credential", cascade="all, delete-orphan"
     )
+
+    @validates("encrypted_config", "source")
+    def _guard_secret_backed_row(self, key: str, value: str | None) -> str | None:
+        """Refuse to put a real value on a Secret-backed row, at the line that tries.
+
+        OAuth refresh, the Codex node and the update endpoint all decrypt, change and
+        re-encrypt a credential; on a Secret-backed row that would write the value into
+        the database. Validators run for constructor arguments too, in either order.
+        """
+        stored = value if key == "encrypted_config" else self.encrypted_config
+        source = value if key == "source" else self.source
+        if stored is not None and source is not None and stored != source:
+            raise CredentialWriteBackError(
+                f"credential {self.id} is managed by Kubernetes Secret "
+                f"{source.removeprefix('k8s:')}; its value cannot be stored in the database"
+            )
+        return value
+
+
+@event.listens_for(Credential, "before_insert")
+@event.listens_for(Credential, "before_update")
+def _credential_pointer_needs_source(
+    _mapper: object, _connection: Connection, target: Credential
+) -> None:
+    """Refuse a Secret pointer on a row without `source`, so only the watcher makes one.
+
+    Checked at flush rather than on assignment: a constructor may set
+    `encrypted_config` before `source`, and only the final pair matters.
+    """
+    if target.source is None and str(target.encrypted_config or "").startswith("k8s:"):
+        raise CredentialWriteBackError(
+            f"credential {target.id}: a Secret pointer needs a matching source"
+        )
 
 
 class CredentialShare(Base):
@@ -2798,6 +2853,12 @@ class ClusterInstance(Base):
     db_latency_ms: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     heartbeat_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
+    # Last heartbeat from a process whose Kubernetes credentials were synced (every
+    # process, when that feature is off). All processes upsert this one row, so it
+    # keeps the newest value and an unsynced process never clears it.
+    credentials_synced_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
