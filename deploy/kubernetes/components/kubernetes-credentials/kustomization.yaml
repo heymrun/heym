@@ -1,0 +1,20 @@
+# Credentials declared as labelled Secrets (HEYM_K8S_CREDENTIALS). Add it to an
+# overlay with:
+#
+#   components:
+#     - ../../components/kubernetes-credentials
+#
+# Secrets RBAC can't be narrowed by label, so the backend can read every Secret in
+# its namespace. Keep other applications' Secrets out of that namespace.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+  - rbac.yaml
+patches:
+  # Every Deployment: main and workers each watch the Secrets themselves, because
+  # values are kept in memory and never written to the database.
+  - target: {kind: Deployment}
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value: {name: HEYM_K8S_CREDENTIALS, value: "true"}

@@ -75,6 +75,88 @@ Role in Heym's namespace that grants `get` on `pods`. Workspace sandboxes then n
 a claim named `heym-data` in the sandbox namespace bound to the same RWX share
 (a second, statically provisioned PersistentVolume).
 
+## Credentials from Kubernetes Secrets
+
+A Secret labelled `heym.run/credential: "true"` becomes a read-only credential.
+Values stay in each process's memory and never reach the database or its backups,
+and changing the Secret rotates the credential without a restart. Anything that
+writes a Secret works: External Secrets Operator, SealedSecrets, SOPS through Flux
+or Argo CD, or `kubectl`.
+
+Add the component to your overlay. It grants the ServiceAccount `get`, `list` and
+`watch` on Secrets and sets `HEYM_K8S_CREDENTIALS=true` on every Deployment:
+
+    components:
+      - ../../components/kubernetes-credentials
+
+Secrets RBAC can't be narrowed by label, so Heym can read every Secret in the
+watched namespace. Run Heym in its own namespace, or set
+`HEYM_K8S_CREDENTIALS_NAMESPACE` to one that holds only Heym credentials. Startup
+refuses while any of `HEYM_PYTHON_TOOL_SANDBOX`, `HEYM_PLAYWRIGHT_SANDBOX` or
+`HEYM_MCP_STDIO_SANDBOX` is `subprocess`, because user code would run next to the
+ServiceAccount token.
+
+    apiVersion: v1
+    kind: Secret
+    metadata:
+      name: heym-cred-llm-gateway
+      labels:
+        heym.run/credential: "true"
+      annotations:
+        heym.run/name: llm-gateway              # credential name shown in Heym
+        heym.run/type: custom                   # a credential type
+        heym.run/owner: admin@example.com       # an existing user
+        heym.run/share-users: alice@example.com # optional, comma-separated emails
+        heym.run/share-teams: automation        # optional, comma-separated team names
+    stringData:
+      base_url: http://llm-gateway.internal/v1
+      api_key: sk-...
+
+Each data key is a config field. For a type with nested or non-string fields, put
+the whole config as JSON under a single `config.json` key instead. Types that store
+refreshed OAuth tokens (Codex, Google, BigQuery, and Linear or Notion in OAuth mode)
+can't be read-only and are refused.
+
+With External Secrets Operator, put the label and annotations on the target
+template:
+
+    apiVersion: external-secrets.io/v1
+    kind: ExternalSecret
+    metadata:
+      name: heym-cred-llm-gateway
+    spec:
+      secretStoreRef: {kind: ClusterSecretStore, name: parameter-store}
+      target:
+        template:
+          metadata:
+            labels: {heym.run/credential: "true"}
+            annotations:
+              heym.run/name: llm-gateway
+              heym.run/type: custom
+              heym.run/owner: admin@example.com
+          data:
+            base_url: http://llm-gateway.internal/v1
+            api_key: "{{ .key }}"
+      data:
+        - secretKey: key
+          remoteRef: {key: /heym/llm-gateway-key}
+
+What to expect:
+
+- **A pod can be Ready before it has synced.** Startup doesn't wait for the API
+  server, so the UI stays up without it. Until a process has synced it claims no
+  queued runs, and a run that uses one of these credentials fails with
+  `not synced from Kubernetes yet` before any node runs. Settings → Kubernetes and
+  Settings → Instances show the sync state, so don't build a health check that
+  assumes Ready means synced.
+- **A deleted Secret leaves its credential unavailable**, keeping its id and
+  shares, so recreating the Secret (a GitOps prune and re-apply) restores it for
+  every workflow. Rows are never removed automatically; an admin removes them
+  from Settings → Kubernetes.
+- **An owner who hasn't signed in yet** is retried every five minutes.
+- **A user credential with the same name and owner** is never taken over; the
+  Secret is reported as a conflict instead.
+
 ## OpenShift
 
     kubectl apply -k deploy/kubernetes/overlays/openshift
