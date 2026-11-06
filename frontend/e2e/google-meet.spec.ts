@@ -50,7 +50,6 @@ test("Google Meet exposes availability, booking fields and expression navigation
     await page.getByRole("button", { name: "Properties", exact: true }).click();
     await page.locator('.vue-flow__node[data-id="meeting"]').click();
     const panel = page.locator(".properties-panel");
-    await expect(panel.getByTestId("gm-availability-help")).toContainText("60 days");
     await expect(panel.getByTestId("gm-field-gmEndDate")).toBeVisible();
     const includeTitles = panel.getByLabel("Include Busy Event Titles", { exact: true });
     await expect(includeTitles).not.toBeChecked();

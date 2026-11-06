@@ -135,16 +135,7 @@ onMounted(async (): Promise<void> => {
       </p>
     </div>
     <p
-      v-if="selectedNode.data.gmOperation === 'read'"
-      class="text-xs text-muted-foreground"
-      data-testid="gm-availability-help"
-    >
-      Returns available_slots and busy_slots from now until next month's first day.
-      Override the dates for a shorter range or up to 60 days. Availability includes nights
-      and weekends; it reflects calendar conflicts, not working hours.
-    </p>
-    <p
-      v-else-if="selectedNode.data.gmOperation === 'update'"
+      v-if="selectedNode.data.gmOperation === 'update'"
       class="text-xs text-muted-foreground"
     >
       Empty fields keep their existing values. Supply both times to reschedule.
@@ -158,7 +149,7 @@ onMounted(async (): Promise<void> => {
       Use $input.email to invite a visitor who selected an available time.
     </p>
     <p
-      v-else
+      v-else-if="selectedNode.data.gmOperation === 'delete'"
       class="text-xs text-muted-foreground"
     >
       Guests receive cancellation emails.
