@@ -93,7 +93,7 @@ badge is hidden on mobile screens.
 
 ## Search
 
-Use the workflow search field beside **Status**, or press **Ctrl+F** (or **Cmd+F**), to filter workflows by title or description. Matching workflows inside folders are shown with their folder branches expanded. Press **Escape** to clear the search.
+Use the workflow search field beside **Status**, or press **Ctrl+F** (or **Cmd+F**), to filter workflows by title or description, or folders by name. Matching workflows inside folders are shown with their folder branches expanded, and a folder whose name matches is shown with everything inside it. Press **Escape** to clear the search.
 
 ## Folders
 

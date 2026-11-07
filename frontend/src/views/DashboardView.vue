@@ -438,13 +438,29 @@ function matchesWorkflowSearch(workflow: WorkflowListItem, normalizedQuery: stri
   return `${workflow.name} ${workflow.description ?? ""} ${workflow.owner_email ?? ""}`.toLowerCase().includes(normalizedQuery);
 }
 
-/** Prunes folders with no visible workflow so a filter never leaves empty shells behind. */
-function filterFolderTree(folders: FolderTree[]): FolderTree[] {
-  return folders.flatMap((folder): FolderTree[] => {
-    const children = filterFolderTree(folder.children);
-    const folderWorkflows = folder.workflows.filter(isWorkflowVisible);
+function matchesFolderSearch(folder: FolderTree, normalizedQuery: string): boolean {
+  if (normalizedQuery.length === 0) {
+    return false;
+  }
 
-    if (children.length === 0 && folderWorkflows.length === 0) {
+  return `${folder.name} ${folder.description ?? ""}`.toLowerCase().includes(normalizedQuery);
+}
+
+/**
+ * Prunes folders with no visible workflow so a filter never leaves empty shells behind.
+ * A folder whose own name matches the search stays with everything inside it; only the status filter still applies.
+ */
+function filterFolderTree(folders: FolderTree[], insideMatchedFolder = false): FolderTree[] {
+  return folders.flatMap((folder): FolderTree[] => {
+    const showAllContents =
+      insideMatchedFolder || matchesFolderSearch(folder, normalizedWorkflowSearchQuery.value);
+    const children = filterFolderTree(folder.children, showAllContents);
+    const folderWorkflows = folder.workflows.filter((workflow) =>
+      showAllContents ? matchesStatusFilter(workflow) : isWorkflowVisible(workflow),
+    );
+    const keepWhenEmpty = showAllContents && statusFilter.value === "all";
+
+    if (children.length === 0 && folderWorkflows.length === 0 && !keepWhenEmpty) {
       return [];
     }
 
@@ -454,6 +470,23 @@ function filterFolderTree(folders: FolderTree[]): FolderTree[] {
       workflows: folderWorkflows,
     }];
   });
+}
+
+function collectWorkflowIdsInMatchedFolders(
+  folders: FolderTree[],
+  insideMatchedFolder: boolean,
+  workflowIds: Set<string>,
+): void {
+  for (const folder of folders) {
+    const showAllContents =
+      insideMatchedFolder || matchesFolderSearch(folder, normalizedWorkflowSearchQuery.value);
+    if (showAllContents) {
+      for (const workflow of folder.workflows) {
+        workflowIds.add(workflow.id);
+      }
+    }
+    collectWorkflowIdsInMatchedFolders(folder.children, showAllContents, workflowIds);
+  }
 }
 
 function collectFolderIds(folders: FolderTree[], folderIds: Set<string>): void {
@@ -616,7 +649,7 @@ function openSelectedWorkflowFromStep(nodeId: string): void {
 /** True when search or the status filter leaves the whole listing empty. */
 const hasNoVisibleWorkflows = computed((): boolean => {
   if (workflows.value.length === 0) return false;
-  return !workflows.value.some(isWorkflowVisible);
+  return !workflows.value.some(isWorkflowVisible) && displayedFolderTree.value.length === 0;
 });
 
 /** Search or a status other than "all" - both prune the tree and force matches open. */
@@ -647,9 +680,18 @@ const workflowSearchMatchCount = computed((): number => {
     return workflows.value.length;
   }
 
-  return workflows.value.filter((workflow) =>
-    matchesWorkflowSearch(workflow, normalizedWorkflowSearchQuery.value),
-  ).length;
+  const matchedIds = new Set<string>(
+    workflows.value
+      .filter((workflow) => matchesWorkflowSearch(workflow, normalizedWorkflowSearchQuery.value))
+      .map((workflow) => workflow.id),
+  );
+  const virtualFolder = heymUsersFolder.value;
+  collectWorkflowIdsInMatchedFolders(
+    virtualFolder ? [...folderStore.folderTree, virtualFolder] : folderStore.folderTree,
+    false,
+    matchedIds,
+  );
+  return matchedIds.size;
 });
 
 const workflowCountLabel = computed((): string => {
@@ -2047,8 +2089,8 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                   </p>
                   <p class="mt-1 max-w-md text-xs text-muted-foreground">
                     {{ statusFilter === 'all'
-                      ? 'Try a different title or description.'
-                      : 'Try a different title, description or status filter.' }}
+                      ? 'Try a different title, description or folder name.'
+                      : 'Try a different title, description, folder name or status filter.' }}
                   </p>
                   <Button
                     v-if="statusFilter !== 'all'"
