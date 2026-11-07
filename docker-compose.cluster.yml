@@ -83,8 +83,8 @@ services:
       HEYM_DB_SYNC_POOL_SIZE: "2"
       HEYM_DB_SYNC_MAX_OVERFLOW: "3"
     shm_size: "2gb"
-    # Skips the image entrypoint's migration step: main owns the schema.
-    entrypoint: ["sh", "-c", "uv run python -m uvicorn app.main:app --host 0.0.0.0 --port 10105 --workers 2"]
+    # Skips the image entrypoint's migration step: main owns the schema. Keeps its key check.
+    entrypoint: ["sh", "-c", "uv run python -m app.key_check && exec uv run python -m uvicorn app.main:app --host 0.0.0.0 --port 10105 --workers 2"]
     ports:
       - "10111:10105"
     volumes:

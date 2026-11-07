@@ -22,7 +22,8 @@ services:
     entrypoint:
       - bash
       - -c
-      - cd /app/backend && exec uv run python -m uvicorn app.main:app --host 0.0.0.0 --port 10105 --workers 2
+      # The key check first: it refuses an ENCRYPTION_KEY this database wasn't encrypted with.
+      - cd /app/backend && uv run python -m app.key_check && exec uv run python -m uvicorn app.main:app --host 0.0.0.0 --port 10105 --workers 2
 
     shm_size: "2gb"
 

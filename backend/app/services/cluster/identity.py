@@ -54,6 +54,16 @@ def keys_fingerprint() -> str:
     return f"{_key_digest(settings.encryption_key)}{_key_digest(settings.secret_key)}"
 
 
+def primary_fingerprint() -> str:
+    """The ENCRYPTION_KEY half of keys_fingerprint: the key this instance encrypts with."""
+    return _key_digest(settings.encryption_key)
+
+
+def decrypt_fingerprints() -> list[str]:
+    """Fingerprints of every key this instance decrypts with, ENCRYPTION_KEY first."""
+    return [_key_digest(key) for key in settings.encryption_keys]
+
+
 _FINGERPRINT_LABEL = b"heym-keys-fingerprint"
 
 

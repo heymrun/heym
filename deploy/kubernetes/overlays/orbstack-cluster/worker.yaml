@@ -25,8 +25,9 @@ spec:
       containers:
         - name: heym
           image: heym-backend:local
-          # Main owns the schema, so the worker skips the image's migration step.
-          command: ["sh", "-c", "uv run python -m uvicorn app.main:app --host 0.0.0.0 --port 10105 --workers 2"]
+          # Main owns the schema, so the worker skips the image's migration step, but
+          # keeps the key check.
+          command: ["sh", "-c", "uv run python -m app.key_check && exec uv run python -m uvicorn app.main:app --host 0.0.0.0 --port 10105 --workers 2"]
           ports:
             - {name: http, containerPort: 10105}
           env:

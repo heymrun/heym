@@ -20,6 +20,7 @@ from sqlalchemy import (
     event,
     func,
     literal,
+    literal_column,
     select,
     true,
 )
@@ -2860,9 +2861,84 @@ class ClusterInstance(Base):
     credentials_synced_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Fingerprints of every key this instance decrypts with: ENCRYPTION_KEY, then
+    # ENCRYPTION_KEYS_EXTRA. The primary's is the first half of keys_fingerprint.
+    decrypt_fingerprints: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default="[]"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+ENCRYPTION_CANARY_ID = 1
+
+
+class EncryptionCanary(Base):
+    """A value encrypted with this database's key, so a wrong key is caught at startup.
+
+    One row. `python -m app.key_check` writes it once a stored value has decrypted,
+    and refuses to start a process whose keys can't read it.
+    """
+
+    __tablename__ = "encryption_canary"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=ENCRYPTION_CANARY_ID)
+    token: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class KeyRotationState(str, PyEnum):
+    running = "running"
+    paused = "paused"
+    completed = "completed"
+
+
+class KeyRotation(Base):
+    """One re-encryption of stored values under ENCRYPTION_KEY, started by an admin.
+
+    Progress lives here rather than in a process, so it survives a leader change and
+    every instance reports the same numbers. A completed row's retired fingerprints are
+    the keys it moved the database away from: the key check refuses them as a primary.
+    """
+
+    __tablename__ = "key_rotations"
+    __table_args__ = (
+        # At most one rotation in progress.
+        Index(
+            "ix_key_rotations_one_active",
+            "active",
+            unique=True,
+            postgresql_where=literal_column("active"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="running")
+    # True while running or paused; the partial unique index allows one such row.
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    target_fingerprint: Mapped[str] = mapped_column(String(32), nullable=False)
+    retired_fingerprints: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default="[]"
+    )
+    started_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    done: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    remaining: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    unreadable: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # The last credential id rewritten in the current pass, so a new leader resumes there.
+    cursor: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    message: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class WorkflowRunQueue(Base):
