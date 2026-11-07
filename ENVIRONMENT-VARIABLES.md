@@ -276,6 +276,13 @@ or allowlist every instance.
 | `HEYM_INSTANCE_NAME` | Display label for this instance; the admin UI can rename it later. | — |
 | `HEYM_INSTANCE_ID` | Stable id shared by all of this instance's processes. Derived from the name when empty. | — |
 
+### Credentials from Kubernetes Secrets
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HEYM_K8S_CREDENTIALS` | Read credentials from Secrets labelled `heym.run/credential: "true"`. Needs `get`, `list` and `watch` on `secrets`, and refuses to start while any sandbox switch is `subprocess`. See [deploy/kubernetes](deploy/kubernetes/README.md#credentials-from-kubernetes-secrets). | `false` |
+| `HEYM_K8S_CREDENTIALS_NAMESPACE` | Namespace to watch. | Heym's own namespace |
+
 ## Miscellaneous
 
 | Variable | Description | Default |

@@ -16,6 +16,7 @@ from starlette.responses import Response
 from app.api import (
     a2a,
     admin_cluster,
+    admin_k8s_credentials,
     agent_memory,
     agent_suite_runs,
     agent_suites,
@@ -111,6 +112,7 @@ from app.services.heym_event_service import (
 )
 from app.services.hitl_service import build_public_base_url, build_review_url
 from app.services.imap_trigger_service import imap_trigger_manager
+from app.services.k8s_credentials import lifecycle as k8s_credentials_lifecycle
 from app.services.notion_service import NotionService
 from app.services.qdrant_pool import close_all_clients as close_qdrant_clients
 from app.services.qdrant_pool import warm_up_pools as warm_up_qdrant_pools
@@ -193,6 +195,8 @@ async def _reinstall_plugin_dependencies() -> None:
 async def lifespan(app: FastAPI):
     logger.info("Starting Heym AI Workflow Platform v%s", settings.resolved_version)
     await lock_service.start()
+    # Before anything that reads credentials; it never waits for the first sync.
+    await k8s_credentials_lifecycle.start()
 
     async with async_session_maker() as _startup_db:
         await _startup_db.execute(
@@ -272,6 +276,7 @@ async def lifespan(app: FastAPI):
     await active_execution_registry.stop()
     with suppress(Exception):
         await mark_own_executions_orphaned()
+    await k8s_credentials_lifecycle.stop()
     await lock_service.stop()
     close_redis_pools()
     close_grist_clients()
@@ -357,6 +362,11 @@ app.include_router(
 )
 app.include_router(work_channel.router, prefix="/api/integrations/work", tags=["Heym Work Channel"])
 app.include_router(admin_cluster.router, prefix="/api/admin/cluster", tags=["Cluster Admin"])
+app.include_router(
+    admin_k8s_credentials.router,
+    prefix="/api/admin/k8s-credentials",
+    tags=["Kubernetes Credentials Admin"],
+)
 app.include_router(workflows.router, prefix="/api/workflows", tags=["Workflows"])
 app.include_router(collab.router, prefix="/api/workflows", tags=["Canvas Collaboration"])
 app.include_router(agent_memory.router, prefix="/api/workflows", tags=["Agent Memory"])

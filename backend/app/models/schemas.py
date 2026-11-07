@@ -833,6 +833,8 @@ class CredentialResponse(BaseModel):
     name: str
     type: CredentialType
     masked_value: str | None = None
+    # `k8s:<namespace>/<secret-name>` when a Kubernetes Secret manages it (read-only).
+    source: str | None = None
     header_key: str | None = None
     public_fields: dict[str, str | None] = Field(default_factory=dict)
     created_at: datetime
@@ -847,6 +849,8 @@ class CredentialListResponse(BaseModel):
     name: str
     type: CredentialType
     masked_value: str | None = None
+    # `k8s:<namespace>/<secret-name>` when a Kubernetes Secret manages it (read-only).
+    source: str | None = None
     header_key: str | None = None
     public_fields: dict[str, str | None] = {}
     created_at: datetime
@@ -2139,6 +2143,9 @@ class ClusterInstanceResponse(BaseModel):
     db_latency_ms: float
     live: bool
     compatible: bool
+    # False while no process of the instance has synced its Kubernetes credentials;
+    # dispatch skips it until one has. Always True when that feature is off.
+    credentials_synced: bool = True
     heartbeat_at: datetime | None = None
 
 

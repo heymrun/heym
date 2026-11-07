@@ -93,7 +93,7 @@ from app.services.codex_followup_service import (
 )
 from app.services.collab.protocol import parse_collab_hash_header, parse_collab_session_header
 from app.services.collab.saves import queue_collab_saved
-from app.services.credential_context import credential_context_value
+from app.services.credential_context import CredentialsContext, credential_context_value
 from app.services.dashboard_widget_policy import dashboard_widget_blocked_nodes_error
 from app.services.encryption import decrypt_config
 from app.services.execution_cancellation import (
@@ -132,6 +132,7 @@ from app.services.hitl_service import (
 from app.services.hitl_widget_service import ensure_saved_filter_allowed
 from app.services.html_response import build_html_response, find_sole_html_terminal
 from app.services.instance_admin import is_instance_admin
+from app.services.k8s_credentials.store import CredentialUnavailableError
 from app.services.node_analytics_rollup import pending_on_first_write
 from app.services.pending_execution import needs_local_pending_persist
 from app.services.pending_review_cancel import cancel_pending_review_execution
@@ -2842,10 +2843,13 @@ async def get_credentials_context(
         seen_ids.add(cred.id)
         all_credentials.append(cred)
 
-    context: dict[str, str] = {}
+    context = CredentialsContext()
     for cred in all_credentials:
         try:
             value = await credential_context_value(cred, decrypt_config(cred.encrypted_config))
+        except CredentialUnavailableError as exc:
+            context.unavailable[cred.name] = str(exc)
+            continue
         except Exception:
             continue
         if value is not None:

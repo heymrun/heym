@@ -30,6 +30,8 @@ def _view(**overrides: object) -> InstanceView:
         heartbeat_at=datetime.now(timezone.utc),
     )
     base.update(overrides)
+    # A process that beats has synced its credentials unless a test says otherwise.
+    base.setdefault("credentials_synced_at", base["heartbeat_at"])
     return InstanceView(**base)  # type: ignore[arg-type]
 
 

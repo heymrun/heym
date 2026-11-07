@@ -97,6 +97,7 @@ async def _read_cluster(db: AsyncSession) -> ClusterSettingsResponse:
                 db_latency_ms=i.db_latency_ms,
                 live=registry.is_live_now(i, now=now, connected_ids=connected),
                 compatible=main is not None and registry.is_compatible_with(i, main),
+                credentials_synced=registry.credentials_synced(i, now=now),
                 heartbeat_at=i.heartbeat_at,
             )
             # Main first, then workers by id, so the table order is stable.

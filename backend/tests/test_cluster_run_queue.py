@@ -156,6 +156,8 @@ def _instance(instance_id: str, *, role: str, weight: int, version: str = "1.0.0
         heartbeat_at=datetime.now(timezone.utc),
     )
     fields.update(over)
+    # A process that beats has synced its credentials unless a test says otherwise.
+    fields.setdefault("credentials_synced_at", fields["heartbeat_at"])
     return InstanceView(**fields)
 
 

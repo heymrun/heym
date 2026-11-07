@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useMediaQuery } from "@vueuse/core";
-import { Brain, Database, Globe, Key, MessageSquare, Plus, Search, Share2, Shield, Terminal, Trash2, Users, X } from "lucide-vue-next";
+import { Boxes, Brain, Database, Globe, Key, MessageSquare, Plus, Search, Share2, Shield, Terminal, Trash2, Users, X } from "lucide-vue-next";
 
 import type { Credential, CredentialListItem, CredentialShare, CredentialType } from "@/types/credential";
 import type { Team, TeamShare } from "@/types/team";
@@ -506,10 +506,10 @@ async function removeCredentialTeamShare(teamId: string): Promise<void> {
         :data-testid="`credential-card-${credential.id}`"
         :class="cn(
           'credential-card p-5 cursor-pointer group',
-          credential.is_shared && 'shared-card'
+          (credential.is_shared || credential.source) && 'shared-card'
         )"
         :style="{ animationDelay: `${index * 50}ms` }"
-        @click="!credential.is_shared && openEditDialog(credential)"
+        @click="!credential.is_shared && !credential.source && openEditDialog(credential)"
       >
         <div class="flex items-start justify-between mb-3">
           <div class="flex items-center gap-3">
@@ -536,6 +536,15 @@ async function removeCredentialTeamShare(teamId: string): Promise<void> {
                   <Users class="w-3 h-3" />
                   Shared
                 </span>
+                <span
+                  v-if="credential.source"
+                  :data-testid="`credential-kubernetes-${credential.id}`"
+                  class="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-accent-orange/10 text-accent-orange"
+                  :title="`Managed by Kubernetes Secret ${credential.source.replace(/^k8s:/, '')}. Change it where the Secret is managed.`"
+                >
+                  <Boxes class="w-3 h-3" />
+                  Kubernetes
+                </span>
               </div>
               <p class="text-xs text-muted-foreground">
                 {{ CREDENTIAL_TYPE_LABELS[credential.type] }}
@@ -543,7 +552,7 @@ async function removeCredentialTeamShare(teamId: string): Promise<void> {
             </div>
           </div>
           <div
-            v-if="!credential.is_shared"
+            v-if="!credential.is_shared && !credential.source"
             class="flex items-center gap-0.5"
           >
             <Button

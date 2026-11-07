@@ -15,7 +15,13 @@ class AlembicMigrationGraphTest(unittest.TestCase):
         self.script = ScriptDirectory.from_config(config)
 
     def test_revision_graph_has_one_head(self) -> None:
-        self.assertEqual(self.script.get_heads(), ["150_google_meet_credential"])
+        self.assertEqual(self.script.get_heads(), ["151_k8s_secret_credentials"])
+
+    def test_k8s_secret_credentials_follows_google_meet_credential(self) -> None:
+        revision = self.script.get_revision("151_k8s_secret_credentials")
+
+        self.assertIsNotNone(revision)
+        self.assertEqual(revision.down_revision, "150_google_meet_credential")
 
     def test_google_meet_credential_follows_board_auto_advance(self) -> None:
         revision = self.script.get_revision("150_google_meet_credential")

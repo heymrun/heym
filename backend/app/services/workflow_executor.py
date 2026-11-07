@@ -42,6 +42,11 @@ from app.services.cancellation_bridge import CancellationBridge
 from app.services.chart_payload import (
     build_chart_payload,  # noqa: F401 - public patch alias for node handlers
 )
+from app.services.credential_context import (
+    mask_credentials_context,  # noqa: F401 - re-exported for existing importers
+    refused_run_event,
+    refused_run_result,
+)
 from app.services.execution_cancellation import (
     buffer_live_execution_events,
     record_execution_node_completed,
@@ -8261,22 +8266,6 @@ def _mask_sub_execution_dict(row: dict, credentials_context: dict[str, str] | No
     return sc
 
 
-def mask_credentials_context(credentials_context: dict[str, str] | None) -> dict[str, str]:
-    """Return a preview-safe credentials context with secret values masked."""
-    if not credentials_context:
-        return {}
-
-    masked_context: dict[str, str] = {}
-    for name, value in credentials_context.items():
-        if not value:
-            masked_context[name] = value
-        elif len(value) > 7:
-            masked_context[name] = value[:7] + "**"
-        else:
-            masked_context[name] = "**"
-    return masked_context
-
-
 def execute_workflow(
     workflow_id: uuid.UUID,
     nodes: list[dict],
@@ -8299,6 +8288,8 @@ def execute_workflow(
     llm_session_id: str | None = None,
     file_scope: RunFileScope | None = None,
 ) -> ExecutionResult:
+    if refused := refused_run_result(workflow_id, credentials_context, nodes, workflow_cache):
+        return refused
     executor = WorkflowExecutor(
         nodes,
         edges,
@@ -9562,6 +9553,9 @@ def _execute_workflow_streaming_impl(
 ):
     import queue
 
+    if refused := refused_run_event(workflow_id, credentials_context, nodes, workflow_cache):
+        yield refused
+        return
     event_queue: queue.Queue = queue.Queue()
     wf_executor = WorkflowExecutor(
         nodes,

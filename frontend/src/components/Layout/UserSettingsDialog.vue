@@ -25,8 +25,10 @@ import {
   uninstallPlugin,
 } from "@/services/plugins";
 import ClusterSettingsTab from "@/components/Layout/settings/ClusterSettingsTab.vue";
+import KubernetesCredentialsTab from "@/components/Layout/settings/KubernetesCredentialsTab.vue";
 import SsoSettingsTab from "@/components/Layout/settings/SsoSettingsTab.vue";
 import WorkIntegrationSettingsTab from "@/components/Layout/settings/WorkIntegrationSettingsTab.vue";
+import { k8sCredentialsEnabled } from "@/services/k8sCredentials";
 import { useAuthStore } from "@/stores/auth";
 
 import AiDefaultsTab from "@/components/Layout/aiDefaults/AiDefaultsTab.vue";
@@ -43,6 +45,7 @@ type SettingsTab =
   | "plugins"
   | "sso"
   | "instances"
+  | "kubernetes"
   | "work";
 
 const props = defineProps<{
@@ -58,6 +61,9 @@ const authStore = useAuthStore();
 const router = useRouter();
 
 const activeTab = ref<SettingsTab>("profile");
+
+// Off on Docker installs, so the tab stays hidden until the backend says otherwise.
+const kubernetesTabVisible = ref(false);
 
 const observabilityStatus = ref<ObservabilityStatus | null>(null);
 const loadingObservability = ref(false);
@@ -261,6 +267,11 @@ watch(
       selectedTtsCredentialId.value = authStore.user.tts_credential_id ?? "";
       selectedVoiceId.value = authStore.user.tts_voice_id ?? "";
       void loadElevenLabsCredentials().then(loadVoices);
+      if (authStore.user.is_admin) {
+        void k8sCredentialsEnabled().then((enabled) => {
+          kubernetesTabVisible.value = enabled;
+        });
+      }
       if (activeTab.value === "observability") {
         void loadObservabilityStatus();
       }
@@ -472,6 +483,16 @@ async function handleChangePassword(): Promise<void> {
             @click="activeTab = 'instances'"
           >
             Instances
+          </button>
+          <button
+            v-if="authStore.user?.is_admin && kubernetesTabVisible"
+            type="button"
+            data-testid="settings-tab-kubernetes"
+            class="px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap shrink-0"
+            :class="activeTab === 'kubernetes' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'"
+            @click="activeTab = 'kubernetes'"
+          >
+            Kubernetes
           </button>
         </div>
       </div>
@@ -911,6 +932,10 @@ HEYM_PLUGIN_ADMIN_EMAILS=you@example.com</pre>
 
       <div v-else-if="activeTab === 'instances' && authStore.user?.is_admin">
         <ClusterSettingsTab />
+      </div>
+
+      <div v-else-if="activeTab === 'kubernetes' && authStore.user?.is_admin && kubernetesTabVisible">
+        <KubernetesCredentialsTab />
       </div>
 
       <div v-else-if="activeTab === 'sso' && authStore.user?.is_admin">
