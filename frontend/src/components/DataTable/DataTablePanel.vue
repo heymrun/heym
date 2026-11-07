@@ -30,6 +30,7 @@ import Dialog from "@/components/ui/Dialog.vue";
 import Input from "@/components/ui/Input.vue";
 import Label from "@/components/ui/Label.vue";
 import Textarea from "@/components/ui/Textarea.vue";
+import { useListSearchShortcut } from "@/composables/useListSearchShortcut";
 import { formatDate } from "@/lib/utils";
 import { dataTablesApi } from "@/services/api";
 import { playSuccessSound } from "@/utils/audio";
@@ -64,6 +65,7 @@ const tables = ref<DataTableListItem[]>([]);
 const loading = ref(true);
 const error = ref("");
 const searchQuery = ref("");
+const searchInput = ref<HTMLInputElement | null>(null);
 
 // ── Detail state ──
 const selectedTable = ref<DataTable | null>(null);
@@ -123,9 +125,22 @@ const renameInputRef = ref<HTMLInputElement | null>(null);
 // ── Copied ID feedback ──
 const copiedRowId = ref<string | null>(null);
 
+const {
+  normalizedQuery: normalizedSearchQuery,
+  isActive: isSearchActive,
+  placeholder: searchPlaceholder,
+  clear: clearSearch,
+  clearAndKeepFocus: clearSearchAndKeepFocus,
+} = useListSearchShortcut({
+  input: searchInput,
+  query: searchQuery,
+  noun: "data tables",
+  isEnabled: () => !showCreateDialog.value && !showAIDialog.value,
+});
+
 const filtered = computed(() => {
-  if (!searchQuery.value) return tables.value;
-  const q = searchQuery.value.toLowerCase();
+  if (!isSearchActive.value) return tables.value;
+  const q = normalizedSearchQuery.value;
   return tables.value.filter(
     (t) => t.name.toLowerCase().includes(q) || (t.description || "").toLowerCase().includes(q),
   );
@@ -693,12 +708,26 @@ onUnmounted(() => window.removeEventListener("keydown", handleCreateDialogEscape
       <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
         <div class="flex items-center gap-2 sm:contents">
           <div class="relative min-w-0 flex-1">
-            <Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
+            <Search class="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <input
+              id="data-table-search"
+              ref="searchInput"
               v-model="searchQuery"
-              placeholder="Search data tables..."
-              class="pl-9"
-            />
+              type="text"
+              autocomplete="off"
+              class="h-11 min-h-[44px] md:h-9 w-full rounded-xl border border-border bg-background px-9 py-2 text-sm shadow-sm transition-all duration-200 placeholder:text-muted-foreground/60 hover:border-border/80 focus-visible:outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/15"
+              :placeholder="searchPlaceholder"
+              @keydown.esc.prevent.stop="clearSearch"
+            >
+            <button
+              v-if="isSearchActive"
+              type="button"
+              title="Clear search"
+              class="absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
+              @click="clearSearchAndKeepFocus"
+            >
+              <X class="h-4 w-4" />
+            </button>
           </div>
           <Button
             size="sm"
@@ -757,6 +786,20 @@ onUnmounted(() => window.removeEventListener("keydown", handleCreateDialogEscape
         class="flex items-center justify-center py-20"
       >
         <RefreshCw class="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+
+      <!-- No search match -->
+      <div
+        v-else-if="isSearchActive && tables.length > 0 && filtered.length === 0"
+        class="flex flex-col items-center justify-center rounded-xl border border-dashed border-border/70 bg-muted/10 px-4 py-16 text-center"
+      >
+        <Search class="mb-3 h-8 w-8 text-muted-foreground/60" />
+        <p class="text-sm font-medium text-foreground">
+          No data tables found
+        </p>
+        <p class="mt-1 max-w-md text-xs text-muted-foreground">
+          Try a different name or description.
+        </p>
       </div>
 
       <!-- Empty state -->

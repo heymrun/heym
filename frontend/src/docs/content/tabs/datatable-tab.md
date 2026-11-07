@@ -12,6 +12,10 @@ The **DataTable** tab lets you create and manage structured data tables directly
 3. Enter a name and optional description
 4. Add columns with the column editor
 
+## Searching
+
+Use the search field above the table list, or press **Ctrl+F** (or **Cmd+F**), to filter tables by name or description as you type. Press **Escape** to clear the search.
+
 ## Columns
 
 Each column has:

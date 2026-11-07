@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { useMediaQuery } from "@vueuse/core";
 import { Boxes, Brain, Database, Globe, Key, KeyRound, MessageSquare, Plus, Search, Share2, Shield, Terminal, Trash2, Users, X } from "lucide-vue-next";
 
 import type { Credential, CredentialListItem, CredentialShare, CredentialType } from "@/types/credential";
@@ -16,6 +15,7 @@ import Label from "@/components/ui/Label.vue";
 import Select from "@/components/ui/Select.vue";
 import UserAvatar from "@/components/ui/UserAvatar.vue";
 import { refreshCredentialsCache } from "@/composables/useExpressionCompletion";
+import { useListSearchShortcut } from "@/composables/useListSearchShortcut";
 import { contextReference } from "@/lib/contextReference";
 import { cn, formatDate } from "@/lib/utils";
 import { credentialsApi, teamsApi } from "@/services/api";
@@ -28,12 +28,20 @@ const editingCredential = ref<Credential | null>(null);
 
 const credentialSearchQuery = ref("");
 const credentialSearchInput = ref<HTMLInputElement | null>(null);
-const isMobile = useMediaQuery("(max-width: 767px)");
+const showShareDialog = ref(false);
 
-const normalizedCredentialSearchQuery = computed((): string =>
-  credentialSearchQuery.value.trim().toLowerCase(),
-);
-const isCredentialSearchActive = computed((): boolean => normalizedCredentialSearchQuery.value.length > 0);
+const {
+  normalizedQuery: normalizedCredentialSearchQuery,
+  isActive: isCredentialSearchActive,
+  placeholder: searchPlaceholder,
+  clear: clearCredentialSearch,
+  clearAndKeepFocus: clearCredentialSearchAndKeepFocus,
+} = useListSearchShortcut({
+  input: credentialSearchInput,
+  query: credentialSearchQuery,
+  noun: "credentials",
+  isEnabled: () => !showDialog.value && !showShareDialog.value,
+});
 
 function matchesCredentialSearch(credential: CredentialListItem, normalizedQuery: string): boolean {
   if (normalizedQuery.length === 0) {
@@ -69,80 +77,6 @@ const credentialCountLabel = computed((): string => {
   return `${credentialSearchMatchCount.value}/${credentials.value.length}`;
 });
 
-const isMac = computed((): boolean => {
-  if (typeof navigator === "undefined") {
-    return false;
-  }
-
-  return navigator.platform.toLowerCase().startsWith("mac") || navigator.userAgent.includes("Mac");
-});
-
-const searchShortcutLabel = computed((): string => {
-  if (isMobile.value) return "";
-  return isMac.value ? "⌘F" : "Ctrl+F";
-});
-
-const searchPlaceholder = computed((): string => {
-  const label = searchShortcutLabel.value;
-  return label ? `Search credentials (${label})` : "Search credentials";
-});
-
-function clearCredentialSearch(): void {
-  credentialSearchQuery.value = "";
-  credentialSearchInput.value?.blur();
-}
-
-function clearCredentialSearchAndKeepFocus(): void {
-  credentialSearchQuery.value = "";
-  credentialSearchInput.value?.focus();
-}
-
-function focusCredentialSearch(): void {
-  requestAnimationFrame(() => {
-    credentialSearchInput.value?.focus();
-    credentialSearchInput.value?.select();
-  });
-}
-
-function isTypingTarget(target: EventTarget | null): boolean {
-  if (!target) return false;
-  const element = target as HTMLElement;
-  return (
-    element.tagName === "INPUT" ||
-    element.tagName === "TEXTAREA" ||
-    element.isContentEditable ||
-    element.closest("input, textarea, [contenteditable]") !== null
-  );
-}
-
-function handleCredentialKeyDown(event: KeyboardEvent): void {
-  if (showDialog.value || showShareDialog.value) return;
-
-  const isTyping = isTypingTarget(event.target);
-  const isMeta = event.metaKey || event.ctrlKey;
-  const key = event.key.toLowerCase();
-
-  if (
-    key === "escape" &&
-    isCredentialSearchActive.value &&
-    (!isTyping || event.target === credentialSearchInput.value)
-  ) {
-    event.preventDefault();
-    clearCredentialSearch();
-    return;
-  }
-
-  if (
-    isMeta &&
-    key === "f" &&
-    (!isTyping || event.target === credentialSearchInput.value)
-  ) {
-    event.preventDefault();
-    focusCredentialSearch();
-  }
-}
-
-const showShareDialog = ref(false);
 const sharingCredential = ref<CredentialListItem | null>(null);
 const credentialShares = ref<CredentialShare[]>([]);
 const credentialTeamShares = ref<TeamShare[]>([]);
@@ -152,19 +86,13 @@ const shareTeamId = ref("");
 const sharingLoading = ref(false);
 const shareError = ref("");
 
-onMounted(async () => {
-  await loadCredentials();
-  window.addEventListener("keydown", handleCredentialKeyDown);
-  const unsub = onDismissOverlays(() => {
-    showDialog.value = false;
-    showShareDialog.value = false;
-    clearCredentialSearch();
-  });
-  onUnmounted(() => {
-    window.removeEventListener("keydown", handleCredentialKeyDown);
-    unsub();
-  });
+onMounted(loadCredentials);
+
+const unsubscribeDismissOverlays = onDismissOverlays(() => {
+  showDialog.value = false;
+  showShareDialog.value = false;
 });
+onUnmounted(unsubscribeDismissOverlays);
 
 async function loadCredentials(): Promise<void> {
   loading.value = true;

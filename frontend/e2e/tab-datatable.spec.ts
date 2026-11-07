@@ -87,7 +87,7 @@ test("fits the table list and the detail footer on a phone screen", async ({ pag
     await page.goto("/?tab=datatable");
 
     const listControls = [
-      page.getByPlaceholder("Search data tables..."),
+      page.locator("#data-table-search"),
       page.getByRole("button", { name: "New DataTable", exact: true }),
       page.getByRole("button", { name: "Generate with AI" }),
       page.getByRole("heading", { name: table.name, exact: true }),

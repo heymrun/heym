@@ -553,6 +553,12 @@ def get_masked_value(credential_type: CredentialType, config: dict) -> str | Non
     return None
 
 
+UNREADABLE_CREDENTIAL_DETAIL = (
+    "This credential's value can't be read with the configured encryption keys. "
+    "Enter its whole value again, or delete it."
+)
+
+
 def display_config(credential: Credential) -> tuple[dict, str | None, bool]:
     """The config to describe a credential with, the masked value, and whether it's unreadable.
 
@@ -1432,7 +1438,16 @@ async def run_credential_connection_test(
                     "stored configuration."
                 ),
             )
-        stored_config = decrypt_config(credential.encrypted_config)
+        try:
+            stored_config = decrypt_config(credential.encrypted_config)
+        except InvalidToken:
+            # Only the owner's entered value can be tested; a non-owner's was refused above.
+            if not config:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=UNREADABLE_CREDENTIAL_DETAIL,
+                ) from None
+            stored_config = {}
         if test_data.type == CredentialType.supabase:
             config = _merge_supabase_test_config(config, stored_config)
         elif test_data.type == CredentialType.linear:
@@ -1830,8 +1845,7 @@ async def update_credential(
         if credential_data.config is None:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="This credential's value can't be read with the configured "
-                "encryption keys. Enter its whole value again, or delete it.",
+                detail=UNREADABLE_CREDENTIAL_DETAIL,
             ) from None
         config, unreadable = {}, True
 

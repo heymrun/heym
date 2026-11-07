@@ -52,6 +52,10 @@ Use **Test Connection** to verify Supabase, Linear, or Notion credentials before
 
 OAuth credentials open the provider's authorization page in a popup. If the browser blocks it, use the **Open the authorization page** link under the Connect button; the dialog notices when the connection completes. Once a new credential is connected, the button shows **Connected**.
 
+## Searching
+
+Use the search field above the list, or press **Ctrl+F** (or **Cmd+F**), to filter credentials by name or type as you type. Press **Escape** to clear the search.
+
 ## Editing and Deleting
 
 - **Edit** – Update credential values (sensitive values are masked)

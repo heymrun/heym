@@ -73,6 +73,8 @@ These shortcuts are active on the Workflows tab when no other text input is acti
 | `Ctrl + F` / `Cmd + F` | Focus workflow search |
 | `Escape` | Clear workflow search when it has text |
 
+The **Credentials** and **DataTable** tabs work the same way: `Ctrl + F` / `Cmd + F` focuses the search field, the list narrows as you type, and `Escape` clears it.
+
 ## Properties Panel Shortcuts
 
 These shortcuts are active while a node is selected and the properties panel is open.
