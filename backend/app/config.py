@@ -44,6 +44,14 @@ class Settings(BaseSettings):
         return v
 
     encryption_key: str = ""
+    # Keys accepted for decryption only, comma-separated. During a rotation this holds the
+    # new key while it is introduced, then the old key once the new one is ENCRYPTION_KEY.
+    encryption_keys_extra: str = ""
+    # Accept ENCRYPTION_KEY as this database's key even though nothing stored decrypts with
+    # it: the way out for an install whose key changed before key checking existed.
+    accept_current_encryption_key: bool = Field(
+        default=False, validation_alias="HEYM_ACCEPT_CURRENT_ENCRYPTION_KEY"
+    )
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 1440
     jwt_refresh_token_expire_days: int = 30
@@ -216,6 +224,31 @@ class Settings(BaseSettings):
                 'python -c "import secrets; print(secrets.token_hex(32))"'
             )
         return v
+
+    @field_validator("encryption_keys_extra")
+    @classmethod
+    def encryption_keys_extra_are_real_keys(cls, v: str) -> str:
+        """Drop empty entries and refuse the placeholder, as for ENCRYPTION_KEY.
+
+        Without dropping them, a trailing comma would add the empty string as a key that
+        decrypts: every key goes through the same sha256 derivation, empty or not.
+        """
+        keys = [key.strip() for key in v.split(",") if key.strip()]
+        if _ENCRYPTION_KEY_PLACEHOLDER in keys:
+            raise ValueError(
+                "ENCRYPTION_KEYS_EXTRA must not contain the placeholder value "
+                f"{_ENCRYPTION_KEY_PLACEHOLDER!r}."
+            )
+        return ",".join(keys)
+
+    @property
+    def encryption_keys(self) -> list[str]:
+        """ENCRYPTION_KEY first, then each extra key once. Encryption uses only the first."""
+        keys = [self.encryption_key]
+        for key in self.encryption_keys_extra.split(","):
+            if key and key not in keys:
+                keys.append(key)
+        return keys
 
     @model_validator(mode="after")
     def k8s_credentials_refuse_subprocess_sandboxes(self) -> "Settings":
