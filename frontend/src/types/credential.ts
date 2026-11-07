@@ -47,6 +47,8 @@ export interface Credential {
   public_fields?: Record<string, string | null>;
   /** `k8s:<namespace>/<secret-name>` when a Kubernetes Secret manages it (read-only). */
   source?: string | null;
+  /** No configured ENCRYPTION_KEY decrypts it: it can only be deleted and re-created. */
+  unreadable?: boolean;
   created_at: string;
   updated_at?: string;
 }
@@ -60,6 +62,8 @@ export interface CredentialListItem {
   public_fields?: Record<string, string | null>;
   /** `k8s:<namespace>/<secret-name>` when a Kubernetes Secret manages it (read-only). */
   source?: string | null;
+  /** No configured ENCRYPTION_KEY decrypts it: it can only be deleted and re-created. */
+  unreadable?: boolean;
   created_at: string;
   is_shared?: boolean;
   shared_by?: string | null;

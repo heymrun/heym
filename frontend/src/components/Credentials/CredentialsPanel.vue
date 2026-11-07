@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useMediaQuery } from "@vueuse/core";
-import { Boxes, Brain, Database, Globe, Key, MessageSquare, Plus, Search, Share2, Shield, Terminal, Trash2, Users, X } from "lucide-vue-next";
+import { Boxes, Brain, Database, Globe, Key, KeyRound, MessageSquare, Plus, Search, Share2, Shield, Terminal, Trash2, Users, X } from "lucide-vue-next";
 
 import type { Credential, CredentialListItem, CredentialShare, CredentialType } from "@/types/credential";
 import type { Team, TeamShare } from "@/types/team";
@@ -506,10 +506,15 @@ async function removeCredentialTeamShare(teamId: string): Promise<void> {
         :data-testid="`credential-card-${credential.id}`"
         :class="cn(
           'credential-card p-5 cursor-pointer group',
-          (credential.is_shared || credential.source) && 'shared-card'
+          (credential.is_shared || credential.source || credential.unreadable) && 'shared-card'
         )"
         :style="{ animationDelay: `${index * 50}ms` }"
-        @click="!credential.is_shared && !credential.source && openEditDialog(credential)"
+        @click="
+          !credential.is_shared &&
+            !credential.source &&
+            !credential.unreadable &&
+            openEditDialog(credential)
+        "
       >
         <div class="flex items-start justify-between mb-3">
           <div class="flex items-center gap-3">
@@ -545,6 +550,15 @@ async function removeCredentialTeamShare(teamId: string): Promise<void> {
                   <Boxes class="w-3 h-3" />
                   Kubernetes
                 </span>
+                <span
+                  v-if="credential.unreadable"
+                  :data-testid="`credential-unreadable-${credential.id}`"
+                  class="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-destructive/10 text-destructive"
+                  title="Stored with an encryption key this instance no longer has, so its value can't be read. Delete it and create it again."
+                >
+                  <KeyRound class="w-3 h-3" />
+                  Unreadable
+                </span>
               </div>
               <p class="text-xs text-muted-foreground">
                 {{ CREDENTIAL_TYPE_LABELS[credential.type] }}
@@ -556,6 +570,7 @@ async function removeCredentialTeamShare(teamId: string): Promise<void> {
             class="flex items-center gap-0.5"
           >
             <Button
+              v-if="!credential.unreadable"
               variant="ghost"
               size="icon"
               class="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-primary h-8 w-8"

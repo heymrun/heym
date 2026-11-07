@@ -835,6 +835,8 @@ class CredentialResponse(BaseModel):
     masked_value: str | None = None
     # `k8s:<namespace>/<secret-name>` when a Kubernetes Secret manages it (read-only).
     source: str | None = None
+    # No configured key decrypts it; the owner can only delete and re-create it.
+    unreadable: bool = False
     header_key: str | None = None
     public_fields: dict[str, str | None] = Field(default_factory=dict)
     created_at: datetime
@@ -851,6 +853,8 @@ class CredentialListResponse(BaseModel):
     masked_value: str | None = None
     # `k8s:<namespace>/<secret-name>` when a Kubernetes Secret manages it (read-only).
     source: str | None = None
+    # No configured key decrypts it; the owner can only delete and re-create it.
+    unreadable: bool = False
     header_key: str | None = None
     public_fields: dict[str, str | None] = {}
     created_at: datetime
