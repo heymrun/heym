@@ -63,7 +63,7 @@ def placement_ratio(*, main_only: int, anywhere: int) -> dict[str, int]:
 async def _read_cluster(db: AsyncSession) -> ClusterSettingsResponse:
     instances = await registry.list_instances()
     now = datetime.now(timezone.utc)
-    main = registry.find_main(instances)
+    compatible = registry.compatible_ids(instances, now=now)
     connected = await registry.connected_instance_ids()
 
     since = now - timedelta(hours=24)
@@ -96,8 +96,12 @@ async def _read_cluster(db: AsyncSession) -> ClusterSettingsResponse:
                 docker_ok=i.docker_ok,
                 db_latency_ms=i.db_latency_ms,
                 live=registry.is_live_now(i, now=now, connected_ids=connected),
-                compatible=main is not None and registry.is_compatible_with(i, main),
+                compatible=i.id in compatible,
                 credentials_synced=registry.credentials_synced(i, now=now),
+                primary_fingerprint=registry.primary_fingerprint(i),
+                decrypt_fingerprints=list(
+                    i.decrypt_fingerprints or (registry.primary_fingerprint(i),)
+                ),
                 heartbeat_at=i.heartbeat_at,
             )
             # Main first, then workers by id, so the table order is stable.

@@ -38,15 +38,30 @@ const dotClass = computed<string>(() => {
   return "bg-emerald-500";
 });
 
+/** Which keys it uses, by fingerprint: where an ENCRYPTION_KEY rotation stands. */
+const keysLine = computed<string>(() => {
+  const { primary_fingerprint: primary, decrypt_fingerprints: decrypts } = props.instance;
+  if (!primary) return "";
+  const extra = decrypts.filter((fingerprint) => fingerprint !== primary);
+  return extra.length
+    ? `\nEncrypts with key ${primary}; also decrypts with ${extra.join(", ")}.`
+    : `\nEncrypts with key ${primary}.`;
+});
+
 const statusTitle = computed<string>(() => {
+  let status: string;
   if (!props.instance.compatible) {
-    return "This instance's version, database revision or keys differ from the main instance, so it receives no work.";
+    status =
+      "This instance's version, database revision or keys don't fit the main instance or the other instances, so it receives no work and can't lead.";
+  } else if (!props.instance.live) {
+    status = "No heartbeat in the last 30 seconds.";
+  } else if (unsynced.value) {
+    status =
+      "No process of this instance has synced its Kubernetes credentials yet, so it receives no work.";
+  } else {
+    status = `Version ${props.instance.version}`;
   }
-  if (!props.instance.live) return "No heartbeat in the last 30 seconds.";
-  if (unsynced.value) {
-    return "No process of this instance has synced its Kubernetes credentials yet, so it receives no work.";
-  }
-  return `Version ${props.instance.version}`;
+  return status + keysLine.value;
 });
 
 /** The field grows only for a three-digit weight, so 100 is never clipped and a

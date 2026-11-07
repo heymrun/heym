@@ -88,6 +88,7 @@ from app.observability.tracing import setup_tracing, shutdown_tracing
 from app.services.chat_stream_bus import chat_stream_bus
 from app.services.clickhouse_pool import close_all_clients as close_clickhouse_clients
 from app.services.clickhouse_pool import warm_up_pools as warm_up_clickhouse_pools
+from app.services.cluster import registry as cluster_registry
 from app.services.cluster.dispatch import run_queue_worker
 from app.services.cluster.registry import heartbeat_service
 from app.services.cluster.run_result_bus import run_result_bus
@@ -194,6 +195,8 @@ async def _reinstall_plugin_dependencies() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting Heym AI Workflow Platform v%s", settings.resolved_version)
+    # In cluster mode, only an instance compatible with the cluster may lead.
+    lock_service.set_eligibility(cluster_registry.may_lead)
     await lock_service.start()
     # Before anything that reads credentials; it never waits for the first sync.
     await k8s_credentials_lifecycle.start()

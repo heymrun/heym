@@ -2146,6 +2146,10 @@ class ClusterInstanceResponse(BaseModel):
     # False while no process of the instance has synced its Kubernetes credentials;
     # dispatch skips it until one has. Always True when that feature is off.
     credentials_synced: bool = True
+    # Fingerprints (not keys) of the key it encrypts with and every key it decrypts
+    # with, so an admin can see where a key rotation stands.
+    primary_fingerprint: str = ""
+    decrypt_fingerprints: list[str] = []
     heartbeat_at: datetime | None = None
 
 

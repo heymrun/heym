@@ -47,10 +47,11 @@ def seedable_pool(
     """
     if main is None:
         return {}
+    compatible = registry.compatible_ids(instances, now=now)
     return {
         i.id: (i.weight_configured, i.weight)
         for i in instances
-        if i.enabled and registry.is_live(i, now=now) and registry.is_compatible_with(i, main)
+        if i.enabled and registry.is_live(i, now=now) and i.id in compatible
     }
 
 

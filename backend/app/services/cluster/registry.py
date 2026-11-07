@@ -44,6 +44,9 @@ class InstanceView:
     heartbeat_at: datetime
     # None until a process of this instance has synced its Kubernetes credentials.
     credentials_synced_at: datetime | None = None
+    # Every key it decrypts with, primary first. Empty from an instance that predates
+    # key rotation, which can decrypt with its primary only.
+    decrypt_fingerprints: tuple[str, ...] = ()
 
 
 def is_live(instance: InstanceView, *, now: datetime) -> bool:
@@ -81,18 +84,62 @@ def credentials_synced(instance: InstanceView, *, now: datetime) -> bool:
     return synced_at is not None and synced_at >= now - timedelta(seconds=LIVENESS_WINDOW_SECONDS)
 
 
+def primary_fingerprint(instance: InstanceView) -> str:
+    """The ENCRYPTION_KEY half of keys_fingerprint: the key the instance encrypts with."""
+    return instance.keys_fingerprint[: len(instance.keys_fingerprint) // 2]
+
+
+def secret_fingerprint(instance: InstanceView) -> str:
+    """The SECRET_KEY half of keys_fingerprint."""
+    return instance.keys_fingerprint[len(instance.keys_fingerprint) // 2 :]
+
+
+def can_decrypt(instance: InstanceView, fingerprint: str) -> bool:
+    """Whether the instance holds the key with this fingerprint."""
+    return fingerprint in (instance.decrypt_fingerprints or (primary_fingerprint(instance),))
+
+
 def is_compatible_with(instance: InstanceView, main: InstanceView) -> bool:
     """Whether this instance can safely execute work main would have executed.
 
-    A version or schema difference means it may not know a node type. A key
-    fingerprint difference means it cannot decrypt credentials at all, and the
-    resulting failures name nothing useful - so it is excluded up front.
+    A version or schema difference means it may not know a node type. SECRET_KEY must
+    match exactly. ENCRYPTION_KEY need not, during a rotation: each must be able to
+    decrypt what the other writes, so main holds this instance's primary and this
+    instance holds main's. Outside a rotation that is the same as an exact match.
     """
     return (
         instance.version == main.version
         and instance.schema_revision == main.schema_revision
-        and instance.keys_fingerprint == main.keys_fingerprint
+        and secret_fingerprint(instance) == secret_fingerprint(main)
+        and can_decrypt(instance, primary_fingerprint(main))
+        and can_decrypt(main, primary_fingerprint(instance))
     )
+
+
+def compatible_ids(instances: list[InstanceView], *, now: datetime) -> set[str]:
+    """Instances that can read what every other one writes, anchored on main.
+
+    First, each instance is compared with main (`is_compatible_with`). Then, among those,
+    an instance stays only if it can decrypt the primary of every other live one: during
+    a rotation, a worker that skipped phase 1 still matches a main that hasn't rolled
+    yet, but can't read rows another worker already wrote under the new key.
+
+    Anchoring on main means a bad instance only excludes itself: a worker that joins with
+    a typo in its key fails the first step, so it never pushes main or anyone else out.
+    The second step can drop two instances that each fail on the other (three primaries
+    at once), which only costs capacity; main can't drop out, and the rollout order
+    never produces that state.
+    """
+    main = find_main(instances)
+    if main is None:
+        return set()
+    first = [i for i in instances if is_compatible_with(i, main)]
+    writers = [i for i in first if i.id == main.id or is_live(i, now=now)]
+    return {
+        i.id
+        for i in first
+        if all(can_decrypt(i, primary_fingerprint(w)) for w in writers if w.id != i.id)
+    }
 
 
 def find_main(instances: list[InstanceView]) -> InstanceView | None:
@@ -104,9 +151,7 @@ def find_main(instances: list[InstanceView]) -> InstanceView | None:
 
 def candidate_instances(instances: list[InstanceView], *, now: datetime) -> list[InstanceView]:
     """Instances eligible to receive an ANYWHERE run, in stable id order."""
-    main = find_main(instances)
-    if main is None:
-        return []
+    compatible = compatible_ids(instances, now=now)
     eligible = [
         i
         for i in instances
@@ -114,9 +159,28 @@ def candidate_instances(instances: list[InstanceView], *, now: datetime) -> list
         and i.weight > 0
         and is_live(i, now=now)
         and credentials_synced(i, now=now)
-        and is_compatible_with(i, main)
+        and i.id in compatible
     ]
     return sorted(eligible, key=lambda i: i.id)
+
+
+async def may_lead() -> bool:
+    """Whether a process of this instance may take the leader lock.
+
+    The leader runs cron, the pollers and the RabbitMQ consumers, which read credentials
+    and write them back on an OAuth refresh, so in cluster mode it must pass the same
+    compatibility rule as dispatch. Only that rule: not `enabled` or the weight, or a
+    main kept at weight 0 for the UI could never lead. Main's last published row counts
+    even while main is down, so cron keeps running on a worker then. An instance with no
+    heartbeat row yet can't lead, which makes the startup order irrelevant.
+    """
+    if not settings.cluster_enabled:
+        return True
+    instances = await list_instances()
+    own_id = identity.instance_id()
+    if not any(i.id == own_id for i in instances):
+        return False
+    return own_id in compatible_ids(instances, now=datetime.now(timezone.utc))
 
 
 def _docker_reachable() -> bool:
@@ -180,6 +244,7 @@ async def write_heartbeat() -> None:
         version=settings.resolved_version,
         schema_revision=revision,
         keys_fingerprint=identity.keys_fingerprint(),
+        decrypt_fingerprints=identity.decrypt_fingerprints(),
         docker_ok=await asyncio.to_thread(_sandbox_reachable),
         db_latency_ms=latency_ms,
         heartbeat_at=datetime.now(timezone.utc),
@@ -241,6 +306,7 @@ async def list_instances(*, use_cache: bool = False) -> list[InstanceView]:
                 db_latency_ms=row.db_latency_ms,
                 heartbeat_at=row.heartbeat_at,
                 credentials_synced_at=row.credentials_synced_at,
+                decrypt_fingerprints=tuple(row.decrypt_fingerprints or ()),
             )
             for row in result.scalars().all()
         ]
