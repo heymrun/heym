@@ -263,3 +263,32 @@ class KeyRotationPostgresTests(IsolatedAsyncioTestCase):
             async with self.database.sessions() as db:
                 listed = await key_rotation.unreadable_credentials(db)
         self.assertEqual([(c.id, c.owner_email) for c in listed], [(lost[0], "o@example.com")])
+
+    # The owner of an unreadable credential.
+
+    async def _put(self, credential_id: uuid.UUID, **body: object):  # noqa: ANN202
+        from app.api.credentials import update_credential
+        from app.models.schemas import CredentialUpdate
+
+        async with self.database.sessions() as db:
+            user = await db.get(User, self.owner.id)
+            response = await update_credential(credential_id, CredentialUpdate(**body), user, db)
+            await db.commit()
+            return response
+
+    async def test_a_put_without_a_value_on_an_unreadable_row_is_a_409(self) -> None:
+        from fastapi import HTTPException
+
+        (lost,) = await self._add(LOST)
+        with _keys(NEW, OLD), self.assertRaises(HTTPException) as caught:
+            await self._put(lost, name="renamed")
+        self.assertEqual(caught.exception.status_code, 409)
+
+    async def test_the_owner_can_replace_an_unreadable_value_in_place(self) -> None:
+        (lost,) = await self._add(LOST)
+        with _keys(NEW, OLD):
+            response = await self._put(lost, config={"api_key": "sk-entered-again"})
+            self.assertEqual(response.id, lost)
+            self.assertFalse(response.unreadable)
+            token = (await self._tokens())[lost]
+            self.assertEqual(encryption.decrypt_config(token), {"api_key": "sk-entered-again"})

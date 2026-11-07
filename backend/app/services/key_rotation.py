@@ -90,6 +90,25 @@ def _classify(token: str) -> str:
     return "remaining"
 
 
+def _classify_all(tokens: list[str]) -> list[str]:
+    return [_classify(token) for token in tokens]
+
+
+def _rotate_all(tokens: list[str]) -> list[str | None]:
+    """The token re-encrypted under the primary, or None when it needs no rewrite or can't
+    have one (the primary already reads it, or no configured key does)."""
+    rotated: list[str | None] = []
+    for token in tokens:
+        if readable_by_primary(token):
+            rotated.append(None)
+            continue
+        try:
+            rotated.append(rotate_token(token))
+        except InvalidToken:
+            rotated.append(None)
+    return rotated
+
+
 def fleet_status(instances: list[registry.InstanceView], *, now: datetime) -> FleetStatus:
     """Whether every live instance, and this process, encrypts with this process's key."""
     target = identity.primary_fingerprint()
@@ -134,10 +153,20 @@ async def _stored_tokens(db: AsyncSession) -> AsyncIterator[tuple[str, uuid.UUID
         yield "canary", None, canary.token
 
 
+async def _classified(db: AsyncSession) -> list[tuple[str, uuid.UUID | None, str]]:
+    """Every stored ciphertext's (kind, credential id, class).
+
+    Decrypting each one is CPU work, done in a thread so a large install doesn't stall
+    the event loop while the Encryption tab polls during a rotation.
+    """
+    stored = [item async for item in _stored_tokens(db)]
+    classes = await asyncio.to_thread(_classify_all, [token for _, _, token in stored])
+    return [(kind, credential_id, c) for (kind, credential_id, _), c in zip(stored, classes)]
+
+
 async def count_tokens(db: AsyncSession) -> TokenCounts:
     counts = TokenCounts()
-    async for _kind, _id, token in _stored_tokens(db):
-        kind = _classify(token)
+    for _kind, _id, kind in await _classified(db):
         setattr(counts, kind, getattr(counts, kind) + 1)
     return counts
 
@@ -146,8 +175,8 @@ async def unreadable_credentials(db: AsyncSession) -> list[UnreadableCredential]
     """Credentials no configured key decrypts, for the admin list. Their owners see them too."""
     unreadable_ids = [
         credential_id
-        async for kind, credential_id, token in _stored_tokens(db)
-        if kind == "credential" and _classify(token) == "unreadable"
+        for kind, credential_id, c in await _classified(db)
+        if kind == "credential" and c == "unreadable"
     ]
     if not unreadable_ids:
         return []
@@ -225,13 +254,10 @@ async def _rewrite_batch(
     if cursor is not None:
         query = query.where(Credential.id > cursor)
     rows = (await db.execute(query)).all()
+    new_tokens = await asyncio.to_thread(_rotate_all, [token for _, token in rows])
     rewritten = 0
-    for credential_id, token in rows:
-        if readable_by_primary(token):
-            continue
-        try:
-            new_token = rotate_token(token)
-        except InvalidToken:
+    for (credential_id, _), new_token in zip(rows, new_tokens):
+        if new_token is None:
             continue
         # Core UPDATE that keeps updated_at: a re-encryption isn't an edit, and must not
         # look like one or change anything keyed on it. The CHECK constraint still holds.

@@ -220,6 +220,51 @@ class KeyCheckPostgresTests(IsolatedAsyncioTestCase):
         with _keys(third, NEW):
             self.assertIn("matches", (await self._check()).message)
 
+    # Only main writes the canary.
+
+    def _as(self, role: str):  # noqa: ANN202 - context manager helper
+        return patch.object(identity.settings, "instance_role", role)
+
+    async def test_a_worker_with_a_wrong_key_on_an_empty_database_records_nothing(self) -> None:
+        with _keys(OTHER), self._as("worker"):
+            self.assertIn("main has not recorded", (await self._check()).message)
+        self.assertIsNone(await self._canary())
+        # Main then records its own key, the right one.
+        with _keys(NEW):
+            self.assertIn("recorded", (await self._check()).message)
+
+    async def test_a_worker_ignores_the_flag_and_cant_replace_the_canary(self) -> None:
+        with _keys(NEW):
+            await self._check()
+            before = (await self._canary()).token
+        with (
+            _keys(OTHER, accept=True),
+            self._as("worker"),
+            self.assertRaisesRegex(key_check.KeyCheckError, "same keys as the main instance"),
+        ):
+            await self._check()
+        self.assertEqual((await self._canary()).token, before)
+        with _keys(NEW):
+            self.assertIn("matches", (await self._check()).message)
+
+    async def test_a_worker_with_the_right_keys_passes(self) -> None:
+        with _keys(OLD):
+            await self._check()
+        with _keys(NEW, OLD), self._as("worker"):
+            self.assertIn("matches", (await self._check()).message)
+
+    async def test_the_error_says_to_put_the_old_key_back_before_the_flag(self) -> None:
+        # The old key dropped from ENCRYPTION_KEYS_EXTRA before re-encryption finished.
+        with _keys(OLD):
+            await self._check()
+        with _keys(NEW), self.assertRaises(key_check.KeyCheckError) as caught:
+            await self._check()
+        message = str(caught.exception)
+        self.assertLess(
+            message.index("put the old key back in ENCRYPTION_KEYS_EXTRA"),
+            message.index("HEYM_ACCEPT_CURRENT_ENCRYPTION_KEY"),
+        )
+
     # Schema not migrated yet.
 
     async def test_a_database_without_the_tables_is_skipped(self) -> None:

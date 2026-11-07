@@ -1737,6 +1737,14 @@ async function handleSave(): Promise<void> {
       class="space-y-4"
       @submit.prevent="handleSave"
     >
+      <p
+        v-if="credential?.unreadable"
+        data-testid="credential-unreadable-note"
+        class="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive"
+      >
+        This credential's value was stored with an encryption key this instance no longer has.
+        Enter the whole value again to replace it; workflows that use it keep working once it's saved.
+      </p>
       <div class="space-y-2">
         <Label for="cred-name">Name</Label>
         <Input

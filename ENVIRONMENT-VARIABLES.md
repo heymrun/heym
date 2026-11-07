@@ -18,7 +18,7 @@ lifetimes) that override these code defaults when you copy it.
 | `SECRET_KEY` | JWT signing key. Must be cryptographically random and at least 32 characters. Startup fails if missing or a known placeholder. | — (required) |
 | `ENCRYPTION_KEY` | Key used to encrypt stored credentials at rest. Generate with `python -c "import secrets; print(secrets.token_hex(32))"`. Startup fails if missing, the known placeholder, or not the key this database was encrypted with (see [Rotating `ENCRYPTION_KEY`](#rotating-encryption_key)). | — (required) |
 | `ENCRYPTION_KEYS_EXTRA` | Comma-separated keys accepted for decryption only, never to encrypt. Used while rotating `ENCRYPTION_KEY`. Empty entries are ignored; the placeholder is refused. | — |
-| `HEYM_ACCEPT_CURRENT_ENCRYPTION_KEY` | Start once with `true` to accept `ENCRYPTION_KEY` as this database's key although nothing stored decrypts with it. See [Rotating `ENCRYPTION_KEY`](#rotating-encryption_key). Unset it afterwards. | `false` |
+| `HEYM_ACCEPT_CURRENT_ENCRYPTION_KEY` | Start the main instance once with `true` to accept `ENCRYPTION_KEY` as this database's key although nothing stored decrypts with it. Ignored on workers. See [Rotating `ENCRYPTION_KEY`](#rotating-encryption_key). Unset it afterwards. | `false` |
 
 ## Rotating `ENCRYPTION_KEY`
 
@@ -42,7 +42,8 @@ phase 2. The phases matter for clusters and rolling updates on Kubernetes.
   and says which, so an instance that rolled back can't rotate values back.
 - **Values no configured key reads** (from an earlier key change) are listed in
   **Settings → Encryption**, never counted as remaining, so the job can finish. Their
-  owners see them as **Unreadable** in Credentials and can delete and re-create them.
+  owners see them as **Unreadable** in Credentials, and can enter the value again in place
+  (workflows that use it keep pointing at it) or delete it.
 - **After phase 3, the old key is refused as `ENCRYPTION_KEY`.** An instance restarted
   with an old `.env` fails to start with an error that says so, instead of writing
   values nobody else can read.
@@ -63,11 +64,16 @@ one of them before this change, make the same edit. A worker left on the old com
 runs without the check, and the cluster still keeps it from receiving work or leading if
 its keys don't fit.
 
-On first start after upgrading, the check value is created once one of the 20 most
-recently stored values decrypts, or when there are none. **If none of them decrypts**,
-because the key was changed at some point and nothing has been re-entered since, the check
-refuses to start. If `ENCRYPTION_KEY` is the key you want to keep, start once with
-`HEYM_ACCEPT_CURRENT_ENCRYPTION_KEY=true`, then remove it. Values stored under the lost key
+Only the main instance writes the check value. On its first start after upgrading, it
+creates it once one of the 20 most recently stored values decrypts, or when there are none.
+A worker only reads it, and starts without checking until main has written it. **If none of
+them decrypts**, because the key was changed at some point and nothing has been re-entered
+since, main refuses to start. If `ENCRYPTION_KEY` is the key you want to keep, start main
+once with `HEYM_ACCEPT_CURRENT_ENCRYPTION_KEY=true`, then remove it. A worker ignores the
+flag, so a forgotten one can't make the cluster accept a wrong key.
+
+**If the check refuses after phase 4**, the old key was most likely removed before phase 3
+completed: put it back in `ENCRYPTION_KEYS_EXTRA`, and finish the re-encryption first. Values stored under the lost key
 stay unreadable and are listed as described above.
 
 ## Database

@@ -182,8 +182,8 @@ onUnmounted(() => {
         data-testid="key-rotation-unreadable"
       >
         <p class="mb-2 text-xs font-medium text-muted-foreground">
-          Credentials no configured key can read. Their owners see them as unreadable and can
-          delete and re-create them.
+          Credentials no configured key can read. Their owners see them as unreadable, and can
+          enter the value again in place or delete them.
         </p>
         <div
           v-for="credential in state.unreadable"

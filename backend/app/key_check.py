@@ -13,7 +13,8 @@ It refuses two things, each with an error that names the cause:
   restored old `.env` (the rotation's new key is what every row is under now).
 
 The canary is created only once a stored value has decrypted, so a wrong key at first
-boot is never recorded as the right one.
+boot is never recorded as the right one. Only main writes it: a worker checks it, and
+skips when main hasn't written one yet.
 """
 
 from __future__ import annotations
@@ -126,10 +127,20 @@ async def _write_canary(db: AsyncSession, *, replace: bool) -> None:
 
 
 def _mismatch(detail: str) -> KeyCheckError:
+    # The usual cause is an old key dropped from ENCRYPTION_KEYS_EXTRA before a rotation
+    # finished, and putting it back is the fix, so that comes before the last resort.
+    if identity.is_main():
+        last_resort = (
+            "Only if ENCRYPTION_KEY is right and the stored values can't be recovered, "
+            "start this instance once with HEYM_ACCEPT_CURRENT_ENCRYPTION_KEY=true."
+        )
+    else:
+        last_resort = "Otherwise, give this worker the same keys as the main instance."
     return KeyCheckError(
         "ENCRYPTION_KEY does not match the key this database was encrypted with: "
-        f"{detail} If ENCRYPTION_KEY is right and the stored values can't be recovered, "
-        f"start once with HEYM_ACCEPT_CURRENT_ENCRYPTION_KEY=true. {DOCS_HINT}"
+        f"{detail} If a key was removed from ENCRYPTION_KEYS_EXTRA, or ENCRYPTION_KEY was "
+        "changed, before re-encryption completed, put the old key back in "
+        f"ENCRYPTION_KEYS_EXTRA. {last_resort} {DOCS_HINT}"
     )
 
 
@@ -143,6 +154,8 @@ async def check(db: AsyncSession) -> KeyCheckResult:
     await _refuse_retired_primary(db)
 
     canary = await db.get(EncryptionCanary, ENCRYPTION_CANARY_ID)
+    if not identity.is_main():
+        return _check_worker(canary)
     accept = settings.accept_current_encryption_key
     if canary is not None:
         if _decrypts(canary.token):
@@ -163,6 +176,22 @@ async def check(db: AsyncSession) -> KeyCheckResult:
     if canary is None or not _decrypts(canary.token):
         raise _mismatch("another process recorded a different key at the same time.")
     return KeyCheckResult("ENCRYPTION_KEY recorded as this database's key")
+
+
+def _check_worker(canary: EncryptionCanary | None) -> KeyCheckResult:
+    """A worker only reads the canary. Only main writes or replaces it.
+
+    Otherwise a worker started with a wrong key could record that key on an empty
+    database, or replace the canary through a forgotten HEYM_ACCEPT_CURRENT_ENCRYPTION_KEY,
+    and main would then refuse to start with the right one.
+    """
+    if canary is None:
+        return KeyCheckResult("key check skipped: main has not recorded this database's key yet")
+    if _decrypts(canary.token):
+        return KeyCheckResult("ENCRYPTION_KEY matches this database")
+    if settings.accept_current_encryption_key:
+        logger.warning("HEYM_ACCEPT_CURRENT_ENCRYPTION_KEY is ignored on a worker")
+    raise _mismatch("none of the configured keys decrypts the stored check value.")
 
 
 async def _run() -> KeyCheckResult:

@@ -51,7 +51,7 @@ Before the server starts, Heym also checks `ENCRYPTION_KEY` against a value stor
 3. **Re-encrypt.** An admin starts it from **Settings → Encryption**. It runs in the background and pauses itself if any instance still encrypts with another key.
 4. **Retire.** Once it shows **Completed**, remove the old key, unless a backup taken before the rotation may need restoring.
 
-A single container can skip step 1. Credentials no configured key can read, from an earlier key change, are listed in **Settings → Encryption**; their owners see them as **Unreadable** and can delete and re-create them.
+A single container can skip step 1. Credentials no configured key can read, from an earlier key change, are listed in **Settings → Encryption**; their owners see them as **Unreadable**, and can enter the value again in place, which keeps workflows pointing at it, or delete them.
 
 Rotation protects backups taken afterwards. A leaked key together with a copy of the database still exposes every credential in that copy, so after a leak, also rotate the credentials at their providers. The full procedure, including the first start after upgrading, is in `ENVIRONMENT-VARIABLES.md` under "Rotating `ENCRYPTION_KEY`".
 

@@ -1821,18 +1821,34 @@ async def update_credential(
             )
         credential.name = credential_data.name
 
-    config = decrypt_config(credential.encrypted_config)
+    try:
+        config = decrypt_config(credential.encrypted_config)
+        unreadable = False
+    except InvalidToken:
+        # Stored under a key no instance has any more. The owner can enter the whole
+        # value again in place, which keeps the id the workflows point at.
+        if credential_data.config is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This credential's value can't be read with the configured "
+                "encryption keys. Enter its whole value again, or delete it.",
+            ) from None
+        config, unreadable = {}, True
 
     if credential_data.config is not None:
-        config = (
-            _merge_supabase_update_config(credential_data.config, config)
-            if credential.type == CredentialType.supabase
-            else merge_credential_config_for_update(
-                credential.type,
-                config,
-                credential_data.config,
+        if unreadable:
+            # Nothing to merge into: the new value must be complete on its own.
+            config = dict(credential_data.config)
+        else:
+            config = (
+                _merge_supabase_update_config(credential_data.config, config)
+                if credential.type == CredentialType.supabase
+                else merge_credential_config_for_update(
+                    credential.type,
+                    config,
+                    credential_data.config,
+                )
             )
-        )
         validate_credential_config(
             credential.type,
             config,

@@ -506,15 +506,10 @@ async function removeCredentialTeamShare(teamId: string): Promise<void> {
         :data-testid="`credential-card-${credential.id}`"
         :class="cn(
           'credential-card p-5 cursor-pointer group',
-          (credential.is_shared || credential.source || credential.unreadable) && 'shared-card'
+          (credential.is_shared || credential.source) && 'shared-card'
         )"
         :style="{ animationDelay: `${index * 50}ms` }"
-        @click="
-          !credential.is_shared &&
-            !credential.source &&
-            !credential.unreadable &&
-            openEditDialog(credential)
-        "
+        @click="!credential.is_shared && !credential.source && openEditDialog(credential)"
       >
         <div class="flex items-start justify-between mb-3">
           <div class="flex items-center gap-3">
@@ -554,7 +549,7 @@ async function removeCredentialTeamShare(teamId: string): Promise<void> {
                   v-if="credential.unreadable"
                   :data-testid="`credential-unreadable-${credential.id}`"
                   class="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-destructive/10 text-destructive"
-                  title="Stored with an encryption key this instance no longer has, so its value can't be read. Delete it and create it again."
+                  title="Stored with an encryption key this instance no longer has, so its value can't be read. Open it to enter the value again (workflows keep using it), or delete it."
                 >
                   <KeyRound class="w-3 h-3" />
                   Unreadable
