@@ -22,6 +22,30 @@ ENV VITE_HEYM_WEB_URL=${VITE_HEYM_WEB_URL}
 RUN bun run build
 
 
+# `vite preview` serves the built frontend and proxies /api, websockets and the OAuth routes
+# (see vite.config.ts), so the runtime keeps vite. It does not need the rest of the build
+# toolchain: vite.config.ts imports only vite and @vitejs/plugin-vue. Installing just those
+# two against bun.lock keeps their locked versions, and their own dependencies', in about
+# 37 MB instead of the full ~300 MB tree.
+FROM node:22-bookworm-slim AS frontend-runtime-deps
+
+COPY --from=oven/bun:1.4.2 /usr/local/bin/bun /usr/local/bin/bun
+
+WORKDIR /app
+
+COPY frontend/package.json frontend/bun.lock* ./
+RUN node -e ' \
+    const fs = require("fs"); \
+    const pkg = JSON.parse(fs.readFileSync("package.json", "utf8")); \
+    const keep = ["vite", "@vitejs/plugin-vue"]; \
+    pkg.dependencies = Object.fromEntries(keep.map((name) => [name, pkg.devDependencies[name]])); \
+    delete pkg.devDependencies; \
+    fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2)); \
+    ' \
+    && bun install \
+    && node node_modules/vite/bin/vite.js --version
+
+
 FROM python:3.14-slim AS backend-builder
 
 WORKDIR /app
@@ -53,22 +77,33 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
     git \
-    nodejs \
-    npm \
     ripgrep \
     tzdata \
     unzip \
     wget \
     && rm -rf /var/lib/apt/lists/*
 
-# Converter node file support. weasyprint is the pandoc PDF engine used by fileConvert.
-# OCR (imageToText/pdfToText) needs Tesseract plus poppler's pdftoppm, which rasterizes PDF
-# pages before recognition. `osd` and the script models are what make the "auto" language
+# Node.js 22 LTS, for Codex, MCP stdio servers started with npx, and `vite preview`. Copied
+# from the official image the frontend builds on, instead of Debian's nodejs and npm.
+COPY --from=frontend-runtime-deps /usr/local/bin/node /usr/local/bin/node
+COPY --from=frontend-runtime-deps /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+    && node --version \
+    && npm --version
+
+# Converter node file support. WeasyPrint is the pandoc PDF engine used by fileConvert; its
+# Python package comes from docker/converter-requirements.txt below, and Pango, HarfBuzz and
+# shared-mime-info are its system libraries. OCR (imageToText/pdfToText) needs Tesseract plus
+# poppler's pdftoppm, which rasterizes PDF pages before recognition. `osd` and the script models are what make the "auto" language
 # setting work. OSD detects the script, then a script model such as Latin reads every
 # language written in it. Debian installs the script models without the "script/" prefix,
 # so tesseract lists them as Latin, Cyrillic, HanS, and so on.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    weasyprint \
+    libpango-1.0-0 \
+    libpangoft2-1.0-0 \
+    libharfbuzz-subset0 \
+    shared-mime-info \
     poppler-utils \
     tesseract-ocr \
     tesseract-ocr-osd \
@@ -127,7 +162,7 @@ RUN ARCH="$(uname -m)" \
         armv7l)  DA=armv7   ;; \
         *) echo "Unsupported arch: $ARCH" && exit 1 ;; \
     esac \
-    && curl -fsSL "https://download.docker.com/linux/static/stable/${DA}/docker-27.3.1.tgz" \
+    && curl -fsSL "https://download.docker.com/linux/static/stable/${DA}/docker-29.9.3.tgz" \
         | tar xz --strip-components=1 -C /usr/local/bin docker/docker
 
 ENV DOCS_DIR=/app/docs \
@@ -143,6 +178,11 @@ RUN pip install uv
 COPY docker/sandbox-requirements.txt /tmp/sandbox-requirements.txt
 RUN uv pip install --system --no-cache -r /tmp/sandbox-requirements.txt \
     && rm /tmp/sandbox-requirements.txt
+
+COPY docker/converter-requirements.txt /tmp/converter-requirements.txt
+RUN uv pip install --system --no-cache -r /tmp/converter-requirements.txt \
+    && rm /tmp/converter-requirements.txt \
+    && weasyprint --info
 
 ARG APP_VERSION
 ENV APP_VERSION=${APP_VERSION}
@@ -178,7 +218,7 @@ COPY --from=backend-builder /app/AGENTS.md /app/AGENTS.md
 COPY --from=backend-builder /app/docs /app/docs
 COPY --from=frontend-builder /app/dist /app/frontend/dist
 COPY --from=frontend-builder /app/package.json /app/frontend/package.json
-COPY --from=frontend-builder /app/node_modules /app/frontend/node_modules
+COPY --from=frontend-runtime-deps /app/node_modules /app/frontend/node_modules
 COPY --from=frontend-builder /app/vite.config.ts /app/frontend/vite.config.ts
 COPY docker/release-entrypoint.sh /app/release-entrypoint.sh
 COPY docker/heym-codex-docker /usr/local/bin/heym-codex-docker

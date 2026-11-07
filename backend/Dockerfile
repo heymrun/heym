@@ -1,3 +1,6 @@
+# Node.js 22 LTS comes from the official image (see below), not Debian's nodejs and npm.
+FROM node:22-bookworm-slim AS node
+
 FROM python:3.14-slim
 
 WORKDIR /app
@@ -7,21 +10,33 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
     tzdata \
-    nodejs \
-    npm \
     git \
     ripgrep \
     unzip \
     wget \
-    weasyprint \
     && rm -rf /var/lib/apt/lists/*
 
+# Node.js 22 LTS, for Codex and MCP stdio servers started with npx.
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+COPY --from=node /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+    && node --version \
+    && npm --version
+
+# Converter node file support. WeasyPrint is the pandoc PDF engine used by fileConvert; its
+# Python package comes from docker/converter-requirements.txt below, and Pango, HarfBuzz and
+# shared-mime-info are its system libraries.
 # OCR for the Converter node (imageToText/pdfToText): Tesseract plus poppler's pdftoppm,
 # which rasterizes PDF pages before recognition. `osd` and the script models are what make
 # the "auto" language setting work. OSD detects the script, then a script model such as
 # Latin reads every language written in it. Debian installs the script models without the
 # "script/" prefix, so tesseract lists them as Latin, Cyrillic, HanS, and so on.
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpango-1.0-0 \
+    libpangoft2-1.0-0 \
+    libharfbuzz-subset0 \
+    shared-mime-info \
     poppler-utils \
     tesseract-ocr \
     tesseract-ocr-osd \
@@ -85,7 +100,7 @@ RUN ARCH="$(uname -m)" \
         armv7l)  DA=armv7   ;; \
         *) echo "Unsupported arch: $ARCH" && exit 1 ;; \
     esac \
-    && curl -fsSL "https://download.docker.com/linux/static/stable/${DA}/docker-27.3.1.tgz" \
+    && curl -fsSL "https://download.docker.com/linux/static/stable/${DA}/docker-29.9.3.tgz" \
         | tar xz --strip-components=1 -C /usr/local/bin docker/docker
 
 ENV TZ=Europe/Berlin
@@ -97,6 +112,11 @@ RUN pip install uv
 COPY docker/sandbox-requirements.txt /tmp/sandbox-requirements.txt
 RUN uv pip install --system --no-cache -r /tmp/sandbox-requirements.txt \
     && rm /tmp/sandbox-requirements.txt
+
+COPY docker/converter-requirements.txt /tmp/converter-requirements.txt
+RUN uv pip install --system --no-cache -r /tmp/converter-requirements.txt \
+    && rm /tmp/converter-requirements.txt \
+    && weasyprint --info
 
 ARG APP_VERSION
 ENV APP_VERSION=${APP_VERSION}
