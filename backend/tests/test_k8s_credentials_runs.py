@@ -68,7 +68,7 @@ class DisplayTests(unittest.TestCase):
             "app.services.encryption.k8s_credential_store",
             _synced_store({"api_key": "sk-secretvalue"}),
         ):
-            config, masked = display_config(_credential())  # type: ignore[arg-type]
+            config, masked, _ = display_config(_credential())  # type: ignore[arg-type]
 
         self.assertEqual(masked, POINTER)
         self.assertNotIn("sk-secr", masked or "")
@@ -77,14 +77,14 @@ class DisplayTests(unittest.TestCase):
     def test_an_unavailable_one_still_lists(self) -> None:
         """One deleted Secret must not turn the whole credentials page into a 500."""
         with patch("app.services.encryption.k8s_credential_store", _synced_store(None)):
-            config, masked = display_config(_credential())  # type: ignore[arg-type]
+            config, masked, _ = display_config(_credential())  # type: ignore[arg-type]
 
         self.assertEqual((config, masked), ({}, POINTER))
 
     def test_ui_credentials_keep_their_mask(self) -> None:
         ui = _credential(source=None, encrypted_config=encrypt_config({"api_key": "sk-1234567890"}))
 
-        _, masked = display_config(ui)  # type: ignore[arg-type]
+        _, masked, _ = display_config(ui)  # type: ignore[arg-type]
 
         self.assertEqual(masked, "sk-1234**")
 

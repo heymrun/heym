@@ -3,6 +3,7 @@ import hashlib
 import logging
 import os
 import uuid
+from collections.abc import Awaitable, Callable
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -25,6 +26,26 @@ class DistributedLockService:
         self._running = False
         self._leader_lock_id = _string_to_lock_id("heym:leader:lock")
         self._leader_conn: AsyncConnection | None = None
+        self._may_lead: Callable[[], Awaitable[bool]] | None = None
+
+    def set_eligibility(self, may_lead: Callable[[], Awaitable[bool]]) -> None:
+        """Gate leadership on a check, run before taking the lock and on every loop.
+
+        In cluster mode it is the compatibility rule (registry.may_lead): an instance
+        whose keys can't read what the others write must not run cron or the pollers.
+        """
+        self._may_lead = may_lead
+
+    async def _eligible(self, *, default: bool) -> bool:
+        if self._may_lead is None:
+            return True
+        try:
+            return await self._may_lead()
+        except Exception:
+            # A failed check must neither hand leadership to an unchecked process nor
+            # drop a checked leader on one transient error.
+            logger.warning("Leadership eligibility check failed", exc_info=True)
+            return default
 
     @property
     def worker_id(self) -> str:
@@ -87,13 +108,20 @@ class DistributedLockService:
                     if not still_valid:
                         logger.info("Worker %s lost leader status", self._worker_id)
                         await self._release_leader_session()
+                    elif not await self._eligible(default=True):
+                        logger.warning(
+                            "Worker %s gave up leadership: this instance is no longer "
+                            "compatible with the cluster (see Settings > Instances)",
+                            self._worker_id,
+                        )
+                        await self._release_leader_session()
                     else:
                         check_count += 1
                         if check_count % 12 == 0:
                             logger.info(
                                 "Worker %s still leader (check #%d)", self._worker_id, check_count
                             )
-                else:
+                elif await self._eligible(default=False):
                     acquired = await self._try_acquire_leader_lock()
                     if acquired:
                         self._is_leader = True

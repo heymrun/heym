@@ -835,6 +835,8 @@ class CredentialResponse(BaseModel):
     masked_value: str | None = None
     # `k8s:<namespace>/<secret-name>` when a Kubernetes Secret manages it (read-only).
     source: str | None = None
+    # No configured key decrypts it; the owner can only delete and re-create it.
+    unreadable: bool = False
     header_key: str | None = None
     public_fields: dict[str, str | None] = Field(default_factory=dict)
     created_at: datetime
@@ -851,6 +853,8 @@ class CredentialListResponse(BaseModel):
     masked_value: str | None = None
     # `k8s:<namespace>/<secret-name>` when a Kubernetes Secret manages it (read-only).
     source: str | None = None
+    # No configured key decrypts it; the owner can only delete and re-create it.
+    unreadable: bool = False
     header_key: str | None = None
     public_fields: dict[str, str | None] = {}
     created_at: datetime
@@ -2146,6 +2150,10 @@ class ClusterInstanceResponse(BaseModel):
     # False while no process of the instance has synced its Kubernetes credentials;
     # dispatch skips it until one has. Always True when that feature is off.
     credentials_synced: bool = True
+    # Fingerprints (not keys) of the key it encrypts with and every key it decrypts
+    # with, so an admin can see where a key rotation stands.
+    primary_fingerprint: str = ""
+    decrypt_fingerprints: list[str] = []
     heartbeat_at: datetime | None = None
 
 

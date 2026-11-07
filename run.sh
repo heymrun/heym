@@ -267,6 +267,7 @@ echo -e "${GREEN}Backend dependencies installed.${NC}"
 echo -e "\n${YELLOW}Running database migrations...${NC}"
 uv run python -m alembic upgrade head
 echo -e "${GREEN}Migrations complete.${NC}"
+uv run python -m app.key_check
 
 echo -e "\n${YELLOW}Cleaning up existing ports...${NC}"
 kill_port ${BACKEND_PORT:-10105}

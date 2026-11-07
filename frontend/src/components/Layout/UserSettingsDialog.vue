@@ -25,6 +25,7 @@ import {
   uninstallPlugin,
 } from "@/services/plugins";
 import ClusterSettingsTab from "@/components/Layout/settings/ClusterSettingsTab.vue";
+import KeyRotationTab from "@/components/Layout/settings/KeyRotationTab.vue";
 import KubernetesCredentialsTab from "@/components/Layout/settings/KubernetesCredentialsTab.vue";
 import SsoSettingsTab from "@/components/Layout/settings/SsoSettingsTab.vue";
 import WorkIntegrationSettingsTab from "@/components/Layout/settings/WorkIntegrationSettingsTab.vue";
@@ -46,6 +47,7 @@ type SettingsTab =
   | "sso"
   | "instances"
   | "kubernetes"
+  | "encryption"
   | "work";
 
 const props = defineProps<{
@@ -494,6 +496,16 @@ async function handleChangePassword(): Promise<void> {
           >
             Kubernetes
           </button>
+          <button
+            v-if="authStore.user?.is_admin"
+            type="button"
+            data-testid="settings-tab-encryption"
+            class="px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap shrink-0"
+            :class="activeTab === 'encryption' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'"
+            @click="activeTab = 'encryption'"
+          >
+            Encryption
+          </button>
         </div>
       </div>
 
@@ -936,6 +948,9 @@ HEYM_PLUGIN_ADMIN_EMAILS=you@example.com</pre>
 
       <div v-else-if="activeTab === 'kubernetes' && authStore.user?.is_admin && kubernetesTabVisible">
         <KubernetesCredentialsTab />
+      </div>
+      <div v-else-if="activeTab === 'encryption' && authStore.user?.is_admin">
+        <KeyRotationTab />
       </div>
 
       <div v-else-if="activeTab === 'sso' && authStore.user?.is_admin">

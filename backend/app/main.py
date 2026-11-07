@@ -17,6 +17,7 @@ from app.api import (
     a2a,
     admin_cluster,
     admin_k8s_credentials,
+    admin_key_rotation,
     agent_memory,
     agent_suite_runs,
     agent_suites,
@@ -88,6 +89,7 @@ from app.observability.tracing import setup_tracing, shutdown_tracing
 from app.services.chat_stream_bus import chat_stream_bus
 from app.services.clickhouse_pool import close_all_clients as close_clickhouse_clients
 from app.services.clickhouse_pool import warm_up_pools as warm_up_clickhouse_pools
+from app.services.cluster import registry as cluster_registry
 from app.services.cluster.dispatch import run_queue_worker
 from app.services.cluster.registry import heartbeat_service
 from app.services.cluster.run_result_bus import run_result_bus
@@ -113,6 +115,7 @@ from app.services.heym_event_service import (
 from app.services.hitl_service import build_public_base_url, build_review_url
 from app.services.imap_trigger_service import imap_trigger_manager
 from app.services.k8s_credentials import lifecycle as k8s_credentials_lifecycle
+from app.services.key_rotation import key_rotation_service
 from app.services.notion_service import NotionService
 from app.services.qdrant_pool import close_all_clients as close_qdrant_clients
 from app.services.qdrant_pool import warm_up_pools as warm_up_qdrant_pools
@@ -194,6 +197,8 @@ async def _reinstall_plugin_dependencies() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting Heym AI Workflow Platform v%s", settings.resolved_version)
+    # In cluster mode, only an instance compatible with the cluster may lead.
+    lock_service.set_eligibility(cluster_registry.may_lead)
     await lock_service.start()
     # Before anything that reads credentials; it never waits for the first sync.
     await k8s_credentials_lifecycle.start()
@@ -232,6 +237,7 @@ async def lifespan(app: FastAPI):
     await run_queue_worker.start()
     await execution_recovery_service.start()
     await cron_scheduler.start()
+    await key_rotation_service.start()
 
     _started_at = datetime.now(timezone.utc)
     await publish_event(
@@ -265,6 +271,7 @@ async def lifespan(app: FastAPI):
     await google_trigger_poller.stop()
     await imap_trigger_manager.stop()
     await RabbitMQPool.close_all()
+    await key_rotation_service.stop()
     await cron_scheduler.stop()
     await execution_recovery_service.stop()
     await run_queue_worker.stop()
@@ -366,6 +373,9 @@ app.include_router(
     admin_k8s_credentials.router,
     prefix="/api/admin/k8s-credentials",
     tags=["Kubernetes Credentials Admin"],
+)
+app.include_router(
+    admin_key_rotation.router, prefix="/api/admin/key-rotation", tags=["Encryption Key Admin"]
 )
 app.include_router(workflows.router, prefix="/api/workflows", tags=["Workflows"])
 app.include_router(collab.router, prefix="/api/workflows", tags=["Canvas Collaboration"])

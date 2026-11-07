@@ -12,6 +12,9 @@ export interface ClusterInstance {
   compatible: boolean;
   /** False while no process of the instance has synced its Kubernetes credentials. */
   credentials_synced: boolean;
+  /** Fingerprint of the key it encrypts with, and of every key it decrypts with. */
+  primary_fingerprint: string;
+  decrypt_fingerprints: string[];
   heartbeat_at: string | null;
 }
 

@@ -1,6 +1,7 @@
 import uuid
 from urllib.parse import urlparse
 
+from cryptography.fernet import InvalidToken
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -552,21 +553,26 @@ def get_masked_value(credential_type: CredentialType, config: dict) -> str | Non
     return None
 
 
-def display_config(credential: Credential) -> tuple[dict, str | None]:
-    """The config to describe a credential with, and the masked value to show for it.
+def display_config(credential: Credential) -> tuple[dict, str | None, bool]:
+    """The config to describe a credential with, the masked value, and whether it's unreadable.
 
     A Secret-backed credential shows its Secret rather than the first characters of
     its value, and lists even when this process has no value for it, so one deleted
     Secret can't fail a whole page. Its public fields come from this process's copy.
+    A row no configured key decrypts (ENCRYPTION_KEY changed the hard way) lists as
+    unreadable instead of failing its owner's page: only the owner can re-enter it.
     """
     if credential.source:
         try:
             config = decrypt_config(credential.encrypted_config)
         except CredentialUnavailableError:
             config = {}
-        return config, credential.source
-    config = decrypt_config(credential.encrypted_config)
-    return config, get_masked_value(credential.type, config)
+        return config, credential.source, False
+    try:
+        config = decrypt_config(credential.encrypted_config)
+    except InvalidToken:
+        return {}, None, True
+    return config, get_masked_value(credential.type, config), False
 
 
 def refuse_secret_backed(credential: Credential) -> None:
@@ -852,7 +858,7 @@ async def list_credentials(
     seen_ids: set[uuid.UUID] = set()
     responses = []
     for cred in owned_credentials:
-        config, masked = display_config(cred)
+        config, masked, unreadable = display_config(cred)
         header_key = get_header_key(cred.type, config)
         responses.append(
             CredentialListResponse(
@@ -863,6 +869,7 @@ async def list_credentials(
                 header_key=header_key,
                 public_fields=get_public_credential_fields(cred.type, config),
                 source=cred.source,
+                unreadable=unreadable,
                 created_at=cred.created_at,
                 is_shared=False,
                 shared_by=None,
@@ -875,7 +882,7 @@ async def list_credentials(
         if cred.id in seen_ids:
             continue
         seen_ids.add(cred.id)
-        config, masked = display_config(cred)
+        config, masked, unreadable = display_config(cred)
         header_key = get_header_key(cred.type, config)
         responses.append(
             CredentialListResponse(
@@ -886,6 +893,7 @@ async def list_credentials(
                 header_key=header_key,
                 public_fields=get_public_credential_fields(cred.type, config),
                 source=cred.source,
+                unreadable=unreadable,
                 created_at=cred.created_at,
                 is_shared=True,
                 shared_by=owner_email,
@@ -897,7 +905,7 @@ async def list_credentials(
         if cred.id in seen_ids:
             continue
         seen_ids.add(cred.id)
-        config, masked = display_config(cred)
+        config, masked, unreadable = display_config(cred)
         header_key = get_header_key(cred.type, config)
         responses.append(
             CredentialListResponse(
@@ -908,6 +916,7 @@ async def list_credentials(
                 header_key=header_key,
                 public_fields=get_public_credential_fields(cred.type, config),
                 source=cred.source,
+                unreadable=unreadable,
                 created_at=cred.created_at,
                 is_shared=True,
                 shared_by=None,
@@ -996,7 +1005,7 @@ async def list_credentials_by_type(
     seen_ids: set[uuid.UUID] = set()
     responses = []
     for cred in owned_credentials:
-        config, masked = display_config(cred)
+        config, masked, unreadable = display_config(cred)
         header_key = get_header_key(cred.type, config)
         responses.append(
             CredentialListResponse(
@@ -1007,6 +1016,7 @@ async def list_credentials_by_type(
                 header_key=header_key,
                 public_fields=get_public_credential_fields(cred.type, config),
                 source=cred.source,
+                unreadable=unreadable,
                 created_at=cred.created_at,
                 is_shared=False,
                 shared_by=None,
@@ -1019,7 +1029,7 @@ async def list_credentials_by_type(
         if cred.id in seen_ids:
             continue
         seen_ids.add(cred.id)
-        config, masked = display_config(cred)
+        config, masked, unreadable = display_config(cred)
         header_key = get_header_key(cred.type, config)
         responses.append(
             CredentialListResponse(
@@ -1030,6 +1040,7 @@ async def list_credentials_by_type(
                 header_key=header_key,
                 public_fields=get_public_credential_fields(cred.type, config),
                 source=cred.source,
+                unreadable=unreadable,
                 created_at=cred.created_at,
                 is_shared=True,
                 shared_by=owner_email,
@@ -1041,7 +1052,7 @@ async def list_credentials_by_type(
         if cred.id in seen_ids:
             continue
         seen_ids.add(cred.id)
-        config, masked = display_config(cred)
+        config, masked, unreadable = display_config(cred)
         header_key = get_header_key(cred.type, config)
         responses.append(
             CredentialListResponse(
@@ -1052,6 +1063,7 @@ async def list_credentials_by_type(
                 header_key=header_key,
                 public_fields=get_public_credential_fields(cred.type, config),
                 source=cred.source,
+                unreadable=unreadable,
                 created_at=cred.created_at,
                 is_shared=True,
                 shared_by=None,
@@ -1118,13 +1130,14 @@ async def _list_credentials_of_types(
         shared_by: str | None,
         shared_by_team: str | None,
     ) -> CredentialListResponse:
-        config, masked = display_config(cred)
+        config, masked, unreadable = display_config(cred)
         return CredentialListResponse(
             id=cred.id,
             name=cred.name,
             type=cred.type,
             masked_value=masked,
             source=cred.source,
+            unreadable=unreadable,
             header_key=get_header_key(cred.type, config),
             public_fields=get_public_credential_fields(cred.type, config),
             created_at=cred.created_at,
@@ -1747,7 +1760,7 @@ async def get_credential(
             detail="Credential not found",
         )
 
-    config, masked = display_config(credential)
+    config, masked, unreadable = display_config(credential)
     header_key = get_header_key(credential.type, config)
 
     audit(
@@ -1764,6 +1777,7 @@ async def get_credential(
         type=credential.type,
         masked_value=masked,
         source=credential.source,
+        unreadable=unreadable,
         header_key=header_key,
         public_fields=get_public_credential_fields(credential.type, config),
         created_at=credential.created_at,
@@ -1807,18 +1821,34 @@ async def update_credential(
             )
         credential.name = credential_data.name
 
-    config = decrypt_config(credential.encrypted_config)
+    try:
+        config = decrypt_config(credential.encrypted_config)
+        unreadable = False
+    except InvalidToken:
+        # Stored under a key no instance has any more. The owner can enter the whole
+        # value again in place, which keeps the id the workflows point at.
+        if credential_data.config is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This credential's value can't be read with the configured "
+                "encryption keys. Enter its whole value again, or delete it.",
+            ) from None
+        config, unreadable = {}, True
 
     if credential_data.config is not None:
-        config = (
-            _merge_supabase_update_config(credential_data.config, config)
-            if credential.type == CredentialType.supabase
-            else merge_credential_config_for_update(
-                credential.type,
-                config,
-                credential_data.config,
+        if unreadable:
+            # Nothing to merge into: the new value must be complete on its own.
+            config = dict(credential_data.config)
+        else:
+            config = (
+                _merge_supabase_update_config(credential_data.config, config)
+                if credential.type == CredentialType.supabase
+                else merge_credential_config_for_update(
+                    credential.type,
+                    config,
+                    credential_data.config,
+                )
             )
-        )
         validate_credential_config(
             credential.type,
             config,

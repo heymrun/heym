@@ -114,6 +114,11 @@ echo "Running database migrations..."
 cd /app/backend
 uv run python -m alembic upgrade head
 
+# Refuses to start with an ENCRYPTION_KEY this database wasn't encrypted with. Here, not
+# in the app: uvicorn would respawn a worker whose startup fails, forever.
+echo "Checking ENCRYPTION_KEY against the database..."
+uv run python -m app.key_check
+
 echo "Starting backend on ${BACKEND_BIND_HOST}:${BACKEND_PORT}..."
 uv run python -m uvicorn app.main:app \
     --host "${BACKEND_BIND_HOST}" \
