@@ -94,7 +94,7 @@ Use the Notion **node** for native database, page, and block operations. Use `$c
 
 On Kubernetes, an operator can declare credentials as Secrets labelled `heym.run/credential: "true"`, with annotations for the name, type, owner and sharing. They appear on the Credentials tab with a **Kubernetes** badge and work like any other credential in nodes and `$credentials`, but they are read-only in Heym: edit, delete and share are disabled, and the masked value shows the Secret's name instead of the first characters of the value. Their values are kept in memory and never stored in Heym's database. Change them where the Secret is managed; a change takes effect without a restart.
 
-If the Secret is deleted, the credential stays listed but unavailable, and runs that use it fail with the Secret's name. Admins see every such credential, and why one isn't usable, under **Settings → Kubernetes**. Setup is in the [Kubernetes guide](../getting-started/kubernetes.md#credentials-from-kubernetes-secrets).
+If the Secret is deleted, the credential stays listed but unavailable, and runs that use it fail with the Secret's name. Admins see every such credential, and why one isn't usable, under **Settings → Kubernetes**, which appears while `HEYM_K8S_CREDENTIALS` is on. Setup is in the [Kubernetes guide](../getting-started/kubernetes.md#credentials-from-kubernetes-secrets).
 
 ## Creating Credentials from Chat
 

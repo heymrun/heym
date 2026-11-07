@@ -82,8 +82,11 @@ class ReconcilePostgresTests(IsolatedAsyncioTestCase):
         return SecretCredential(**fields)
 
     async def _reconcile(self, items: list[SecretCredential]) -> list[rows.SecretStatus]:
+        # reconcile() reports every Secret-backed row in the database. A shared dev
+        # database can hold rows from a live run, so keep only this test's Secrets.
         async with async_session_maker() as db:
-            return await rows.reconcile(db, items)
+            statuses = await rows.reconcile(db, items)
+        return [s for s in statuses if s.secret_name.endswith(self.suffix)]
 
     async def _row(self, credential_id: uuid.UUID) -> Credential | None:
         async with async_session_maker() as db:

@@ -121,6 +121,38 @@ class RunEntryTests(unittest.TestCase):
                 nodes = [{"data": {"headers": [{"value": expression}]}}]
                 self.assertIsNotNone(unavailable_credential_error(self._context(), nodes))
 
+    def test_a_longer_name_that_starts_with_it_doesnt_count(self) -> None:
+        for expression in (
+            "$credentials.llm_v2",
+            "$credentials.llm2",
+            '$credentials["llm_v2"]',
+            "$credentials['llm2']",
+        ):
+            with self.subTest(expression):
+                nodes = [{"data": {"url": expression}}]
+                self.assertIsNone(unavailable_credential_error(self._context(), nodes))
+
+    def test_a_field_of_it_or_it_inside_an_expression_counts(self) -> None:
+        for expression in (
+            "$credentials.llm.api_key",
+            "{{ $credentials.llm }}",
+            "$credentials.llm,$credentials.other",
+        ):
+            with self.subTest(expression):
+                nodes = [{"data": {"url": expression}}]
+                self.assertIsNotNone(unavailable_credential_error(self._context(), nodes))
+
+    def test_a_name_with_regex_characters_is_matched_literally(self) -> None:
+        context = CredentialsContext()
+        context.unavailable["a.b+"] = "not synced yet"
+
+        self.assertIsNotNone(
+            unavailable_credential_error(context, [{"data": {"url": '$credentials["a.b+"]'}}])
+        )
+        self.assertIsNone(
+            unavailable_credential_error(context, [{"data": {"url": '$credentials["aXbb"]'}}])
+        )
+
     def test_a_reference_inside_a_sub_workflow_counts(self) -> None:
         cache = {"sub": {"nodes": [{"data": {"prompt": "use $credentials.llm"}}]}}
 

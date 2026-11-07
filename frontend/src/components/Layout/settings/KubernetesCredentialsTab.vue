@@ -74,16 +74,7 @@ onMounted(load);
       </Button>
     </div>
 
-    <p
-      v-if="state && !state.enabled"
-      class="text-sm text-muted-foreground"
-    >
-      Kubernetes credentials are off. Set <code>HEYM_K8S_CREDENTIALS=true</code> and grant the
-      backend's ServiceAccount <code>get</code>, <code>list</code> and <code>watch</code> on
-      Secrets to turn them on.
-    </p>
-
-    <template v-else-if="state">
+    <template v-if="state">
       <p
         class="text-sm text-muted-foreground"
         data-testid="k8s-credentials-sync"

@@ -146,7 +146,8 @@ What to expect:
 - **A pod can be Ready before it has synced.** Startup doesn't wait for the API
   server, so the UI stays up without it. Until a process has synced it claims no
   queued runs, and a run that uses one of these credentials fails with
-  `not synced from Kubernetes yet` before any node runs. Settings → Kubernetes and
+  `not synced from Kubernetes yet` before any node runs. Settings → Kubernetes
+  (an admin tab that appears only while `HEYM_K8S_CREDENTIALS` is on) and
   Settings → Instances show the sync state, so don't build a health check that
   assumes Ready means synced.
 - **A deleted Secret leaves its credential unavailable**, keeping its id and

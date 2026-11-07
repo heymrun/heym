@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections.abc import Iterator
 from typing import Any
 
@@ -51,10 +52,20 @@ def unavailable_credential_error(
         return None
     texts = list(_strings([nodes, list((workflow_cache or {}).values())]))
     for name, reason in unavailable.items():
-        forms = (f"credentials.{name}", f'credentials["{name}"]', f"credentials['{name}']")
-        if any(form in text for text in texts for form in forms):
+        if any(_references(name).search(text) for text in texts):
             return f'credential "{name}": {reason}'
     return None
+
+
+def _references(name: str) -> re.Pattern[str]:
+    # The dot form ends where the identifier does, so `api` doesn't match `$credentials.api_v2`;
+    # `$credentials.api.key` still counts. The bracket forms end at their closing quote.
+    escaped = re.escape(name)
+    return re.compile(
+        rf"credentials\.{escaped}(?![A-Za-z0-9_])"
+        rf"|credentials\[\"{escaped}\"\]"
+        rf"|credentials\['{escaped}'\]"
+    )
 
 
 _GOOGLE_OAUTH_TYPES = (
