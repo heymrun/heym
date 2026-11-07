@@ -38,7 +38,7 @@ When `REDIS_URL` is configured, rate limits are shared across all backend worker
 
 ## Credential Encryption
 
-All API keys, webhook URLs, and bearer tokens stored in the [Credentials](../tabs/credentials-tab.md) panel are encrypted at rest using AES-256 (Fernet) before being written to the database. The key is derived from the `ENCRYPTION_KEY` environment variable. The `run.sh` and `deploy.sh` scripts generate a strong value automatically when it is empty; the application refuses to start if `ENCRYPTION_KEY` is empty or left at a known placeholder.
+All API keys, webhook URLs, and bearer tokens stored in the [Credentials](../tabs/credentials-tab.md) panel are encrypted at rest with Fernet (AES-128 in CBC mode, authenticated with HMAC-SHA256) before being written to the database. The key is derived from the `ENCRYPTION_KEY` environment variable. The `run.sh` and `deploy.sh` scripts generate a strong value automatically when it is empty; the application refuses to start if `ENCRYPTION_KEY` is empty or left at a known placeholder.
 
 Before the server starts, Heym also checks `ENCRYPTION_KEY` against a value stored in the database, and refuses to start with a key the database wasn't encrypted with, instead of failing credential reads later with nothing useful in the error.
 

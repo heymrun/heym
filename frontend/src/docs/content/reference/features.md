@@ -685,7 +685,7 @@ See also [Drive](../tabs/drive-tab.md), [File Generation](./file-generation.md),
 
 ### [Security](./security.md)
 
-Heym enforces a password policy (length, uppercase, lowercase, digit), stores access tokens in HttpOnly cookies, and rotates refresh tokens on use. Rate limiting applies to login, register, and [Portal](./portal.md) login. [Credentials](./credentials.md) are encrypted at rest with AES-256 (Fernet). [MCP](../tabs/mcp-tab.md) API key is used for client auth; content safety is available via [Guardrails](./guardrails.md) on [LLM](../nodes/llm-node.md) and [Agent Node](../nodes/agent-node.md) nodes. [Execution Tokens](./execution-tokens.md) provide per-workflow scoped JWTs for external callers.
+Heym enforces a password policy (length, uppercase, lowercase, digit), stores access tokens in HttpOnly cookies, and rotates refresh tokens on use. Rate limiting applies to login, register, and [Portal](./portal.md) login. [Credentials](./credentials.md) are encrypted at rest with Fernet (AES-128-CBC with HMAC-SHA256), and the key can be [rotated](./security.md#rotating-the-key) without downtime. [MCP](../tabs/mcp-tab.md) API key is used for client auth; content safety is available via [Guardrails](./guardrails.md) on [LLM](../nodes/llm-node.md) and [Agent Node](../nodes/agent-node.md) nodes. [Execution Tokens](./execution-tokens.md) provide per-workflow scoped JWTs for external callers.
 
 See also [Execution Tokens](./execution-tokens.md), [Guardrails](./guardrails.md), [Portal](./portal.md), and [Credentials](./credentials.md).
 
