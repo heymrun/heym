@@ -61,6 +61,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-heym}
       SECRET_KEY: ${SECRET_KEY}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      ENCRYPTION_KEYS_EXTRA: ${ENCRYPTION_KEYS_EXTRA:-}
       # Cluster identity. Defaults preserve single-instance behavior until
       # HEYM_CLUSTER_ENABLED=true is configured in .env.
       HEYM_CLUSTER_ENABLED: ${HEYM_CLUSTER_ENABLED:-false}

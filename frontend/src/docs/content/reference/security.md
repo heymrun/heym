@@ -40,6 +40,21 @@ When `REDIS_URL` is configured, rate limits are shared across all backend worker
 
 All API keys, webhook URLs, and bearer tokens stored in the [Credentials](../tabs/credentials-tab.md) panel are encrypted at rest using AES-256 (Fernet) before being written to the database. The key is derived from the `ENCRYPTION_KEY` environment variable. The `run.sh` and `deploy.sh` scripts generate a strong value automatically when it is empty; the application refuses to start if `ENCRYPTION_KEY` is empty or left at a known placeholder.
 
+Before the server starts, Heym also checks `ENCRYPTION_KEY` against a value stored in the database, and refuses to start with a key the database wasn't encrypted with, instead of failing credential reads later with nothing useful in the error.
+
+### Rotating the key
+
+`ENCRYPTION_KEY` can be replaced without downtime and without re-entering credentials:
+
+1. **Introduce.** Set `ENCRYPTION_KEYS_EXTRA` to the new key, keeping `ENCRYPTION_KEY` as it is, and restart every instance.
+2. **Promote.** Make the new key `ENCRYPTION_KEY` and the old one `ENCRYPTION_KEYS_EXTRA`, and restart every instance.
+3. **Re-encrypt.** An admin starts it from **Settings → Encryption**. It runs in the background and pauses itself if any instance still encrypts with another key.
+4. **Retire.** Once it shows **Completed**, remove the old key, unless a backup taken before the rotation may need restoring.
+
+A single container can skip step 1. Credentials no configured key can read, from an earlier key change, are listed in **Settings → Encryption**; their owners see them as **Unreadable** and can delete and re-create them.
+
+Rotation protects backups taken afterwards. A leaked key together with a copy of the database still exposes every credential in that copy, so after a leak, also rotate the credentials at their providers. The full procedure, including the first start after upgrading, is in `ENVIRONMENT-VARIABLES.md` under "Rotating `ENCRYPTION_KEY`".
+
 ## MCP API Key
 
 The MCP API key is used to authenticate external MCP clients connecting to the `/api/mcp/sse` endpoint. When the SSE connection is established, a short-lived (1-hour) session token is issued and embedded in the message endpoint URL instead of the real API key, preventing the key from appearing in server access logs. See [MCP Tab](../tabs/mcp-tab.md) for setup.

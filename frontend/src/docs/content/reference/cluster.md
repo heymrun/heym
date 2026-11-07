@@ -87,7 +87,7 @@ The example compose file sets those and `max_connections = 300`. That takes a tw
 
 ## Requirements the cluster cannot enforce for you
 
-**Every instance must use the same `SECRET_KEY` and `ENCRYPTION_KEY`.** A worker with a different `ENCRYPTION_KEY` cannot decrypt credentials, and every credential-using run would fail with an error naming nothing useful. Heym compares a digest of both keys on each heartbeat, along with the app version and the database revision, and marks a mismatched instance **Mismatch** so it receives no work at all. Load falls back to main until you fix it.
+**Every instance must use the same `SECRET_KEY` and `ENCRYPTION_KEY`**, except while [rotating `ENCRYPTION_KEY`](./security.md#rotating-the-key), when the instances may differ as long as each can read what the others write. A worker with a different `ENCRYPTION_KEY` cannot decrypt credentials, and every credential-using run would fail with an error naming nothing useful. An instance whose keys don't fit can't become the leader that runs cron and the pollers either. Heym compares a digest of both keys on each heartbeat, along with the app version and the database revision, and marks a mismatched instance **Mismatch** so it receives no work at all. Load falls back to main until you fix it.
 
 That also defines the upgrade order. Upgrading main first marks every worker incompatible; work returns to main, and each worker rejoins as it is upgraded. Slower, visible, and reversible.
 

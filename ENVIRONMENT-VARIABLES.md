@@ -16,7 +16,59 @@ lifetimes) that override these code defaults when you copy it.
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `SECRET_KEY` | JWT signing key. Must be cryptographically random and at least 32 characters. Startup fails if missing or a known placeholder. | — (required) |
-| `ENCRYPTION_KEY` | Key used to encrypt stored credentials at rest. Generate with `python -c "import secrets; print(secrets.token_hex(32))"`. Startup fails if missing or the known placeholder. | — (required) |
+| `ENCRYPTION_KEY` | Key used to encrypt stored credentials at rest. Generate with `python -c "import secrets; print(secrets.token_hex(32))"`. Startup fails if missing, the known placeholder, or not the key this database was encrypted with (see [Rotating `ENCRYPTION_KEY`](#rotating-encryption_key)). | — (required) |
+| `ENCRYPTION_KEYS_EXTRA` | Comma-separated keys accepted for decryption only, never to encrypt. Used while rotating `ENCRYPTION_KEY`. Empty entries are ignored; the placeholder is refused. | — |
+| `HEYM_ACCEPT_CURRENT_ENCRYPTION_KEY` | Start once with `true` to accept `ENCRYPTION_KEY` as this database's key although nothing stored decrypts with it. See [Rotating `ENCRYPTION_KEY`](#rotating-encryption_key). Unset it afterwards. | `false` |
+
+## Rotating `ENCRYPTION_KEY`
+
+`ENCRYPTION_KEY` encrypts every stored credential, the SSO client secret and short-lived
+sign-in state. It can be replaced without downtime and without re-entering credentials.
+Rotation takes two configuration changes and one admin action, because during a rolling
+restart old and new configuration run side by side: no process may encrypt with the new
+key before every other one can decrypt it.
+
+| Phase | Configuration | Then |
+|---|---|---|
+| 1. Introduce | `ENCRYPTION_KEY=old`, `ENCRYPTION_KEYS_EXTRA=new` | Restart every instance. Nothing is encrypted with `new` yet. |
+| 2. Promote | `ENCRYPTION_KEY=new`, `ENCRYPTION_KEYS_EXTRA=old` | Restart every instance. New and changed values are encrypted with `new`. |
+| 3. Re-encrypt | unchanged | In **Settings → Encryption**, start the re-encryption once every instance encrypts with `new`. It converts existing values in the background; everything keeps working. |
+| 4. Retire | `ENCRYPTION_KEY=new`, no `old` | Only once phase 3 shows **Completed**, and no database backup taken before it will ever need restoring. |
+
+A single container restarts all its processes together, so it can go straight to
+phase 2. The phases matter for clusters and rolling updates on Kubernetes.
+
+- **The re-encryption pauses itself** when any live instance encrypts with another key,
+  and says which, so an instance that rolled back can't rotate values back.
+- **Values no configured key reads** (from an earlier key change) are listed in
+  **Settings → Encryption**, never counted as remaining, so the job can finish. Their
+  owners see them as **Unreadable** in Credentials and can delete and re-create them.
+- **After phase 3, the old key is refused as `ENCRYPTION_KEY`.** An instance restarted
+  with an old `.env` fails to start with an error that says so, instead of writing
+  values nobody else can read.
+
+**What rotation protects.** Rotation protects backups taken afterwards. A leaked key
+together with a copy of the database still exposes every credential in that copy, so
+after a leak, also rotate the credentials themselves at their providers.
+
+### The key check
+
+Before the server starts, `python -m app.key_check` compares the keys with a check value
+stored in the database, and refuses to start with an error naming the cause. The image
+entrypoints run it after migrations. **Worker definitions that start uvicorn directly
+must run it too:** `docker-compose.worker.yml`, the `worker-a` service in
+`docker-compose.cluster.yml` and `deploy/kubernetes/overlays/orbstack-cluster/worker.yaml`
+do, as `uv run python -m app.key_check && exec uv run python -m uvicorn …`. If you copied
+one of them before this change, make the same edit. A worker left on the old command still
+runs without the check, and the cluster still keeps it from receiving work or leading if
+its keys don't fit.
+
+On first start after upgrading, the check value is created once one of the 20 most
+recently stored values decrypts, or when there are none. **If none of them decrypts**,
+because the key was changed at some point and nothing has been re-entered since, the check
+refuses to start. If `ENCRYPTION_KEY` is the key you want to keep, start once with
+`HEYM_ACCEPT_CURRENT_ENCRYPTION_KEY=true`, then remove it. Values stored under the lost key
+stay unreadable and are listed as described above.
 
 ## Database
 
@@ -255,11 +307,13 @@ needs no open port and no route back to the main instance.
 
 Two rules the cluster cannot enforce for you:
 
-- **`SECRET_KEY` and `ENCRYPTION_KEY` must be identical on every instance.** A
-  worker with a different `ENCRYPTION_KEY` cannot decrypt credentials. Heym
-  compares digests of both keys on each heartbeat and marks a mismatched
-  instance incompatible so it receives no work, rather than letting it fail
-  every credential-using run.
+- **`SECRET_KEY` and `ENCRYPTION_KEY` must be identical on every instance**,
+  except while [rotating `ENCRYPTION_KEY`](#rotating-encryption_key). A worker
+  with a different `ENCRYPTION_KEY` cannot decrypt credentials. Heym compares
+  digests of the keys on each heartbeat and marks an instance incompatible when
+  it can't read what main writes, or what main can't read from it, or what another
+  live instance writes. An incompatible instance receives no work and can't
+  become the leader that runs cron and the pollers.
 - **Point ingress at the main instance only.** Round-robining user traffic
   across instances would send a file upload to one machine and its download to
   another.

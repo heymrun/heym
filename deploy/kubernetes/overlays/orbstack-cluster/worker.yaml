@@ -42,6 +42,9 @@ spec:
               valueFrom: {secretKeyRef: {name: heym-secrets, key: SECRET_KEY}}
             - name: ENCRYPTION_KEY
               valueFrom: {secretKeyRef: {name: heym-secrets, key: ENCRYPTION_KEY}}
+            # Only while rotating ENCRYPTION_KEY: add this key to heym-secrets for phases 1-3.
+            - name: ENCRYPTION_KEYS_EXTRA
+              valueFrom: {secretKeyRef: {name: heym-secrets, key: ENCRYPTION_KEYS_EXTRA, optional: true}}
           volumeMounts:
             - {name: data, mountPath: /app/data}
           readinessProbe:
