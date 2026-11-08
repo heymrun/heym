@@ -182,7 +182,7 @@ async def call_user_memory_tool(
         )
     if result.changed:
         audit(
-            action="user.memory.updated",
+            action="user.memory_update",
             actor_id=user_id,
             actor_email=getattr(user, "email", None),
             target_type="user",

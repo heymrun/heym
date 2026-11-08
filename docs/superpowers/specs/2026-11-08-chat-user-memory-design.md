@@ -96,7 +96,7 @@ Mirrors `chat_data_tables.py` / `chat_dashboards.py`:
   again", "Not saved: looks like a credential".
 - `call_user_memory_tool(db, user, name, args, *, source) -> dict`: validates arguments with
   Pydantic, calls the service, and on a successful write calls
-  `audit(action="user.memory.updated", actor_id=..., source=..., mode=..., length=...)`. The
+  `audit(action="user.memory_update", actor_id=..., source=..., mode=..., length=...)`. The
   audit line never contains the text. `source` is `chat` for every dashboard chat turn (Chat tab,
   Work, `heym_chat`, A2A) and `mcp` for the global server's direct tools.
 - `build_user_memory_mcp_tools() -> list[MCPTool]` for the global MCP server.

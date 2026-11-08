@@ -694,7 +694,7 @@ class CallToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["status"], STATUS_ADDED)
         audit.assert_called_once()
         kwargs = audit.call_args.kwargs
-        self.assertEqual(kwargs["action"], "user.memory.updated")
+        self.assertEqual(kwargs["action"], "user.memory_update")
         self.assertEqual(kwargs["source"], "chat")
         self.assertEqual(kwargs["mode"], "append")
         self.assertNotIn("Prefers short answers", json.dumps(kwargs, default=str))
@@ -1001,7 +1001,7 @@ async def call_user_memory_tool(
         )
     if result.changed:
         audit(
-            action="user.memory.updated",
+            action="user.memory_update",
             actor_id=user_id,
             actor_email=getattr(user, "email", None),
             target_type="user",

@@ -114,7 +114,7 @@ Runs started by a schedule, a trigger node, a queue or an event are not audit li
 | Boards | `board.create` · `update` · `delete` · `column_create` · `column_update` · `column_delete` · `column_empty` · `card_create` · `card_update` · `card_delete` · `card_move` · `card_run` · `share_add` · `share_remove` · `team_share_add` · `team_share_remove` |
 | Drive | `drive.upload` · `download` · `delete` · `delete_all` · `bulk_delete` · `share_create` · `share_revoke` · `team_sharing_update` · `bulk_team_sharing_update` · `chat_mount` |
 | Teams | `team.create` · `update` · `delete` · `member_add` · `member_remove` |
-| Users | `user.deactivate` (with `workflows_paused`; `outcome=denied` with `reason=last_break_glass_admin`) · `reactivate` (with `workflows_resumed`) · `sessions_revoke` · `mfa_reset`. The administrator is the actor, the account is the target. |
+| Users | `user.deactivate` (with `workflows_paused`; `outcome=denied` with `reason=last_break_glass_admin`) · `reactivate` (with `workflows_resumed`) · `sessions_revoke` · `mfa_reset`. The administrator is the actor, the account is the target. `user.memory_update` is logged when Chat or an MCP client saves to the user's [User Rules](./user-settings.md#user-rules-as-memory), with `source` (`chat` or `mcp`), `mode` (`append` or `replace`) and `length`; the user is both actor and target, and the text itself is never logged. |
 | Folders | `folder.create` · `update` · `delete` · `workflow_move` |
 
 `drive.chat_mount` is logged the first time a conversation opens a Drive file in the [file sandbox](./file-analysis.md), with the conversation id and whether the file was shared with the user.
