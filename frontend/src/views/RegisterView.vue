@@ -7,8 +7,10 @@ import Button from "@/components/ui/Button.vue";
 import Card from "@/components/ui/Card.vue";
 import Input from "@/components/ui/Input.vue";
 import Label from "@/components/ui/Label.vue";
+import MfaSignInStep from "@/components/Auth/MfaSignInStep.vue";
 import WorkflowHeroBackground from "@/components/Layout/WorkflowHeroBackground.vue";
 import { useAuthStore } from "@/stores/auth";
+import type { MfaChallenge } from "@/types/auth";
 
 interface FastApiValidationError {
   msg: string;
@@ -30,6 +32,8 @@ const password = ref("");
 const confirmPassword = ref("");
 const error = ref("");
 const loading = ref(false);
+// With HEYM_REQUIRE_MFA a new account enrols an authenticator before its first session.
+const mfaChallenge = ref<MfaChallenge | null>(null);
 const minPasswordLength = 8;
 
 interface PasswordRequirement {
@@ -97,12 +101,12 @@ async function handleSubmit(): Promise<void> {
   loading.value = true;
 
   try {
-    await authStore.register({
+    mfaChallenge.value = await authStore.register({
       name: name.value,
       email: email.value,
       password: password.value,
     });
-    router.push("/");
+    if (!mfaChallenge.value) router.push("/");
   } catch (err: unknown) {
     const defaultErrorMessage = "Registration failed. Please try again.";
     const axiosErr = err as RegisterApiError;
@@ -171,7 +175,14 @@ const features = [
           </div>
         </div>
 
+        <MfaSignInStep
+          v-if="mfaChallenge"
+          :challenge="mfaChallenge"
+          @done="router.push('/')"
+          @cancel="router.push('/login')"
+        />
         <form
+          v-else
           class="space-y-3"
           @submit.prevent="handleSubmit"
         >

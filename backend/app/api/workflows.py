@@ -169,6 +169,7 @@ from app.services.workflow_last_trigger import (
     fetch_last_trigger_sources,
 )
 from app.services.workflow_lifecycle import (
+    OWNER_DEACTIVATED_MARKER,
     has_unfinished_workflow_executions,
     set_automatic_triggers_paused,
 )
@@ -1943,6 +1944,36 @@ async def _set_workflow_triggers_paused(
     return response
 
 
+async def set_owner_triggers_paused(
+    owner_id: uuid.UUID, paused: bool, current_user: User, db: AsyncSession
+) -> int:
+    """Pause or resume the automatic triggers of every workflow one account owns.
+
+    Used when an administrator deactivates or reactivates that account. Each save goes
+    through `update_workflow`, like the per-workflow pause, so Edit History and trigger
+    resync stay identical. Returns how many workflows changed.
+    """
+    result = await db.execute(
+        select(Workflow).where(Workflow.owner_id == owner_id).order_by(Workflow.created_at)
+    )
+    changed = 0
+    for workflow in result.scalars().all():
+        current_nodes = workflow.nodes or []
+        nodes = set_automatic_triggers_paused(
+            current_nodes, paused=paused, marker=OWNER_DEACTIVATED_MARKER
+        )
+        if nodes == current_nodes:
+            continue
+        await update_workflow(
+            workflow.id,
+            WorkflowUpdate(nodes=nodes, base_updated_at=workflow.updated_at),
+            current_user,
+            db,
+        )
+        changed += 1
+    return changed
+
+
 @router.post("/{workflow_id}/pause-triggers", response_model=WorkflowResponse)
 async def pause_workflow_triggers(
     workflow_id: uuid.UUID,
@@ -2993,7 +3024,7 @@ async def _resolve_execution_token_actor(db: AsyncSession, payload: dict) -> Use
         else:
             actor_result = await db.execute(select(User).where(User.id == actor_id))
             actor = actor_result.scalar_one_or_none()
-    if actor is None:
+    if actor is None or not actor.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Execution token subject is no longer valid",

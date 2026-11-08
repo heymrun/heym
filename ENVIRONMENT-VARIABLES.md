@@ -97,7 +97,14 @@ stay unreadable and are listed as described above.
 | `JWT_REFRESH_TOKEN_EXPIRE_DAYS` | Refresh-token lifetime in days. | `30` |
 | `ALLOW_REGISTER` | Allow new user self-registration. Set `false` to lock down production, but only after your admin account exists: registration is refused for everyone when this is off and there is no first-user bootstrap, so an empty database plus `false` leaves no way to create an account. | `true` |
 | `HEYM_ADMIN_EMAILS` | Comma-separated email addresses of instance administrators, matched case-insensitively. Administrators manage instance settings (**Settings → SSO**, **Settings → Instances**, the Heym Work integration), can open, edit, and delete any user's workflows, see every owner's schedules and execution history, and pause or resume a workflow's automatic triggers. They also keep password sign-in when it is disabled for SSO, so a misconfigured provider cannot lock the instance. Empty grants nobody this access. Restart the backend after changing it. Plugin installation uses the separate `HEYM_PLUGIN_ADMIN_EMAILS`. | — |
+| `HEYM_REQUIRE_MFA` | Turn on two-factor sign-in with an authenticator app (TOTP). Every password sign-in then asks for a 6-digit code, and an account that has none sets one up by scanning a QR code before it reaches anything. Password sessions that began without a code end, so everyone enrols at their next sign-in. SSO sign-in is never affected: the identity provider owns the second factor. Off means no account is asked for a code; stored authenticators are kept and apply again when it is turned back on. Restart the backend after changing it. | `false` |
 | `TRUST_PROXY_HEADERS` | Trust `X-Forwarded-*` headers (enable only behind a trusted proxy). | `false` |
+
+## Data retention
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HEYM_DATA_RETENTION_DAYS` | Days of execution history and LLM traces to keep. Older rows are deleted once a day after 05:00 (in `TIMEZONE`) by the scheduler leader, in batches. A run still waiting on a human review or a Codex follow-up is kept whatever its age. `0` keeps everything. Takes effect on existing installs at the next daily pass after upgrading. In a cluster any instance can lead the scheduler, so set the same value on every instance. | `90` |
 
 ## OAuth (MCP / API clients)
 

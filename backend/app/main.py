@@ -18,6 +18,7 @@ from app.api import (
     admin_cluster,
     admin_k8s_credentials,
     admin_key_rotation,
+    admin_users,
     agent_memory,
     agent_suite_runs,
     agent_suites,
@@ -25,6 +26,7 @@ from app.api import (
     alerts,
     analytics,
     auth,
+    auth_mfa,
     avatars,
     bigquery_oauth,
     boards,
@@ -361,6 +363,7 @@ app.add_middleware(HeymIdentityMiddleware)
 
 app.include_router(oauth.router, tags=["OAuth"])
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
+app.include_router(auth_mfa.router, prefix="/api/auth/mfa", tags=["Two-Factor Authentication"])
 app.include_router(avatars.router, prefix="/api/avatars", tags=["Avatars"])
 app.include_router(sso_auth.router, prefix="/api/auth/sso", tags=["SSO"])
 app.include_router(sso_admin.router, prefix="/api/admin/sso", tags=["SSO Admin"])
@@ -377,6 +380,7 @@ app.include_router(
 app.include_router(
     admin_key_rotation.router, prefix="/api/admin/key-rotation", tags=["Encryption Key Admin"]
 )
+app.include_router(admin_users.router, prefix="/api/admin/users", tags=["User Admin"])
 app.include_router(workflows.router, prefix="/api/workflows", tags=["Workflows"])
 app.include_router(collab.router, prefix="/api/workflows", tags=["Canvas Collaboration"])
 app.include_router(agent_memory.router, prefix="/api/workflows", tags=["Agent Memory"])

@@ -96,7 +96,7 @@ class WorkSsoCallbackTests(unittest.IsolatedAsyncioTestCase):
         return _encode_transaction("st", "nonce", "verifier", "/", client="work", work_state=STATE)
 
     async def test_work_sign_in_redirects_to_the_registered_url_with_a_code(self) -> None:
-        user = SimpleNamespace(id=uuid.uuid4(), email="ada@acme.example")
+        user = SimpleNamespace(id=uuid.uuid4(), email="ada@acme.example", is_active=True)
         db = AsyncMock()
         request = _Request(cookies={_TX_COOKIE: self._transaction()})
         discovery = SimpleNamespace(issuer="https://idp.acme.example")

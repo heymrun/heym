@@ -293,6 +293,7 @@ class MCPServerAuthTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(ctx.exception.status_code, 403)
 
+    @patch("app.api.mcp_servers.session_user_active", AsyncMock(return_value=True))
     async def test_session_token_auth_does_not_query_database(self) -> None:
         from fastapi import Request
 

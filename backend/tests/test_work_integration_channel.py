@@ -169,7 +169,14 @@ class RefreshTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_refresh_rotates_and_returns_a_bound_pair(self) -> None:
         row = _row()
-        user = SimpleNamespace(id=uuid.uuid4(), email="ada@acme.example", name="Ada")
+        user = SimpleNamespace(
+            id=uuid.uuid4(),
+            email="ada@acme.example",
+            name="Ada",
+            is_active=True,
+            hashed_password="x",
+            sso_subject=None,
+        )
         token = create_refresh_token(user.id, client="work", key_version=key_version(row.key_hash))
         db = AsyncMock()
         db.execute = AsyncMock(return_value=_ScalarResult(user))

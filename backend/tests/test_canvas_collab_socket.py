@@ -4,6 +4,7 @@ import json
 import time
 import unittest
 import uuid
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -15,6 +16,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from app.api import collab
 from app.db.models import User, Workflow
+from app.services.auth import TokenClaims
 from app.services.collab.hub import CollabHub
 from app.services.collab.protocol import RoutedMessage
 
@@ -57,8 +59,22 @@ class _FakeSession:
 
 class CollabSocketTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.owner = SimpleNamespace(id=uuid.uuid4(), name="Ana")
-        self.viewer = SimpleNamespace(id=uuid.uuid4(), name="Ben")
+        self.owner = SimpleNamespace(
+            id=uuid.uuid4(),
+            name="Ana",
+            is_active=True,
+            sessions_revoked_at=None,
+            hashed_password="x",
+            sso_subject=None,
+        )
+        self.viewer = SimpleNamespace(
+            id=uuid.uuid4(),
+            name="Ben",
+            is_active=True,
+            sessions_revoked_at=None,
+            hashed_password="x",
+            sso_subject=None,
+        )
         self.workflow = SimpleNamespace(id=WORKFLOW_ID, owner_id=self.owner.id)
         self.tokens = {"owner": self.owner.id, "viewer": self.viewer.id}
         self.permissions: dict[uuid.UUID, list[str | None]] = {
@@ -71,7 +87,7 @@ class CollabSocketTests(unittest.TestCase):
             patch.object(collab, "collab_hub", hub),
             patch.object(collab, "collab_bus", _InProcessBus(hub)),
             patch.object(collab, "async_session_maker", lambda: _FakeSession(users, self.workflow)),
-            patch.object(collab, "resolve_token_user_id", AsyncMock(side_effect=self._resolve)),
+            patch.object(collab, "resolve_token_claims", AsyncMock(side_effect=self._resolve)),
             patch.object(
                 collab, "get_workflow_permission", AsyncMock(side_effect=self._permission)
             ),
@@ -84,8 +100,11 @@ class CollabSocketTests(unittest.TestCase):
         self.client.__enter__()
         self.addCleanup(self.client.__exit__, None, None, None)
 
-    async def _resolve(self, _connection: Any, token: str) -> uuid.UUID | None:
-        return self.tokens.get(token)
+    async def _resolve(self, _connection: Any, token: str) -> TokenClaims | None:
+        user_id = self.tokens.get(token)
+        if user_id is None:
+            return None
+        return TokenClaims(user_id=user_id, client=None, key_version=None, issued_at=None)
 
     async def _permission(self, _db: Any, _workflow: Any, user_id: uuid.UUID, **_kw: Any) -> Any:
         answers = self.permissions[user_id]
@@ -101,6 +120,16 @@ class CollabSocketTests(unittest.TestCase):
         with self.assertRaises(WebSocketDisconnect) as caught:
             socket.receive_json()
         return caught.exception.code
+
+    def test_a_deactivated_account_closes_as_unauthenticated(self) -> None:
+        self.owner.is_active = False
+        with self._connect("owner") as socket:
+            self.assertEqual(collab.CLOSE_UNAUTHENTICATED, self._close_code(socket))
+
+    def test_a_token_from_before_sign_out_everywhere_closes_as_unauthenticated(self) -> None:
+        self.owner.sessions_revoked_at = datetime.now(timezone.utc)
+        with self._connect("owner") as socket:
+            self.assertEqual(collab.CLOSE_UNAUTHENTICATED, self._close_code(socket))
 
     def test_a_foreign_origin_is_refused(self) -> None:
         with self.assertRaises(WebSocketDisconnect) as caught:

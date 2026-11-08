@@ -33,6 +33,7 @@ from app.api.mcp import (
     build_tools_with_chat,
     dispatch_chat_tool_call,
     get_credentials_context_for_user,
+    session_user_active,
     validate_chat_tool_credential,
 )
 from app.api.workflow_run_audit import RunActor, audit_workflow_run
@@ -175,6 +176,11 @@ async def _get_named_server_context(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Session token not valid for this server",
             )
+        if not await session_user_active(user_id_str):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired session token",
+            )
         user = _session_user_from_id(user_id_str)
         return user, _session_server_from_id(server_id, user.id)
 
@@ -203,7 +209,7 @@ async def _get_named_server_context(
             )
         user_res = await db.execute(select(User).where(User.id == token_record.user_id))
         user = user_res.scalar_one_or_none()
-        if user is None:
+        if user is None or not user.is_active:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
         server_res = await db.execute(
             select(MCPServer).where(MCPServer.id == server_id, MCPServer.user_id == user.id)
@@ -231,7 +237,7 @@ async def _get_named_server_context(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
     user_res = await db.execute(select(User).where(User.id == server.user_id))
     user = user_res.scalar_one_or_none()
-    if user is None:
+    if user is None or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
     return user, server
 

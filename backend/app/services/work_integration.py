@@ -172,12 +172,12 @@ class WorkTokens:
 
 
 async def issue_work_tokens(
-    db: AsyncSession, user_id: uuid.UUID, row: WorkIntegration
+    db: AsyncSession, user_id: uuid.UUID, row: WorkIntegration, *, method: str
 ) -> WorkTokens:
     """Mint and persist a token pair bound to Work and to the current key."""
     version = key_version(row.key_hash or "")
-    access = create_access_token(user_id, client=WORK_CLIENT, key_version=version)
-    refresh = create_refresh_token(user_id, client=WORK_CLIENT, key_version=version)
+    access = create_access_token(user_id, client=WORK_CLIENT, key_version=version, method=method)
+    refresh = create_refresh_token(user_id, client=WORK_CLIENT, key_version=version, method=method)
     await store_refresh_token(db, refresh, user_id)
     return WorkTokens(access_token=access, refresh_token=refresh)
 

@@ -3,15 +3,16 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.auth import password_sign_in, register_account
+from app.api.auth import mfa_sign_in, password_sign_in, register_account
 from app.api.deps import get_client_ip
 from app.config import settings
 from app.db.models import User, WorkIntegration
 from app.db.session import get_db
-from app.models.schemas import UserCreate, UserLogin
+from app.models.schemas import MfaLoginRequest, UserCreate, UserLogin
 from app.models.work_integration_schemas import (
     WorkAuditRequest,
     WorkHandshakeRequest,
@@ -21,8 +22,13 @@ from app.models.work_integration_schemas import (
     WorkTokenResponse,
     WorkUserSummary,
 )
+from app.services import mfa
+from app.services.account_status import mark_signed_in, meets_mfa_policy
 from app.services.audit_log import OUTCOME_DENIED, audit
 from app.services.auth import (
+    SIGN_IN_MFA,
+    SIGN_IN_PASSWORD,
+    SIGN_IN_SSO,
     create_access_token,
     create_refresh_token,
     read_refresh_claims,
@@ -62,8 +68,12 @@ def _summary(user: User) -> WorkUserSummary:
 
 
 async def _load_user(db: AsyncSession, user_id: object) -> User | None:
+    """The account behind a code or refresh token, while it may still sign in."""
     result = await db.execute(select(User).where(User.id == user_id))
-    return result.scalar_one_or_none()
+    user = result.scalar_one_or_none()
+    if user is None or not user.is_active:
+        return None
+    return user
 
 
 @router.post("/handshake", response_model=WorkHandshakeResponse)
@@ -95,20 +105,76 @@ async def handshake(
     )
 
 
+_SIGN_IN_AGAIN = "Sign in again to set up two-factor authentication."
+
+
+def _second_factor_response(user: User) -> JSONResponse | None:
+    """A 401 carrying the challenge when the password alone does not finish this sign-in.
+
+    The challenge sits beside `detail` rather than inside it, so a Work release that does
+    not know the second step still shows a readable message instead of failing to parse.
+    An account without an authenticator also gets `mfa_setup`: Work shows its QR code, and
+    the enrolment completes in Work before any session exists.
+    """
+    requirement = mfa.password_sign_in_requirement(user)
+    if requirement is None:
+        return None
+    audit(action="auth.mfa_challenge", actor=user, client=WORK_CLIENT, purpose=requirement)
+    content: dict[str, object] = {
+        "detail": "Enter the code from your authenticator app.",
+        "mfa_challenge": mfa.create_challenge_token(user.id, requirement, client=WORK_CLIENT),
+    }
+    if requirement == mfa.PURPOSE_ENROLL:
+        offer = mfa.create_setup_offer(user)
+        content["detail"] = "Set up two-factor authentication to continue."
+        content["mfa_setup"] = {
+            "setup_token": offer.setup_token,
+            "secret": offer.secret,
+            "otpauth_uri": offer.otpauth_uri,
+            "qr_code": offer.qr_code,
+        }
+    return JSONResponse(status_code=status.HTTP_401_UNAUTHORIZED, content=content)
+
+
+async def _work_session(
+    db: AsyncSession, user: User, row: WorkIntegration, method: str
+) -> WorkTokenResponse:
+    mark_signed_in(user)
+    tokens = await issue_work_tokens(db, user.id, row, method=method)
+    return WorkTokenResponse(
+        access_token=tokens.access_token, refresh_token=tokens.refresh_token, user=_summary(user)
+    )
+
+
 @router.post("/login", response_model=WorkTokenResponse)
 async def channel_login(
     body: UserLogin,
     request: Request,
     row: WorkIntegration = Depends(require_work_channel),
     db: AsyncSession = Depends(get_db),
-) -> WorkTokenResponse:
+) -> WorkTokenResponse | JSONResponse:
     ip = work_client_ip(request, fallback=get_client_ip(request))
     user = await password_sign_in(db, body, ip, client=WORK_CLIENT)
-    tokens = await issue_work_tokens(db, user.id, row)
+    challenge = _second_factor_response(user)
+    if challenge is not None:
+        return challenge
+    session = await _work_session(db, user, row, SIGN_IN_PASSWORD)
     audit(action="auth.login", actor=user, client=WORK_CLIENT)
-    return WorkTokenResponse(
-        access_token=tokens.access_token, refresh_token=tokens.refresh_token, user=_summary(user)
-    )
+    return session
+
+
+@router.post("/login/mfa", response_model=WorkTokenResponse)
+async def channel_login_mfa(
+    body: MfaLoginRequest,
+    row: WorkIntegration = Depends(require_work_channel),
+    db: AsyncSession = Depends(get_db),
+) -> WorkTokenResponse:
+    """Finish a Work password sign-in with a code, enrolling first when `setup_token` is set."""
+    user, codes, method = await mfa_sign_in(db, body, client=WORK_CLIENT)
+    session = await _work_session(db, user, row, SIGN_IN_MFA)
+    session.recovery_codes = codes
+    audit(action="auth.login", actor=user, client=WORK_CLIENT, mfa=method)
+    return session
 
 
 @router.post("/register", response_model=WorkTokenResponse, status_code=status.HTTP_201_CREATED)
@@ -117,10 +183,17 @@ async def channel_register(
     request: Request,
     row: WorkIntegration = Depends(require_work_channel),
     db: AsyncSession = Depends(get_db),
-) -> WorkTokenResponse:
+) -> WorkTokenResponse | JSONResponse:
     ip = work_client_ip(request, fallback=get_client_ip(request))
     user = await register_account(db, body, ip, client=WORK_CLIENT)
-    tokens = await issue_work_tokens(db, user.id, row)
+    challenge = _second_factor_response(user)
+    if challenge is not None:
+        audit(action="auth.register", actor=user, client=WORK_CLIENT)
+        # The account exists before its enrolment; a 401 must not roll it back.
+        await db.commit()
+        return challenge
+    mark_signed_in(user)
+    tokens = await issue_work_tokens(db, user.id, row, method=SIGN_IN_PASSWORD)
     audit(action="auth.register", actor=user, client=WORK_CLIENT)
     return WorkTokenResponse(
         access_token=tokens.access_token, refresh_token=tokens.refresh_token, user=_summary(user)
@@ -146,7 +219,7 @@ async def channel_sso_exchange(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Sign-in code is invalid or expired",
         )
-    tokens = await issue_work_tokens(db, user.id, row)
+    tokens = await issue_work_tokens(db, user.id, row, method=SIGN_IN_SSO)
     audit(action="auth.sso_exchange", actor=user, client=WORK_CLIENT)
     return WorkTokenResponse(
         access_token=tokens.access_token, refresh_token=tokens.refresh_token, user=_summary(user)
@@ -170,8 +243,19 @@ async def channel_refresh(
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
 
-    new_access = create_access_token(user.id, client=WORK_CLIENT, key_version=current)
-    new_refresh = create_refresh_token(user.id, client=WORK_CLIENT, key_version=current)
+    if not meets_mfa_policy(
+        claims.method,
+        has_password=bool(user.hashed_password),
+        has_sso_identity=bool(user.sso_subject),
+    ):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=_SIGN_IN_AGAIN)
+
+    new_access = create_access_token(
+        user.id, client=WORK_CLIENT, key_version=current, method=claims.method
+    )
+    new_refresh = create_refresh_token(
+        user.id, client=WORK_CLIENT, key_version=current, method=claims.method
+    )
     if not await rotate_refresh_token(db, body.refresh_token, new_refresh, user.id):
         audit(
             action="auth.token_refresh",

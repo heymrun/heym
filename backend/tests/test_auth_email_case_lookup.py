@@ -86,6 +86,7 @@ class PasswordSignInEmailCaseTests(unittest.IsolatedAsyncioTestCase):
             id=uuid.uuid4(),
             email="Jane.Doe@corp.example",
             hashed_password=hash_password("Passw0rd!x"),
+            is_active=True,
         )
         db = AsyncMock()
         db.execute.return_value = _result(stored)
@@ -138,7 +139,9 @@ class OAuthConsentEmailCaseTests(unittest.IsolatedAsyncioTestCase):
             redirect_uris=["https://client.example/callback"],
             is_confidential=True,
         )
-        stored = SimpleNamespace(id=uuid.uuid4(), email="Jane@corp.example", hashed_password="h")
+        stored = SimpleNamespace(
+            id=uuid.uuid4(), email="Jane@corp.example", hashed_password="h", is_active=True
+        )
         db = AsyncMock()
         db.add = MagicMock()
         db.execute = AsyncMock(

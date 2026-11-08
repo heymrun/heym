@@ -16,8 +16,14 @@ from app.config import settings
 from app.db.models import SsoSettings, User, WorkIntegration
 from app.db.session import get_db
 from app.models.schemas import SsoStatusResponse
+from app.services.account_status import mark_signed_in
 from app.services.audit_log import OUTCOME_DENIED, OUTCOME_FAILURE, audit
-from app.services.auth import create_access_token, create_refresh_token, store_refresh_token
+from app.services.auth import (
+    SIGN_IN_SSO,
+    create_access_token,
+    create_refresh_token,
+    store_refresh_token,
+)
 from app.services.auth_rate_limiter import login_limiter
 from app.services.oidc_client import (
     OidcError,
@@ -313,6 +319,16 @@ async def sso_callback(
         )
         return failure(rejection.code)
 
+    if not user.is_active:
+        audit(
+            action="auth.sso_login",
+            outcome=OUTCOME_DENIED,
+            actor=user,
+            reason="account_deactivated",
+        )
+        return failure("account_deactivated")
+    mark_signed_in(user)
+
     if transaction.get("client") == WORK_CLIENT:
         if work_row is None or not (work_row.enabled and work_row.work_url):
             return failure("sso_disabled")
@@ -329,8 +345,8 @@ async def sso_callback(
         audit(action="auth.sso_login", actor=user, client=WORK_CLIENT)
         return response
 
-    access_token = create_access_token(user.id)
-    refresh_token = create_refresh_token(user.id)
+    access_token = create_access_token(user.id, method=SIGN_IN_SSO)
+    refresh_token = create_refresh_token(user.id, method=SIGN_IN_SSO)
     await store_refresh_token(db, refresh_token, user.id)
 
     response = RedirectResponse(url=safe_next_path(transaction.get("next")), status_code=302)

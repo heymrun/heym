@@ -15,10 +15,11 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, WebSocket
 from starlette.datastructures import Headers
 
-from app.api.deps import resolve_token_user_id
+from app.api.deps import resolve_token_claims
 from app.config import settings
 from app.db.models import User, Workflow
 from app.db.session import async_session_maker
+from app.services.account_status import access_token_current
 from app.services.collab.bus import CollabPublishError, collab_bus
 from app.services.collab.hub import CollabConnection, collab_hub
 from app.services.collab.protocol import (
@@ -77,14 +78,14 @@ async def _identify(
     websocket: WebSocket, workflow_id: uuid.UUID
 ) -> tuple[SessionIdentity | None, int]:
     token = websocket.cookies.get("access_token")
-    user_id = await resolve_token_user_id(websocket, token) if token else None
-    if user_id is None:
+    claims = await resolve_token_claims(websocket, token) if token else None
+    if claims is None:
         return None, CLOSE_UNAUTHENTICATED
     async with async_session_maker() as db:
-        user = await db.get(User, user_id)
-    if user is None:
+        user = await db.get(User, claims.user_id)
+    if user is None or not access_token_current(user, claims):
         return None, CLOSE_UNAUTHENTICATED
-    permission = await _permission(workflow_id, user_id)
+    permission = await _permission(workflow_id, user.id)
     if permission is None:
         return None, CLOSE_FORBIDDEN
     identity = SessionIdentity(

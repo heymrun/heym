@@ -41,7 +41,7 @@ class HashSecretTests(unittest.TestCase):
 class MCPKeyAuthenticationTests(unittest.IsolatedAsyncioTestCase):
     async def test_valid_key_authenticates_against_the_stored_digest(self) -> None:
         raw_key = "the-real-key"
-        user = SimpleNamespace(id=uuid.uuid4(), mcp_api_key=hash_secret(raw_key))
+        user = SimpleNamespace(id=uuid.uuid4(), mcp_api_key=hash_secret(raw_key), is_active=True)
         db = AsyncMock()
         db.execute = AsyncMock(return_value=_ScalarResult(user))
 

@@ -66,7 +66,24 @@ The password must also differ from your current password. These rules are enforc
 3. Re-enter in **Confirm New Password**
 4. Click **Update Password**
 
-If the current password is incorrect, an inline error message is shown. On success, a confirmation message appears and the form resets automatically.
+If the current password is incorrect, an inline error message is shown. On success, a confirmation message appears and the form resets automatically. Changing the password also signs out every other session: other browsers and devices, Heym Work, and connected MCP clients. This browser stays signed in.
+
+### Two-factor authentication
+
+Shown only when the instance turns on two-factor sign-in (`HEYM_REQUIRE_MFA=true`) and your account has a password. Accounts that sign in through [SSO](./sso.md) do not see it: their identity provider owns the second factor.
+
+You set up the authenticator at sign-in, the first time a password sign-in asks for it. This section shows since when it is on and how many recovery codes are left, and offers two actions:
+
+| Action | What it asks for | What happens |
+|--------|------------------|--------------|
+| **Move to a new phone** | Your password and a code from the current authenticator (or a recovery code) | A new QR code is shown. Scan it, enter a code from the new app, and the old authenticator stops working. New recovery codes are shown once. |
+| **New recovery codes** | A code from your authenticator | Ten new codes are shown once, and the old ones stop working at once. |
+
+Two-factor sign-in cannot be turned off from here while the instance requires it. If you lose your phone and your recovery codes, an administrator can reset it from the **Users** tab; you then set up a new authenticator at your next sign-in.
+
+### Sessions
+
+**Sign out other sessions** ends every session except the one you are using: other browsers and devices, Heym Work, and MCP clients connected through OAuth. Use it after signing in on a shared computer or losing a device. Your MCP API key and execution tokens are keys rather than sessions, so they keep working; rotate them from the [MCP Tab](../tabs/mcp-tab.md) and the workflow's execution tokens if they may have leaked.
 
 ## Voice Tab
 
@@ -97,6 +114,19 @@ For each **OpenCode** credential the tab shows the OpenCode Go subscription wind
 ## Observability Tab
 
 The Observability tab shows the read-only status of [OpenTelemetry Tracing](./opentelemetry.md) for this instance: whether tracing is enabled, the OTLP endpoint, service name, sampler ratio, and which spans are emitted. Tracing is configured through `HEYM_OTEL_*` environment variables on the backend, so this tab does not edit anything. When tracing is disabled, the tab lists the environment variables needed to turn it on. Secrets such as OTLP auth headers are never shown here. See [Environment Variables](https://github.com/heymrun/heym/blob/main/ENVIRONMENT-VARIABLES.md) for the full configuration reference.
+
+## Users Tab
+
+Visible only to instance administrators, the accounts listed in `HEYM_ADMIN_EMAILS`. It lists every account with its sign-in methods (password, SSO), whether two-factor sign-in is set up, whether it is an administrator, and when it last signed in. Search by name or email, and filter by **Active** or **Deactivated**.
+
+| Action | Effect |
+|--------|--------|
+| **Deactivate** | Blocks every sign-in (password, SSO, Heym Work, the MCP consent page). Ends every session, revokes refresh and MCP OAuth tokens, and stops the account's MCP API keys and execution tokens from working. Pauses the automatic triggers of every workflow the account owns. |
+| **Reactivate** | Allows sign-in again. MCP API keys and execution tokens work again. Resumes only the triggers the deactivation paused; a workflow an administrator paused separately stays paused. |
+| **Sign out** | Ends every session of the account without blocking its next sign-in. |
+| **Reset 2FA** | Removes the authenticator and recovery codes, for someone who lost both. They set up a new one at their next password sign-in. |
+
+You cannot deactivate yourself. When password sign-in is disabled for SSO, Heym also refuses to deactivate the last administrator who can still sign in with a password, so the instance keeps a way back in. Every action is audited (`user.deactivate`, `user.reactivate`, `user.sessions_revoke`, `user.mfa_reset`).
 
 ## SSO Tab
 

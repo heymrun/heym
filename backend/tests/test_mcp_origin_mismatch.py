@@ -114,6 +114,7 @@ class MCPInitializeVersionTests(unittest.TestCase):
 class DefaultSSEOriginTests(unittest.IsolatedAsyncioTestCase):
     """Tests for mcp_sse_endpoint in app/api/mcp.py."""
 
+    @patch("app.api.mcp.session_user_active", AsyncMock(return_value=True))
     async def test_session_token_auth_does_not_query_database(self) -> None:
         """Session-token message auth is stateless and does not consume DB pool slots."""
         from app.services.mcp_session import mcp_session_store

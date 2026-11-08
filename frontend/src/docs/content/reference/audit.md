@@ -54,11 +54,17 @@ Every state change is logged. Reads are logged only where reading is itself the 
 | Action | Notes |
 |--------|-------|
 | `auth.register` | `outcome=denied` when registration is disabled or when password sign-in is off (`reason=password_login_disabled`), `failure` when the email is taken. |
-| `auth.login` | `outcome=failure` records the attempted address and whether the email was unknown or the password wrong. |
+| `auth.login` | `outcome=failure` records the attempted address and whether the email was unknown or the password wrong. `outcome=denied` with `reason=account_deactivated` when the password was right but the account is deactivated. A sign-in finished with a second factor carries `mfa=totp` or `mfa=recovery`. |
+| `auth.mfa_challenge` | The password was right and the sign-in now waits for a code: `purpose=verify`, or `purpose=enroll` for an account setting up its authenticator. Only with `HEYM_REQUIRE_MFA`. |
+| `auth.mfa_verify` | `outcome=failure` when a sign-in code was wrong or already used. Repeated failures for one account are worth alerting on. |
+| `auth.mfa_enable` | An authenticator was set up, at sign-in (`during=sign_in`) or from Settings. |
+| `auth.mfa_replace` | The account moved to a new authenticator from **Settings → Security**. `outcome=failure` when the password or current code was wrong. |
+| `auth.mfa_recovery_codes_regenerate` | New recovery codes replaced the old ones. |
+| `auth.sessions_revoke` | The user signed out every other session (`scope=others`). |
 | `auth.logout` | The actor is resolved from the refresh cookie, so a logout without one is logged with no identity. |
 | `auth.token_refresh` | `outcome=denied` with `reason=refresh_token_replayed_or_revoked` — a token-theft signal worth alerting on. |
 | `auth.password_change` | `outcome=failure` when the current password was wrong. |
-| `auth.sso_login` | Single sign-on. `outcome=failure` carries the reason the provider response was rejected; `denied` carries `email_not_verified`, `domain_not_allowed`, or `provisioning_disabled`. |
+| `auth.sso_login` | Single sign-on. `outcome=failure` carries the reason the provider response was rejected; `denied` carries `email_not_verified`, `domain_not_allowed`, `provisioning_disabled`, or `account_deactivated`. |
 | `sso_settings.update` | An administrator changed the [SSO](./sso.md) configuration. Records `enabled` and `password_login_disabled`, never the client secret. |
 | `sso_settings.test` | An administrator ran the SSO connection test. |
 
@@ -108,6 +114,7 @@ Runs started by a schedule, a trigger node, a queue or an event are not audit li
 | Boards | `board.create` · `update` · `delete` · `column_create` · `column_update` · `column_delete` · `column_empty` · `card_create` · `card_update` · `card_delete` · `card_move` · `card_run` · `share_add` · `share_remove` · `team_share_add` · `team_share_remove` |
 | Drive | `drive.upload` · `download` · `delete` · `delete_all` · `bulk_delete` · `share_create` · `share_revoke` · `team_sharing_update` · `bulk_team_sharing_update` · `chat_mount` |
 | Teams | `team.create` · `update` · `delete` · `member_add` · `member_remove` |
+| Users | `user.deactivate` (with `workflows_paused`; `outcome=denied` with `reason=last_break_glass_admin`) · `reactivate` (with `workflows_resumed`) · `sessions_revoke` · `mfa_reset`. The administrator is the actor, the account is the target. |
 | Folders | `folder.create` · `update` · `delete` · `workflow_move` |
 
 `drive.chat_mount` is logged the first time a conversation opens a Drive file in the [file sandbox](./file-analysis.md), with the conversation id and whether the file was shared with the user.

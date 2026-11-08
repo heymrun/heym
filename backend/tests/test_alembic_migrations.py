@@ -15,7 +15,13 @@ class AlembicMigrationGraphTest(unittest.TestCase):
         self.script = ScriptDirectory.from_config(config)
 
     def test_revision_graph_has_one_head(self) -> None:
-        self.assertEqual(self.script.get_heads(), ["152_encryption_key_rotation"])
+        self.assertEqual(self.script.get_heads(), ["153_account_security"])
+
+    def test_account_security_follows_encryption_key_rotation(self) -> None:
+        revision = self.script.get_revision("153_account_security")
+
+        self.assertIsNotNone(revision)
+        self.assertEqual(revision.down_revision, "152_encryption_key_rotation")
 
     def test_encryption_key_rotation_follows_k8s_secret_credentials(self) -> None:
         revision = self.script.get_revision("152_encryption_key_rotation")

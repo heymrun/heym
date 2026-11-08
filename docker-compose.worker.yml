@@ -17,6 +17,8 @@ services:
       HEYM_INSTANCE_ROLE: worker
       HEYM_INSTANCE_ID: worker-1
       HEYM_INSTANCE_NAME: Worker 1
+      # Any instance can lead the scheduler, so keep this equal to the main instance.
+      HEYM_DATA_RETENTION_DAYS: "90"
       HEYM_DB_POOL_SIZE: "8"
       HEYM_DB_MAX_OVERFLOW: "12"
       HEYM_OTEL_ENABLED: "false"

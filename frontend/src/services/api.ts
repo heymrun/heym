@@ -17,7 +17,14 @@ import type {
   AlertTeamShareEntry,
   AlertUpdatePayload,
 } from "@/types/alerts";
-import type { LoginRequest, PasswordChangeRequest, RegisterRequest, User, UserUpdateRequest } from "@/types/auth";
+import type {
+  LoginRequest,
+  LoginResponse,
+  PasswordChangeRequest,
+  RegisterRequest,
+  User,
+  UserUpdateRequest,
+} from "@/types/auth";
 import type { FileAttachmentPayload } from "@/types/chat";
 import type {
   CreateTemplateRequest,
@@ -430,12 +437,23 @@ api.interceptors.response.use(
 );
 
 export const authApi = {
-  login: async (data: LoginRequest): Promise<void> => {
-    await api.post("/auth/login", data);
+  login: async (data: LoginRequest): Promise<LoginResponse> => {
+    const response = await api.post<LoginResponse>("/auth/login", data);
+    return response.data;
   },
 
-  register: async (data: RegisterRequest): Promise<void> => {
-    await api.post("/auth/register", data);
+  completeMfa: async (data: {
+    challenge_token: string;
+    code: string;
+    setup_token?: string | null;
+  }): Promise<LoginResponse> => {
+    const response = await api.post<LoginResponse>("/auth/login/mfa", data);
+    return response.data;
+  },
+
+  register: async (data: RegisterRequest): Promise<LoginResponse> => {
+    const response = await api.post<LoginResponse>("/auth/register", data);
+    return response.data;
   },
 
   logout: async (): Promise<void> => {

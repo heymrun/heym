@@ -30,6 +30,7 @@ from app.services.cron_slot_state import (
     cleanup_old_cleanup_slot_claims,
     iso_week_slot,
 )
+from app.services.data_retention import apply_retention, retention_cutoff
 from app.services.distributed_lock import lock_service
 from app.services.execution_history_maintenance import reclaim_execution_history_toast
 from app.services.global_variables_service import get_global_variables_context
@@ -56,6 +57,7 @@ class CronScheduler:
         self._last_portal_session_cleanup_date: str | None = None
         self._last_workflow_version_cleanup_date: str | None = None
         self._last_refresh_token_cleanup_date: str | None = None
+        self._last_data_retention_date: str | None = None
         self._last_file_access_token_cleanup_date: str | None = None
         self._last_response_cache_cleanup_date: str | None = None
         self._last_cron_slot_claim_cleanup_date: str | None = None
@@ -96,6 +98,7 @@ class CronScheduler:
                 await self._check_portal_session_cleanup()
                 await self._check_workflow_version_cleanup()
                 await self._check_refresh_token_cleanup()
+                await self._check_data_retention()
                 await self._check_file_access_token_cleanup()
                 await self._check_response_cache_cleanup()
                 await self._check_cron_slot_claim_cleanup()
@@ -567,6 +570,25 @@ class CronScheduler:
                     self._last_refresh_token_cleanup_date = current_date
                 else:
                     logger.debug("Refresh token cleanup already handled by another worker")
+
+    async def _check_data_retention(self) -> None:
+        """Delete history older than HEYM_DATA_RETENTION_DAYS, once a day after 05:00."""
+        tz = get_configured_timezone()
+        now = datetime.now(tz)
+        current_date = now.strftime("%Y%m%d")
+        if now.hour < 5 or self._last_data_retention_date == current_date:
+            return
+        self._last_data_retention_date = current_date
+        if retention_cutoff() is None:
+            return
+        if not await claim_cleanup_slot(
+            job_name="data_retention",
+            slot_date=current_date,
+            worker_id=lock_service.worker_id,
+        ):
+            logger.debug("Data retention already handled by another worker")
+            return
+        await apply_retention()
 
     async def _cleanup_expired_refresh_tokens(self) -> None:
         from app.services.auth import cleanup_expired_refresh_tokens

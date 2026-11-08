@@ -60,7 +60,7 @@ class ExecutionTokenActorTests(unittest.IsolatedAsyncioTestCase):
         collaborator_id = uuid.uuid4()
         workflow = _workflow(owner_id)
         token, _jti, _exp = create_workflow_execution_token(collaborator_id, workflow.id, 3600)
-        collaborator = SimpleNamespace(id=collaborator_id)
+        collaborator = SimpleNamespace(id=collaborator_id, is_active=True)
 
         actor = await self._validate(workflow, token, collaborator)
 

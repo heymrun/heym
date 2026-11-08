@@ -336,6 +336,22 @@ def _stream_mcp_jsonrpc_response(
     )
 
 
+async def session_user_active(user_id_str: str) -> bool:
+    """Whether the account behind a short-lived MCP session token may still act.
+
+    The session store lives in one process's memory, so deactivation on another instance
+    cannot clear it; the account row is the check every instance shares. It runs in its
+    own short session so a long tool call never holds a pooled connection for it.
+    """
+    try:
+        user_id = uuid.UUID(user_id_str)
+    except ValueError:
+        return False
+    async with async_session_maker() as db:
+        result = await db.execute(select(User.is_active).where(User.id == user_id))
+        return result.scalar_one_or_none() is True
+
+
 def _session_user_from_id(user_id_str: str) -> User:
     return User(
         id=uuid.UUID(user_id_str),
@@ -447,6 +463,12 @@ async def get_mcp_user(
                 headers={"WWW-Authenticate": 'Bearer realm="heym-mcp"'},
             )
         user_id_str, _ = resolve_result  # ignore server_id for default server
+        if not await session_user_active(user_id_str):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired session token",
+                headers={"WWW-Authenticate": 'Bearer realm="heym-mcp"'},
+            )
         return _session_user_from_id(user_id_str)
 
     # 1. Check for Bearer token (OAuth). Header only: a long-lived token in the
@@ -477,7 +499,7 @@ async def get_mcp_user(
 
         user_result = await db.execute(select(User).where(User.id == token_record.user_id))
         user = user_result.scalar_one_or_none()
-        if user is None:
+        if user is None or not user.is_active:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="User not found",
@@ -497,7 +519,7 @@ async def get_mcp_user(
     result = await db.execute(select(User).where(User.mcp_api_key == hash_secret(api_key)))
     user = result.scalar_one_or_none()
 
-    if user is None:
+    if user is None or not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid MCP API key",

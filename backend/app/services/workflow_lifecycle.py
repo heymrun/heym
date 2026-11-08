@@ -49,30 +49,38 @@ def _unfinished_execution_query(workflow_id: UUID) -> CompoundSelect:
     )
 
 
+ADMIN_PAUSE_MARKER = "_adminPaused"
+# Separate from the admin marker, so reactivating an account never resumes a workflow an
+# administrator paused on purpose, and an admin resume never undoes a deactivation.
+OWNER_DEACTIVATED_MARKER = "_ownerDeactivated"
+
+
 def set_automatic_triggers_paused(
-    nodes: list[dict[str, Any]], *, paused: bool
+    nodes: list[dict[str, Any]], *, paused: bool, marker: str = ADMIN_PAUSE_MARKER
 ) -> list[dict[str, Any]]:
-    """Pause/resume triggers without enabling ones already off before an admin pause.
+    """Pause/resume triggers without enabling ones already off before the pause.
 
     Remember affected triggers in their stored node data so Resume survives reloads
-    and works from another administrator's session. Older paused graphs without this
-    marker can still be resumed by enabling their automatic triggers.
+    and works from another administrator's session. Older admin-paused graphs without
+    the marker can still be resumed by enabling their automatic triggers.
     """
     updated = copy.deepcopy(nodes)
     triggers = [node for node in updated if node.get("type") in TRIGGER_NODE_TYPES]
-    has_pause_marker = any(node.get("data", {}).get("_adminPaused") is True for node in triggers)
-    resume_unmarked = not has_pause_marker and all(
-        node.get("data", {}).get("active") is False for node in triggers
+    has_pause_marker = any(node.get("data", {}).get(marker) is True for node in triggers)
+    resume_unmarked = (
+        marker == ADMIN_PAUSE_MARKER
+        and not has_pause_marker
+        and all(node.get("data", {}).get("active") is False for node in triggers)
     )
     for node in triggers:
         data = node.setdefault("data", {})
         if paused:
             if data.get("active") is not False:
-                data["_adminPaused"] = True
+                data[marker] = True
                 data["active"] = False
-        elif resume_unmarked or data.get("_adminPaused") is True:
+        elif resume_unmarked or data.get(marker) is True:
             data["active"] = True
-            data.pop("_adminPaused", None)
+            data.pop(marker, None)
     return updated
 
 
