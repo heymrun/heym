@@ -78,12 +78,39 @@ onUnmounted(() => {
 
 <template>
   <div class="space-y-4">
-    <div class="flex items-center justify-between gap-4">
-      <p class="text-sm text-muted-foreground">
-        Rotating <code>ENCRYPTION_KEY</code>: add the new key to
-        <code>ENCRYPTION_KEYS_EXTRA</code> everywhere, then make it <code>ENCRYPTION_KEY</code>
-        with the old one as the extra, then re-encrypt here. Keys are shown by fingerprint only.
-      </p>
+    <div class="flex items-start justify-between gap-4">
+      <div class="min-w-0 space-y-2">
+        <p class="text-sm font-medium">
+          How to rotate <code>ENCRYPTION_KEY</code>
+        </p>
+        <ol
+          data-testid="key-rotation-steps"
+          class="list-decimal space-y-1.5 pl-5 text-sm text-muted-foreground marker:font-medium marker:text-foreground"
+        >
+          <li>
+            <span class="font-medium text-foreground">Introduce.</span>
+            Add the new key to <code>ENCRYPTION_KEYS_EXTRA</code> on every instance and restart
+            them.
+          </li>
+          <li>
+            <span class="font-medium text-foreground">Promote.</span>
+            Make the new key <code>ENCRYPTION_KEY</code>, put the old key in
+            <code>ENCRYPTION_KEYS_EXTRA</code>, and restart every instance.
+          </li>
+          <li>
+            <span class="font-medium text-foreground">Re-encrypt.</span>
+            Click the button below. It runs in the background.
+          </li>
+          <li>
+            <span class="font-medium text-foreground">Retire.</span>
+            When it shows Completed, remove the old key from
+            <code>ENCRYPTION_KEYS_EXTRA</code>.
+          </li>
+        </ol>
+        <p class="text-xs text-muted-foreground">
+          Keys are shown by fingerprint only.
+        </p>
+      </div>
       <Button
         variant="outline"
         size="sm"
