@@ -51,6 +51,20 @@ A workflow with a [concurrency limit](../reference/webhooks.md#concurrency-limit
 
 The client polls the `heym_execution_status` tool with that `execution_id`. It returns the same body as the [status URL](../reference/webhooks.md#status-url): `queued` with the current position, `running`, then `success` or `error` with the outputs. It only finds runs of workflows that the same server exposes. The tool is listed on the default server and on each named server only while at least one of its workflows has a concurrency limit. When the workflow's queue is full, the call returns an error, "Concurrency queue is full".
 
+### Memory tools: get_user_memory and set_user_memory
+
+The default server always lists two more tools, with or without `heym_chat`, so any MCP client shares one memory with Heym's Chat and Heym Work. The memory is your [User Rules](../reference/user-settings.md#user-rules-as-memory).
+
+| Tool | Arguments | Returns |
+|------|-----------|---------|
+| `get_user_memory` | none | `content` (your User Rules), `revision`, `length`, `max_length` |
+| `set_user_memory` | `mode` (`append` or `replace`), `content`, `revision` (required for `replace`) | `status` (`added`, `replaced`, `unchanged`, `conflict`, `refused`) and the memory after the write |
+
+- `append` adds one line.
+- `replace` rewrites the whole text and only lands when `revision` matches the stored text. On `conflict`, the result carries the current text and revision to merge and retry.
+- Text that looks like an API key, token, password or other credential is refused, and nothing is saved.
+- Named servers do not list these tools. A workflow named `get_user_memory` or `set_user_memory` is not listed on the default server.
+
 ## Heym Agent
 
 The **Heym Capabilities** section turns the Chat tab engine into a single MCP tool named `heym_chat`. Enable it on the default server, on any named server, or on both — each surface keeps its own toggle and model selection.
@@ -73,7 +87,7 @@ When it is on, `heym_chat` appears in `tools/list` alongside your workflow tools
 
 Capabilities added to the Chat tab later become available through `heym_chat` automatically — there is no per-capability toggle to keep in sync.
 
-These capabilities run inside `heym_chat`: `tools/list` shows `heym_chat` and your workflow tools, never the chat's internal tools such as the eval suite ones.
+These capabilities run inside `heym_chat`: `tools/list` shows `heym_chat` and your workflow tools, never the chat's internal tools such as the eval suite ones. The [memory tools](#memory-tools-get_user_memory-and-set_user_memory) are the one exception: `heym_chat` uses them too, and the default server also lists them on their own.
 
 ### Build mode
 

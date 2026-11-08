@@ -14,6 +14,11 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.analytics import upsert_workflow_analytics_snapshot
+from app.api.chat_memory import (
+    USER_MEMORY_TOOL_NAMES,
+    build_user_memory_mcp_tools,
+    call_user_memory_tool,
+)
 from app.api.deps import get_current_user
 from app.api.workflow_run_audit import RunActor, audit_workflow_run
 from app.api.workflows import (
@@ -645,6 +650,20 @@ async def build_tools_with_chat(
     return tools
 
 
+async def global_mcp_tools(
+    workflows: list[Workflow],
+    chat_settings: agent_settings.AgentSettings,
+) -> list[MCPTool]:
+    """The global server's tools: the shared list plus the user memory tools.
+
+    The memory tools win a name clash, so a workflow named like one is not listed. Named servers
+    use `build_tools_with_chat` directly and do not offer memory.
+    """
+    tools = await build_tools_with_chat(workflows, chat_settings)
+    kept = [tool for tool in tools if tool.name not in USER_MEMORY_TOOL_NAMES]
+    return kept + build_user_memory_mcp_tools()
+
+
 async def dispatch_chat_tool_call(
     *,
     request: Request,
@@ -1038,7 +1057,7 @@ async def list_mcp_tools(
 ) -> MCPToolsListResponse:
     workflows = await get_user_mcp_workflows(db, mcp_user.id)
     chat_settings = await agent_settings.get_global_agent_settings(db, mcp_user.id)
-    return MCPToolsListResponse(tools=await build_tools_with_chat(workflows, chat_settings))
+    return MCPToolsListResponse(tools=await global_mcp_tools(workflows, chat_settings))
 
 
 # Server-side ceiling for the caller-supplied MCP connect timeout. The outer HTTP
@@ -1121,6 +1140,15 @@ async def call_mcp_tool(
     body = await request.json()
     tool_name = body.get("name", "")
     arguments = body.get("arguments", {})
+
+    if tool_name in USER_MEMORY_TOOL_NAMES:
+        memory_result = await call_user_memory_tool(
+            db, mcp_user, tool_name, arguments or {}, source="mcp"
+        )
+        return MCPToolResult(
+            content=[MCPTextContent(text=json.dumps(memory_result, indent=2))],
+            isError=bool(memory_result.get("error")),
+        )
 
     if tool_name == mcp_chat_service.MCP_CHAT_TOOL_NAME:
         chat_settings = await agent_settings.get_global_agent_settings(db, mcp_user.id)
@@ -1382,7 +1410,7 @@ async def _dispatch_mcp_jsonrpc(
     if msg.method == "tools/list":
         workflows = await get_user_mcp_workflows(db, mcp_user.id)
         chat_settings = await agent_settings.get_global_agent_settings(db, mcp_user.id)
-        tools = await build_tools_with_chat(workflows, chat_settings)
+        tools = await global_mcp_tools(workflows, chat_settings)
         return {
             "jsonrpc": "2.0",
             "id": msg.id,
@@ -1392,6 +1420,16 @@ async def _dispatch_mcp_jsonrpc(
     if msg.method == "tools/call":
         tool_name = msg.params.get("name", "")
         arguments = msg.params.get("arguments", {})
+
+        if tool_name in USER_MEMORY_TOOL_NAMES:
+            memory_result = await call_user_memory_tool(
+                db, mcp_user, tool_name, arguments or {}, source="mcp"
+            )
+            return _mcp_tool_result_jsonrpc_response(
+                msg.id,
+                json.dumps(memory_result, indent=2),
+                is_error=bool(memory_result.get("error")),
+            )
 
         if tool_name == mcp_chat_service.MCP_CHAT_TOOL_NAME:
             chat_settings = await agent_settings.get_global_agent_settings(db, mcp_user.id)
