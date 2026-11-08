@@ -134,9 +134,9 @@ system prompt.
   `get_user_memory` and `set_user_memory`, with or without `heym_chat`. Both global listings use
   it (`tools/list` and `GET /api/mcp/tools`). `build_tools_with_chat` itself is unchanged because
   named servers share it.
-- `tools/call` handles both names before `heym_chat` and workflow matching, through
-  `call_user_memory_tool` with `source="mcp"`. A tool error returns an MCP tool result with
-  `isError: true`.
+- `tools/call` (JSON-RPC) and the REST `POST /api/mcp/tools/call` handle both names before
+  `heym_chat` and workflow matching, through `call_user_memory_tool` with `source="mcp"`. A tool
+  error returns an MCP tool result with `isError: true`.
 - Reserved names win: a workflow whose sanitized tool name equals one of them is left out of
   `tools/list` and is not reachable under that name.
 - Per-workflow MCP surfaces are unchanged.
