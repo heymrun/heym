@@ -5,6 +5,7 @@ import type { Conversation, ConversationDetail, ContextUsage, EvalSuitePreview, 
 import type { FileAttachmentPayload } from "@/services/api";
 import { DRIVE_ATTACHMENT_MARKER } from "@/lib/chatAttachment";
 import { CHAT_CONTEXT_HEADER } from "@/lib/chatContext";
+import { messagesBeforeEdit } from "@/lib/chatMessageEdit";
 import { applyChatLiveEvent, visibleDraft } from "@/lib/chatLive";
 import { mergeEvalSuite } from "@/lib/evalSuitePreview";
 import { chatApi } from "@/services/api";
@@ -365,6 +366,49 @@ export const useChatStore = defineStore("chat", () => {
         _clearStreamState(conversationId);
       }
     }
+  }
+
+  /**
+   * Edit an earlier user message and send it again with the chosen model. The server removes
+   * the message and everything after it, keeps its attachment, and starts a new turn; the
+   * thread rewinds to match. Throws when the server refuses, so the editor can say why.
+   */
+  async function editMessage(
+    conversationId: string,
+    messageId: string,
+    content: string,
+    credentialId: string,
+    model: string,
+    attachmentName: string | null = null,
+  ): Promise<void> {
+    if (activeConversation.value?.id !== conversationId) return;
+    if (getStreamState(conversationId).isStreaming) return;
+    if (!messagesBeforeEdit(activeConversation.value.messages, messageId)) return;
+    userCancelledConvIds.delete(conversationId);
+
+    const response = await chatApi.sendMessage(
+      conversationId,
+      content,
+      credentialId,
+      model,
+      null,
+      messageId,
+    );
+    if (!response.user_message || activeConversation.value?.id !== conversationId) return;
+    const kept = messagesBeforeEdit(activeConversation.value.messages, messageId) ?? [];
+    const displayMessage: Message = {
+      ...response.user_message,
+      content,
+      ...(attachmentName ? { attachmentName } : {}),
+    };
+    activeConversation.value = {
+      ...activeConversation.value,
+      messages: [...kept, displayMessage],
+    };
+    void _writeCachedConversation(activeConversation.value);
+    _setStreamState(conversationId, _emptyStreamingPatch(true));
+    _patchConversationFlag(conversationId, "is_running", true);
+    void _subscribeToStream(conversationId);
   }
 
   function _emptyStreamingPatch(isStreaming: boolean): Partial<StreamState> {
@@ -764,7 +808,14 @@ export const useChatStore = defineStore("chat", () => {
     current: ConversationDetail,
     fetched: ConversationDetail,
   ): ConversationDetail {
-    if (current.messages.length === 0) {
+    // A user message the server dropped and one the local copy has never seen mean the thread
+    // was edited elsewhere; the server's history is the one to show.
+    const currentIds = new Set(current.messages.map((message) => message.id));
+    const fetchedIds = new Set(fetched.messages.map((message) => message.id));
+    const editedElsewhere =
+      current.messages.some((message) => message.role === "user" && !fetchedIds.has(message.id)) &&
+      fetched.messages.some((message) => message.role === "user" && !currentIds.has(message.id));
+    if (current.messages.length === 0 || editedElsewhere) {
       return { ...fetched, queued_messages: fetched.queued_messages ?? [] };
     }
     if (fetched.messages.length <= current.messages.length) {
@@ -942,6 +993,7 @@ export const useChatStore = defineStore("chat", () => {
     deleteConversation,
     clearConversations,
     sendMessage,
+    editMessage,
     cancelStreaming,
     updateQueuedMessage,
     deleteQueuedMessage,

@@ -3966,6 +3966,7 @@ export const chatApi = {
     credentialId: string,
     model: string,
     attachment: FileAttachmentPayload | null,
+    editMessageId: string | null = null,
   ): Promise<SendMessageResponse> => {
     const response = await api.post<SendMessageResponse>(`/chats/${id}/messages`, {
       content,
@@ -3973,6 +3974,8 @@ export const chatApi = {
       model,
       allow_build: true,
       ...(attachment ? { attachment } : {}),
+      // Edit and resend: the server removes this message and everything after it first.
+      ...(editMessageId ? { edit_message_id: editMessageId } : {}),
     });
     return response.data;
   },

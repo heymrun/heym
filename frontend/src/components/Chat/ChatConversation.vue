@@ -26,6 +26,7 @@ import ChatToolCall from "@/components/Chat/ChatToolCall.vue";
 import ChatContextBadge from "@/components/Chat/ChatContextBadge.vue";
 import ChatContextChips from "@/components/Chat/ChatContextChips.vue";
 import ChatEvalSuiteCards from "@/components/Chat/ChatEvalSuiteCards.vue";
+import ChatMessageEditor from "@/components/Chat/ChatMessageEditor.vue";
 import ReadonlyCanvasPreview from "@/components/Canvas/ReadonlyCanvasPreview.vue";
 import Button from "@/components/ui/Button.vue";
 import ClarifyCard from "@/components/ui/ClarifyCard.vue";
@@ -47,9 +48,10 @@ import {
   type ChatContextItem,
   type ExtractedChatContext,
 } from "@/lib/chatContext";
+import { editableMessage, editedMessageContent } from "@/lib/chatMessageEdit";
 import { estimateTokens } from "@/lib/contextEstimator";
 import { markdownToPlainText, renderMarkdown } from "@/lib/markdown";
-import { aiApi } from "@/services/api";
+import { aiApi, getErrorDetail } from "@/services/api";
 import { useChatModelSelection } from "@/composables/useChatModelSelection";
 import { useDictation } from "@/composables/useDictation";
 import { splitDriveAttachment } from "@/lib/chatAttachment";
@@ -117,6 +119,10 @@ const {
 });
 
 const copiedMessageId = ref<string | null>(null);
+// Edit and resend: the user message open in the inline editor.
+const editingMessageId = ref<string | null>(null);
+const editError = ref<string | null>(null);
+const isSavingEdit = ref(false);
 const queueEditingId = ref<string | null>(null);
 const queueEditingValue = ref("");
 const queueBusyIds = reactive<Set<string>>(new Set());
@@ -305,6 +311,7 @@ watch(
   (id) => {
     void loadConversationForRoute(id);
     contextItems.value = [];
+    cancelMessageEdit();
     applyShowcaseDraft();
     applyContextDraft();
     focusInputWhenReady();
@@ -648,6 +655,49 @@ async function deleteQueuedMessage(message: QueuedMessage): Promise<void> {
   }
 }
 
+const editBlockedReason = computed((): string | null => {
+  if (isThisConvStreaming.value) return "Wait for the reply to finish, or stop it, to send the edit.";
+  if (!selectedCredentialId.value || !selectedModel.value || modelsLoadFailed.value) {
+    return "Choose a model above to send the edit.";
+  }
+  return null;
+});
+
+function startMessageEdit(msg: Message): void {
+  if (msg.role !== "user" || isThisConvStreaming.value) return;
+  editingMessageId.value = msg.id;
+  editError.value = null;
+}
+
+function cancelMessageEdit(): void {
+  editingMessageId.value = null;
+  editError.value = null;
+}
+
+async function saveMessageEdit(msg: Message, text: string): Promise<void> {
+  const trimmed = text.trim();
+  if (!trimmed || isSavingEdit.value || editBlockedReason.value) return;
+  if (!selectedCredentialId.value || !selectedModel.value) return;
+  isSavingEdit.value = true;
+  editError.value = null;
+  try {
+    await chatStore.editMessage(
+      props.conversationId,
+      msg.id,
+      editedMessageContent(msg.content, trimmed),
+      selectedCredentialId.value,
+      selectedModel.value,
+      messageAttachmentName(msg),
+    );
+    editingMessageId.value = null;
+    focusInputWhenReady();
+  } catch (error: unknown) {
+    editError.value = getErrorDetail(error, "The edited message could not be sent.");
+  } finally {
+    isSavingEdit.value = false;
+  }
+}
+
 const tts = useTextToSpeech();
 const voiceStore = useVoiceStore();
 
@@ -987,47 +1037,83 @@ onUnmounted(() => {
             <Bot class="w-4 h-4 text-primary" />
           </div>
 
+          <ChatMessageEditor
+            v-if="msg.role === 'user' && editingMessageId === msg.id"
+            :text="editableMessage(msg.content).text"
+            :items="editableMessage(msg.content).items"
+            :attachment-name="messageAttachmentName(msg)"
+            :sending="isSavingEdit"
+            :error="editError"
+            :blocked-reason="editBlockedReason"
+            @save="(text: string) => saveMessageEdit(msg, text)"
+            @cancel="cancelMessageEdit"
+          />
           <div
+            v-else
             :class="[
-              'group/message relative min-w-0 rounded-2xl px-4 py-2.5 pr-[4.25rem] text-sm leading-relaxed break-words',
+              'group/message relative min-w-0 rounded-2xl px-4 py-2.5 text-sm leading-relaxed break-words',
               msg.workflowPreview ? 'w-[min(92%,920px)] max-w-[920px]' : 'max-w-[88%] sm:max-w-[72%]',
               msg.role === 'user'
-                ? 'bg-primary text-primary-foreground rounded-tr-sm'
-                : 'bg-muted text-foreground rounded-tl-sm'
+                ? 'bg-primary text-primary-foreground rounded-tr-sm pr-[6.25rem] sm:pr-4'
+                : 'bg-muted text-foreground rounded-tl-sm pr-[4.25rem]'
             ]"
           >
-            <button
-              type="button"
-              class="absolute right-1.5 top-1.5 flex h-7 w-7 items-center justify-center rounded-lg text-current opacity-60 transition-opacity hover:bg-black/10 sm:opacity-0 sm:group-hover/message:opacity-70 hover:opacity-100"
-              :title="copiedMessageId === msg.id ? 'Copied' : 'Copy'"
-              :aria-label="copiedMessageId === msg.id ? 'Copied' : 'Copy message'"
-              @click="copyMessage(msg)"
+            <!-- On wider screens a question's actions sit outside the bubble, to its left,
+                 so a short question keeps a short bubble. -->
+            <div
+              :class="[
+                'absolute right-1.5 top-1.5 flex items-center',
+                msg.role === 'user'
+                  ? 'sm:right-full sm:pr-1.5 sm:text-muted-foreground'
+                  : '',
+              ]"
+              data-testid="chat-message-actions"
             >
-              <Check
-                v-if="copiedMessageId === msg.id"
-                class="w-3.5 h-3.5"
-              />
-              <Copy
-                v-else
-                class="w-3.5 h-3.5"
-              />
-            </button>
-            <button
-              type="button"
-              class="absolute right-9 top-1.5 flex h-7 w-7 items-center justify-center rounded-lg text-current opacity-60 transition-opacity hover:bg-black/10 sm:opacity-0 sm:group-hover/message:opacity-70 hover:opacity-100"
-              :title="tts.playingId.value === msg.id ? 'Stop' : 'Read aloud'"
-              :aria-label="tts.playingId.value === msg.id ? 'Stop reading' : 'Read message aloud'"
-              @click="readMessageAloud(msg)"
-            >
-              <Square
-                v-if="tts.playingId.value === msg.id"
-                class="w-3.5 h-3.5"
-              />
-              <Volume2
-                v-else
-                class="w-3.5 h-3.5"
-              />
-            </button>
+              <button
+                type="button"
+                class="flex h-7 w-7 items-center justify-center rounded-lg text-current opacity-60 transition-opacity hover:bg-black/10 sm:opacity-0 sm:group-hover/message:opacity-70 hover:opacity-100"
+                :title="tts.playingId.value === msg.id ? 'Stop' : 'Read aloud'"
+                :aria-label="tts.playingId.value === msg.id ? 'Stop reading' : 'Read message aloud'"
+                @click="readMessageAloud(msg)"
+              >
+                <Square
+                  v-if="tts.playingId.value === msg.id"
+                  class="w-3.5 h-3.5"
+                />
+                <Volume2
+                  v-else
+                  class="w-3.5 h-3.5"
+                />
+              </button>
+              <button
+                v-if="msg.role === 'user'"
+                type="button"
+                class="flex h-7 w-7 items-center justify-center rounded-lg text-current opacity-60 transition-opacity hover:bg-black/10 hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-30 sm:opacity-0 sm:group-hover/message:opacity-70 sm:disabled:opacity-0 sm:group-hover/message:disabled:opacity-30"
+                :title="isThisConvStreaming ? 'Wait for the reply to finish to edit' : 'Edit'"
+                aria-label="Edit message"
+                data-testid="chat-message-edit"
+                :disabled="isThisConvStreaming"
+                @click="startMessageEdit(msg)"
+              >
+                <Pencil class="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                class="flex h-7 w-7 items-center justify-center rounded-lg text-current opacity-60 transition-opacity hover:bg-black/10 sm:opacity-0 sm:group-hover/message:opacity-70 hover:opacity-100"
+                :title="copiedMessageId === msg.id ? 'Copied' : 'Copy'"
+                :aria-label="copiedMessageId === msg.id ? 'Copied' : 'Copy message'"
+                @click="copyMessage(msg)"
+              >
+                <Check
+                  v-if="copiedMessageId === msg.id"
+                  class="w-3.5 h-3.5"
+                />
+                <Copy
+                  v-else
+                  class="w-3.5 h-3.5"
+                />
+              </button>
+            </div>
             <div
               v-if="msg.role === 'assistant' && msg.tool_calls && msg.tool_calls.length > 0"
               class="mb-2 flex flex-col gap-1.5"
