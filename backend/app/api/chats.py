@@ -61,6 +61,13 @@ from app.models.chat_schemas import (
 from app.services import chat_task_registry as registry
 from app.services.chat_build_mode import BuildRequest
 from app.services.chat_eval_mode import EVAL_SUITE_SAVED_EVENT
+from app.services.chat_message_edit import (
+    EDIT_NOT_FOUND,
+    EDIT_WHILE_RUNNING,
+    carried_attachment,
+    messages_from_edit,
+    split_attachment_block,
+)
 from app.services.credential_access import get_accessible_credential
 from app.services.credential_catalog import CredentialPromptMode, build_credentials_prompt
 from app.services.credential_setup import CredentialFormTool
@@ -1358,9 +1365,42 @@ async def _attachment_data(
         return body.attachment.model_dump(mode="json")
     if body.attachment.file_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="file_id is required")
-    access = await get_accessible_file(db, body.attachment.file_id, user_id)
-    if access is None:
+    data = await _drive_attachment_data(db, user_id, body.attachment.file_id)
+    if data is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    return data
+
+
+async def _edited_turn_input(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    content: str,
+    original_content: str,
+    attachment_data: dict | None,
+) -> tuple[str, dict | None]:
+    """The edited turn's content and attachment, keeping the original's attachment.
+
+    A new attachment replaces the old one. A Drive file the user can no longer open keeps
+    its stored reference as text, as it stood in the conversation.
+    """
+    if attachment_data is not None:
+        return content, attachment_data
+    carried = carried_attachment(original_content)
+    if carried.drive_file_id is not None:
+        data = await _drive_attachment_data(db, user_id, carried.drive_file_id)
+        if data is not None:
+            return content, data
+        return content + split_attachment_block(original_content)[1], None
+    return content + carried.text_tail, None
+
+
+async def _drive_attachment_data(
+    db: AsyncSession, user_id: uuid.UUID, file_id: uuid.UUID
+) -> dict | None:
+    """A Drive file the user can open, described from its row; None when they cannot."""
+    access = await get_accessible_file(db, file_id, user_id)
+    if access is None:
+        return None
     row = access.file
     return {
         "name": row.filename,
@@ -1407,6 +1447,24 @@ async def send_message(
 
     build = await _resolve_build_request(db, current_user.id, body)
     attachment_data = await _attachment_data(db, current_user.id, body)
+    content = body.content
+    if body.edit_message_id is not None:
+        if conversation.is_running:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=EDIT_WHILE_RUNNING)
+        dropped = messages_from_edit(existing_messages, body.edit_message_id)
+        if dropped is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=EDIT_NOT_FOUND)
+        content, attachment_data = await _edited_turn_input(
+            db, current_user.id, content, dropped[0].content, attachment_data
+        )
+        # The conversation rewinds to the point before the edited message.
+        await db.execute(
+            delete(DashboardMessage).where(
+                DashboardMessage.conversation_id == conversation_id,
+                DashboardMessage.id.in_([message.id for message in dropped]),
+            )
+        )
+        existing_messages = existing_messages[: len(existing_messages) - len(dropped)]
     conv_id_str = str(conversation_id)
     if conversation.is_running:
         queued_at = datetime.now(timezone.utc)
@@ -1468,7 +1526,7 @@ async def send_message(
         )
 
     attachment = FileAttachment.model_validate(attachment_data) if attachment_data else None
-    user_message = _build_user_message(body.content, attachment)
+    user_message = _build_user_message(content, attachment)
     message_created_at = datetime.now(timezone.utc)
     message = DashboardMessage(
         id=uuid.uuid4(),
@@ -1496,7 +1554,7 @@ async def send_message(
         _process_chat(
             conv_id=conv_id_str,
             user_id=current_user.id,
-            content=body.content,
+            content=content,
             credential_id=credential.id,
             model=body.model,
             attachment_data=attachment_data,

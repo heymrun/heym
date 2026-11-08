@@ -31,6 +31,7 @@ You can also start a conversation from the chat box on the [Workflows tab](./wor
 - **Markdown rendering** – Responses support markdown formatting, including inline images
 - **Image display** – Images embedded in responses (e.g. from LLM image generation) appear inline; click any image to view it fullscreen. Press **Esc** or the back button (mobile) to close the fullscreen view
 - **Copy messages** – Copy any message to the clipboard
+- **Edit and resend** – Hover one of your messages and click the pencil next to **Copy** to edit it in place. **Save and send** (or **Enter**) removes that message and every message after it, then sends the edited text with the model selected above, so the conversation continues as if the later turns never happened. Context chips and the attachment stay with the message. Press **Esc** or **Cancel** to keep the conversation as it is. Editing waits until a running reply finishes or is stopped. Anything the removed turns already did, such as a saved workflow, stays as it is
 - **Clear chat** – Start a new conversation
 - **Voice input** – Use the microphone button for speech-to-text (browser-supported). When recording stops, Heym can lightly clean up the transcript before you send it
 - **Scheduled workflows** – Ask when cron workflows run (today, this week, this month, or a custom date range). The assistant uses the same schedule data as the [Scheduled](./scheduled-tab.md) tab and can limit results to workflows you own or include those shared with you

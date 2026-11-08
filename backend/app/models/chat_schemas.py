@@ -128,6 +128,14 @@ class MessageCreate(BaseModel):
         default=None,
         description="The workflow an AI edit changes. Needs allow_build or allow_skill_write.",
     )
+    edit_message_id: uuid.UUID | None = Field(
+        default=None,
+        description=(
+            "Edit an earlier user message: it and every message after it are removed, and "
+            "this content is sent in its place. Its attachment is kept unless a new one is "
+            "sent. Refused with 409 while a reply is running."
+        ),
+    )
 
 
 class ConversationTitleGenerate(BaseModel):
