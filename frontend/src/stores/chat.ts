@@ -26,6 +26,13 @@ interface EncryptedChatCachePayload {
 
 type ConversationLoadResult = "loaded" | "not_found" | "error";
 
+/** A queued message's file names, in order; a server without the list sends only the first. */
+function queuedAttachmentNames(queued: QueuedMessage | undefined): string[] {
+  if (!queued) return [];
+  if (queued.attachment_names && queued.attachment_names.length > 0) return queued.attachment_names;
+  return queued.attachment_name ? [queued.attachment_name] : [];
+}
+
 function getInitialSidebarOpen(): boolean {
   if (typeof window === "undefined") return true;
   if (window.matchMedia(MOBILE_SIDEBAR_MEDIA_QUERY).matches) return false;
@@ -320,7 +327,7 @@ export const useChatStore = defineStore("chat", () => {
     content: string,
     credentialId: string,
     model: string,
-    attachment: FileAttachmentPayload | null = null,
+    attachments: FileAttachmentPayload[] = [],
   ): Promise<void> {
     if (!activeConversation.value || activeConversation.value.id !== conversationId) return;
 
@@ -329,7 +336,7 @@ export const useChatStore = defineStore("chat", () => {
     userCancelledConvIds.delete(conversationId);
 
     try {
-      const response = await chatApi.sendMessage(conversationId, content, credentialId, model, attachment);
+      const response = await chatApi.sendMessage(conversationId, content, credentialId, model, attachments);
       if (response.status === "queued" && response.queued_message) {
         _upsertQueuedMessage(conversationId, response.queued_message);
         _patchConversationFlag(conversationId, "is_running", true);
@@ -339,7 +346,7 @@ export const useChatStore = defineStore("chat", () => {
       const displayMessage: Message = {
         ...response.user_message,
         content,
-        ...(attachment ? { attachmentName: attachment.name } : {}),
+        ...(attachments.length > 0 ? { attachmentNames: attachments.map((item) => item.name) } : {}),
       };
       _appendMessageIfMissing(conversationId, displayMessage);
 
@@ -379,7 +386,7 @@ export const useChatStore = defineStore("chat", () => {
     content: string,
     credentialId: string,
     model: string,
-    attachmentName: string | null = null,
+    attachmentNames: string[] = [],
   ): Promise<void> {
     if (activeConversation.value?.id !== conversationId) return;
     if (getStreamState(conversationId).isStreaming) return;
@@ -391,7 +398,7 @@ export const useChatStore = defineStore("chat", () => {
       content,
       credentialId,
       model,
-      null,
+      [],
       messageId,
     );
     if (!response.user_message || activeConversation.value?.id !== conversationId) return;
@@ -399,7 +406,7 @@ export const useChatStore = defineStore("chat", () => {
     const displayMessage: Message = {
       ...response.user_message,
       content,
-      ...(attachmentName ? { attachmentName } : {}),
+      ...(attachmentNames.length > 0 ? { attachmentNames } : {}),
     };
     activeConversation.value = {
       ...activeConversation.value,
@@ -623,10 +630,11 @@ export const useChatStore = defineStore("chat", () => {
             (message) => message.id === payload.queuedMessageId,
           );
           _removeQueuedMessage(conversationId, payload.queuedMessageId);
+          const names = queuedAttachmentNames(queued);
           _appendMessageIfMissing(conversationId, {
             ...payload.userMessage,
             content: queued?.content ?? payload.userMessage.content,
-            ...(queued?.attachment_name ? { attachmentName: queued.attachment_name } : {}),
+            ...(names.length > 0 ? { attachmentNames: names } : {}),
           });
           _setStreamState(conversationId, _emptyStreamingPatch(true));
         },

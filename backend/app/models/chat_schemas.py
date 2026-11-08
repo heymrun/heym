@@ -6,6 +6,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.services.chat_attachments import MAX_CHAT_ATTACHMENTS
+
 
 class ConversationCreate(BaseModel):
     title: str = "New Chat"
@@ -73,6 +75,7 @@ class QueuedMessageResponse(BaseModel):
     credential_id: uuid.UUID
     model: str
     attachment_name: str | None = None
+    attachment_names: list[str] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 
@@ -112,7 +115,14 @@ class MessageCreate(BaseModel):
     content: str
     credential_id: str
     model: str
-    attachment: ChatFileAttachment | None = None
+    attachment: ChatFileAttachment | None = Field(
+        default=None, description="One attached file; it goes before any in attachments."
+    )
+    attachments: list[ChatFileAttachment] = Field(
+        default_factory=list,
+        max_length=MAX_CHAT_ATTACHMENTS,
+        description=f"The files attached to the message, at most {MAX_CHAT_ATTACHMENTS}.",
+    )
     allow_build: bool = Field(
         default=False,
         description="Chat build mode: the turn may save, test-run and finish workflows.",
@@ -132,10 +142,15 @@ class MessageCreate(BaseModel):
         default=None,
         description=(
             "Edit an earlier user message: it and every message after it are removed, and "
-            "this content is sent in its place. Its attachment is kept unless a new one is "
-            "sent. Refused with 409 while a reply is running."
+            "this content is sent in its place. Its attachments are kept unless new ones "
+            "are sent. Refused with 409 while a reply is running."
         ),
     )
+
+    def requested_attachments(self) -> list[ChatFileAttachment]:
+        """Every attached file in order: `attachment` first, then `attachments`."""
+        single = [self.attachment] if self.attachment is not None else []
+        return [*single, *self.attachments]
 
 
 class ConversationTitleGenerate(BaseModel):

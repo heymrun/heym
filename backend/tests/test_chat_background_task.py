@@ -355,7 +355,7 @@ class TestWorkerOwnershipExceptionCleanup(unittest.IsolatedAsyncioTestCase):
                     content="Hello",
                     credential_id=self.cred_id,
                     model="gpt-4o",
-                    attachment_data=None,
+                    attachments=[],
                     public_base_url="http://localhost",
                     should_generate_title=False,
                 )
@@ -389,7 +389,7 @@ class TestWorkerOwnershipExceptionCleanup(unittest.IsolatedAsyncioTestCase):
                     content="Hello",
                     credential_id=self.cred_id,
                     model="gpt-4o",
-                    attachment_data=None,
+                    attachments=[],
                     public_base_url="http://localhost",
                     should_generate_title=False,
                 )
@@ -433,7 +433,7 @@ class TestWorkerOwnershipExceptionCleanup(unittest.IsolatedAsyncioTestCase):
                 content="Hello",
                 credential_id=self.cred_id,
                 model="gpt-4o",
-                attachment_data=None,
+                attachments=[],
                 public_base_url="http://localhost",
                 should_generate_title=False,
             )

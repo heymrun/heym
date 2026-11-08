@@ -56,7 +56,7 @@ class ChatSystemPromptCredentialTests(unittest.IsolatedAsyncioTestCase):
             content="hi",
             credential_id=uuid.uuid4(),
             model="gpt-4o",
-            attachment_data=None,
+            attachments=[],
             should_generate_title=False,
         )
 

@@ -2399,7 +2399,8 @@ class DashboardChatQueueItem(Base):
         nullable=False,
     )
     model: Mapped[str] = mapped_column(String(255), nullable=False)
-    attachment: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=None)
+    # A list of attachments; rows queued before several files hold one dict.
+    attachment: Mapped[list[dict] | dict | None] = mapped_column(JSONB, nullable=True, default=None)
     # A queued build turn keeps its build mode and AI edit target until it runs.
     allow_build: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"

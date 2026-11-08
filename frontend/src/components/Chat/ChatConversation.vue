@@ -24,6 +24,7 @@ import {
 import type { Message, QueuedMessage, WorkflowPreview } from "@/types/chat";
 import ChatToolCall from "@/components/Chat/ChatToolCall.vue";
 import ChatContextBadge from "@/components/Chat/ChatContextBadge.vue";
+import ChatAttachmentChips from "@/components/Chat/ChatAttachmentChips.vue";
 import ChatContextChips from "@/components/Chat/ChatContextChips.vue";
 import ChatEvalSuiteCards from "@/components/Chat/ChatEvalSuiteCards.vue";
 import ChatMessageEditor from "@/components/Chat/ChatMessageEditor.vue";
@@ -54,13 +55,8 @@ import { markdownToPlainText, renderMarkdown } from "@/lib/markdown";
 import { aiApi, getErrorDetail } from "@/services/api";
 import { useChatModelSelection } from "@/composables/useChatModelSelection";
 import { useDictation } from "@/composables/useDictation";
-import { splitDriveAttachment } from "@/lib/chatAttachment";
-import {
-  ATTACHMENT_ACCEPT,
-  toAttachmentPayload,
-  useFileAttachment,
-} from "@/composables/useFileAttachment";
-import type { AttachedFile } from "@/composables/useFileAttachment";
+import { splitAttachmentBlocks } from "@/lib/chatAttachment";
+import { pastedFiles, transferFiles, useFileAttachment } from "@/composables/useFileAttachment";
 import { useQuickPrompts } from "@/composables/useQuickPrompts";
 import { useThinkingWord } from "@/composables/useThinkingWord";
 import { visibleDraft } from "@/lib/chatLive";
@@ -167,8 +163,16 @@ let messagesResizeObserver: ResizeObserver | null = null;
 let chatScrollbarDragStartY = 0;
 let chatScrollbarDragStartScrollTop = 0;
 
-const { attachedFile, attachmentError, attachmentLoading, processFile, clearAttachment } =
-  useFileAttachment();
+const {
+  attachedFiles,
+  attachmentErrors,
+  attachmentLoading,
+  attachmentPayloads,
+  addFiles,
+  removeAttachment,
+  dismissAttachmentErrors,
+  clearAttachments,
+} = useFileAttachment();
 const { editingIndex: qpEditingIndex, editingValue: qpEditingValue, startEdit: qpStartEdit, commitEdit: qpCommitEdit, onEditKeydown: qpOnEditKeydown } =
   useQuickPrompts();
 
@@ -200,10 +204,15 @@ function handleDrop(event: DragEvent): void {
   event.preventDefault();
   dragCounter = 0;
   isDraggingFile.value = false;
-  const file = event.dataTransfer?.files[0];
-  if (file) {
-    void processFile(file);
-  }
+  void addFiles(transferFiles(event.dataTransfer));
+}
+
+/** Pasted files (a screenshot, files copied in a file manager) attach; pasted text stays text. */
+function handlePaste(event: ClipboardEvent): void {
+  const files = pastedFiles(event.clipboardData);
+  if (files.length === 0) return;
+  event.preventDefault();
+  void addFiles(files);
 }
 
 const isShowingConversation = computed(
@@ -227,12 +236,18 @@ const userMessageParts = computed(() => {
 
 function messageText(msg: Message): string {
   const text = userMessageParts.value.get(msg.id)?.text ?? msg.content;
-  return msg.role === "user" ? splitDriveAttachment(text).text : text;
+  return msg.role === "user" ? splitAttachmentBlocks(text).text : text;
 }
 
-function messageAttachmentName(msg: Message): string | null {
-  if (msg.attachmentName) return msg.attachmentName;
-  return msg.role === "user" ? splitDriveAttachment(msg.content).name : null;
+function messageAttachmentNames(msg: Message): string[] {
+  if (msg.attachmentNames && msg.attachmentNames.length > 0) return msg.attachmentNames;
+  if (msg.role !== "user") return [];
+  return splitAttachmentBlocks(msg.content).blocks.map((block) => block.name);
+}
+
+function queuedAttachmentNames(queued: QueuedMessage): string[] {
+  if (queued.attachment_names && queued.attachment_names.length > 0) return queued.attachment_names;
+  return queued.attachment_name ? [queued.attachment_name] : [];
 }
 
 function messageContextItems(msg: Message): ChatContextItem[] {
@@ -687,7 +702,7 @@ async function saveMessageEdit(msg: Message, text: string): Promise<void> {
       editedMessageContent(msg.content, trimmed),
       selectedCredentialId.value,
       selectedModel.value,
-      messageAttachmentName(msg),
+      messageAttachmentNames(msg),
     );
     editingMessageId.value = null;
     focusInputWhenReady();
@@ -751,10 +766,9 @@ function openFilePicker(): void {
 
 async function handleFileInputChange(event: Event): Promise<void> {
   const target = event.target as HTMLInputElement;
-  const file = target.files?.[0];
-  if (!file) return;
-  await processFile(file);
+  const files = Array.from(target.files ?? []);
   target.value = "";
+  await addFiles(files);
 }
 
 async function fixTranscriptionIfNeeded(): Promise<void> {
@@ -823,7 +837,6 @@ async function send(): Promise<void> {
     !selectedCredentialId.value ||
     !selectedModel.value ||
     modelsLoadFailed.value ||
-    attachmentError.value !== null ||
     attachmentLoading.value
   ) {
     return;
@@ -832,14 +845,14 @@ async function send(): Promise<void> {
   resetChatInputHeight();
   const content = appendChatContext(text, contextItems.value);
   contextItems.value = [];
-  const payloadAttachment: AttachedFile | null = attachedFile.value;
-  clearAttachment();
+  const payloads = attachmentPayloads.value;
+  clearAttachments();
   await chatStore.sendMessage(
     props.conversationId,
     content,
     selectedCredentialId.value,
     selectedModel.value,
-    payloadAttachment ? toAttachmentPayload(payloadAttachment) : null,
+    payloads,
   );
   focusInputWhenReady();
 }
@@ -889,7 +902,7 @@ onUnmounted(() => {
         <div class="flex flex-col items-center gap-2 text-primary/70">
           <Paperclip class="w-10 h-10" />
           <p class="text-sm font-medium">
-            Drop file to attach
+            Drop files to attach
           </p>
         </div>
       </div>
@@ -1041,7 +1054,7 @@ onUnmounted(() => {
             v-if="msg.role === 'user' && editingMessageId === msg.id"
             :text="editableMessage(msg.content).text"
             :items="editableMessage(msg.content).items"
-            :attachment-name="messageAttachmentName(msg)"
+            :attachment-names="messageAttachmentNames(msg)"
             :sending="isSavingEdit"
             :error="editError"
             :blocked-reason="editBlockedReason"
@@ -1227,11 +1240,17 @@ onUnmounted(() => {
               :suites="msg.evalSuites"
             />
             <div
-              v-if="messageAttachmentName(msg)"
-              class="mt-1.5 flex items-center gap-1 text-xs opacity-70"
+              v-if="messageAttachmentNames(msg).length > 0"
+              class="mt-1.5 flex flex-col gap-0.5 text-xs opacity-70"
             >
-              <Paperclip class="w-3 h-3 shrink-0" />
-              <span class="truncate">{{ messageAttachmentName(msg) }}</span>
+              <div
+                v-for="(name, index) in messageAttachmentNames(msg)"
+                :key="index"
+                class="flex min-w-0 items-center gap-1"
+              >
+                <Paperclip class="w-3 h-3 shrink-0" />
+                <span class="truncate">{{ name }}</span>
+              </div>
             </div>
           </div>
 
@@ -1441,12 +1460,12 @@ onUnmounted(() => {
       <input
         ref="fileInputRef"
         type="file"
-        :accept="ATTACHMENT_ACCEPT"
+        multiple
         class="hidden"
         @change="handleFileInputChange"
       >
       <div
-        v-if="queuedMessages.length > 0 || attachedFile || attachmentError || contextItems.length > 0"
+        v-if="queuedMessages.length > 0 || attachedFiles.length > 0 || attachmentErrors.length > 0 || contextItems.length > 0"
         class="mb-1.5 flex flex-col gap-1.5 px-1"
       >
         <div
@@ -1514,11 +1533,11 @@ onUnmounted(() => {
                       {{ extractChatContext(queued.content).text }}
                     </p>
                     <div
-                      v-if="queued.attachment_name"
+                      v-if="queuedAttachmentNames(queued).length > 0"
                       class="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground"
                     >
                       <Paperclip class="h-3 w-3 shrink-0" />
-                      <span class="truncate">{{ queued.attachment_name }}</span>
+                      <span class="truncate">{{ queuedAttachmentNames(queued).join(", ") }}</span>
                     </div>
                   </div>
                 </div>
@@ -1552,33 +1571,13 @@ onUnmounted(() => {
           @remove="removeContextItem"
         />
 
-        <div
-          v-if="attachedFile || attachmentError"
-          class="flex min-w-0 items-center justify-end gap-2"
-        >
-          <div
-            v-if="attachedFile"
-            class="flex items-center gap-1.5 rounded-lg bg-muted/60 border border-border/40 px-2.5 py-1 text-xs text-foreground max-w-xs"
-          >
-            <Paperclip class="w-3 h-3 shrink-0 text-muted-foreground" />
-            <span class="truncate">{{ attachedFile.name }}</span>
-            <span class="text-muted-foreground shrink-0">· {{ attachedFile.sizeKb }} KB</span>
-            <button
-              type="button"
-              class="shrink-0 ml-0.5 rounded hover:bg-muted/80 p-0.5"
-              aria-label="Remove attachment"
-              @click="clearAttachment"
-            >
-              <X class="w-3 h-3" />
-            </button>
-          </div>
-          <p
-            v-if="attachmentError"
-            class="text-xs text-destructive"
-          >
-            {{ attachmentError }}
-          </p>
-        </div>
+        <ChatAttachmentChips
+          class="items-end"
+          :files="attachedFiles"
+          :errors="attachmentErrors"
+          @remove="removeAttachment"
+          @dismiss-errors="dismissAttachmentErrors"
+        />
       </div>
       <form
         class="flex items-center gap-0.5 sm:gap-2 rounded-2xl bg-muted/40 border border-border/40 px-1.5 sm:px-3 py-1.5 sm:py-2 min-h-[44px] sm:min-h-[52px] focus-within:border-primary/30 focus-within:bg-muted/50 transition-colors"
@@ -1587,19 +1586,11 @@ onUnmounted(() => {
         <button
           type="button"
           class="shrink-0 h-7 w-7 sm:h-9 sm:w-9 min-h-7 min-w-7 sm:min-h-[36px] sm:min-w-[36px] rounded-lg sm:rounded-xl flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/80 disabled:opacity-50 disabled:pointer-events-none touch-manipulation transition-colors"
-          :disabled="attachmentLoading"
-          title="Attach file"
-          aria-label="Attach file"
+          title="Attach files"
+          aria-label="Attach files"
           @click="openFilePicker"
         >
-          <Loader2
-            v-if="attachmentLoading"
-            class="w-3.5 h-3.5 sm:w-4 sm:h-4 animate-spin"
-          />
-          <Paperclip
-            v-else
-            class="w-3.5 h-3.5 sm:w-4 sm:h-4"
-          />
+          <Paperclip class="w-3.5 h-3.5 sm:w-4 sm:h-4" />
         </button>
         <textarea
           ref="chatInputRef"
@@ -1609,6 +1600,7 @@ onUnmounted(() => {
           class="chat-input flex-1 min-w-0 min-h-[36px] sm:min-h-[44px] max-h-40 resize-none bg-transparent border-0 px-0.5 sm:px-1 py-2 sm:py-3 text-sm text-left focus:outline-none focus:ring-0 disabled:opacity-50 touch-manipulation placeholder:text-muted-foreground leading-5"
           :disabled="!canSendMessage || !selectedCredentialId || !selectedModel || modelsLoadFailed"
           @keydown="onKeydown"
+          @paste="handlePaste"
           @input="resizeChatInput"
         />
         <Tooltip
@@ -1661,7 +1653,7 @@ onUnmounted(() => {
           variant="gradient"
           size="icon"
           aria-label="Send message"
-          :disabled="!input.trim() || !canSendMessage || !selectedCredentialId || !selectedModel || modelsLoadFailed || !!attachmentError || attachmentLoading"
+          :disabled="!input.trim() || !canSendMessage || !selectedCredentialId || !selectedModel || modelsLoadFailed || attachmentLoading"
           class="shrink-0 !h-7 !w-7 sm:!h-9 sm:!w-9 !min-h-7 !min-w-7 sm:!min-h-[36px] sm:!min-w-[36px] rounded-lg sm:rounded-xl touch-manipulation"
         >
           <Send class="w-3.5 h-3.5 sm:w-4 sm:h-4" />

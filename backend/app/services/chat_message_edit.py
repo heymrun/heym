@@ -4,8 +4,8 @@ Editing works like a rewind: the edited message and every message after it are r
 the new text is sent as the conversation's next turn, with the model the client picked. The
 model therefore sees the conversation exactly as it stood before the edited message.
 
-An attachment the original message carried stays with the edit. The server stored it as a
-block after the message text (`_build_user_message`), so that block is read back here:
+The attachments the original message carried stay with the edit. The server stored each one
+as a block after the message text (`_build_user_message`), so those blocks are read back here:
 
 - A Drive file is rebuilt from its id, so access is checked again and the turn gets the same
   attachment routing as a new upload.
@@ -46,9 +46,9 @@ class StoredMessage(Protocol):
 
 @dataclass(frozen=True)
 class CarriedAttachment:
-    """What an edited message keeps of the attachment its original carried."""
+    """What an edited message keeps of one attachment its original carried."""
 
-    # Appended verbatim after the edited text (inline files, or a Drive file without an id).
+    # The stored block, appended verbatim after the edited text unless it is rebuilt.
     text_tail: str = ""
     # A Drive file, checked and described again like a new attachment.
     drive_file_id: uuid.UUID | None = None
@@ -63,17 +63,31 @@ def split_attachment_block(content: str) -> tuple[str, str]:
     return content[:start], content[start:]
 
 
-def carried_attachment(content: str) -> CarriedAttachment:
-    """The attachment a stored user message carried, in the form an edit can send again."""
-    _, block = split_attachment_block(content)
-    if not block:
-        return CarriedAttachment()
-    if block.startswith(DRIVE_FILE_MARKER):
-        header = block[len(DRIVE_FILE_MARKER) :].split("\n", 1)[0]
-        match = _DRIVE_FILE_ID.search(header)
-        if match is not None:
-            return CarriedAttachment(drive_file_id=uuid.UUID(match.group(1)))
-    return CarriedAttachment(text_tail=block)
+def attachment_blocks(content: str) -> list[str]:
+    """The attachment blocks the server appended to a stored user message, in order."""
+    _, tail = split_attachment_block(content)
+    starts: set[int] = set()
+    for marker in ATTACHMENT_MARKERS:
+        index = tail.find(marker)
+        while index != -1:
+            starts.add(index)
+            index = tail.find(marker, index + 1)
+    ordered = sorted(starts)
+    return [tail[begin:end] for begin, end in zip(ordered, [*ordered[1:], len(tail)])]
+
+
+def carried_attachments(content: str) -> list[CarriedAttachment]:
+    """The attachments a stored user message carried, in the form an edit can send again."""
+    carried: list[CarriedAttachment] = []
+    for block in attachment_blocks(content):
+        drive_file_id = None
+        if block.startswith(DRIVE_FILE_MARKER):
+            header = block[len(DRIVE_FILE_MARKER) :].split("\n", 1)[0]
+            match = _DRIVE_FILE_ID.search(header)
+            if match is not None:
+                drive_file_id = uuid.UUID(match.group(1))
+        carried.append(CarriedAttachment(text_tail=block, drive_file_id=drive_file_id))
+    return carried
 
 
 def messages_from_edit(

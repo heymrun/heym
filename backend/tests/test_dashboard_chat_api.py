@@ -1057,12 +1057,12 @@ Here is the workflow:
 
 class BuildUserMessageTests(unittest.TestCase):
     def test_no_attachment_returns_string_content(self) -> None:
-        result = _build_user_message("Hello", None)
+        result = _build_user_message("Hello")
         self.assertEqual(result, {"role": "user", "content": "Hello"})
 
     def test_text_attachment_embeds_in_content(self) -> None:
         attachment = FileAttachment(name="notes.txt", kind="text", content="line1\nline2")
-        result = _build_user_message("Summarize this", attachment)
+        result = _build_user_message("Summarize this", [attachment])
         self.assertEqual(result["role"], "user")
         self.assertIsInstance(result["content"], str)
         self.assertIn("Summarize this", result["content"])
@@ -1071,7 +1071,7 @@ class BuildUserMessageTests(unittest.TestCase):
 
     def test_pdf_attachment_embeds_in_content(self) -> None:
         attachment = FileAttachment(name="report.pdf", kind="pdf", content="Extracted text")
-        result = _build_user_message("Analyze this", attachment)
+        result = _build_user_message("Analyze this", [attachment])
         self.assertIsInstance(result["content"], str)
         self.assertIn("[ATTACHED FILE: report.pdf]", result["content"])
         self.assertIn("Extracted text", result["content"])
@@ -1080,7 +1080,7 @@ class BuildUserMessageTests(unittest.TestCase):
         attachment = FileAttachment(
             name="photo.png", kind="image", content="data:image/png;base64,abc123"
         )
-        result = _build_user_message("Describe this", attachment)
+        result = _build_user_message("Describe this", [attachment])
         self.assertEqual(result["role"], "user")
         self.assertIsInstance(result["content"], str)
         self.assertIn("Describe this", result["content"])

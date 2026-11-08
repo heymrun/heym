@@ -9,6 +9,7 @@ records of a large JSON file. Never imported by the backend at run time.
 
 from __future__ import annotations
 
+import codecs
 import csv
 import datetime as _dt
 import json
@@ -125,7 +126,8 @@ def detect_kind(path: Path, name: str | None = None, mime: str | None = None) ->
     if mime and mime.startswith("text/"):
         return "text"
     try:
-        head.decode("utf-8")
+        # The head may end inside a multi-byte character; only a complete file must end whole.
+        codecs.getincrementaldecoder("utf-8")().decode(head, final=len(head) < 4096)
         return "text"
     except UnicodeDecodeError:
         return "binary"

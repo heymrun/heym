@@ -3,7 +3,7 @@ import { computed, onUnmounted, ref, watch } from "vue";
 import { Loader2, Paperclip, Upload } from "lucide-vue-next";
 
 import Textarea from "@/components/ui/Textarea.vue";
-import { INPUT_FIELD_FILE_ACCEPT, readFileForInputField } from "@/lib/inputFieldFile";
+import { readFileForInputField } from "@/lib/inputFieldFile";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -210,7 +210,6 @@ function openFilePicker(): void {
         ref="fileInputRef"
         type="file"
         class="hidden"
-        :accept="INPUT_FIELD_FILE_ACCEPT"
         :disabled="disabled || isLoading"
         @change="handleFileInputChange"
       >

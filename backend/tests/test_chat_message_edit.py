@@ -13,17 +13,25 @@ from app.api.chats import send_message
 from app.db.models import CredentialType, DashboardConversation, DashboardMessage
 from app.models.chat_schemas import MessageCreate
 from app.services.chat_message_edit import (
-    carried_attachment,
+    attachment_blocks,
+    carried_attachments,
     messages_from_edit,
     split_attachment_block,
 )
 
 FILE_ID = uuid.UUID("0b8c2a8e-7d55-4e8e-9f3c-2b1d6f3a9c10")
+SECOND_FILE_ID = uuid.UUID("5f0e7c1a-3b2d-4c6e-8a9f-1d2e3f4a5b6c")
 DRIVE_BLOCK = (
     f"\n\n[ATTACHED DRIVE FILE: report.pdf · id {FILE_ID} · 2048 bytes · application/pdf]\n"
     "The file is in Heym Drive; its content is not in this message. Open it with "
     "inspect_file and run_python."
 )
+SECOND_DRIVE_BLOCK = (
+    f"\n\n[ATTACHED DRIVE FILE: burak.akgun · id {SECOND_FILE_ID} · 65 bytes]\n"
+    "The file is in Heym Drive; its content is not in this message. Open it with "
+    "inspect_file and run_python."
+)
+INLINE_BLOCK = "\n\n[ATTACHED FILE: notes.py]\nprint('hi')"
 
 
 def _message(role: str, content: str, offset: int) -> DashboardMessage:
@@ -92,21 +100,30 @@ class TestEditHelpers(unittest.TestCase):
     def test_split_attachment_block_without_an_attachment(self) -> None:
         self.assertEqual(split_attachment_block("Just text"), ("Just text", ""))
 
-    def test_carried_attachment_rebuilds_a_drive_file_from_its_id(self) -> None:
-        carried = carried_attachment("Summarise this" + DRIVE_BLOCK)
+    def test_carried_attachments_rebuild_a_drive_file_from_its_id(self) -> None:
+        [carried] = carried_attachments("Summarise this" + DRIVE_BLOCK)
         self.assertEqual(carried.drive_file_id, FILE_ID)
-        self.assertEqual(carried.text_tail, "")
+        self.assertEqual(carried.text_tail, DRIVE_BLOCK)
 
-    def test_carried_attachment_keeps_inline_file_text(self) -> None:
+    def test_carried_attachments_keep_inline_file_text(self) -> None:
         block = "\n\n[ATTACHED FILE: notes.txt]\nline one\nline two"
-        carried = carried_attachment("Read the notes" + block)
+        [carried] = carried_attachments("Read the notes" + block)
         self.assertIsNone(carried.drive_file_id)
         self.assertEqual(carried.text_tail, block)
 
-    def test_carried_attachment_without_an_attachment(self) -> None:
-        carried = carried_attachment("Nothing attached")
-        self.assertIsNone(carried.drive_file_id)
-        self.assertEqual(carried.text_tail, "")
+    def test_carried_attachments_without_an_attachment(self) -> None:
+        self.assertEqual(carried_attachments("Nothing attached"), [])
+
+    def test_attachment_blocks_split_several_files_in_order(self) -> None:
+        content = "Compare these" + DRIVE_BLOCK + INLINE_BLOCK + SECOND_DRIVE_BLOCK
+        self.assertEqual(
+            attachment_blocks(content), [DRIVE_BLOCK, INLINE_BLOCK, SECOND_DRIVE_BLOCK]
+        )
+
+    def test_carried_attachments_keep_every_file(self) -> None:
+        carried = carried_attachments("Compare" + DRIVE_BLOCK + INLINE_BLOCK + SECOND_DRIVE_BLOCK)
+        self.assertEqual([item.drive_file_id for item in carried], [FILE_ID, None, SECOND_FILE_ID])
+        self.assertEqual(carried[1].text_tail, INLINE_BLOCK)
 
     def test_messages_from_edit_returns_the_message_and_everything_after(self) -> None:
         first = _message("user", "one", 0)
@@ -146,14 +163,18 @@ class TestSendEditedMessage(unittest.IsolatedAsyncioTestCase):
             patch(
                 "app.api.chats.get_accessible_file",
                 new_callable=AsyncMock,
-                return_value=file_access,
+                **(
+                    {"side_effect": file_access}
+                    if callable(file_access)
+                    else {"return_value": file_access}
+                ),
             ),
             patch("app.api.chats.build_public_base_url", return_value="http://localhost"),
             patch("app.api.chats.registry.create_task", new_callable=AsyncMock),
             patch("app.api.chats._process_chat", process_chat),
             patch(
                 "app.api.chats._build_user_message",
-                side_effect=lambda text, attachment: {"role": "user", "content": text},
+                side_effect=lambda text, attachments=(): {"role": "user", "content": text},
             ) as build_user_message,
             patch("asyncio.create_task", side_effect=_close),
         ):
@@ -232,11 +253,12 @@ class TestSendEditedMessage(unittest.IsolatedAsyncioTestCase):
             file_access=SimpleNamespace(file=row),
         )
 
-        text, attachment = build_user_message.call_args.args
+        text, [attachment] = build_user_message.call_args.args
         self.assertEqual(text, "Summarise this in three bullets")
         self.assertEqual(attachment.kind, "file")
         self.assertEqual(attachment.file_id, FILE_ID)
-        self.assertEqual(process_chat.call_args.kwargs["attachment_data"]["file_id"], str(FILE_ID))
+        [stored] = process_chat.call_args.kwargs["attachments"]
+        self.assertEqual(stored["file_id"], str(FILE_ID))
 
     async def test_edit_keeps_a_drive_reference_the_user_can_no_longer_open_as_text(self) -> None:
         conversation = _conversation(self.user_id)
@@ -246,10 +268,10 @@ class TestSendEditedMessage(unittest.IsolatedAsyncioTestCase):
             conversation, [edited], self._body("Summarise it", edited.id), file_access=None
         )
 
-        text, attachment = build_user_message.call_args.args
+        text, attachments = build_user_message.call_args.args
         self.assertEqual(text, "Summarise it" + DRIVE_BLOCK)
-        self.assertIsNone(attachment)
-        self.assertIsNone(process_chat.call_args.kwargs["attachment_data"])
+        self.assertEqual(attachments, [])
+        self.assertEqual(process_chat.call_args.kwargs["attachments"], [])
 
     async def test_edit_keeps_inline_file_text(self) -> None:
         conversation = _conversation(self.user_id)
@@ -261,6 +283,51 @@ class TestSendEditedMessage(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(process_chat.call_args.kwargs["content"], "Read the notes twice" + block)
+
+    async def test_edit_keeps_every_attachment_of_the_original(self) -> None:
+        conversation = _conversation(self.user_id)
+        edited = _message("user", "Compare" + DRIVE_BLOCK + INLINE_BLOCK + SECOND_DRIVE_BLOCK, 0)
+        rows = {
+            FILE_ID: SimpleNamespace(
+                id=FILE_ID, filename="report.pdf", size_bytes=2048, mime_type="application/pdf"
+            ),
+            SECOND_FILE_ID: SimpleNamespace(
+                id=SECOND_FILE_ID, filename="burak.akgun", size_bytes=65, mime_type=None
+            ),
+        }
+
+        async def reachable(_db: object, file_id: uuid.UUID, _user_id: uuid.UUID) -> object:
+            return SimpleNamespace(file=rows[file_id])
+
+        _, _, process_chat, build_user_message = await self._send(
+            conversation, [edited], self._body("Compare them", edited.id), file_access=reachable
+        )
+
+        text, attachments = build_user_message.call_args.args
+        self.assertEqual(text, "Compare them" + INLINE_BLOCK)
+        self.assertEqual([item.file_id for item in attachments], [FILE_ID, SECOND_FILE_ID])
+        self.assertEqual(
+            [data["name"] for data in process_chat.call_args.kwargs["attachments"]],
+            ["report.pdf", "burak.akgun"],
+        )
+
+    async def test_edit_keeps_an_unreachable_file_as_text_and_the_others_as_files(self) -> None:
+        conversation = _conversation(self.user_id)
+        edited = _message("user", "Compare" + DRIVE_BLOCK + SECOND_DRIVE_BLOCK, 0)
+        row = SimpleNamespace(
+            id=FILE_ID, filename="report.pdf", size_bytes=2048, mime_type="application/pdf"
+        )
+
+        async def only_first(_db: object, file_id: uuid.UUID, _user_id: uuid.UUID) -> object:
+            return SimpleNamespace(file=row) if file_id == FILE_ID else None
+
+        _, _, _, build_user_message = await self._send(
+            conversation, [edited], self._body("Compare", edited.id), file_access=only_first
+        )
+
+        text, attachments = build_user_message.call_args.args
+        self.assertEqual(text, "Compare" + SECOND_DRIVE_BLOCK)
+        self.assertEqual([item.file_id for item in attachments], [FILE_ID])
 
     async def test_edit_is_refused_while_a_reply_is_running(self) -> None:
         conversation = _conversation(self.user_id, running=True)

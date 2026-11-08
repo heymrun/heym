@@ -137,9 +137,12 @@ class ChatBuildSessionTests(unittest.IsolatedAsyncioTestCase):
         target: uuid.UUID | None = None,
         session_id: str | None = "conv-1",
         attachment: FileAttachment | None = None,
+        attachments: list[FileAttachment] | None = None,
         selected_credential: Any = None,
         model: str = "gpt-5.5",
     ) -> chat_build.ChatBuildSession:
+        if attachments is None:
+            attachments = [attachment] if attachment is not None else []
         return chat_build.ChatBuildSession(
             db=self.db,
             user=self.user,
@@ -151,7 +154,7 @@ class ChatBuildSessionTests(unittest.IsolatedAsyncioTestCase):
             public_base_url="http://localhost",
             cancel_event=None,
             llm_session_id=session_id,
-            attachment=attachment,
+            attachments=attachments,
         )
 
     async def test_save_creates_a_workflow_when_the_turn_has_no_target(self) -> None:

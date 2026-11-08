@@ -7,7 +7,7 @@ The **Workflows** tab is the default dashboard view. It shows your workflow list
 
 ## Start a Chat
 
-Above the workflow list there is a chat box that greets you by name and asks what you want to automate. Type a prompt, optionally attach one file, and pick the credential and model you want. Both dropdowns are searchable and start on your [AI defaults](../reference/user-settings.md).
+Above the workflow list there is a chat box that greets you by name and asks what you want to automate. Type a prompt, optionally attach files (drop, paste or pick up to 10), and pick the credential and model you want. Both dropdowns are searchable and start on your [AI defaults](../reference/user-settings.md).
 
 Sending creates a new conversation and opens it in the [Chat tab](./chat-tab.md), where the reply streams in. Supported attachments are text files, images, and PDFs, one per message, same as the chat composer.
 

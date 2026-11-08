@@ -458,7 +458,7 @@ class DashboardChatConcurrencyRaceTests(unittest.IsolatedAsyncioTestCase):
                     content="Old msg",
                     credential_id=self.cred_id,
                     model="gpt-4o",
-                    attachment_data=None,
+                    attachments=[],
                     public_base_url="http://localhost:10105",
                     should_generate_title=False,
                 )
@@ -507,7 +507,7 @@ class DashboardChatConcurrencyRaceTests(unittest.IsolatedAsyncioTestCase):
                     content="Current msg",
                     credential_id=self.cred_id,
                     model="gpt-4o",
-                    attachment_data=None,
+                    attachments=[],
                     public_base_url="http://localhost:10105",
                     should_generate_title=False,
                 )

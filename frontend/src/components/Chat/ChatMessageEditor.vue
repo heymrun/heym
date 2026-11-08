@@ -11,8 +11,8 @@ interface Props {
   text: string;
   /** Context chips that stay with the message. */
   items?: readonly ChatContextItem[];
-  /** The attachment that stays with the message. */
-  attachmentName?: string | null;
+  /** The attachments that stay with the message. */
+  attachmentNames?: readonly string[];
   sending?: boolean;
   error?: string | null;
   /** Why the edit cannot be sent right now (no model, a reply running). */
@@ -21,7 +21,7 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   items: () => [],
-  attachmentName: null,
+  attachmentNames: () => [],
   sending: false,
   error: null,
   blockedReason: null,
@@ -83,11 +83,12 @@ onMounted(() => {
       :items="items"
     />
     <div
-      v-if="attachmentName"
+      v-for="(name, index) in attachmentNames"
+      :key="index"
       class="mt-1.5 flex items-center gap-1 text-xs text-muted-foreground"
     >
       <Paperclip class="h-3 w-3 shrink-0" />
-      <span class="truncate">{{ attachmentName }}</span>
+      <span class="truncate">{{ name }}</span>
     </div>
     <p class="mt-2 text-xs text-muted-foreground">
       {{ blockedReason ?? "Sending removes the messages after this one and asks the model again." }}
