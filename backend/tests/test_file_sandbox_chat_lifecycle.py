@@ -97,7 +97,7 @@ class AttachmentTests(IsolatedAsyncioTestCase):
     async def test_a_foreign_file_id_is_refused(self) -> None:
         with patch.object(chats, "get_accessible_file", AsyncMock(return_value=None)):
             with self.assertRaises(HTTPException) as caught:
-                await chats._attachment_data(MagicMock(), uuid.uuid4(), self._body(uuid.uuid4()))
+                await chats._attachments_data(MagicMock(), uuid.uuid4(), self._body(uuid.uuid4()))
         self.assertEqual(caught.exception.status_code, 404)
 
     async def test_name_size_and_mime_come_from_the_drive_row(self) -> None:
@@ -105,7 +105,7 @@ class AttachmentTests(IsolatedAsyncioTestCase):
         row = SimpleNamespace(id=file_id, filename="q3.xlsx", size_bytes=2048, mime_type="x/y")
         access = SimpleNamespace(file=row)
         with patch.object(chats, "get_accessible_file", AsyncMock(return_value=access)):
-            data = await chats._attachment_data(MagicMock(), uuid.uuid4(), self._body(file_id))
+            [data] = await chats._attachments_data(MagicMock(), uuid.uuid4(), self._body(file_id))
         self.assertEqual(
             data,
             {
@@ -126,14 +126,14 @@ class AttachmentTests(IsolatedAsyncioTestCase):
             model="m",
             attachment=ChatFileAttachment(name="a.txt", kind="text", content="hello"),
         )
-        data = await chats._attachment_data(MagicMock(), uuid.uuid4(), body)
+        [data] = await chats._attachments_data(MagicMock(), uuid.uuid4(), body)
         self.assertEqual(data["content"], "hello")
 
     def test_drive_file_message_never_carries_content(self) -> None:
         attachment = FileAttachment(
             name="q3.xlsx", kind="file", file_id=uuid.uuid4(), size=10, content="SHOULD NOT"
         )
-        message = _build_user_message("Sum it", attachment)
+        message = _build_user_message("Sum it", [attachment])
         self.assertIn("[ATTACHED DRIVE FILE: q3.xlsx", message["content"])
         self.assertNotIn("SHOULD NOT", message["content"])
 

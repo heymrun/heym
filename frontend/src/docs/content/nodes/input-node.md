@@ -45,7 +45,7 @@ The **Input** node is the entry point for workflows that receive data from the u
 
 In the editor **Run** tab (Defined webhook mode), each input field supports drag-and-drop and an inline attachment control (bottom-right of the field):
 
-- **Text files** (`.txt`, `.md`, `.json`, `.csv`, and similar) are read as plain text.
+- **Text files** (`.txt`, `.md`, `.json`, `.csv`, and any other file that reads as UTF-8 text, such as `notes` or `todo.list`) are read as plain text, up to 500 KB.
 - **Images** (JPEG, PNG, GIF, WebP) are stored as a `data:` URL (base64) in the field value — use field keys such as `imageUrl` or `base64` when downstream nodes expect image data.
 - **PDF** files are converted to extracted text (max 5 MB file, 100k characters of content).
 

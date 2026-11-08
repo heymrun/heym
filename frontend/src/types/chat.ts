@@ -89,6 +89,8 @@ export interface QueuedMessage {
   credential_id: string
   model: string
   attachment_name: string | null
+  /** Every attached file's name, in order. */
+  attachment_names?: string[]
   created_at: string
   updated_at: string
 }
@@ -98,7 +100,8 @@ export interface Message {
   role: 'user' | 'assistant'
   content: string
   images?: string[]
-  attachmentName?: string
+  /** The attached files' names, shown until the stored content carries them. */
+  attachmentNames?: string[]
   workflowPreview?: WorkflowPreview
   evalSuites?: EvalSuitePreview[]
   tool_calls?: ToolCall[]

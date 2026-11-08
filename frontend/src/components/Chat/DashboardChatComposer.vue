@@ -3,13 +3,10 @@ import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { Loader2, Paperclip, Send, X } from "lucide-vue-next";
 
+import ChatAttachmentChips from "@/components/Chat/ChatAttachmentChips.vue";
 import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 import { useChatModelSelection } from "@/composables/useChatModelSelection";
-import {
-  ATTACHMENT_ACCEPT,
-  toAttachmentPayload,
-  useFileAttachment,
-} from "@/composables/useFileAttachment";
+import { pastedFiles, transferFiles, useFileAttachment } from "@/composables/useFileAttachment";
 import { useAuthStore } from "@/stores/auth";
 import { useChatStore } from "@/stores/chat";
 
@@ -61,8 +58,16 @@ const {
   selectCredential,
 } = useChatModelSelection();
 
-const { attachedFile, attachmentError, attachmentLoading, processFile, clearAttachment } =
-  useFileAttachment();
+const {
+  attachedFiles,
+  attachmentErrors,
+  attachmentLoading,
+  attachmentPayloads,
+  addFiles,
+  removeAttachment,
+  dismissAttachmentErrors,
+  clearAttachments,
+} = useFileAttachment();
 
 const input = ref("");
 const inputRef = ref<HTMLTextAreaElement | null>(null);
@@ -93,7 +98,6 @@ const canSubmit = computed<boolean>(
     input.value.trim().length > 0 &&
     isReady.value &&
     !attachmentLoading.value &&
-    attachmentError.value === null &&
     !isSubmitting.value,
 );
 
@@ -114,11 +118,18 @@ function openFilePicker(): void {
 
 async function handleFileInputChange(event: Event): Promise<void> {
   const target = event.target as HTMLInputElement;
-  const file = target.files?.[0];
-  if (!file) return;
-  await processFile(file);
+  const files = Array.from(target.files ?? []);
   // Allow re-picking the same file after removing it.
   target.value = "";
+  await addFiles(files);
+}
+
+/** Pasted files (a screenshot, files copied in a file manager) attach; pasted text stays text. */
+function onPaste(event: ClipboardEvent): void {
+  const files = pastedFiles(event.clipboardData);
+  if (files.length === 0) return;
+  event.preventDefault();
+  void addFiles(files);
 }
 
 function dragCarriesFiles(event: DragEvent): boolean {
@@ -155,9 +166,7 @@ async function onDrop(event: DragEvent): Promise<void> {
   event.stopPropagation();
   dragCounter = 0;
   isDraggingFile.value = false;
-  const file = event.dataTransfer?.files?.[0];
-  if (!file) return;
-  await processFile(file);
+  await addFiles(transferFiles(event.dataTransfer));
 }
 
 function onCredentialSelect(value: string | undefined): void {
@@ -177,7 +186,7 @@ async function submit(): Promise<void> {
 
   isSubmitting.value = true;
   submitError.value = "";
-  const payload = attachedFile.value;
+  const payloads = attachmentPayloads.value;
 
   try {
     const conversation = await chatStore.createConversation();
@@ -188,10 +197,10 @@ async function submit(): Promise<void> {
       text,
       selectedCredentialId.value,
       selectedModel.value,
-      payload ? toAttachmentPayload(payload) : null,
+      payloads,
     );
     input.value = "";
-    clearAttachment();
+    clearAttachments();
     void nextTick(resizeInput);
     await router.push(`/chats/${conversation.id}`);
   } catch {
@@ -234,7 +243,7 @@ onUnmounted(() => {
     >
       <div class="flex items-center gap-2 text-sm font-medium text-primary">
         <Paperclip class="h-4 w-4" />
-        Drop file to attach
+        Drop files to attach
       </div>
     </div>
 
@@ -260,7 +269,7 @@ onUnmounted(() => {
     <input
       ref="fileInputRef"
       type="file"
-      :accept="ATTACHMENT_ACCEPT"
+      multiple
       class="hidden"
       @change="handleFileInputChange"
     >
@@ -279,6 +288,7 @@ onUnmounted(() => {
           class="min-h-[24px] w-full resize-none bg-transparent px-2.5 py-0 text-[15px] leading-6 text-foreground outline-none sm:text-base"
           @input="onInput"
           @keydown="onKeydown"
+          @paste="onPaste"
           @focus="isInputFocused = true"
           @blur="isInputFocused = false"
         />
@@ -303,8 +313,8 @@ onUnmounted(() => {
             type="button"
             class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground disabled:pointer-events-none disabled:opacity-50 sm:order-1"
             :disabled="attachmentLoading"
-            title="Attach file"
-            aria-label="Attach file"
+            title="Attach files"
+            aria-label="Attach files"
             @click="openFilePicker"
           >
             <Paperclip class="h-4 w-4" />
@@ -370,32 +380,15 @@ onUnmounted(() => {
         </div>
       </div>
       <div
-        v-if="attachedFile || attachmentError || modelsLoadFailed || showNoCredentialsHint || submitError"
+        v-if="attachedFiles.length > 0 || attachmentErrors.length > 0 || modelsLoadFailed || showNoCredentialsHint || submitError"
         class="mt-2 flex flex-wrap items-center gap-2 px-1"
       >
-        <div
-          v-if="attachedFile"
-          class="flex max-w-xs items-center gap-1.5 rounded-lg border border-border/40 bg-muted/60 px-2.5 py-1 text-xs text-foreground"
-        >
-          <Paperclip class="h-3 w-3 shrink-0 text-muted-foreground" />
-          <span class="truncate">{{ attachedFile.name }}</span>
-          <span class="shrink-0 text-muted-foreground">· {{ attachedFile.sizeKb }} KB</span>
-          <button
-            type="button"
-            class="ml-0.5 shrink-0 rounded p-0.5 hover:bg-muted/80"
-            aria-label="Remove attachment"
-            @click="clearAttachment"
-          >
-            <X class="h-3 w-3" />
-          </button>
-        </div>
-
-        <p
-          v-if="attachmentError"
-          class="text-xs text-destructive"
-        >
-          {{ attachmentError }}
-        </p>
+        <ChatAttachmentChips
+          :files="attachedFiles"
+          :errors="attachmentErrors"
+          @remove="removeAttachment"
+          @dismiss-errors="dismissAttachmentErrors"
+        />
 
         <p
           v-if="modelsLoadFailed"

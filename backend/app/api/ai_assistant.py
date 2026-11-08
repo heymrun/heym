@@ -6,7 +6,7 @@ import logging
 import re
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,7 +17,7 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from openai import OpenAI
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -97,6 +97,7 @@ from app.services.assistant_yolo import (
     stream_until_disconnect,
     stream_yolo_assistant_turn,
 )
+from app.services.chat_attachments import MAX_CHAT_ATTACHMENTS, run_attachment
 from app.services.chat_image_input import IMAGE_FIELD_KEYWORDS, image_input
 from app.services.chat_progress import ToolProgress, follow_tool, workflow_draft_message
 from app.services.chat_round_stream import (
@@ -283,6 +284,12 @@ class DashboardChatRequest(BaseModel):
     user_rules: str | None = None
     client_local_datetime: str | None = None
     attachment: FileAttachment | None = None
+    attachments: list[FileAttachment] = Field(default_factory=list, max_length=MAX_CHAT_ATTACHMENTS)
+
+    def requested_attachments(self) -> list[FileAttachment]:
+        """Every attached file in order: `attachment` first, then `attachments`."""
+        single = [self.attachment] if self.attachment is not None else []
+        return [*single, *self.attachments]
 
 
 class FixTranscriptionRequest(BaseModel):
@@ -481,7 +488,9 @@ _ATTACHMENT_ROUTING_INSTRUCTIONS = (
     '- Drive file attachment → fields named "file_id", "file", "document", "attachment", or '
     "similar; pass the file id\n"
     "- An image attached as a Drive file reaches image fields by itself; leave those out\n"
-    "- If no dedicated field exists → embed the content in the primary message/query/input field"
+    "- If no dedicated field exists → embed the content in the primary message/query/input field\n"
+    "- Several files attached → put the id (or name) of the file a run is for in its inputs, "
+    "and run the workflow once per file when each file needs its own run"
 )
 
 
@@ -498,25 +507,15 @@ def _find_injection_field(input_fields: list[str], kind: str) -> str | None:
     return input_fields[0] if input_fields else None
 
 
-def _build_user_message(message: str, attachment: FileAttachment | None) -> dict:
-    """Build the user role message dict.
-
-    For text/PDF: embeds content inline so the LLM can use it directly.
-    For images: embeds only metadata (not the base64) to avoid context overflow on
-    non-vision models. The actual image bytes are auto-injected into the workflow input
-    field by the execute_workflow tool handler at call time.
-    """
-    if attachment is None:
-        return {"role": "user", "content": message}
+def _attachment_block(attachment: FileAttachment) -> str:
+    """The block one attachment adds after the message text."""
     if attachment.kind == "zip":
         from app.services.skill_archive import decode_zip_payload, prompt_for_zip, read_zip
 
         raw = decode_zip_payload(attachment.content)
         if raw is None:
-            body = f"{message}\n\n[ATTACHED ZIP: {attachment.name}]\nThe zip could not be read."
-        else:
-            body = f"{message}\n\n{prompt_for_zip(attachment.name, read_zip(raw))}"
-        return {"role": "user", "content": body}
+            return f"\n\n[ATTACHED ZIP: {attachment.name}]\nThe zip could not be read."
+        return f"\n\n{prompt_for_zip(attachment.name, read_zip(raw))}"
     if attachment.kind == "file":
         details = " · ".join(
             part
@@ -527,25 +526,31 @@ def _build_user_message(message: str, attachment: FileAttachment | None) -> dict
             )
             if part
         )
-        return {
-            "role": "user",
-            "content": (
-                f"{message}\n\n[ATTACHED DRIVE FILE: {attachment.name} · {details}]\n"
-                "The file is in Heym Drive; its content is not in this message. Open it with "
-                "inspect_file and run_python."
-            ),
-        }
+        return (
+            f"\n\n[ATTACHED DRIVE FILE: {attachment.name} · {details}]\n"
+            "The file is in Heym Drive; its content is not in this message. Open it with "
+            "inspect_file and run_python."
+        )
     if attachment.kind == "image":
-        embedded = (
-            f"{message}\n\n"
-            f"[ATTACHED IMAGE: {attachment.name}]\n"
+        return (
+            f"\n\n[ATTACHED IMAGE: {attachment.name}]\n"
             f"IMPORTANT: Do NOT include image data or any image field in the workflow inputs — "
             f"the image is handled server-side automatically. "
             f"Only include the non-image input fields (e.g. text, query, instruction) in your execute_workflow call."
         )
-        return {"role": "user", "content": embedded}
-    embedded = f"{message}\n\n[ATTACHED FILE: {attachment.name}]\n{attachment.content}"
-    return {"role": "user", "content": embedded}
+    return f"\n\n[ATTACHED FILE: {attachment.name}]\n{attachment.content}"
+
+
+def _build_user_message(message: str, attachments: Sequence[FileAttachment] = ()) -> dict:
+    """Build the user role message dict, with one block per attachment in order.
+
+    For text/PDF: embeds content inline so the LLM can use it directly.
+    For images: embeds only metadata (not the base64) to avoid context overflow on
+    non-vision models. The actual image bytes are auto-injected into the workflow input
+    field by the execute_workflow tool handler at call time.
+    """
+    blocks = "".join(_attachment_block(attachment) for attachment in attachments)
+    return {"role": "user", "content": f"{message}{blocks}"}
 
 
 def _format_user_message_date(now: datetime | None = None) -> str:
@@ -3601,7 +3606,7 @@ async def stream_dashboard_chat(
     public_base_url: str,
     trace_context: LLMTraceContext | None = None,
     cancel_event: Event | None = None,
-    attachment: FileAttachment | None = None,
+    attachments: Sequence[FileAttachment] = (),
     selected_credential: Credential | None = None,
     *,
     system_prompt_parts: Any | None = None,
@@ -3672,7 +3677,7 @@ async def stream_dashboard_chat(
                 workflows_block=system_prompt_parts.workflows_block,
                 user_rules=system_prompt_parts.user_rules,
                 history=messages_to_use,
-                attachment_content=attachment.content if attachment else None,
+                attachment_content="".join(item.content for item in attachments) or None,
             )
         return (
             "data: "
@@ -4111,6 +4116,7 @@ async def stream_dashboard_chat(
                     # The LLM only received metadata for images (no base64 in its context),
                     # so we inject the actual content here before execution.
                     sample_file_id = None
+                    attachment = run_attachment(attachments, inputs)
                     if attachment is not None and attachment.kind == "file":
                         sample_file_id = attachment.file_id
                         # An image from Drive still reaches a workflow's image input as itself.
@@ -4299,7 +4305,7 @@ async def stream_dashboard_chat(
                                 inputs=dict(inputs),
                                 available_workflows=workflows,
                                 public_base_url=public_base_url,
-                                attachment=attachment,
+                                attachment=run_attachment(attachments, inputs),
                                 cancel_event=cancel_event,
                                 credential_choices=choices,
                                 credential_mode=credential_mode,
@@ -4476,7 +4482,7 @@ async def stream_dashboard_chat(
                                 inputs=dict(inputs),
                                 available_workflows=workflows,
                                 public_base_url=public_base_url,
-                                attachment=attachment,
+                                attachment=run_attachment(attachments, inputs),
                                 cancel_event=cancel_event,
                                 credential_choices=choices,
                                 credential_mode=credential_mode,
@@ -5966,7 +5972,8 @@ async def dashboard_chat_stream(
     if len(history) > MAX_DASHBOARD_CHAT_HISTORY:
         history = history[-MAX_DASHBOARD_CHAT_HISTORY:]
     messages: list[dict] = list(history)
-    messages.append(_build_user_message(request.message, request.attachment))
+    attachments = request.requested_attachments()
+    messages.append(_build_user_message(request.message, attachments))
 
     trace_context = LLMTraceContext(
         session_id=session_id,
@@ -6011,7 +6018,7 @@ async def dashboard_chat_stream(
             + "\n\nCurrent user local date and time: "
             + request.client_local_datetime.strip()
         )
-    if request.attachment:
+    if attachments:
         system_prompt = system_prompt + "\n\n" + _ATTACHMENT_ROUTING_INSTRUCTIONS
 
     # A Model Router decision is a blocking model call; keep it off the event loop.
@@ -6055,7 +6062,7 @@ async def dashboard_chat_stream(
                     public_base_url,
                     trace_context,
                     cancel_event,
-                    request.attachment,
+                    attachments,
                     credential,
                 ):
                     if cancel_event.is_set():

@@ -59,14 +59,14 @@ from app.models.chat_schemas import (
     SendMessageResponse,
 )
 from app.services import chat_task_registry as registry
+from app.services.chat_attachments import MAX_CHAT_ATTACHMENTS, stored_attachments
 from app.services.chat_build_mode import BuildRequest
 from app.services.chat_eval_mode import EVAL_SUITE_SAVED_EVENT
 from app.services.chat_message_edit import (
     EDIT_NOT_FOUND,
     EDIT_WHILE_RUNNING,
-    carried_attachment,
+    carried_attachments,
     messages_from_edit,
-    split_attachment_block,
 )
 from app.services.credential_access import get_accessible_credential
 from app.services.credential_catalog import CredentialPromptMode, build_credentials_prompt
@@ -116,7 +116,8 @@ class ChatTurn:
     content: str
     credential_id: uuid.UUID
     model: str
-    attachment_data: dict | None
+    # Each attachment as stored, in the order it was attached.
+    attachments: list[dict]
     should_generate_title: bool
     # UI turns open the credential dialog; MCP turns open a Heym page instead.
     credential_mode: CredentialPromptMode = CredentialPromptMode.ASK_AND_CREATE
@@ -213,14 +214,14 @@ def _ingest_tool_event(
 
 
 def _queued_message_response(item: DashboardChatQueueItem) -> QueuedMessageResponse:
-    attachment = item.attachment if isinstance(item.attachment, dict) else None
-    attachment_name = attachment.get("name") if attachment else None
+    names = [str(data["name"]) for data in stored_attachments(item.attachment) if data.get("name")]
     return QueuedMessageResponse(
         id=item.id,
         content=item.content,
         credential_id=item.credential_id,
         model=item.model,
-        attachment_name=str(attachment_name) if attachment_name else None,
+        attachment_name=names[0] if names else None,
+        attachment_names=names,
         created_at=item.created_at,
         updated_at=item.updated_at,
     )
@@ -419,11 +420,7 @@ async def _run_chat_turn(
 
             config = decrypt_config(credential.encrypted_config)
 
-            attachment = (
-                FileAttachment.model_validate(turn.attachment_data)
-                if turn.attachment_data
-                else None
-            )
+            attachments = [FileAttachment.model_validate(data) for data in turn.attachments]
 
             msg_result = await db.execute(
                 select(DashboardMessage)
@@ -463,7 +460,7 @@ async def _run_chat_turn(
                     public_base_url=public_base_url,
                     cancel_event=cancel_event,
                     llm_session_id=conv_id,
-                    attachment=attachment,
+                    attachments=attachments,
                     credential_form=turn.credential_form,
                     conversation_id=conv_uuid,
                 )
@@ -471,7 +468,7 @@ async def _run_chat_turn(
             parts = await _assemble_system_prompt_parts(
                 user,
                 db,
-                include_attachment_instructions=turn.attachment_data is not None,
+                include_attachment_instructions=bool(turn.attachments),
                 credential_mode=turn.credential_mode,
                 build_reference=build.reference() if build is not None else "",
                 file_rules=files.instructions(),
@@ -515,7 +512,7 @@ async def _run_chat_turn(
                 public_base_url,
                 trace_context,
                 cancel_event,
-                attachment,
+                attachments,
                 credential,
                 system_prompt_parts=parts,
                 credential_mode=turn.credential_mode,
@@ -675,12 +672,10 @@ async def _dequeue_next_turn(conv_id: str) -> ChatTurn | None:
             await db.commit()
             return None
 
-        attachment = (
-            FileAttachment.model_validate(item.attachment)
-            if isinstance(item.attachment, dict)
-            else None
+        queued_attachments = stored_attachments(item.attachment)
+        user_message_data = _build_user_message(
+            item.content, [FileAttachment.model_validate(data) for data in queued_attachments]
         )
-        user_message_data = _build_user_message(item.content, attachment)
         message_created_at = datetime.now(timezone.utc)
         user_message = DashboardMessage(
             id=uuid.uuid4(),
@@ -705,7 +700,7 @@ async def _dequeue_next_turn(conv_id: str) -> ChatTurn | None:
             content=item.content,
             credential_id=item.credential_id,
             model=item.model,
-            attachment_data=dict(item.attachment) if isinstance(item.attachment, dict) else None,
+            attachments=queued_attachments,
             should_generate_title=False,
             build=queued_build,
         )
@@ -756,7 +751,7 @@ async def _process_chat(
     content: str,
     credential_id: uuid.UUID,
     model: str,
-    attachment_data: dict | None,
+    attachments: list[dict],
     public_base_url: str,
     should_generate_title: bool,
     build: BuildRequest | None = None,
@@ -771,7 +766,7 @@ async def _process_chat(
         content=content,
         credential_id=credential_id,
         model=model,
-        attachment_data=attachment_data,
+        attachments=attachments,
         should_generate_title=should_generate_title,
         build=build,
     )
@@ -955,7 +950,7 @@ async def run_agent_chat_turn(
 
         conv_uuid = conversation.id
         should_generate_title = is_new or conversation.title == DEFAULT_CONVERSATION_TITLE
-        user_message = _build_user_message(message, None)
+        user_message = _build_user_message(message)
         db.add(
             DashboardMessage(
                 id=uuid.uuid4(),
@@ -984,7 +979,7 @@ async def run_agent_chat_turn(
         content=message,
         credential_id=credential_id,
         model=model,
-        attachment_data=None,
+        attachments=[],
         should_generate_title=should_generate_title,
         credential_mode=CredentialPromptMode.ASK_AND_LINK,
         # Agent turns exist only while the agent is enabled, and they always build.
@@ -1355,20 +1350,30 @@ async def _resolve_build_request(
     return BuildRequest(target_workflow_id=body.target_workflow_id, skill_only=skill_only)
 
 
-async def _attachment_data(
+async def _attachments_data(
     db: AsyncSession, user_id: uuid.UUID, body: MessageCreate
-) -> dict | None:
-    """The attachment as stored; a Drive file is checked and described from its row."""
-    if body.attachment is None:
-        return None
-    if body.attachment.kind != "file":
-        return body.attachment.model_dump(mode="json")
-    if body.attachment.file_id is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="file_id is required")
-    data = await _drive_attachment_data(db, user_id, body.attachment.file_id)
-    if data is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
-    return data
+) -> list[dict]:
+    """The attachments as stored; each Drive file is checked and described from its row."""
+    requested = body.requested_attachments()
+    if len(requested) > MAX_CHAT_ATTACHMENTS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Attach at most {MAX_CHAT_ATTACHMENTS} files to one message",
+        )
+    stored: list[dict] = []
+    for attachment in requested:
+        if attachment.kind != "file":
+            stored.append(attachment.model_dump(mode="json"))
+            continue
+        if attachment.file_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="file_id is required"
+            )
+        data = await _drive_attachment_data(db, user_id, attachment.file_id)
+        if data is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+        stored.append(data)
+    return stored
 
 
 async def _edited_turn_input(
@@ -1376,22 +1381,24 @@ async def _edited_turn_input(
     user_id: uuid.UUID,
     content: str,
     original_content: str,
-    attachment_data: dict | None,
-) -> tuple[str, dict | None]:
-    """The edited turn's content and attachment, keeping the original's attachment.
+    attachments: list[dict],
+) -> tuple[str, list[dict]]:
+    """The edited turn's content and attachments, keeping the original's attachments.
 
-    A new attachment replaces the old one. A Drive file the user can no longer open keeps
-    its stored reference as text, as it stood in the conversation.
+    New attachments replace the old ones. A Drive file the user can no longer open keeps its
+    stored reference as text, as it stood in the conversation; so do inline files.
     """
-    if attachment_data is not None:
-        return content, attachment_data
-    carried = carried_attachment(original_content)
-    if carried.drive_file_id is not None:
-        data = await _drive_attachment_data(db, user_id, carried.drive_file_id)
-        if data is not None:
-            return content, data
-        return content + split_attachment_block(original_content)[1], None
-    return content + carried.text_tail, None
+    if attachments:
+        return content, attachments
+    kept: list[dict] = []
+    for carried in carried_attachments(original_content):
+        if carried.drive_file_id is not None:
+            data = await _drive_attachment_data(db, user_id, carried.drive_file_id)
+            if data is not None:
+                kept.append(data)
+                continue
+        content += carried.text_tail
+    return content, kept
 
 
 async def _drive_attachment_data(
@@ -1446,7 +1453,7 @@ async def send_message(
         )
 
     build = await _resolve_build_request(db, current_user.id, body)
-    attachment_data = await _attachment_data(db, current_user.id, body)
+    attachments_data = await _attachments_data(db, current_user.id, body)
     content = body.content
     if body.edit_message_id is not None:
         if conversation.is_running:
@@ -1454,8 +1461,8 @@ async def send_message(
         dropped = messages_from_edit(existing_messages, body.edit_message_id)
         if dropped is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=EDIT_NOT_FOUND)
-        content, attachment_data = await _edited_turn_input(
-            db, current_user.id, content, dropped[0].content, attachment_data
+        content, attachments_data = await _edited_turn_input(
+            db, current_user.id, content, dropped[0].content, attachments_data
         )
         # The conversation rewinds to the point before the edited message.
         await db.execute(
@@ -1474,7 +1481,7 @@ async def send_message(
             content=body.content,
             credential_id=credential.id,
             model=body.model,
-            attachment=attachment_data,
+            attachment=attachments_data or None,
             allow_build=build is not None and not build.skill_only,
             allow_skill_write=build is not None and build.skill_only,
             build_target_workflow_id=build.target_workflow_id if build is not None else None,
@@ -1525,8 +1532,9 @@ async def send_message(
             queued_message=queued_response,
         )
 
-    attachment = FileAttachment.model_validate(attachment_data) if attachment_data else None
-    user_message = _build_user_message(content, attachment)
+    user_message = _build_user_message(
+        content, [FileAttachment.model_validate(data) for data in attachments_data]
+    )
     message_created_at = datetime.now(timezone.utc)
     message = DashboardMessage(
         id=uuid.uuid4(),
@@ -1557,7 +1565,7 @@ async def send_message(
             content=content,
             credential_id=credential.id,
             model=body.model,
-            attachment_data=attachment_data,
+            attachments=attachments_data,
             public_base_url=public_base_url,
             should_generate_title=should_generate_title,
             build=build,

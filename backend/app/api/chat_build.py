@@ -9,6 +9,7 @@ on the instance that received the request, so the audit trail stays where AGENTS
 import asyncio
 import json
 import uuid
+from collections.abc import Sequence
 from threading import Event
 from typing import Any
 
@@ -33,6 +34,7 @@ from app.api.workflows import extract_input_fields_from_workflow, get_workflow_f
 from app.db.models import Credential, User, Workflow
 from app.services import file_intake_service, template_service
 from app.services.audit_log import audit
+from app.services.chat_attachments import run_attachment
 from app.services.chat_build_mode import (
     AI_BUILDER_TOOL_NAMES,
     BUDGET_SPENT_MESSAGE,
@@ -265,7 +267,7 @@ class ChatBuildSession:
         public_base_url: str,
         cancel_event: Event | None,
         llm_session_id: str | None,
-        attachment: FileAttachment | None = None,
+        attachments: Sequence[FileAttachment] = (),
         credential_form: CredentialFormTool | None = None,
         conversation_id: uuid.UUID | None = None,
     ) -> None:
@@ -279,7 +281,7 @@ class ChatBuildSession:
         self.cancel_event = cancel_event
         # Every model request and test run in the turn carries one non-empty session id.
         self.llm_session_id = llm_session_id or str(uuid.uuid4())
-        self.attachment = attachment
+        self.attachments = list(attachments)
         self.conversation_id = conversation_id
         # MCP turns: credentials are created on a Heym page, never in the chat.
         self.credential_form = credential_form
@@ -592,30 +594,34 @@ class ChatBuildSession:
         return BuildToolOutcome(result=result, summary=summary, status="success", events=[event])
 
     def _attached_bundle(self, skill_name: str | None) -> SkillBundle | BuildToolOutcome | None:
-        """The skill in this turn's zip, or None when the zip is ordinary context."""
-        if self.attachment is None or self.attachment.kind != "zip":
+        """The skill in this turn's zips, or None when the zips are ordinary context."""
+        zips = [attachment for attachment in self.attachments if attachment.kind == "zip"]
+        skills: list[SkillBundle] = []
+        for attachment in zips:
+            raw = decode_zip_payload(attachment.content)
+            if raw is None:
+                return tool_error(
+                    "The zip could not be read."
+                    if len(zips) == 1
+                    else f"The zip {attachment.name} could not be read."
+                )
+            skills.extend(read_zip(raw).skills)
+        if not skills:
             return None
-        raw = decode_zip_payload(self.attachment.content)
-        if raw is None:
-            return tool_error("The zip could not be read.")
-        reading = read_zip(raw)
-        if not reading.skills:
-            return None
-        if len(reading.skills) == 1:
-            return reading.skills[0]
+        if len(skills) == 1:
+            return skills[0]
         if skill_name:
-            matches = [
-                skill for skill in reading.skills if skill.name.casefold() == skill_name.casefold()
-            ]
+            matches = [skill for skill in skills if skill.name.casefold() == skill_name.casefold()]
             if len(matches) == 1:
                 return matches[0]
-        names = ", ".join(skill.name for skill in reading.skills)
+        names = ", ".join(skill.name for skill in skills)
+        source = "The zip has" if len(zips) == 1 else "The zips have"
         return BuildToolOutcome(
             result=json.dumps(
                 {
                     "status": "needs_choice",
-                    "message": f"The zip has several skills ({names}). Pass skill_name.",
-                    "skills": [skill.name for skill in reading.skills],
+                    "message": f"{source} several skills ({names}). Pass skill_name.",
+                    "skills": [skill.name for skill in skills],
                 }
             ),
             summary="Needs a choice of skill",
@@ -806,17 +812,18 @@ class ChatBuildSession:
             return tool_error(str(exc))
         run_inputs = dict(inputs)
         field_keys = [f.key for f in extract_input_fields_from_workflow(workflow)]
-        if self.attachment is not None and self.attachment.kind not in ("zip", "file"):
-            inject_key = _find_injection_field(field_keys, self.attachment.kind)
+        attachment = self._run_attachment(args)
+        if attachment is not None and attachment.kind not in ("zip", "file"):
+            inject_key = _find_injection_field(field_keys, attachment.kind)
             if inject_key:
-                run_inputs[inject_key] = self.attachment.injection_value()
-        elif self.attachment is not None and self.attachment.kind == "file":
+                run_inputs[inject_key] = attachment.injection_value()
+        elif attachment is not None and attachment.kind == "file":
             # An image from Drive still reaches the workflow's image input as itself.
             image = await image_input(
                 self.db,
                 self.user.id,
-                file_id=self.attachment.file_id,
-                mime=self.attachment.mime,
+                file_id=attachment.file_id,
+                mime=attachment.mime,
                 field_keys=field_keys,
             )
             if image is not None:
@@ -854,10 +861,18 @@ class ChatBuildSession:
             status="success" if status == "success" else "error",
         )
 
+    def _run_attachment(self, args: dict[str, Any]) -> FileAttachment | None:
+        """The turn's attachment a test run receives: the one its inputs or sample_file name."""
+        inputs = args.get("inputs") if isinstance(args.get("inputs"), dict) else {}
+        return run_attachment(
+            self.attachments, {"inputs": inputs, "sample_file": args.get("sample_file")}
+        )
+
     async def _sample_file_id(self, args: dict[str, Any], workflow: Workflow) -> uuid.UUID | None:
         """The Drive file a test run hands to the workflow's File Upload trigger.
 
-        The file the model names, else the turn's attachment, else the file this
+        The file the model names, else the turn's attachment its inputs name (or its first
+        Drive file), else the file this
         conversation opened last (only when the workflow has an upload trigger).
 
         Raises:
@@ -866,8 +881,9 @@ class ChatBuildSession:
         named = str(args.get("sample_file") or "").strip()
         if named:
             return await asyncio.to_thread(_resolve_sample_file, self.user.id, named)
-        if self.attachment is not None and self.attachment.kind == "file":
-            return self.attachment.file_id
+        attachment = self._run_attachment(args)
+        if attachment is not None and attachment.kind == "file":
+            return attachment.file_id
         if self.conversation_id is None:
             return None
         if file_intake_service.find_file_upload_trigger(workflow.nodes or []) is None:

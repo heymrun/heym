@@ -485,6 +485,22 @@ class DetectionTests(InspectorTestCase):
         _text_pdf(path, "Detected by magic bytes")
         self.assertEqual(detect_kind(path), "pdf")
 
+    def test_utf8_text_with_an_unknown_extension_is_text(self) -> None:
+        path = self.dir / "burak.akgun"
+        path.write_text("4 rfc ve pr\n\n3 Multifernet, ilerlet.\n5 açık issue\n", encoding="utf-8")
+        self.assertEqual(detect_kind(path), "text")
+
+    def test_utf8_text_cut_inside_a_character_at_the_sniff_limit_is_text(self) -> None:
+        path = self.dir / "notes"
+        # 4095 ASCII bytes, then "ş" (2 bytes): the 4096-byte head ends inside it.
+        path.write_bytes(b"a" * 4095 + "şimdi".encode("utf-8"))
+        self.assertEqual(detect_kind(path), "text")
+
+    def test_invalid_utf8_without_an_extension_is_binary(self) -> None:
+        path = self.dir / "blob"
+        path.write_bytes(b"abc\xff\xfe\xfd")
+        self.assertEqual(detect_kind(path), "binary")
+
     def test_binary_gets_a_hint(self) -> None:
         path = self.dir / "blob.bin"
         path.write_bytes(bytes(range(256)))

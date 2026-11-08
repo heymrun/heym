@@ -1,3 +1,5 @@
+import { readsAsUtf8Text } from "@/lib/textFileSniff";
+
 export type InputFieldFileKind = "text" | "image" | "pdf";
 
 export interface InputFieldFileResult {
@@ -26,11 +28,13 @@ const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const MAX_PDF_BYTES = 5 * 1024 * 1024;
 const MAX_CONTENT_CHARS = 100_000;
 
-function detectKind(file: File): InputFieldFileKind | null {
+/** A name the list does not know is still text when the file reads as UTF-8 (`notes`, `a.list`). */
+async function detectKind(file: File): Promise<InputFieldFileKind | null> {
   if (file.type === "application/pdf") return "pdf";
   if (IMAGE_MIME_TYPES.has(file.type)) return "image";
-  const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+  const ext = file.name.includes(".") ? (file.name.split(".").pop() ?? "").toLowerCase() : "";
   if (TEXT_EXTENSIONS.has(ext)) return "text";
+  if (await readsAsUtf8Text(file)) return "text";
   return null;
 }
 
@@ -77,7 +81,7 @@ async function extractPdfText(file: File): Promise<string> {
 
 /** Read a dropped or selected file into a workflow input field value string. */
 export async function readFileForInputField(file: File): Promise<InputFieldFileResult> {
-  const kind = detectKind(file);
+  const kind = await detectKind(file);
   if (!kind) {
     throw new Error("Unsupported file type");
   }
@@ -107,6 +111,3 @@ export async function readFileForInputField(file: File): Promise<InputFieldFileR
 
   return { content, name: file.name, kind };
 }
-
-export const INPUT_FIELD_FILE_ACCEPT =
-  ".txt,.md,.json,.csv,.py,.ts,.js,.html,.xml,.yaml,.yml,.log,.pdf,image/jpeg,image/png,image/gif,image/webp";

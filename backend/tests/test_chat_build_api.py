@@ -237,7 +237,7 @@ class RunChatTurnBuildTests(unittest.IsolatedAsyncioTestCase):
             content="Build it",
             credential_id=credential.id,
             model="gpt-5.5",
-            attachment_data=None,
+            attachments=[],
             should_generate_title=False,
             build=BuildRequest(),
         )
@@ -307,7 +307,7 @@ class RunChatTurnBuildTests(unittest.IsolatedAsyncioTestCase):
             content="Make a suite",
             credential_id=credential.id,
             model="gpt-5.5",
-            attachment_data=None,
+            attachments=[],
             should_generate_title=False,
         )
         with (
