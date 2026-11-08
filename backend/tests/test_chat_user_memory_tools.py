@@ -4,7 +4,7 @@ import json
 import unittest
 import uuid
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.api import chat_memory
 from app.services.user_memory import (
@@ -164,6 +164,78 @@ class SchemaTests(unittest.TestCase):
         self.assertEqual([t.name for t in tools], ["get_user_memory", "set_user_memory"])
         self.assertEqual(tools[1].inputSchema.required, ["mode", "content"])
         self.assertIn("credentials", tools[1].description or "")
+
+
+class ChatWiringTests(unittest.TestCase):
+    def test_every_dashboard_chat_turn_offers_the_tools(self) -> None:
+        from app.api import ai_assistant
+
+        names = [tool["function"]["name"] for tool in ai_assistant.DASHBOARD_CHAT_TOOLS]
+        self.assertIn("get_user_memory", names)
+        self.assertIn("set_user_memory", names)
+
+    def test_the_prompt_carries_the_write_rule(self) -> None:
+        from app.api import ai_assistant
+
+        self.assertIn(chat_memory.USER_MEMORY_PROMPT, ai_assistant.DASHBOARD_CHAT_SYSTEM_PROMPT)
+        self.assertIn("Never save details", ai_assistant.DASHBOARD_CHAT_SYSTEM_PROMPT)
+
+    def test_run_history_summaries_route_here(self) -> None:
+        from app.api import ai_assistant
+
+        self.assertEqual(
+            ai_assistant._summarize_tool_result("set_user_memory", json.dumps({"status": "added"})),
+            "Added to memory",
+        )
+
+
+class ChatDispatchTests(unittest.IsolatedAsyncioTestCase):
+    async def test_stream_dispatches_memory_tools(self) -> None:
+        from app.api import ai_assistant
+
+        user = SimpleNamespace(id=uuid.uuid4())
+        arguments = {"mode": "append", "content": "Prefers short answers"}
+        tool_message = MagicMock(content=None)
+        tool_call = MagicMock()
+        tool_call.id = "memory-call"
+        tool_call.function.name = "set_user_memory"
+        tool_call.function.arguments = json.dumps(arguments)
+        tool_message.tool_calls = [tool_call]
+        final_message = MagicMock(content="Saved.", tool_calls=None)
+        usage = MagicMock(prompt_tokens=10, completion_tokens=5, total_tokens=15)
+        client = MagicMock()
+        client.chat.completions.create.side_effect = [
+            MagicMock(choices=[MagicMock(message=tool_message)], usage=usage),
+            MagicMock(choices=[MagicMock(message=final_message)], usage=usage),
+        ]
+        db = AsyncMock()
+
+        with (
+            patch.object(ai_assistant, "record_run_history"),
+            patch.object(
+                ai_assistant,
+                "call_user_memory_tool",
+                AsyncMock(return_value={"status": "added", "length": 21}),
+            ) as call_tool,
+        ):
+            chunks = [
+                chunk
+                async for chunk in ai_assistant.stream_dashboard_chat(
+                    client,
+                    "gpt-4o-mini",
+                    "system",
+                    [{"role": "user", "content": "remember that I prefer short answers"}],
+                    db,
+                    user,
+                    "OpenAI",
+                    "https://heym.example",
+                )
+            ]
+
+        call_tool.assert_awaited_once_with(db, user, "set_user_memory", arguments, source="chat")
+        joined = "".join(chunks)
+        self.assertIn("Saving to memory...", joined)
+        self.assertIn("Added to memory", joined)
 
 
 if __name__ == "__main__":

@@ -56,6 +56,14 @@ from app.api.chat_data_tables import (
     data_table_tool_label,
     summarize_data_table_tool,
 )
+from app.api.chat_memory import (
+    USER_MEMORY_PROMPT,
+    USER_MEMORY_TOOL_NAMES,
+    USER_MEMORY_TOOL_SCHEMAS,
+    call_user_memory_tool,
+    summarize_user_memory_tool,
+    user_memory_tool_label,
+)
 from app.api.data_tables import create_data_table as create_data_table_route
 from app.api.deps import get_current_user
 from app.api.schedules import fetch_schedule_events_for_user
@@ -634,7 +642,9 @@ When the user asks for something you cannot do with your tools (e.g. console log
 16a. Direct DataTable actions are real actions, not advice or workflow builds. When the user asks to inspect rows, add or remove columns, or insert, update, delete or clear rows, use the DataTable tools directly. Do not build a workflow for a one-off table edit and do not send the user to the DataTable tab. A table UUID or a link such as https://heym.example/?tab=datatable/<uuid> identifies the table; inspect it with get_data_table. For a name, resolve it with list_data_tables; ask only if ambiguous. Owner and write access (direct or team) allow column and row changes; read access permits inspection only. Preserve existing columns and row values when adding columns. Use string for columns whose type the user did not specify. Use list_data_table_rows to find actual row UUIDs before changing or deleting selected rows, paginating when has_more is true. Report validation errors and partial imports accurately; never claim a failed action succeeded. Removing columns and clearing all rows follow the DataTable tab's confirmation: first call without confirmed, show the returned warning (including the affected rows and irreversible value loss), emit a heym-clarify confirmation question and stop. Only after the user confirms in a follow-up may you call the same action with confirmed=true. Single-row deletion on request needs no extra confirmation. The workflow DSL catalog contains no row values; its builder-only restrictions do not prohibit these direct DataTable tools.
 17. Dashboards hold widgets, and Heym Work shows each dashboard as a page. When the user asks which dashboards or pages exist, what is on one, or which dashboard or page a widget or workflow is on, call list_dashboards (dashboard_id to read one, workflow_id to find where a workflow is placed) and answer from it, linking each dashboard's url. When the user asks for a new dashboard or page, call create_dashboard with a short name and then fill it in the same turn. When the user asks for new widgets, charts or metrics on a dashboard or page, resolve the dashboard with list_dashboards (or use the one create_dashboard returned) and the data tables the widgets read with list_data_tables, then call build_dashboard_widgets once with every widget: a short title, a prompt that says what it shows from which data, and the data_table_ids. It builds them in parallel, checks their data, fixes a widget that shows nothing or an error up to twice, and returns what was built and what failed. When a result of build_dashboard_widgets or refine_dashboard_widgets lists still_failing, call refine_dashboard_widgets once more for those widgets with an instruction that builds each a different way and avoids what its error names; if one still fails, tell the user which widget and why. If the user did not say what the page should show and no data table fits, ask with one heym-clarify question first. If build_dashboard_widgets says the chat's model cannot build widgets, call add_dashboard_widget without workflow_id, with a short title and the chart_type: it puts an empty widget on the dashboard. Then follow its next_step: write the widget's graph with save_workflow and the widget's workflow_id, test it with run_workflow_test and finish. Never build a separate workflow to copy onto a dashboard. When the user asks to put, add or place an existing workflow on a dashboard or page, resolve the workflow with list_workflows and call add_dashboard_widget with its workflow_id. Call add_dashboard_widget once per widget. If the user names no dashboard and several have permission owner or write, emit one heym-clarify question of type single whose options are those dashboard names, then stop and wait. A dashboard with permission read cannot take widgets: say so. After adding, say whether it became a chart widget or a run widget and link the dashboard url. Changes to a chart widget go to the widget's workflow_id from the result, never to the workflow it was copied from. When the user asks to change what one or more widgets show or how they draw it, call refine_dashboard_widgets once with every change. A message from Heym Work's page view lists the user's notes on a page's widgets, each with its widget_id: apply every note in that one call, except a note that asks to rename or delete a widget, which goes to those tools. Afterwards say per widget what changed, and what could not be changed and why. To rename a widget, call rename_dashboard_widget with its id from list_dashboards. Call delete_dashboard_widget only when the user asked to delete or remove that widget; if their words match more than one widget, ask which with one heym-clarify question first. Deleting a chart widget deletes its workflow too. When the user asks to tidy, arrange or clean up a dashboard or page, also when they ask in the same message as adding widgets, call tidy_dashboard once the widgets are added, with per_row when they name how many widgets go in a row; another call gives another arrangement. tidy_dashboard arranges the dashboard in Heym. A Heym Work page keeps its own arrangement, which the Tidy up button on that page changes: say so when the user means a page in Heym Work."""
 
-DASHBOARD_CHAT_SYSTEM_PROMPT = DASHBOARD_CHAT_SYSTEM_PROMPT + CLARIFY_PROTOCOL_PROMPT
+DASHBOARD_CHAT_SYSTEM_PROMPT = (
+    DASHBOARD_CHAT_SYSTEM_PROMPT + CLARIFY_PROTOCOL_PROMPT + USER_MEMORY_PROMPT
+)
 
 _CREDENTIAL_CHOICES_SCHEMA: dict[str, Any] = {
     "type": "array",
@@ -1165,6 +1175,7 @@ DASHBOARD_CHAT_TOOLS = [
     *DASHBOARD_BUILD_TOOL_SCHEMAS,
     *DATA_TABLE_TOOL_SCHEMAS,
     *BOARD_TOOL_SCHEMAS,
+    *USER_MEMORY_TOOL_SCHEMAS,
 ]
 
 
@@ -3429,6 +3440,8 @@ def _summarize_tool_result(tool_name: str, result_json: str) -> str:
         return summarize_dashboard_build_tool(tool_name, data)
     if tool_name in DATA_TABLE_TOOL_NAMES:
         return summarize_data_table_tool(tool_name, data)
+    if tool_name in USER_MEMORY_TOOL_NAMES:
+        return summarize_user_memory_tool(tool_name, data)
     if tool_name in BOARD_TOOL_NAMES:
         return summarize_board_tool(tool_name, data if isinstance(data, dict) else {})
     return result_json[:200] + ("..." if len(result_json) > 200 else "")
@@ -5237,6 +5250,41 @@ async def stream_dashboard_chat(
                     chat_llm = (selected_credential.id, model) if selected_credential else None
                     result = json.dumps(
                         await call_board_tool(db, user, name, args, public_base_url, chat_llm)
+                    )
+                    step_ms = round((time.time() - step_start) * 1000, 2)
+                    run_steps.append(
+                        {
+                            "label": step_label,
+                            "tool": name,
+                            "request": args,
+                            "response_summary": _summarize_tool_result(name, result),
+                            "execution_time_ms": step_ms,
+                        }
+                    )
+                    yield _tool_end_yield(
+                        tc.id,
+                        run_steps[-1]["response_summary"],
+                        step_ms,
+                        status=_chat_tool_lifecycle_status(name, result),
+                    )
+                elif name in USER_MEMORY_TOOL_NAMES:
+                    step_label = user_memory_tool_label(name)
+                    yield (
+                        "data: "
+                        + json.dumps(
+                            {
+                                "type": "tool_start",
+                                "id": tc.id,
+                                "name": name,
+                                "label": step_label,
+                                "args": args,
+                            }
+                        )
+                        + "\n\n"
+                    )
+                    step_start = time.time()
+                    result = json.dumps(
+                        await call_user_memory_tool(db, user, name, args, source="chat")
                     )
                     step_ms = round((time.time() - step_start) * 1000, 2)
                     run_steps.append(
