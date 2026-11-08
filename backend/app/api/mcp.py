@@ -1141,6 +1141,15 @@ async def call_mcp_tool(
     tool_name = body.get("name", "")
     arguments = body.get("arguments", {})
 
+    if tool_name in USER_MEMORY_TOOL_NAMES:
+        memory_result = await call_user_memory_tool(
+            db, mcp_user, tool_name, arguments or {}, source="mcp"
+        )
+        return MCPToolResult(
+            content=[MCPTextContent(text=json.dumps(memory_result, indent=2))],
+            isError=bool(memory_result.get("error")),
+        )
+
     if tool_name == mcp_chat_service.MCP_CHAT_TOOL_NAME:
         chat_settings = await agent_settings.get_global_agent_settings(db, mcp_user.id)
         if not chat_settings.enabled:

@@ -114,6 +114,21 @@ class DispatchTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertTrue(response["result"]["isError"])
 
+    async def test_the_rest_tool_call_route_runs_memory_tools_too(self) -> None:
+        user = SimpleNamespace(id=uuid.uuid4())
+        db = AsyncMock()
+        with patch.object(
+            mcp_api,
+            "call_user_memory_tool",
+            AsyncMock(return_value={"content": "Answer in English", "revision": "abc"}),
+        ) as call_tool:
+            result = await mcp_api.call_mcp_tool(
+                _request({"name": "get_user_memory", "arguments": {}}), user, db
+            )
+        call_tool.assert_awaited_once_with(db, user, "get_user_memory", {}, source="mcp")
+        self.assertFalse(result.isError)
+        self.assertEqual(json.loads(result.content[0].text)["revision"], "abc")
+
 
 if __name__ == "__main__":
     unittest.main()
