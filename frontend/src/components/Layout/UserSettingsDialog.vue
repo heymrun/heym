@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 
 import type { CredentialListItem } from "@/types/credential";
@@ -27,6 +27,7 @@ import {
 import ClusterSettingsTab from "@/components/Layout/settings/ClusterSettingsTab.vue";
 import KeyRotationTab from "@/components/Layout/settings/KeyRotationTab.vue";
 import KubernetesCredentialsTab from "@/components/Layout/settings/KubernetesCredentialsTab.vue";
+import SettingsTabNav from "@/components/Layout/settings/SettingsTabNav.vue";
 import SsoSettingsTab from "@/components/Layout/settings/SsoSettingsTab.vue";
 import WorkIntegrationSettingsTab from "@/components/Layout/settings/WorkIntegrationSettingsTab.vue";
 import { k8sCredentialsEnabled } from "@/services/k8sCredentials";
@@ -66,6 +67,35 @@ const activeTab = ref<SettingsTab>("profile");
 
 // Off on Docker installs, so the tab stays hidden until the backend says otherwise.
 const kubernetesTabVisible = ref(false);
+
+interface SettingsTabEntry {
+  id: SettingsTab;
+  label: string;
+  adminOnly?: boolean;
+  testId?: string;
+}
+
+const SETTINGS_TABS: SettingsTabEntry[] = [
+  { id: "profile", label: "Profile" },
+  { id: "security", label: "Security" },
+  { id: "voice", label: "Voice" },
+  { id: "ai-defaults", label: "AI Defaults" },
+  { id: "observability", label: "Observability" },
+  { id: "plugins", label: "Plugins" },
+  { id: "sso", label: "SSO", adminOnly: true },
+  { id: "work", label: "Heym Work", adminOnly: true },
+  { id: "instances", label: "Instances", adminOnly: true },
+  { id: "kubernetes", label: "Kubernetes", adminOnly: true, testId: "settings-tab-kubernetes" },
+  { id: "encryption", label: "Encryption", adminOnly: true, testId: "settings-tab-encryption" },
+];
+
+const visibleTabs = computed<SettingsTabEntry[]>(() =>
+  SETTINGS_TABS.filter((tab) => {
+    if (tab.adminOnly && !authStore.user?.is_admin) return false;
+    if (tab.id === "kubernetes" && !kubernetesTabVisible.value) return false;
+    return true;
+  }),
+);
 
 const observabilityStatus = ref<ObservabilityStatus | null>(null);
 const loadingObservability = ref(false);
@@ -226,34 +256,6 @@ const confirmNewPassword = ref("");
 const passwordError = ref<string | null>(null);
 const passwordSuccess = ref<string | null>(null);
 
-const tabbarRef = ref<HTMLElement | null>(null);
-const showLeftShadow = ref(false);
-const showRightShadow = ref(false);
-let tabbarResizeObserver: ResizeObserver | null = null;
-
-function updateTabbarShadows(): void {
-  const container = tabbarRef.value;
-  if (!container) return;
-  showLeftShadow.value = container.scrollLeft > 2;
-  showRightShadow.value =
-    container.scrollLeft + container.clientWidth < container.scrollWidth - 2;
-}
-
-function setupTabbarObservers(): void {
-  nextTick(() => {
-    const container = tabbarRef.value;
-    if (!container) return;
-    updateTabbarShadows();
-    tabbarResizeObserver = new ResizeObserver(() => updateTabbarShadows());
-    tabbarResizeObserver.observe(container);
-  });
-}
-
-function teardownTabbarObservers(): void {
-  tabbarResizeObserver?.disconnect();
-  tabbarResizeObserver = null;
-}
-
 watch(
   () => props.open,
   (isOpen) => {
@@ -280,11 +282,6 @@ watch(
       if (activeTab.value === "plugins") {
         void loadPlugins();
       }
-      setupTabbarObservers();
-    } else {
-      teardownTabbarObservers();
-      showLeftShadow.value = false;
-      showRightShadow.value = false;
     }
   },
   { immediate: true },
@@ -313,14 +310,6 @@ async function handleSaveProfile(): Promise<void> {
     savingProfile.value = false;
   }
 }
-
-onMounted(() => {
-  setupTabbarObservers();
-});
-
-onUnmounted(() => {
-  teardownTabbarObservers();
-});
 
 async function handleChangePassword(): Promise<void> {
   passwordError.value = null;
@@ -387,589 +376,467 @@ async function handleChangePassword(): Promise<void> {
   <Dialog
     :open="props.open"
     title="Settings"
-    content-class="!max-w-[532px]"
+    content-class="!max-w-[760px]"
     @close="emit('close')"
   >
-    <div class="space-y-5 -mt-3">
-      <div class="relative">
-        <Transition name="tab-fade">
-          <div
-            v-if="showLeftShadow"
-            class="pointer-events-none absolute left-0 top-0 bottom-0 w-8 z-10"
-            style="background: linear-gradient(to right, hsl(var(--card)) 0%, transparent 100%)"
-          />
-        </Transition>
-        <Transition name="tab-fade">
-          <div
-            v-if="showRightShadow"
-            class="pointer-events-none absolute right-0 top-0 bottom-0 w-8 z-10"
-            style="background: linear-gradient(to left, hsl(var(--card)) 0%, transparent 100%)"
-          />
-        </Transition>
-        <div
-          ref="tabbarRef"
-          class="flex border-b border-border pb-1 overflow-x-auto scrollbar-thin"
-          @scroll="updateTabbarShadows"
-        >
-          <button
-            type="button"
-            class="px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap shrink-0"
-            :class="activeTab === 'profile' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'"
-            @click="activeTab = 'profile'"
-          >
-            Profile
-          </button>
-          <button
-            type="button"
-            class="px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap shrink-0"
-            :class="activeTab === 'security' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'"
-            @click="activeTab = 'security'"
-          >
-            Security
-          </button>
-          <button
-            type="button"
-            class="px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap shrink-0"
-            :class="activeTab === 'voice' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'"
-            @click="activeTab = 'voice'"
-          >
-            Voice
-          </button>
-          <button
-            type="button"
-            class="px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap shrink-0"
-            :class="activeTab === 'ai-defaults' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'"
-            @click="activeTab = 'ai-defaults'"
-          >
-            AI Defaults
-          </button>
-          <button
-            type="button"
-            class="px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap shrink-0"
-            :class="activeTab === 'observability' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'"
-            @click="activeTab = 'observability'"
-          >
-            Observability
-          </button>
-          <button
-            type="button"
-            class="px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap shrink-0"
-            :class="activeTab === 'plugins' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'"
-            @click="activeTab = 'plugins'"
-          >
-            Plugins
-          </button>
-          <button
-            v-if="authStore.user?.is_admin"
-            type="button"
-            class="px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap shrink-0"
-            :class="activeTab === 'sso' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'"
-            @click="activeTab = 'sso'"
-          >
-            SSO
-          </button>
-          <button
-            v-if="authStore.user?.is_admin"
-            type="button"
-            class="px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap shrink-0"
-            :class="activeTab === 'work' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'"
-            @click="activeTab = 'work'"
-          >
-            Heym Work
-          </button>
-          <button
-            v-if="authStore.user?.is_admin"
-            type="button"
-            class="px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap shrink-0"
-            :class="activeTab === 'instances' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'"
-            @click="activeTab = 'instances'"
-          >
-            Instances
-          </button>
-          <button
-            v-if="authStore.user?.is_admin && kubernetesTabVisible"
-            type="button"
-            data-testid="settings-tab-kubernetes"
-            class="px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap shrink-0"
-            :class="activeTab === 'kubernetes' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'"
-            @click="activeTab = 'kubernetes'"
-          >
-            Kubernetes
-          </button>
-          <button
-            v-if="authStore.user?.is_admin"
-            type="button"
-            data-testid="settings-tab-encryption"
-            class="px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap shrink-0"
-            :class="activeTab === 'encryption' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'"
-            @click="activeTab = 'encryption'"
-          >
-            Encryption
-          </button>
-        </div>
-      </div>
-
-      <form
-        v-if="activeTab === 'profile'"
-        class="space-y-5"
-        @submit.prevent="handleSaveProfile"
-      >
-        <div
-          v-if="authStore.user"
-          class="flex items-center gap-3"
-        >
-          <UserAvatar
-            :user-id="authStore.user.id"
-            :name="name || authStore.user.name"
-            :email="authStore.user.email"
-            class="h-12 w-12 bg-primary/15 text-lg font-semibold text-primary dark:bg-primary/25 dark:text-accent-foreground"
-          />
-          <p class="min-w-0 text-xs text-muted-foreground">
-            Your picture comes from
-            <a
-              href="https://gravatar.com"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="font-medium text-primary hover:underline dark:text-accent-foreground"
-            >Gravatar</a>
-            for <span class="break-all font-medium text-foreground">{{ authStore.user.email }}</span>.
-            Without one, Heym shows your initial.
-          </p>
-        </div>
-
-        <div class="space-y-2">
-          <Label for="user-name">Name</Label>
-          <Input
-            id="user-name"
-            v-model="name"
-            placeholder="Your name"
-            required
-          />
-        </div>
-
-        <div class="space-y-2">
-          <Label for="user-rules">User Rules</Label>
-          <p class="text-xs text-muted-foreground">
-            Custom instructions included in every AI request (workflow builder and dashboard
-            chat). Use this to define your preferences, coding style, or specific requirements.
-          </p>
-          <Textarea
-            id="user-rules"
-            v-model="userRules"
-            placeholder="e.g., Always use Turkish for labels, prefer concise responses, include error handling in all workflows..."
-            :rows="6"
-          />
-        </div>
-
-        <div class="flex justify-end gap-3 pt-2">
-          <Button
-            variant="outline"
-            type="button"
-            @click="emit('close')"
-          >
-            Cancel
-          </Button>
-          <Button
-            type="submit"
-            :loading="savingProfile"
-            :disabled="!name.trim()"
-          >
-            Save Changes
-          </Button>
-        </div>
-      </form>
-
-      <form
-        v-else-if="activeTab === 'security'"
-        class="space-y-5"
-        @submit.prevent="handleChangePassword"
-      >
-        <div class="space-y-2">
-          <Label for="current-password">Current Password</Label>
-          <Input
-            id="current-password"
-            v-model="currentPassword"
-            type="password"
-            autocomplete="current-password"
-            required
-          />
-        </div>
-
-        <div class="space-y-2">
-          <Label for="new-password">New Password</Label>
-          <Input
-            id="new-password"
-            v-model="newPassword"
-            type="password"
-            autocomplete="new-password"
-            required
-          />
-          <p class="text-xs text-muted-foreground">
-            Minimum 6 characters. Use a strong, unique password for better security.
-          </p>
-        </div>
-
-        <div class="space-y-2">
-          <Label for="confirm-new-password">Confirm New Password</Label>
-          <Input
-            id="confirm-new-password"
-            v-model="confirmNewPassword"
-            type="password"
-            autocomplete="new-password"
-            required
-          />
-        </div>
-
-        <div
-          v-if="passwordError"
-          class="text-xs text-destructive"
-        >
-          {{ passwordError }}
-        </div>
-        <div
-          v-if="passwordSuccess"
-          class="text-xs text-emerald-500"
-        >
-          {{ passwordSuccess }}
-        </div>
-
-        <div class="flex justify-end gap-3 pt-2">
-          <Button
-            variant="outline"
-            type="button"
-            @click="emit('close')"
-          >
-            Close
-          </Button>
-          <Button
-            type="submit"
-            :loading="savingPassword"
-          >
-            Update Password
-          </Button>
-        </div>
-      </form>
-
-      <div
-        v-else-if="activeTab === 'voice'"
-        class="space-y-5"
-      >
-        <div class="space-y-2">
-          <Label>ElevenLabs Credential</Label>
-          <p class="text-xs text-muted-foreground">
-            Used to read messages aloud and power interactive voice mode in chat.
-          </p>
-          <Select
-            v-model="selectedTtsCredentialId"
-            :options="credentialOptions"
-          />
-          <Button
-            variant="outline"
-            type="button"
-            class="mt-1"
-            @click="goToCredentialsTab"
-          >
-            Add credential
-          </Button>
-        </div>
-
-        <div class="space-y-2">
-          <Label>Voice</Label>
-          <Select
-            v-model="selectedVoiceId"
-            :options="voiceOptions"
-            :disabled="!selectedTtsCredentialId || loadingVoices"
-          />
-          <p
-            v-if="voiceError"
-            class="text-xs text-destructive"
-          >
-            {{ voiceError }}
-          </p>
-        </div>
-
-        <div class="flex justify-end gap-3 pt-2">
-          <Button
-            variant="outline"
-            type="button"
-            @click="emit('close')"
-          >
-            Cancel
-          </Button>
-          <Button
-            type="button"
-            :loading="savingVoice"
-            :disabled="!selectedTtsCredentialId || !selectedVoiceId"
-            @click="handleSaveVoice"
-          >
-            Save Voice Settings
-          </Button>
-        </div>
-      </div>
-
-      <AiDefaultsTab
-        v-else-if="activeTab === 'ai-defaults'"
-        @close="emit('close')"
+    <div class="-mt-3 flex flex-col gap-5 sm:mt-0 sm:min-h-[26rem] sm:flex-row sm:gap-6">
+      <SettingsTabNav
+        v-model="activeTab"
+        :tabs="visibleTabs"
       />
 
-      <div
-        v-else-if="activeTab === 'observability'"
-        class="space-y-5"
-      >
-        <p class="text-xs text-muted-foreground">
-          OpenTelemetry traces every workflow and node execution so you can inspect them in
-          any OTLP-compatible backend (Jaeger, Grafana Tempo, Honeycomb, Datadog, and more).
-          Configure it with the <code>HEYM_OTEL_*</code> environment variables; this panel is
-          read-only.
-        </p>
+      <div class="min-w-0 flex-1 space-y-5">
+        <form
+          v-if="activeTab === 'profile'"
+          class="space-y-5"
+          @submit.prevent="handleSaveProfile"
+        >
+          <div
+            v-if="authStore.user"
+            class="flex items-center gap-3"
+          >
+            <UserAvatar
+              :user-id="authStore.user.id"
+              :name="name || authStore.user.name"
+              :email="authStore.user.email"
+              class="h-12 w-12 bg-primary/15 text-lg font-semibold text-primary dark:bg-primary/25 dark:text-accent-foreground"
+            />
+            <p class="min-w-0 text-xs text-muted-foreground">
+              Your picture comes from
+              <a
+                href="https://gravatar.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="font-medium text-primary hover:underline dark:text-accent-foreground"
+              >Gravatar</a>
+              for <span class="break-all font-medium text-foreground">{{ authStore.user.email }}</span>.
+              Without one, Heym shows your initial.
+            </p>
+          </div>
+
+          <div class="space-y-2">
+            <Label for="user-name">Name</Label>
+            <Input
+              id="user-name"
+              v-model="name"
+              placeholder="Your name"
+              required
+            />
+          </div>
+
+          <div class="space-y-2">
+            <Label for="user-rules">User Rules</Label>
+            <p class="text-xs text-muted-foreground">
+              Custom instructions included in every AI request (workflow builder and dashboard
+              chat). Use this to define your preferences, coding style, or specific requirements.
+            </p>
+            <Textarea
+              id="user-rules"
+              v-model="userRules"
+              placeholder="e.g., Always use Turkish for labels, prefer concise responses, include error handling in all workflows..."
+              :rows="6"
+            />
+          </div>
+
+          <div class="flex justify-end gap-3 pt-2">
+            <Button
+              variant="outline"
+              type="button"
+              @click="emit('close')"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              :loading="savingProfile"
+              :disabled="!name.trim()"
+            >
+              Save Changes
+            </Button>
+          </div>
+        </form>
+
+        <form
+          v-else-if="activeTab === 'security'"
+          class="space-y-5"
+          @submit.prevent="handleChangePassword"
+        >
+          <div class="space-y-2">
+            <Label for="current-password">Current Password</Label>
+            <Input
+              id="current-password"
+              v-model="currentPassword"
+              type="password"
+              autocomplete="current-password"
+              required
+            />
+          </div>
+
+          <div class="space-y-2">
+            <Label for="new-password">New Password</Label>
+            <Input
+              id="new-password"
+              v-model="newPassword"
+              type="password"
+              autocomplete="new-password"
+              required
+            />
+            <p class="text-xs text-muted-foreground">
+              Minimum 6 characters. Use a strong, unique password for better security.
+            </p>
+          </div>
+
+          <div class="space-y-2">
+            <Label for="confirm-new-password">Confirm New Password</Label>
+            <Input
+              id="confirm-new-password"
+              v-model="confirmNewPassword"
+              type="password"
+              autocomplete="new-password"
+              required
+            />
+          </div>
+
+          <div
+            v-if="passwordError"
+            class="text-xs text-destructive"
+          >
+            {{ passwordError }}
+          </div>
+          <div
+            v-if="passwordSuccess"
+            class="text-xs text-emerald-500"
+          >
+            {{ passwordSuccess }}
+          </div>
+
+          <div class="flex justify-end gap-3 pt-2">
+            <Button
+              variant="outline"
+              type="button"
+              @click="emit('close')"
+            >
+              Close
+            </Button>
+            <Button
+              type="submit"
+              :loading="savingPassword"
+            >
+              Update Password
+            </Button>
+          </div>
+        </form>
 
         <div
-          v-if="loadingObservability"
-          class="text-xs text-muted-foreground"
+          v-else-if="activeTab === 'voice'"
+          class="space-y-5"
         >
-          Loading status…
+          <div class="space-y-2">
+            <Label>ElevenLabs Credential</Label>
+            <p class="text-xs text-muted-foreground">
+              Used to read messages aloud and power interactive voice mode in chat.
+            </p>
+            <Select
+              v-model="selectedTtsCredentialId"
+              :options="credentialOptions"
+            />
+            <Button
+              variant="outline"
+              type="button"
+              class="mt-1"
+              @click="goToCredentialsTab"
+            >
+              Add credential
+            </Button>
+          </div>
+
+          <div class="space-y-2">
+            <Label>Voice</Label>
+            <Select
+              v-model="selectedVoiceId"
+              :options="voiceOptions"
+              :disabled="!selectedTtsCredentialId || loadingVoices"
+            />
+            <p
+              v-if="voiceError"
+              class="text-xs text-destructive"
+            >
+              {{ voiceError }}
+            </p>
+          </div>
+
+          <div class="flex justify-end gap-3 pt-2">
+            <Button
+              variant="outline"
+              type="button"
+              @click="emit('close')"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              :loading="savingVoice"
+              :disabled="!selectedTtsCredentialId || !selectedVoiceId"
+              @click="handleSaveVoice"
+            >
+              Save Voice Settings
+            </Button>
+          </div>
+        </div>
+
+        <AiDefaultsTab
+          v-else-if="activeTab === 'ai-defaults'"
+          @close="emit('close')"
+        />
+
+        <div
+          v-else-if="activeTab === 'observability'"
+          class="space-y-5"
+        >
+          <p class="text-xs text-muted-foreground">
+            OpenTelemetry traces every workflow and node execution so you can inspect them in
+            any OTLP-compatible backend (Jaeger, Grafana Tempo, Honeycomb, Datadog, and more).
+            Configure it with the <code>HEYM_OTEL_*</code> environment variables; this panel is
+            read-only.
+          </p>
+
+          <div
+            v-if="loadingObservability"
+            class="text-xs text-muted-foreground"
+          >
+            Loading status…
+          </div>
+
+          <div
+            v-else-if="observabilityStatus"
+            class="space-y-3"
+          >
+            <div class="flex items-center gap-2">
+              <span class="text-sm font-medium">Status</span>
+              <span
+                class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold"
+                :class="observabilityStatus.enabled
+                  ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                  : 'bg-muted text-muted-foreground'"
+              >
+                {{ observabilityStatus.enabled ? "Enabled" : "Disabled" }}
+              </span>
+            </div>
+
+            <dl class="grid grid-cols-[max-content_1fr] items-baseline gap-x-4 gap-y-1.5 text-sm">
+              <dt class="text-muted-foreground">
+                Service name
+              </dt>
+              <dd class="font-mono text-xs break-all">
+                {{ observabilityStatus.service_name }}
+              </dd>
+
+              <template v-if="observabilityStatus.enabled">
+                <dt class="text-muted-foreground">
+                  OTLP endpoint
+                </dt>
+                <dd class="font-mono text-xs break-all">
+                  {{ observabilityStatus.endpoint || "(SDK default)" }}
+                </dd>
+
+                <dt class="text-muted-foreground">
+                  Sampler ratio
+                </dt>
+                <dd class="font-mono text-xs">
+                  {{ observabilityStatus.sampler_ratio }}
+                </dd>
+
+                <dt class="text-muted-foreground">
+                  Capture node I/O
+                </dt>
+                <dd class="font-mono text-xs">
+                  {{ observabilityStatus.capture_node_io ? "on" : "off" }}
+                </dd>
+
+                <dt class="text-muted-foreground">
+                  Instrumented
+                </dt>
+                <dd class="text-xs">
+                  {{ observabilityStatus.instrumented.join(", ") }}
+                </dd>
+
+                <dt class="text-muted-foreground">
+                  Spans
+                </dt>
+                <dd class="text-xs">
+                  {{ observabilityStatus.spans.join(", ") }}
+                </dd>
+              </template>
+            </dl>
+
+            <div
+              v-if="!observabilityStatus.enabled"
+              class="rounded-lg border border-border bg-muted/40 p-3 text-xs text-muted-foreground space-y-1"
+            >
+              <p class="font-medium text-foreground">
+                Enable tracing
+              </p>
+              <p>Set these environment variables on the backend, then restart:</p>
+              <pre class="mt-1 whitespace-pre-wrap font-mono leading-relaxed">HEYM_OTEL_ENABLED=true
+HEYM_OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:4318
+HEYM_OTEL_EXPORTER_OTLP_HEADERS=authorization=Bearer &lt;token&gt;</pre>
+            </div>
+          </div>
+
+          <div
+            v-else
+            class="text-xs text-destructive"
+          >
+            Could not load observability status.
+          </div>
+
+          <div class="flex justify-end gap-3 pt-2">
+            <Button
+              variant="outline"
+              type="button"
+              @click="emit('close')"
+            >
+              Close
+            </Button>
+          </div>
         </div>
 
         <div
-          v-else-if="observabilityStatus"
-          class="space-y-3"
+          v-else-if="activeTab === 'plugins'"
+          class="space-y-5"
         >
-          <div class="flex items-center gap-2">
-            <span class="text-sm font-medium">Status</span>
-            <span
-              class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold"
-              :class="observabilityStatus.enabled
-                ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
-                : 'bg-muted text-muted-foreground'"
-            >
-              {{ observabilityStatus.enabled ? "Enabled" : "Disabled" }}
-            </span>
-          </div>
-
-          <dl class="grid grid-cols-[max-content_1fr] items-baseline gap-x-4 gap-y-1.5 text-sm">
-            <dt class="text-muted-foreground">
-              Service name
-            </dt>
-            <dd class="font-mono text-xs break-all">
-              {{ observabilityStatus.service_name }}
-            </dd>
-
-            <template v-if="observabilityStatus.enabled">
-              <dt class="text-muted-foreground">
-                OTLP endpoint
-              </dt>
-              <dd class="font-mono text-xs break-all">
-                {{ observabilityStatus.endpoint || "(SDK default)" }}
-              </dd>
-
-              <dt class="text-muted-foreground">
-                Sampler ratio
-              </dt>
-              <dd class="font-mono text-xs">
-                {{ observabilityStatus.sampler_ratio }}
-              </dd>
-
-              <dt class="text-muted-foreground">
-                Capture node I/O
-              </dt>
-              <dd class="font-mono text-xs">
-                {{ observabilityStatus.capture_node_io ? "on" : "off" }}
-              </dd>
-
-              <dt class="text-muted-foreground">
-                Instrumented
-              </dt>
-              <dd class="text-xs">
-                {{ observabilityStatus.instrumented.join(", ") }}
-              </dd>
-
-              <dt class="text-muted-foreground">
-                Spans
-              </dt>
-              <dd class="text-xs">
-                {{ observabilityStatus.spans.join(", ") }}
-              </dd>
-            </template>
-          </dl>
+          <p class="text-xs text-muted-foreground">
+            Plugins add custom nodes (actions and triggers) to this instance. Installing or
+            removing a plugin runs server-side code, so it is restricted to operators listed in
+            <code>HEYM_PLUGIN_ADMIN_EMAILS</code>.
+          </p>
 
           <div
-            v-if="!observabilityStatus.enabled"
+            v-if="loadingPlugins"
+            class="text-xs text-muted-foreground"
+          >
+            Loading plugins…
+          </div>
+
+          <div
+            v-else-if="!pluginsEnabled"
             class="rounded-lg border border-border bg-muted/40 p-3 text-xs text-muted-foreground space-y-1"
           >
             <p class="font-medium text-foreground">
-              Enable tracing
+              Plugins are disabled
             </p>
             <p>Set these environment variables on the backend, then restart:</p>
-            <pre class="mt-1 whitespace-pre-wrap font-mono leading-relaxed">HEYM_OTEL_ENABLED=true
-HEYM_OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:4318
-HEYM_OTEL_EXPORTER_OTLP_HEADERS=authorization=Bearer &lt;token&gt;</pre>
-          </div>
-        </div>
-
-        <div
-          v-else
-          class="text-xs text-destructive"
-        >
-          Could not load observability status.
-        </div>
-
-        <div class="flex justify-end gap-3 pt-2">
-          <Button
-            variant="outline"
-            type="button"
-            @click="emit('close')"
-          >
-            Close
-          </Button>
-        </div>
-      </div>
-
-      <div
-        v-else-if="activeTab === 'plugins'"
-        class="space-y-5"
-      >
-        <p class="text-xs text-muted-foreground">
-          Plugins add custom nodes (actions and triggers) to this instance. Installing or
-          removing a plugin runs server-side code, so it is restricted to operators listed in
-          <code>HEYM_PLUGIN_ADMIN_EMAILS</code>.
-        </p>
-
-        <div
-          v-if="loadingPlugins"
-          class="text-xs text-muted-foreground"
-        >
-          Loading plugins…
-        </div>
-
-        <div
-          v-else-if="!pluginsEnabled"
-          class="rounded-lg border border-border bg-muted/40 p-3 text-xs text-muted-foreground space-y-1"
-        >
-          <p class="font-medium text-foreground">
-            Plugins are disabled
-          </p>
-          <p>Set these environment variables on the backend, then restart:</p>
-          <pre class="mt-1 whitespace-pre-wrap font-mono leading-relaxed">HEYM_PLUGINS_ENABLED=true
+            <pre class="mt-1 whitespace-pre-wrap font-mono leading-relaxed">HEYM_PLUGINS_ENABLED=true
 HEYM_PLUGIN_ADMIN_EMAILS=you@example.com</pre>
-        </div>
-
-        <template v-else>
-          <div class="space-y-2">
-            <Label for="plugin-zip">Install a plugin (.zip)</Label>
-            <input
-              id="plugin-zip"
-              type="file"
-              accept=".zip"
-              :disabled="pluginBusy"
-              class="block w-full text-sm text-muted-foreground file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-primary-foreground hover:file:bg-primary/90"
-              @change="handleInstallFile"
-            >
           </div>
 
-          <p
-            v-if="pluginError"
-            class="text-xs text-destructive"
-          >
-            {{ pluginError }}
-          </p>
+          <template v-else>
+            <div class="space-y-2">
+              <Label for="plugin-zip">Install a plugin (.zip)</Label>
+              <input
+                id="plugin-zip"
+                type="file"
+                accept=".zip"
+                :disabled="pluginBusy"
+                class="block w-full text-sm text-muted-foreground file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-primary-foreground hover:file:bg-primary/90"
+                @change="handleInstallFile"
+              >
+            </div>
 
-          <div
-            v-if="installedPlugins.length === 0"
-            class="text-xs text-muted-foreground"
-          >
-            No plugins installed yet.
-          </div>
-
-          <ul
-            v-else
-            class="space-y-2"
-          >
-            <li
-              v-for="plugin in installedPlugins"
-              :key="plugin.id"
-              class="flex items-center justify-between gap-3 rounded-lg border border-border bg-card/60 p-3"
+            <p
+              v-if="pluginError"
+              class="text-xs text-destructive"
             >
-              <div class="min-w-0">
-                <div class="flex items-center gap-2">
-                  <span class="text-sm font-medium truncate">{{ plugin.name }}</span>
-                  <span class="text-xs text-muted-foreground">v{{ plugin.version }}</span>
+              {{ pluginError }}
+            </p>
+
+            <div
+              v-if="installedPlugins.length === 0"
+              class="text-xs text-muted-foreground"
+            >
+              No plugins installed yet.
+            </div>
+
+            <ul
+              v-else
+              class="space-y-2"
+            >
+              <li
+                v-for="plugin in installedPlugins"
+                :key="plugin.id"
+                class="flex items-center justify-between gap-3 rounded-lg border border-border bg-card/60 p-3"
+              >
+                <div class="min-w-0">
+                  <div class="flex items-center gap-2">
+                    <span class="text-sm font-medium truncate">{{ plugin.name }}</span>
+                    <span class="text-xs text-muted-foreground">v{{ plugin.version }}</span>
+                  </div>
+                  <p class="text-xs text-muted-foreground line-clamp-1">
+                    {{ plugin.description }}
+                  </p>
+                  <div class="mt-1 flex flex-wrap gap-1">
+                    <span
+                      v-for="node in plugin.nodes"
+                      :key="node.key"
+                      class="text-[10px] rounded px-1.5 py-0.5 bg-muted text-muted-foreground"
+                    >
+                      {{ node.name }} · {{ node.kind }}
+                    </span>
+                  </div>
                 </div>
-                <p class="text-xs text-muted-foreground line-clamp-1">
-                  {{ plugin.description }}
-                </p>
-                <div class="mt-1 flex flex-wrap gap-1">
-                  <span
-                    v-for="node in plugin.nodes"
-                    :key="node.key"
-                    class="text-[10px] rounded px-1.5 py-0.5 bg-muted text-muted-foreground"
+                <div class="flex items-center gap-2 shrink-0">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    type="button"
+                    :disabled="pluginBusy"
+                    @click="handleTogglePlugin(plugin)"
                   >
-                    {{ node.name }} · {{ node.kind }}
-                  </span>
+                    {{ plugin.enabled ? "Disable" : "Enable" }}
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    type="button"
+                    :disabled="pluginBusy"
+                    @click="handleUninstallPlugin(plugin)"
+                  >
+                    Uninstall
+                  </Button>
                 </div>
-              </div>
-              <div class="flex items-center gap-2 shrink-0">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  type="button"
-                  :disabled="pluginBusy"
-                  @click="handleTogglePlugin(plugin)"
-                >
-                  {{ plugin.enabled ? "Disable" : "Enable" }}
-                </Button>
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  type="button"
-                  :disabled="pluginBusy"
-                  @click="handleUninstallPlugin(plugin)"
-                >
-                  Uninstall
-                </Button>
-              </div>
-            </li>
-          </ul>
-        </template>
+              </li>
+            </ul>
+          </template>
 
-        <div class="flex justify-end gap-3 pt-2">
-          <Button
-            variant="outline"
-            type="button"
-            @click="emit('close')"
-          >
-            Close
-          </Button>
+          <div class="flex justify-end gap-3 pt-2">
+            <Button
+              variant="outline"
+              type="button"
+              @click="emit('close')"
+            >
+              Close
+            </Button>
+          </div>
         </div>
-      </div>
 
-      <div v-else-if="activeTab === 'instances' && authStore.user?.is_admin">
-        <ClusterSettingsTab />
-      </div>
+        <div v-else-if="activeTab === 'instances' && authStore.user?.is_admin">
+          <ClusterSettingsTab />
+        </div>
 
-      <div v-else-if="activeTab === 'kubernetes' && authStore.user?.is_admin && kubernetesTabVisible">
-        <KubernetesCredentialsTab />
-      </div>
-      <div v-else-if="activeTab === 'encryption' && authStore.user?.is_admin">
-        <KeyRotationTab />
-      </div>
+        <div v-else-if="activeTab === 'kubernetes' && authStore.user?.is_admin && kubernetesTabVisible">
+          <KubernetesCredentialsTab />
+        </div>
+        <div v-else-if="activeTab === 'encryption' && authStore.user?.is_admin">
+          <KeyRotationTab />
+        </div>
 
-      <div v-else-if="activeTab === 'sso' && authStore.user?.is_admin">
-        <SsoSettingsTab />
-      </div>
-      <div v-else-if="activeTab === 'work' && authStore.user?.is_admin">
-        <WorkIntegrationSettingsTab />
+        <div v-else-if="activeTab === 'sso' && authStore.user?.is_admin">
+          <SsoSettingsTab />
+        </div>
+        <div v-else-if="activeTab === 'work' && authStore.user?.is_admin">
+          <WorkIntegrationSettingsTab />
+        </div>
       </div>
     </div>
   </Dialog>
 </template>
-
-<style scoped>
-.tab-fade-enter-active,
-.tab-fade-leave-active {
-  transition: opacity 0.15s ease;
-}
-.tab-fade-enter-from,
-.tab-fade-leave-to {
-  opacity: 0;
-}
-</style>
