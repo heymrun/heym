@@ -1,6 +1,6 @@
 import type { Component } from "vue";
 
-import A2AAgentTourVisual from "@/features/release-tour/components/visuals/A2AAgentTourVisual.vue";
+import AccountSecurityTourVisual from "@/features/release-tour/components/visuals/AccountSecurityTourVisual.vue";
 import BoardTaskFieldsTourVisual from "@/features/release-tour/components/visuals/BoardTaskFieldsTourVisual.vue";
 import GoogleMeetTourVisual from "@/features/release-tour/components/visuals/GoogleMeetTourVisual.vue";
 import FallbackTourVisual from "@/features/release-tour/components/visuals/FallbackTourVisual.vue";
@@ -12,7 +12,7 @@ export const TOUR_VISUALS: Record<string, Component> = {
   "board-task-fields": BoardTaskFieldsTourVisual,
   "file-analysis": FileAnalysisTourVisual,
   "planning-widgets": PlanningWidgetsTourVisual,
-  "a2a-agent": A2AAgentTourVisual,
+  "account-security": AccountSecurityTourVisual,
   "google-meet": GoogleMeetTourVisual,
 };
 

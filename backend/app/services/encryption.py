@@ -31,6 +31,16 @@ def encrypt_config(config: dict) -> str:
     return encrypted.decode()
 
 
+def encrypt_text(value: str) -> str:
+    """Encrypt one string under ENCRYPTION_KEY."""
+    return get_fernet().encrypt(value.encode()).decode()
+
+
+def decrypt_text(token: str) -> str:
+    """Decrypt a string written by `encrypt_text`, with any configured key."""
+    return get_multi_fernet().decrypt(token.encode()).decode()
+
+
 def readable_by_primary(token: str) -> bool:
     """Whether ENCRYPTION_KEY alone decrypts this token, i.e. it needs no re-encryption."""
     try:

@@ -17,6 +17,29 @@ import type { ReleaseEntry } from "@/features/release-tour/releaseTour.types";
  */
 export const RELEASE_REGISTRY: ReleaseEntry[] = [
   {
+    releaseId: "2026.27",
+    publishedAt: new Date("2026-11-08T12:00:00Z"),
+    headline: "Two-factor sign-in, account deactivation and data retention",
+    releaseTour: {
+      label: "New in Heym", introTitle: "New in this release",
+      introDescription: "Controls a security review asks for, on your own instance.",
+      tourEnabled: true,
+      sectionOrder: ["account-security"],
+    },
+    sections: [{
+      id: "account-security", title: "Two-factor sign-in and offboarding",
+      publishedAt: new Date("2026-11-08T12:00:00Z"),
+      blocks: [{ type: "prose", markdown: "Turn on **two-factor sign-in** and every password sign-in asks for a code from an authenticator app. Anyone without one scans a QR code first, before reaching anything, and gets ten single-use recovery codes. SSO sign-in stays with your identity provider. Administrators get a **Users** tab in Settings: **Deactivate** an account when someone leaves and their sessions end, their keys stop working and the automatic triggers of their workflows pause; **Reactivate** brings it all back. Anyone can **Sign out other sessions** from Settings → Security. Execution history and LLM traces now keep 90 days by default, which you can change or turn off." }],
+      tour: {
+        description: "Require an authenticator code at password sign-in, offboard leavers in one click, and keep history for a set time.",
+        useCases: ["Meet the MFA requirement of a security review", "Remove a departing employee's access and pause their automations", "Keep run history and prompts for 90 days only"],
+        tourVisual: "account-security",
+        docTarget: { categoryId: "reference", slug: "security", title: "Security" },
+      },
+    }],
+  },
+
+  {
     releaseId: "2026.26",
     publishedAt: new Date("2026-11-06T12:00:00Z"),
     headline: "Find free times and send Google Meet calendar invitations",
@@ -105,52 +128,5 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
         docTarget: { categoryId: "nodes", slug: "chart-output-node", title: "Chart Output" },
       },
     }],
-  },
-  {
-    releaseId: "2026.23",
-    publishedAt: new Date("2026-10-27T12:00:00Z"),
-    headline: "Reach the Heym Agent from other agents over A2A",
-    releaseTour: {
-      label: "New in Heym",
-      introTitle: "New in this release",
-      introDescription:
-        "A quick look at what changed since your last update. Takes about a minute.",
-      tourEnabled: true,
-      sectionOrder: ["a2a-agent"],
-    },
-    sections: [
-      {
-        id: "a2a-agent",
-        title: "The Heym Agent, over MCP and A2A",
-        publishedAt: new Date("2026-10-27T12:00:00Z"),
-        blocks: [
-          {
-            type: "prose",
-            markdown:
-              "The **MCP** tab is now **MCP / A2A**, and the Heym Chat tool is the **Heym Agent**: the same engine as the Chat tab, which MCP clients call as `heym_chat`. Tick **Enable A2A** on the global server or on any named server, and other agents can send it tasks over the Agent2Agent protocol (A2A 1.0). The card shows the Agent Card URL and the JSON-RPC endpoint to copy.",
-          },
-          {
-            type: "prose",
-            markdown:
-              "A task streams what the agent is doing, step by step, and ends with the reply and links to every workflow or eval suite it saved. A clarifying question pauses the task as **input required**; a credential the agent needs opens on Heym's own page and pauses it as **auth required**, so no secret passes through the other agent. Every task is a conversation in the Chat tab, and MCP clients now see the agent's real steps as progress too.",
-          },
-        ],
-        tour: {
-          description:
-            "Tick Enable A2A and other agents can delegate work to the Heym Agent, with the same abilities as Chat.",
-          useCases: [
-            "Let a company assistant built on another platform build and run Heym workflows",
-            "Hand an agent's research results to Heym to turn into a scheduled workflow",
-            "Follow a long build from another agent with streamed progress",
-          ],
-          tourVisual: "a2a-agent",
-          docTarget: {
-            categoryId: "reference",
-            slug: "a2a",
-            title: "A2A",
-          },
-        },
-      },
-    ],
   },
 ];

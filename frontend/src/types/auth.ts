@@ -41,3 +41,32 @@ export interface TokenResponse {
   refresh_token: string;
   token_type: string;
 }
+
+export interface MfaSetup {
+  setup_token: string;
+  secret: string;
+  otpauth_uri: string;
+  qr_code: string;
+}
+
+export interface MfaChallenge {
+  purpose: "verify" | "enroll";
+  challenge_token: string;
+  setup: MfaSetup | null;
+}
+
+export interface LoginResponse {
+  access_token: string | null;
+  refresh_token: string | null;
+  token_type: string;
+  mfa: MfaChallenge | null;
+  recovery_codes: string[] | null;
+}
+
+export interface MfaStatus {
+  enabled: boolean;
+  required: boolean;
+  available: boolean;
+  enabled_at: string | null;
+  recovery_codes_remaining: number;
+}

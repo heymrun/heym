@@ -21,6 +21,16 @@ def cluster_disabled_unless_a_test_asks_for_it():
 
 
 @pytest.fixture(autouse=True)
+def account_security_defaults_unless_a_test_sets_them():
+    """Two-factor sign-in off and retention at its default, whatever the developer's .env says."""
+    with (
+        patch.object(settings, "require_mfa", False),
+        patch.object(settings, "data_retention_days", 90),
+    ):
+        yield
+
+
+@pytest.fixture(autouse=True)
 def instance_admins_empty_unless_a_test_configures_them():
     """Never grant permissions or change query paths from a developer's .env."""
     with patch.object(settings, "admin_emails", ""):

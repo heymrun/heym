@@ -134,6 +134,8 @@ A failed sign-in returns to the login screen with a readable message. Heym never
 - **Only asymmetric signatures are accepted.** `none` and symmetric algorithms are rejected regardless of what the provider advertises.
 - **The post-login destination is validated** as a same-origin path, so the callback cannot be used as an open redirect.
 - **Every sign-in is audited.** Successes, failures, and refusals appear as `auth.sso_login` lines, and configuration changes as `sso_settings.update` — see [Audit Logging](./audit.md).
+- **Two-factor sign-in is the provider's.** `HEYM_REQUIRE_MFA` applies to password sign-in only; an SSO sign-in is never asked for a Heym code. Require MFA in your identity provider.
+- **Deactivation applies here too.** An account an administrator deactivated in **Settings → Users** is refused even when the provider still authenticates it.
 
 ## What Is Not Supported
 

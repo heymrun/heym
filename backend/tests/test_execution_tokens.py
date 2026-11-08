@@ -276,7 +276,9 @@ class ValidateWorkflowAuthScopedTokenTests(unittest.IsolatedAsyncioTestCase):
 
         db = AsyncMock()
         db.execute = AsyncMock(
-            return_value=_ScalarResult(SimpleNamespace(revoked=False, id=uuid.uuid4()))
+            return_value=_ScalarResult(
+                SimpleNamespace(revoked=False, id=uuid.uuid4(), is_active=True)
+            )
         )
 
         with unittest.mock.patch(

@@ -81,7 +81,11 @@ class LoginEndpointGateTests(unittest.IsolatedAsyncioTestCase):
 
     async def _login(self, email: str, sso_row: SimpleNamespace) -> object:
         user = SimpleNamespace(
-            id=uuid.uuid4(), email=email, name="Test", hashed_password=hash_password("hunter2")
+            id=uuid.uuid4(),
+            email=email,
+            name="Test",
+            hashed_password=hash_password("hunter2"),
+            is_active=True,
         )
         db = AsyncMock()
         db.execute.return_value = _ScalarResult(user)

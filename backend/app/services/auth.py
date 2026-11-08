@@ -36,6 +36,18 @@ class TokenClaims:
     user_id: uuid.UUID
     client: str | None
     key_version: str | None
+    # Milliseconds since the epoch, compared with User.sessions_revoked_at. Not `iat`:
+    # PyJWT rejects an `iat` ahead of its own clock, which a skew between instances causes,
+    # and whole seconds would let a session opened just before a sign-out survive it.
+    issued_at: int | None = None
+    # How the session began: SIGN_IN_PASSWORD, SIGN_IN_MFA or SIGN_IN_SSO. None on tokens
+    # minted before this claim existed.
+    method: str | None = None
+
+
+SIGN_IN_PASSWORD = "pwd"
+SIGN_IN_MFA = "mfa"
+SIGN_IN_SSO = "sso"
 
 
 def _add_client_claims(
@@ -46,8 +58,17 @@ def _add_client_claims(
         payload["ckv"] = key_version or ""
 
 
+def _add_method(payload: dict[str, object], method: str | None) -> None:
+    if method is not None:
+        payload["amr"] = method
+
+
 def create_access_token(
-    user_id: uuid.UUID, *, client: str | None = None, key_version: str | None = None
+    user_id: uuid.UUID,
+    *,
+    client: str | None = None,
+    key_version: str | None = None,
+    method: str | None = None,
 ) -> str:
     expire = datetime.now(timezone.utc) + timedelta(
         minutes=settings.jwt_access_token_expire_minutes
@@ -56,13 +77,19 @@ def create_access_token(
         "sub": str(user_id),
         "exp": expire,
         "type": "access",
+        "issued_at_ms": int(datetime.now(timezone.utc).timestamp() * 1000),
     }
     _add_client_claims(to_encode, client, key_version)
+    _add_method(to_encode, method)
     return jwt.encode(to_encode, settings.secret_key, algorithm=settings.jwt_algorithm)
 
 
 def create_refresh_token(
-    user_id: uuid.UUID, *, client: str | None = None, key_version: str | None = None
+    user_id: uuid.UUID,
+    *,
+    client: str | None = None,
+    key_version: str | None = None,
+    method: str | None = None,
 ) -> str:
     expire = datetime.now(timezone.utc) + timedelta(days=settings.jwt_refresh_token_expire_days)
     to_encode: dict[str, object] = {
@@ -72,6 +99,7 @@ def create_refresh_token(
         "jti": str(uuid.uuid4()),
     }
     _add_client_claims(to_encode, client, key_version)
+    _add_method(to_encode, method)
     return jwt.encode(to_encode, settings.secret_key, algorithm=settings.jwt_algorithm)
 
 
@@ -120,10 +148,14 @@ def _read_claims(token: str, expected_type: str) -> TokenClaims | None:
         return None
     client = payload.get("cli")
     key_version = payload.get("ckv")
+    issued_at = payload.get("issued_at_ms")
+    method = payload.get("amr")
     return TokenClaims(
         user_id=user_id,
         client=str(client) if client is not None else None,
         key_version=str(key_version) if key_version is not None else None,
+        issued_at=issued_at if isinstance(issued_at, int) else None,
+        method=str(method) if isinstance(method, str) else None,
     )
 
 

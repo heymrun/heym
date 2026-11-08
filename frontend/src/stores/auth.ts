@@ -6,7 +6,14 @@ import {
   refreshGlobalVariablesCache,
 } from "@/composables/useExpressionCompletion";
 import { authApi } from "@/services/api";
-import type { LoginRequest, PasswordChangeRequest, RegisterRequest, User, UserUpdateRequest } from "@/types/auth";
+import type {
+  LoginRequest,
+  MfaChallenge,
+  PasswordChangeRequest,
+  RegisterRequest,
+  User,
+  UserUpdateRequest,
+} from "@/types/auth";
 
 export const useAuthStore = defineStore("auth", () => {
   const user = ref<User | null>(null);
@@ -20,14 +27,17 @@ export const useAuthStore = defineStore("auth", () => {
   // cookie that JavaScript cannot read.
   const isAuthenticated = computed(() => !!user.value);
 
-  async function login(data: LoginRequest): Promise<void> {
+  // Returns the second step when the password alone does not finish the sign-in.
+  async function login(data: LoginRequest): Promise<MfaChallenge | null> {
     loading.value = true;
     error.value = null;
 
     try {
-      await authApi.login(data);
+      const result = await authApi.login(data);
+      if (result.mfa) return result.mfa;
       await fetchUser();
       refreshGlobalVariablesCache();
+      return null;
     } catch (err) {
       if (err instanceof Error) {
         error.value = err.message;
@@ -38,14 +48,16 @@ export const useAuthStore = defineStore("auth", () => {
     }
   }
 
-  async function register(data: RegisterRequest): Promise<void> {
+  async function register(data: RegisterRequest): Promise<MfaChallenge | null> {
     loading.value = true;
     error.value = null;
 
     try {
-      await authApi.register(data);
+      const result = await authApi.register(data);
+      if (result.mfa) return result.mfa;
       await fetchUser();
       refreshGlobalVariablesCache();
+      return null;
     } catch (err) {
       if (err instanceof Error) {
         error.value = err.message;
@@ -54,6 +66,21 @@ export const useAuthStore = defineStore("auth", () => {
     } finally {
       loading.value = false;
     }
+  }
+
+  // Finishes a challenged sign-in. Returns recovery codes when it enrolled a new authenticator.
+  async function completeMfa(
+    challenge: MfaChallenge,
+    code: string,
+  ): Promise<string[] | null> {
+    const result = await authApi.completeMfa({
+      challenge_token: challenge.challenge_token,
+      code,
+      setup_token: challenge.setup?.setup_token ?? null,
+    });
+    await fetchUser();
+    refreshGlobalVariablesCache();
+    return result.recovery_codes;
   }
 
   async function fetchUser(): Promise<void> {
@@ -116,6 +143,7 @@ export const useAuthStore = defineStore("auth", () => {
     isAuthenticated,
     login,
     register,
+    completeMfa,
     fetchUser,
     updateUser,
     changePassword,

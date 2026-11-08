@@ -52,7 +52,7 @@ def _db_for_token(actor: SimpleNamespace | None) -> AsyncMock:
 class ExecutionTokenAccessRecheckTests(unittest.IsolatedAsyncioTestCase):
     async def test_token_is_rejected_once_minter_lost_access(self) -> None:
         workflow = _workflow(uuid.uuid4())
-        minter = SimpleNamespace(id=uuid.uuid4())
+        minter = SimpleNamespace(id=uuid.uuid4(), is_active=True)
         token, _jti, _exp = create_workflow_execution_token(minter.id, workflow.id, 315360000)
 
         with patch(
@@ -67,7 +67,7 @@ class ExecutionTokenAccessRecheckTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_token_is_accepted_while_minter_has_access(self) -> None:
         workflow = _workflow(uuid.uuid4())
-        minter = SimpleNamespace(id=uuid.uuid4())
+        minter = SimpleNamespace(id=uuid.uuid4(), is_active=True)
         token, _jti, _exp = create_workflow_execution_token(minter.id, workflow.id, 3600)
 
         with patch("app.api.workflows.user_has_workflow_access", AsyncMock(return_value=True)):
@@ -79,7 +79,7 @@ class ExecutionTokenAccessRecheckTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_token_minted_by_user_who_never_had_access_is_rejected(self) -> None:
         workflow = _workflow(uuid.uuid4())
-        stranger = SimpleNamespace(id=uuid.uuid4())
+        stranger = SimpleNamespace(id=uuid.uuid4(), is_active=True)
         token, _jti, _exp = create_workflow_execution_token(stranger.id, workflow.id, 3600)
 
         with patch("app.api.workflows.user_has_workflow_access", AsyncMock(return_value=False)):

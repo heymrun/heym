@@ -124,6 +124,67 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
 
 
+class MfaSetupResponse(BaseModel):
+    """A secret offered for enrolment. Shown while it is being set up, never again."""
+
+    setup_token: str
+    secret: str
+    otpauth_uri: str
+    qr_code: str
+
+
+class MfaChallengeResponse(BaseModel):
+    """The password was right; the sign-in still needs a code, or an enrolment first."""
+
+    purpose: Literal["verify", "enroll"]
+    challenge_token: str
+    setup: MfaSetupResponse | None = None
+
+
+class LoginResponse(BaseModel):
+    """Tokens for a finished sign-in, or the challenge a second factor must answer."""
+
+    access_token: str | None = None
+    refresh_token: str | None = None
+    token_type: str = "bearer"
+    mfa: MfaChallengeResponse | None = None
+    recovery_codes: list[str] | None = None
+
+
+class MfaLoginRequest(BaseModel):
+    challenge_token: str = Field(min_length=1, max_length=4096)
+    code: str = Field(min_length=6, max_length=32)
+    setup_token: str | None = Field(default=None, max_length=4096)
+
+
+class MfaStatusResponse(BaseModel):
+    enabled: bool
+    required: bool
+    # On only with HEYM_REQUIRE_MFA, and only for accounts with a password.
+    available: bool
+    enabled_at: datetime | None = None
+    recovery_codes_remaining: int = 0
+
+
+class MfaSetupRequest(BaseModel):
+    password: str = Field(min_length=1, max_length=1024)
+    # A code from the current authenticator, when one is already set up.
+    code: str | None = Field(default=None, max_length=32)
+
+
+class MfaEnableRequest(BaseModel):
+    setup_token: str = Field(min_length=1, max_length=4096)
+    code: str = Field(min_length=6, max_length=32)
+
+
+class MfaCodeRequest(BaseModel):
+    code: str = Field(min_length=6, max_length=32)
+
+
+class MfaRecoveryCodesResponse(BaseModel):
+    recovery_codes: list[str]
+
+
 class TokenRefresh(BaseModel):
     refresh_token: str = ""
 

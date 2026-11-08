@@ -80,6 +80,8 @@ class WorkTokenResponse(BaseModel):
     access_token: str
     refresh_token: str
     user: WorkUserSummary
+    # Shown once, after an enrolment that happened during this sign-in.
+    recovery_codes: list[str] | None = None
 
 
 class WorkSsoExchangeRequest(BaseModel):

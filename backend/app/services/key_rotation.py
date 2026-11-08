@@ -145,6 +145,11 @@ async def _stored_tokens(db: AsyncSession) -> AsyncIterator[tuple[str, uuid.UUID
         if len(rows) < 500:
             break
         last = rows[-1][0]
+    mfa_rows = await db.execute(
+        select(User.id, User.mfa_secret).where(User.mfa_secret.is_not(None)).order_by(User.id)
+    )
+    for user_id, token in mfa_rows.all():
+        yield "mfa", user_id, token
     sso = await db.get(SsoSettings, SSO_SETTINGS_ID)
     if sso is not None and sso.encrypted_client_secret:
         yield "sso", None, sso.encrypted_client_secret
@@ -270,9 +275,33 @@ async def _rewrite_batch(
     return len(rows), rewritten, rows[-1][0] if rows else cursor
 
 
-async def _rewrite_singletons(db: AsyncSession) -> int:
-    """The SSO client secret and the key check's canary."""
+async def _rewrite_mfa_secrets(db: AsyncSession) -> int:
+    """Authenticator secrets: one per enrolled account, few enough for a single pass."""
+    rows = (
+        await db.execute(
+            select(User.id, User.mfa_secret)
+            .where(User.mfa_secret.is_not(None))
+            .order_by(User.id)
+            .with_for_update()
+        )
+    ).all()
+    new_tokens = await asyncio.to_thread(_rotate_all, [token for _, token in rows])
     rewritten = 0
+    for (user_id, _), new_token in zip(rows, new_tokens):
+        if new_token is None:
+            continue
+        await db.execute(
+            update(User)
+            .where(User.id == user_id)
+            .values(mfa_secret=new_token, updated_at=User.updated_at)
+        )
+        rewritten += 1
+    return rewritten
+
+
+async def _rewrite_singletons(db: AsyncSession) -> int:
+    """The SSO client secret, the key check's canary, and authenticator secrets."""
+    rewritten = await _rewrite_mfa_secrets(db)
     sso = (
         await db.execute(
             select(SsoSettings).where(SsoSettings.id == SSO_SETTINGS_ID).with_for_update()

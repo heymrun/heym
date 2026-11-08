@@ -145,7 +145,9 @@ class OAuthEndpointFlowTests(unittest.IsolatedAsyncioTestCase):
             redirect_uris=["https://client.example/callback"],
             is_confidential=False,
         )
-        user = SimpleNamespace(id=uuid.uuid4(), email="user@example.com", hashed_password="hash")
+        user = SimpleNamespace(
+            id=uuid.uuid4(), email="user@example.com", hashed_password="hash", is_active=True
+        )
         verifier = "correct-horse-battery-staple"
         challenge = _pkce_challenge(verifier)
 
@@ -276,7 +278,7 @@ class OAuthRegistrationTests(unittest.IsolatedAsyncioTestCase):
 class MCPBearerTokenLookupTests(unittest.IsolatedAsyncioTestCase):
     async def test_default_mcp_auth_queries_only_the_digest(self) -> None:
         raw_token = "legacy-access-token"
-        user = SimpleNamespace(id=uuid.uuid4())
+        user = SimpleNamespace(id=uuid.uuid4(), is_active=True)
         token_record = SimpleNamespace(user_id=user.id)
         db = AsyncMock()
         db.execute = AsyncMock(
@@ -306,7 +308,7 @@ class MCPBearerTokenLookupTests(unittest.IsolatedAsyncioTestCase):
     async def test_named_mcp_server_auth_queries_only_the_digest(self) -> None:
         raw_token = "legacy-server-token"
         server_id = uuid.uuid4()
-        user = SimpleNamespace(id=uuid.uuid4())
+        user = SimpleNamespace(id=uuid.uuid4(), is_active=True)
         server = SimpleNamespace(id=server_id, user_id=user.id)
         token_record = SimpleNamespace(user_id=user.id)
         db = AsyncMock()
@@ -516,7 +518,9 @@ class TestRedirectUriEndpointRegression(unittest.IsolatedAsyncioTestCase):
             redirect_uris=["javascript:alert(1)"],  # registered before fix
             is_confidential=False,
         )
-        user = SimpleNamespace(id=uuid.uuid4(), email="user@example.com", hashed_password="hash")
+        user = SimpleNamespace(
+            id=uuid.uuid4(), email="user@example.com", hashed_password="hash", is_active=True
+        )
         db = AsyncMock()
         db.add = MagicMock()
         db.flush = AsyncMock()

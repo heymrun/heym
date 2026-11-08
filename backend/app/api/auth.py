@@ -9,6 +9,10 @@ from app.config import settings
 from app.db.models import CredentialType, User
 from app.db.session import get_db
 from app.models.schemas import (
+    LoginResponse,
+    MfaChallengeResponse,
+    MfaLoginRequest,
+    MfaSetupResponse,
     PasswordChangeRequest,
     TokenRefresh,
     TokenResponse,
@@ -17,11 +21,21 @@ from app.models.schemas import (
     UserResponse,
     UserUpdate,
 )
+from app.services import mfa
+from app.services.account_status import (
+    DEACTIVATED_DETAIL,
+    mark_signed_in,
+    meets_mfa_policy,
+    revoke_sessions,
+)
 from app.services.audit_log import OUTCOME_DENIED, OUTCOME_FAILURE, audit
 from app.services.auth import (
+    SIGN_IN_MFA,
+    SIGN_IN_PASSWORD,
     create_access_token,
     create_refresh_token,
     hash_password,
+    read_access_claims,
     read_refresh_claims,
     revoke_refresh_token,
     rotate_refresh_token,
@@ -200,43 +214,143 @@ async def password_sign_in(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
         )
+    # Told only after the password is right, so the message reveals nothing to a guesser.
+    if not user.is_active:
+        audit(
+            action="auth.login",
+            outcome=OUTCOME_DENIED,
+            actor=user,
+            reason="account_deactivated",
+            client=client,
+        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=DEACTIVATED_DETAIL)
     return user
 
 
-@router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
+def mfa_challenge_for(user: User, *, client: str | None) -> MfaChallengeResponse | None:
+    """The second step a password sign-in still needs, or None when it is complete."""
+    requirement = mfa.password_sign_in_requirement(user)
+    if requirement is None:
+        return None
+    setup = None
+    if requirement == mfa.PURPOSE_ENROLL:
+        offer = mfa.create_setup_offer(user)
+        setup = MfaSetupResponse(
+            setup_token=offer.setup_token,
+            secret=offer.secret,
+            otpauth_uri=offer.otpauth_uri,
+            qr_code=offer.qr_code,
+        )
+    return MfaChallengeResponse(
+        purpose=requirement,
+        challenge_token=mfa.create_challenge_token(user.id, requirement, client=client),
+        setup=setup,
+    )
+
+
+_CHALLENGE_EXPIRED = "This sign-in attempt expired. Sign in again."
+_CODE_INVALID = "That code is not valid. Check your authenticator app and try again."
+
+
+async def mfa_sign_in(
+    db: AsyncSession, body: MfaLoginRequest, *, client: str | None
+) -> tuple[User, list[str] | None, str]:
+    """Answer a sign-in challenge. Returns the user, any new recovery codes, and the method."""
+    claims = mfa.read_challenge_token(body.challenge_token)
+    if claims is None or claims.client != client:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=_CHALLENGE_EXPIRED)
+    allowed, retry_after = mfa.mfa_limiter.is_allowed(str(claims.user_id))
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many attempts. Try again later.",
+            headers={"Retry-After": str(retry_after)},
+        )
+    result = await db.execute(select(User).where(User.id == claims.user_id))
+    user = result.scalar_one_or_none()
+    if user is None or not user.is_active:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=_CHALLENGE_EXPIRED)
+
+    if claims.purpose == mfa.PURPOSE_ENROLL:
+        secret = mfa.read_setup_secret(body.setup_token or "", user.id)
+        if secret is None or mfa.mfa_enabled(user):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=_CHALLENGE_EXPIRED)
+        codes = await mfa.enable_mfa(db, user, secret, body.code)
+        if codes is None:
+            audit(action="auth.mfa_enable", outcome=OUTCOME_FAILURE, actor=user, client=client)
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=_CODE_INVALID)
+        audit(action="auth.mfa_enable", actor=user, client=client, during="sign_in")
+        return user, codes, "totp"
+
+    method = await mfa.verify_second_factor(db, user, body.code)
+    if method is None:
+        audit(action="auth.mfa_verify", outcome=OUTCOME_FAILURE, actor=user, client=client)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=_CODE_INVALID)
+    return user, None, method
+
+
+async def _issue_session(
+    db: AsyncSession, response: Response, user: User, method: str
+) -> LoginResponse:
+    access_token = create_access_token(user.id, method=method)
+    refresh_token = create_refresh_token(user.id, method=method)
+    await store_refresh_token(db, refresh_token, user.id)
+    _set_auth_cookies(response, access_token, refresh_token)
+    return LoginResponse(access_token=access_token, refresh_token=refresh_token)
+
+
+@router.post("/register", response_model=LoginResponse, status_code=status.HTTP_201_CREATED)
 async def register(
     user_data: UserCreate,
     request: Request,
     response: Response,
     db: AsyncSession = Depends(get_db),
-) -> TokenResponse:
+) -> LoginResponse:
     user = await register_account(db, user_data, get_client_ip(request))
-
-    access_token = create_access_token(user.id)
-    refresh_token = create_refresh_token(user.id)
-    await store_refresh_token(db, refresh_token, user.id)
-    _set_auth_cookies(response, access_token, refresh_token)
-
     audit(action="auth.register", actor=user)
-    return TokenResponse(access_token=access_token, refresh_token=refresh_token)
+
+    # With HEYM_REQUIRE_MFA a new account enrols before it holds any session.
+    challenge = mfa_challenge_for(user, client=None)
+    if challenge is not None:
+        audit(action="auth.mfa_challenge", actor=user, purpose=challenge.purpose)
+        return LoginResponse(mfa=challenge)
+    mark_signed_in(user)
+    return await _issue_session(db, response, user, SIGN_IN_PASSWORD)
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post("/login", response_model=LoginResponse)
 async def login(
     user_data: UserLogin,
     request: Request,
     response: Response,
     db: AsyncSession = Depends(get_db),
-) -> TokenResponse:
+) -> LoginResponse:
     user = await password_sign_in(db, user_data, get_client_ip(request))
 
-    access_token = create_access_token(user.id)
-    refresh_token = create_refresh_token(user.id)
-    await store_refresh_token(db, refresh_token, user.id)
-    _set_auth_cookies(response, access_token, refresh_token)
+    challenge = mfa_challenge_for(user, client=None)
+    if challenge is not None:
+        audit(action="auth.mfa_challenge", actor=user, purpose=challenge.purpose)
+        return LoginResponse(mfa=challenge)
 
+    mark_signed_in(user)
+    session = await _issue_session(db, response, user, SIGN_IN_PASSWORD)
     audit(action="auth.login", actor=user)
-    return TokenResponse(access_token=access_token, refresh_token=refresh_token)
+    return session
+
+
+@router.post("/login/mfa", response_model=LoginResponse)
+async def login_mfa(
+    body: MfaLoginRequest,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+) -> LoginResponse:
+    """Finish a password sign-in with an authenticator or recovery code."""
+    user, recovery_codes, method = await mfa_sign_in(db, body, client=None)
+    mark_signed_in(user)
+    session = await _issue_session(db, response, user, SIGN_IN_MFA)
+    session.recovery_codes = recovery_codes
+    audit(action="auth.login", actor=user, mfa=method)
+    return session
 
 
 @router.post("/refresh", response_model=TokenResponse)
@@ -276,14 +390,24 @@ async def refresh_tokens(
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
 
-    if user is None:
+    if user is None or not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found",
         )
 
-    new_access_token = create_access_token(user.id)
-    new_refresh_token = create_refresh_token(user.id)
+    if not meets_mfa_policy(
+        claims.method,
+        has_password=bool(user.hashed_password),
+        has_sso_identity=bool(user.sso_subject),
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Sign in again to set up two-factor authentication.",
+        )
+
+    new_access_token = create_access_token(user.id, method=claims.method)
+    new_refresh_token = create_refresh_token(user.id, method=claims.method)
 
     rotated = await rotate_refresh_token(db, token_data.refresh_token, new_refresh_token, user.id)
     if not rotated:
@@ -369,9 +493,34 @@ async def update_me(
     return UserResponse.model_validate(current_user)
 
 
+def _current_method(request: Request) -> str:
+    """How the caller's own session began, kept when its tokens are reissued."""
+    header = request.headers.get("Authorization", "")
+    token = header[7:] if header.startswith("Bearer ") else request.cookies.get("access_token")
+    claims = read_access_claims(token or "")
+    if claims is None or claims.method is None:
+        return SIGN_IN_PASSWORD
+    return claims.method
+
+
+@router.post("/sessions/revoke-others", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_other_sessions(
+    request: Request,
+    response: Response,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Sign out every other browser, device, Heym Work session, and MCP OAuth client."""
+    await revoke_sessions(db, current_user)
+    await _issue_session(db, response, current_user, _current_method(request))
+    audit(action="auth.sessions_revoke", actor=current_user, scope="others")
+
+
 @router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)
 async def change_password(
     password_data: PasswordChangeRequest,
+    request: Request,
+    response: Response,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
@@ -388,5 +537,7 @@ async def change_password(
         )
 
     current_user.hashed_password = hash_password(password_data.new_password)
-    await db.flush()
+    # Whoever knew the old password keeps no session; this browser gets a fresh one.
+    await revoke_sessions(db, current_user)
+    await _issue_session(db, response, current_user, _current_method(request))
     audit(action="auth.password_change", actor=current_user)

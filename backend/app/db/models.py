@@ -135,6 +135,21 @@ class User(Base):
     mcp_chat_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
     # Makes the global server's Heym Agent reachable over A2A too. Needs mcp_chat_enabled.
     mcp_a2a_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # A deactivated account authenticates nowhere: no sign-in, no session, no key.
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default=true(), nullable=False
+    )
+    deactivated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Access tokens issued before this instant are refused.
+    sessions_revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Fernet ciphertext under ENCRYPTION_KEY; a TOTP secret must be read back to verify.
+    mfa_secret: Mapped[str | None] = mapped_column(Text, nullable=True)
+    mfa_enabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # The last accepted TOTP time step, so a code cannot be replayed inside its window.
+    mfa_last_step: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -907,6 +922,8 @@ class LLMTrace(Base):
     __table_args__ = (
         Index("ix_llm_traces_user_created", "user_id", "created_at"),
         Index("ix_llm_traces_workflow_node_created", "workflow_id", "node_id", "created_at"),
+        # Created by migration 023; declared so the retention delete's index is visible here.
+        Index("ix_llm_traces_created_at", "created_at"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -1612,6 +1629,22 @@ class RefreshToken(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     user: Mapped["User"] = relationship("User")
+
+
+class UserMfaRecoveryCode(Base):
+    """One single-use recovery code, stored as its SHA-256 digest and deleted when used."""
+
+    __tablename__ = "user_mfa_recovery_codes"
+    __table_args__ = (UniqueConstraint("user_id", "code_hash", name="uq_user_mfa_recovery_code"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    code_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
 
 class WorkflowExecutionToken(Base):

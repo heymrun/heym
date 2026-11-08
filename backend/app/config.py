@@ -81,6 +81,11 @@ class Settings(BaseSettings):
     # may always sign in with a password, which is the break-glass path when SSO is
     # misconfigured. An empty value grants nobody.
     admin_emails: str = Field(default="", validation_alias="HEYM_ADMIN_EMAILS")
+    # Turns on two-factor sign-in: every password sign-in asks for an authenticator code,
+    # and an account without one enrols at its next sign-in. SSO sign-in is never affected.
+    require_mfa: bool = Field(default=False, validation_alias="HEYM_REQUIRE_MFA")
+    # Execution history and LLM traces older than this are deleted daily. 0 keeps everything.
+    data_retention_days: int = Field(default=90, ge=0, validation_alias="HEYM_DATA_RETENTION_DAYS")
     # Load distribution across instances sharing this database. The role defaults to
     # "main" so an existing single-instance deployment keeps behaving as main with no
     # configuration change.

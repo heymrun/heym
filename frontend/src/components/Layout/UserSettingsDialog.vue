@@ -27,8 +27,11 @@ import {
 import ClusterSettingsTab from "@/components/Layout/settings/ClusterSettingsTab.vue";
 import KeyRotationTab from "@/components/Layout/settings/KeyRotationTab.vue";
 import KubernetesCredentialsTab from "@/components/Layout/settings/KubernetesCredentialsTab.vue";
+import MfaSettingsSection from "@/components/Layout/settings/MfaSettingsSection.vue";
+import SessionsSettingsSection from "@/components/Layout/settings/SessionsSettingsSection.vue";
 import SettingsTabNav from "@/components/Layout/settings/SettingsTabNav.vue";
 import SsoSettingsTab from "@/components/Layout/settings/SsoSettingsTab.vue";
+import UsersSettingsTab from "@/components/Layout/settings/UsersSettingsTab.vue";
 import WorkIntegrationSettingsTab from "@/components/Layout/settings/WorkIntegrationSettingsTab.vue";
 import { k8sCredentialsEnabled } from "@/services/k8sCredentials";
 import { useAuthStore } from "@/stores/auth";
@@ -46,6 +49,7 @@ type SettingsTab =
   | "observability"
   | "plugins"
   | "sso"
+  | "users"
   | "instances"
   | "kubernetes"
   | "encryption"
@@ -82,6 +86,7 @@ const SETTINGS_TABS: SettingsTabEntry[] = [
   { id: "ai-defaults", label: "AI Defaults" },
   { id: "observability", label: "Observability" },
   { id: "plugins", label: "Plugins" },
+  { id: "users", label: "Users", adminOnly: true, testId: "settings-tab-users" },
   { id: "sso", label: "SSO", adminOnly: true },
   { id: "work", label: "Heym Work", adminOnly: true },
   { id: "instances", label: "Instances", adminOnly: true },
@@ -363,7 +368,7 @@ async function handleChangePassword(): Promise<void> {
     currentPassword.value = "";
     newPassword.value = "";
     confirmNewPassword.value = "";
-    passwordSuccess.value = "Password updated successfully.";
+    passwordSuccess.value = "Password updated. Your other sessions were signed out.";
   } catch {
     passwordError.value = authStore.error || "Failed to change password. Please try again.";
   } finally {
@@ -376,7 +381,7 @@ async function handleChangePassword(): Promise<void> {
   <Dialog
     :open="props.open"
     title="Settings"
-    content-class="!max-w-[760px]"
+    content-class="!max-w-[760px] h-[min(90vh,calc(100dvh-2rem))] sm:h-[min(640px,calc(100dvh-3rem))]"
     @close="emit('close')"
   >
     <div class="-mt-3 flex flex-col gap-5 sm:mt-0 sm:min-h-[26rem] sm:flex-row sm:gap-6">
@@ -456,76 +461,82 @@ async function handleChangePassword(): Promise<void> {
           </div>
         </form>
 
-        <form
+        <div
           v-else-if="activeTab === 'security'"
-          class="space-y-5"
-          @submit.prevent="handleChangePassword"
+          class="space-y-6"
         >
-          <div class="space-y-2">
-            <Label for="current-password">Current Password</Label>
-            <Input
-              id="current-password"
-              v-model="currentPassword"
-              type="password"
-              autocomplete="current-password"
-              required
-            />
-          </div>
-
-          <div class="space-y-2">
-            <Label for="new-password">New Password</Label>
-            <Input
-              id="new-password"
-              v-model="newPassword"
-              type="password"
-              autocomplete="new-password"
-              required
-            />
-            <p class="text-xs text-muted-foreground">
-              Minimum 6 characters. Use a strong, unique password for better security.
-            </p>
-          </div>
-
-          <div class="space-y-2">
-            <Label for="confirm-new-password">Confirm New Password</Label>
-            <Input
-              id="confirm-new-password"
-              v-model="confirmNewPassword"
-              type="password"
-              autocomplete="new-password"
-              required
-            />
-          </div>
-
-          <div
-            v-if="passwordError"
-            class="text-xs text-destructive"
+          <form
+            class="space-y-5"
+            @submit.prevent="handleChangePassword"
           >
-            {{ passwordError }}
-          </div>
-          <div
-            v-if="passwordSuccess"
-            class="text-xs text-emerald-500"
-          >
-            {{ passwordSuccess }}
-          </div>
+            <div class="space-y-2">
+              <Label for="current-password">Current Password</Label>
+              <Input
+                id="current-password"
+                v-model="currentPassword"
+                type="password"
+                autocomplete="current-password"
+                required
+              />
+            </div>
 
-          <div class="flex justify-end gap-3 pt-2">
-            <Button
-              variant="outline"
-              type="button"
-              @click="emit('close')"
+            <div class="space-y-2">
+              <Label for="new-password">New Password</Label>
+              <Input
+                id="new-password"
+                v-model="newPassword"
+                type="password"
+                autocomplete="new-password"
+                required
+              />
+              <p class="text-xs text-muted-foreground">
+                At least 8 characters, with an uppercase letter, a lowercase letter and a digit.
+              </p>
+            </div>
+
+            <div class="space-y-2">
+              <Label for="confirm-new-password">Confirm New Password</Label>
+              <Input
+                id="confirm-new-password"
+                v-model="confirmNewPassword"
+                type="password"
+                autocomplete="new-password"
+                required
+              />
+            </div>
+
+            <div
+              v-if="passwordError"
+              class="text-xs text-destructive"
             >
-              Close
-            </Button>
-            <Button
-              type="submit"
-              :loading="savingPassword"
+              {{ passwordError }}
+            </div>
+            <div
+              v-if="passwordSuccess"
+              class="text-xs text-emerald-500"
             >
-              Update Password
-            </Button>
-          </div>
-        </form>
+              {{ passwordSuccess }}
+            </div>
+
+            <div class="flex justify-end gap-3 pt-2">
+              <Button
+                variant="outline"
+                type="button"
+                @click="emit('close')"
+              >
+                Close
+              </Button>
+              <Button
+                type="submit"
+                :loading="savingPassword"
+              >
+                Update Password
+              </Button>
+            </div>
+          </form>
+          <MfaSettingsSection />
+          <SessionsSettingsSection />
+        </div>
 
         <div
           v-else-if="activeTab === 'voice'"
@@ -830,6 +841,9 @@ HEYM_PLUGIN_ADMIN_EMAILS=you@example.com</pre>
           <KeyRotationTab />
         </div>
 
+        <div v-else-if="activeTab === 'users' && authStore.user?.is_admin">
+          <UsersSettingsTab />
+        </div>
         <div v-else-if="activeTab === 'sso' && authStore.user?.is_admin">
           <SsoSettingsTab />
         </div>

@@ -22,6 +22,28 @@ These rules are enforced on both the frontend and the backend (Pydantic validato
 - Access tokens are stored in **HttpOnly** cookies, not `localStorage`. This prevents JavaScript (including XSS payloads) from reading the token.
 - The refresh token is scoped to the `/api/auth/refresh` path and cannot be sent to other endpoints.
 - Each `/api/auth/refresh` call **rotates** the refresh token: the old token is immediately revoked and a new one is issued. Replaying a used refresh token returns `401`.
+- **Sign out everywhere.** **Settings → Security → Sign out other sessions** ends every other session the account holds, and changing the password does the same. Access tokens issued before that moment are refused at once, even before they expire, and refresh and MCP OAuth tokens are revoked.
+- Session lifetimes come from `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` and `JWT_REFRESH_TOKEN_EXPIRE_DAYS`. Because every refresh rotates the token, the refresh lifetime also works as an idle timeout: a session not used for that long has to sign in again.
+
+## Two-Factor Authentication
+
+Set `HEYM_REQUIRE_MFA=true` to require a code from an authenticator app (TOTP, RFC 6238) at every password sign-in. Google Authenticator, Microsoft Authenticator, 1Password and any other TOTP app work.
+
+- **Enrolment before access.** An account without an authenticator scans a QR code and confirms a code right after its password, before it holds any session. Turning the setting on also ends password sessions that began without a code, so nobody keeps working unenrolled.
+- **SSO is not affected.** Sign-in through [SSO](./sso.md) never asks for a Heym code; require MFA at your identity provider instead.
+- **Every password surface.** The web login, registration, [Heym Work](./heym-work.md) sign-in, and the MCP OAuth consent page all ask for the code.
+- **Recovery codes.** Ten single-use codes are shown once after enrolment. They are stored as SHA-256 digests, so a database copy does not contain them.
+- **Secrets at rest.** The authenticator secret is encrypted with `ENCRYPTION_KEY` and re-encrypted by [key rotation](#rotating-the-key) like credentials.
+- **Replay and guessing.** A code is accepted once, within one 30-second step either side of now, and five wrong codes lock that account's sign-in for 15 minutes.
+- **Lost phone.** An administrator resets two-factor sign-in from **Settings → Users**, and the person sets up a new authenticator at the next sign-in.
+
+## Account Deactivation
+
+Administrators deactivate an account from **Settings → Users** when someone leaves. A deactivated account authenticates nowhere: password, SSO, Heym Work, and the MCP consent page refuse it; its sessions end at once; refresh and MCP OAuth tokens are revoked; its MCP API keys and execution tokens stop working. The automatic triggers of every workflow it owns are paused, the same way **Pause triggers** pauses one workflow, so nothing keeps running in the name of someone who has left. Reactivation reverses all of it except the revoked sessions. See [Settings → Users](./user-settings.md#users-tab).
+
+## Data Retention
+
+Execution history and LLM traces older than `HEYM_DATA_RETENTION_DAYS` (default `90`) are deleted once a day. A run still waiting on a human review is kept. Set `0` to keep everything. Alert events have their own fixed 90-day window. The weekly execution-history maintenance then returns the freed disk space.
 
 ## Rate Limiting
 

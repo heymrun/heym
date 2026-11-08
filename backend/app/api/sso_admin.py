@@ -36,7 +36,11 @@ async def break_glass_available(db: AsyncSession) -> bool:
     result = await db.execute(
         select(func.count())
         .select_from(User)
-        .where(func.lower(User.email).in_(emails), User.hashed_password.is_not(None))
+        .where(
+            func.lower(User.email).in_(emails),
+            User.hashed_password.is_not(None),
+            User.is_active.is_(True),
+        )
     )
     return (result.scalar() or 0) > 0
 
