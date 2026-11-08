@@ -2,6 +2,7 @@
 import { computed, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 
+import type { User } from "@/types/auth";
 import type { CredentialListItem } from "@/types/credential";
 
 import Button from "@/components/ui/Button.vue";
@@ -12,6 +13,7 @@ import Select from "@/components/ui/Select.vue";
 import Textarea from "@/components/ui/Textarea.vue";
 import UserAvatar from "@/components/ui/UserAvatar.vue";
 import {
+  authApi,
   credentialsApi,
   observabilityApi,
   voiceApi,
@@ -37,6 +39,7 @@ import { k8sCredentialsEnabled } from "@/services/k8sCredentials";
 import { useAuthStore } from "@/stores/auth";
 
 import AiDefaultsTab from "@/components/Layout/aiDefaults/AiDefaultsTab.vue";
+import { mergeFreshProfile } from "@/components/Layout/userSettingsProfile";
 import { clearPluginIconCache } from "@/components/Panels/PluginIcon.vue";
 
 import type { PluginSummary } from "@/types/workflow";
@@ -261,12 +264,26 @@ const confirmNewPassword = ref("");
 const passwordError = ref<string | null>(null);
 const passwordSuccess = ref<string | null>(null);
 
+async function refreshProfile(cached: User): Promise<void> {
+  try {
+    const fresh = await authApi.getMe();
+    if (!props.open) return;
+    const merged = mergeFreshProfile({ name: name.value, userRules: userRules.value }, cached, fresh);
+    name.value = merged.name;
+    userRules.value = merged.userRules;
+    authStore.user = fresh;
+  } catch {
+    // The cached profile stays in the form; saving still works.
+  }
+}
+
 watch(
   () => props.open,
   (isOpen) => {
     if (isOpen && authStore.user) {
       name.value = authStore.user.name;
       userRules.value = authStore.user.user_rules || "";
+      void refreshProfile(authStore.user);
       activeTab.value = props.initialTab ?? "profile";
       currentPassword.value = "";
       newPassword.value = "";
@@ -434,6 +451,8 @@ async function handleChangePassword(): Promise<void> {
             <p class="text-xs text-muted-foreground">
               Custom instructions included in every AI request (workflow builder and dashboard
               chat). Use this to define your preferences, coding style, or specific requirements.
+              Chat and connected MCP clients can add to it when you ask them to remember
+              something.
             </p>
             <Textarea
               id="user-rules"
