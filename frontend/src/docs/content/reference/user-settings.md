@@ -38,6 +38,16 @@ User Rules are custom instructions automatically injected into every AI requestâ
 
 User Rules are injected at the system levelâ€”they run before every prompt automatically, without any extra configuration per workflow or conversation.
 
+#### User Rules as memory
+
+User Rules are also your memory across sessions. When you ask Chat to remember something ("remember that our CRM is HubSpot"), or you state a lasting preference or make a decision later conversations need, Chat adds one line to your User Rules. The next conversation starts with it, whether it runs in Heym, in Heym Work, or in an MCP client connected to your [default MCP server](../tabs/mcp-tab.md#memory-tools-get_user_memory-and-set_user_memory).
+
+- Chat does not save after every message, and it tells you in one sentence what it saved.
+- To change or remove something, ask Chat to forget or rewrite it, or edit the text here.
+- API keys, tokens, passwords and other credentials are never saved. Heym refuses them; keep them in [Credentials](../tabs/credentials-tab.md).
+- The limit is 4000 characters.
+- This dialog reads the latest text each time it opens, so saving it keeps what Chat added.
+
 ### Saving Profile Changes
 
 Click **Save Changes** to apply. Changes take effect immediately for all new AI requests.

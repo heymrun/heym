@@ -170,6 +170,8 @@ The editor's AI Assistant does not create suites.
 
 [User Rules](../reference/user-settings.md) (configured in Settings) are automatically injected into every Chat conversation as system-level instructions. Set them once to apply persistent preferences to all chat requests.
 
+They are also Chat's memory. Ask Chat to remember something, or state a lasting preference or decision, and it adds one line to your User Rules. Ask it to forget or change something and it rewrites them. Each save shows as a tool row in the conversation, and credentials are never saved. See [User Rules as memory](../reference/user-settings.md#user-rules-as-memory).
+
 ## Related
 
 - [MCP / A2A Tab](./mcp-tab.md) – Expose this engine to MCP clients as the `heym_chat` tool
