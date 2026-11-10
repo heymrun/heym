@@ -175,6 +175,7 @@ import type {
   WidgetUpdateRequest,
 } from "@/types/dashboard";
 import type { FileRunResult } from "@/types/quickDrawer";
+import type { RagIngestJobList } from "@/types/ragIngest";
 import type {
   BoardCard,
   BoardColumn,
@@ -2442,6 +2443,9 @@ export interface VectorStoreShare {
 export interface VectorStoreUploadResponse {
   chunks_processed: number;
   points_inserted: number;
+  /** "queued": Heym reads the file in the background; see `listIngestJobs`. */
+  status?: "done" | "queued";
+  job_id?: string | null;
 }
 
 export interface FileCheckItem {
@@ -2594,6 +2598,15 @@ export const vectorStoresApi = {
 
   deleteItem: async (id: string, pointId: string): Promise<void> => {
     await api.delete(`/vector-stores/${id}/items/${pointId}`);
+  },
+
+  listIngestJobs: async (id: string): Promise<RagIngestJobList> => {
+    const response = await api.get<RagIngestJobList>(`/vector-stores/${id}/ingest-jobs`);
+    return response.data;
+  },
+
+  dismissIngestJob: async (id: string, jobId: string): Promise<void> => {
+    await api.delete(`/vector-stores/${id}/ingest-jobs/${jobId}`);
   },
 };
 

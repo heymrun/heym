@@ -2,13 +2,23 @@ import csv
 import io
 import json
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Protocol
 
 
 @dataclass
 class TextChunk:
     text: str
     metadata: dict
+
+
+class TimedSegment(Protocol):
+    """A stretch of transcribed speech; `speech_to_text_service.SttSegment` is one."""
+
+    start: float
+    end: float
+    text: str
 
 
 DEFAULT_CHUNK_SIZE = 1000
@@ -237,39 +247,48 @@ class FileProcessor:
 
         return cleaned.strip()
 
+    def pdf_page_texts(self, file_content: bytes) -> list[str]:
+        """Each page's cleaned text layer, in order; "" for a page that has none."""
+        from pypdf import PdfReader
+
+        reader = PdfReader(io.BytesIO(file_content))
+        texts: list[str] = []
+        for page in reader.pages:
+            raw = page.extract_text() or ""
+            cleaned = self._clean_pdf_text(raw) if raw.strip() else ""
+            texts.append(cleaned if cleaned.strip() else "")
+        return texts
+
+    def process_pdf_pages(
+        self,
+        page_texts: Sequence[str],
+        filename: str,
+        file_size: int,
+        ocr_pages: frozenset[int] = frozenset(),
+    ) -> list[TextChunk]:
+        """Chunk per-page text; pages listed in `ocr_pages` were read by OCR."""
+        chunks: list[TextChunk] = []
+        total = len(page_texts)
+        for page_num, text in enumerate(page_texts, start=1):
+            if not text.strip():
+                continue
+            metadata: dict = {
+                "source": filename,
+                "file_size": file_size,
+                "page": page_num,
+                "total_pages": total,
+                "file_type": "pdf",
+            }
+            if page_num in ocr_pages:
+                metadata["ocr"] = True
+            chunks.extend(self._chunk_text(text, base_metadata=metadata))
+        return self._add_context_overlap(chunks)
+
     def process_pdf(
         self, file_content: bytes, filename: str, file_size: int | None = None
     ) -> list[TextChunk]:
-        from pypdf import PdfReader
-
         actual_size = file_size if file_size is not None else len(file_content)
-        reader = PdfReader(io.BytesIO(file_content))
-        chunks = []
-
-        for page_num, page in enumerate(reader.pages, start=1):
-            page_text = page.extract_text() or ""
-
-            if not page_text.strip():
-                continue
-
-            page_text = self._clean_pdf_text(page_text)
-
-            if not page_text.strip():
-                continue
-
-            page_chunks = self._chunk_text(
-                page_text,
-                base_metadata={
-                    "source": filename,
-                    "file_size": actual_size,
-                    "page": page_num,
-                    "total_pages": len(reader.pages),
-                    "file_type": "pdf",
-                },
-            )
-            chunks.extend(page_chunks)
-
-        return self._add_context_overlap(chunks)
+        return self.process_pdf_pages(self.pdf_page_texts(file_content), filename, actual_size)
 
     def process_markdown(
         self, file_content: bytes, filename: str, file_size: int | None = None
@@ -299,6 +318,80 @@ class FileProcessor:
                 "file_type": "text",
             },
         )
+        return self._add_context_overlap(chunks)
+
+    def process_extracted_text(
+        self,
+        text: str,
+        filename: str,
+        file_size: int,
+        *,
+        file_type: str,
+        extra_metadata: dict | None = None,
+    ) -> list[TextChunk]:
+        """Chunk text that came out of another reader (OCR, for example)."""
+        chunks = self._chunk_text(
+            text,
+            base_metadata={
+                "source": filename,
+                "file_size": file_size,
+                "file_type": file_type,
+                **(extra_metadata or {}),
+            },
+        )
+        return self._add_context_overlap(chunks)
+
+    def process_timed_segments(
+        self,
+        segments: Sequence[TimedSegment],
+        filename: str,
+        file_size: int,
+        extra_metadata: dict | None = None,
+    ) -> list[TextChunk]:
+        """Group transcript segments into chunks of up to `chunk_size` characters.
+
+        Each chunk keeps the start of its first segment and the end of its last, so a search
+        hit points at a moment in the recording.
+        """
+        base = {
+            "source": filename,
+            "file_size": file_size,
+            "file_type": "audio",
+            **(extra_metadata or {}),
+        }
+        chunks: list[TextChunk] = []
+        texts: list[str] = []
+        start = 0.0
+        end = 0.0
+        length = 0
+
+        def flush() -> None:
+            chunks.append(
+                TextChunk(
+                    text=" ".join(texts),
+                    metadata={
+                        **base,
+                        "start_seconds": round(start, 2),
+                        "end_seconds": round(end, 2),
+                        "chunk_index": len(chunks),
+                    },
+                )
+            )
+
+        for segment in segments:
+            text = segment.text.strip()
+            if not text:
+                continue
+            if texts and length + len(text) + 1 > self.chunk_size:
+                flush()
+                texts, length = [], 0
+            if not texts:
+                start = segment.start
+            texts.append(text)
+            end = segment.end
+            length += len(text) + 1
+        if texts:
+            flush()
         return self._add_context_overlap(chunks)
 
     def process_csv(

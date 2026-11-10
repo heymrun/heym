@@ -1295,6 +1295,41 @@ class VectorStoreShare(Base):
     user: Mapped["User"] = relationship("User", back_populates="vector_store_shares")
 
 
+class VectorStoreIngestJob(Base):
+    """A vector store upload read in the background: audio, or a PDF with scanned pages.
+
+    The row lives while the file is read and is deleted once its chunks are in the store. A
+    failed row keeps its error until someone dismisses it. `heartbeat_at` moves every 30
+    seconds while the process that runs the job is alive; see rag_ingest_jobs.py.
+    """
+
+    __tablename__ = "vector_store_ingest_jobs"
+    __table_args__ = (
+        Index("ix_vector_store_ingest_jobs_store_status", "vector_store_id", "status"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    vector_store_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("vector_stores.id", ondelete="CASCADE"), nullable=False
+    )
+    created_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    filename: Mapped[str] = mapped_column(String(512), nullable=False)
+    file_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="queued")
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    override_duplicates: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    heartbeat_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class VectorStoreTeamShare(Base):
     __tablename__ = "vector_store_team_shares"
     __table_args__ = (

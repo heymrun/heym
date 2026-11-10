@@ -1543,7 +1543,7 @@ The http node ALWAYS returns a structured response object:
 - **Inputs**: 1 | **Outputs**: 1
 - **Data fields**:
   - `label`: Node identifier
-  - `conversion`: `"csvToJson"` (CSV text -> array of row objects), `"jsonToCsv"` (array of objects/rows -> CSV text), `"xmlToJson"` (XML text -> object), `"jsonToXml"` (object -> XML text), `"imageToText"` (OCR an image file), `"pdfToText"` (OCR every selected PDF page), `"audioToText"` (voice transcribe: speech in an mp3, wav, or ogg file -> text), or `"fileConvert"` (rewrite a stored file in another format)
+  - `conversion`: `"csvToJson"` (CSV text -> array of row objects), `"jsonToCsv"` (array of objects/rows -> CSV text), `"xmlToJson"` (XML text -> object), `"jsonToXml"` (object -> XML text), `"imageToText"` (OCR an image file), `"pdfToText"` (OCR every selected PDF page), `"audioToText"` (voice transcribe: speech in an mp3, wav, ogg, opus (WhatsApp voice notes), or flac file -> text), or `"fileConvert"` (rewrite a stored file in another format)
   - `source`: Expression for the input to convert (e.g. `"$previousNode.body"` or `"$userInput.body.text"`). If empty, the first input is used. Text conversions only.
   - `delimiter`: Single-character field delimiter (default `,`). Use `"\\t"` for tab-separated values.
   - `hasHeader`: Boolean, `csvToJson` only — first row is the header (default true). When false each row is an array of cell values instead of an object.

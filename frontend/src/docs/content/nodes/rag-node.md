@@ -55,6 +55,11 @@ Add documents to the vector store.
 
 **Output:** `$nodeLabel.status`, `$nodeLabel.inserted_ids`
 
+To store an image's text or a recording's transcript from a workflow, put a
+[Converter](./converter-node.md) node (`imageToText`, `pdfToText` or `audioToText`) before the
+insert and pass `$converterNode.result` as `documentContent`. Files uploaded in the
+[Vectorstores](../tabs/vectorstores-tab.md) tab go through the same readers on their own.
+
 ### Metadata expressions
 
 Metadata values accept expressions, so a document can be stored with context from the run:

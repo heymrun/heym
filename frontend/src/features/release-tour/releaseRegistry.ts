@@ -17,6 +17,29 @@ import type { ReleaseEntry } from "@/features/release-tour/releaseTour.types";
  */
 export const RELEASE_REGISTRY: ReleaseEntry[] = [
   {
+    releaseId: "2026.30",
+    publishedAt: new Date("2026-11-10T22:00:00Z"),
+    headline: "Images, audio and any text file in vector stores",
+    releaseTour: {
+      label: "New in Heym", introTitle: "New in this release",
+      introDescription: "Photos, recordings and scanned pages become searchable RAG sources.",
+      tourEnabled: true,
+      sectionOrder: ["rag-media-upload"],
+    },
+    sections: [{
+      id: "rag-media-upload", title: "Images, audio and any text file in vector stores",
+      publishedAt: new Date("2026-11-10T22:00:00Z"),
+      blocks: [{ type: "prose", markdown: "Drop a photo, a screenshot, a voice note (WhatsApp's `.opus` files too) or a call recording on a vector store and it becomes searchable. Images are read with the Converter's OCR, and audio is transcribed on your own instance with the same Whisper model, in the background, so a long recording does not hold the upload open. PDF pages without a text layer are now read with OCR instead of being skipped, and a plain-text file of any name, such as `notes` or `README`, goes in as text. Heym Work's Knowledge pages take the same files." }],
+      tour: {
+        description: "Put photos, recordings, scanned PDFs and plain-text files of any name into a vector store.",
+        useCases: ["Search call recordings from a RAG node", "Make photographed receipts and whiteboards searchable", "Index scanned contracts without a separate OCR step"],
+        tourVisual: "rag-media-upload",
+        docTarget: { categoryId: "tabs", slug: "vectorstores-tab", title: "Vectorstores" },
+      },
+    }],
+  },
+
+  {
     releaseId: "2026.29",
     publishedAt: new Date("2026-11-10T16:00:00Z"),
     headline: "Rerank RAG search results with a Decision Model",
@@ -103,34 +126,6 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
         useCases: ["Show when customers can book a call", "Invite a visitor using the email and time from your form", "Reschedule or cancel meetings and notify guests"],
         tourVisual: "google-meet",
         docTarget: { categoryId: "nodes", slug: "google-meet-node", title: "Google Meet" },
-      },
-    }],
-  },
-
-  {
-    releaseId: "2026.25",
-    publishedAt: new Date("2026-11-05T12:00:00Z"),
-    headline: "Assign, prioritize and schedule board cards from Heym, Heym Work, Chat and MCP",
-    releaseTour: {
-      label: "New in Heym",
-      introTitle: "New in this release",
-      introDescription: "Kanban boards become team task boards, managed the same way everywhere.",
-      tourEnabled: true,
-      sectionOrder: ["board-task-fields"],
-    },
-    sections: [{
-      id: "board-task-fields",
-      title: "Assign, prioritize and schedule board cards",
-      publishedAt: new Date("2026-11-05T12:00:00Z"),
-      blocks: [{
-        type: "prose",
-        markdown: "Open a card on the **Board** tab to give it an assignee, a priority, a due date and labels such as a client or project. The card shows them at a glance, and overdue work turns red. The order you drag cards into is kept, in Heym and in Heym Work. A board can also stop moving cards on its own: turn off **Advance cards automatically** in its settings for a plain team task board. Chat and any MCP client through `heym_chat` can now create and change boards, columns and cards, assign, move and comment on tasks, and list what is overdue or waiting for a review. Moving or commenting on a card never approves a review.",
-      }],
-      tour: {
-        description: "Give cards an owner, a priority and a due date, and manage them from Heym, Heym Work, Chat or MCP.",
-        useCases: ["See who works on which contract and what is overdue", "Ask Chat to move a task to Review and assign it to a colleague", "Keep a plain task board whose cards stay where people put them"],
-        tourVisual: "board-task-fields",
-        docTarget: { categoryId: "tabs", slug: "board-tab", title: "Board" },
       },
     }],
   },
