@@ -63,6 +63,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && tesseract --version \
     && pdftoppm -v
 
+# Whisper model for the Converter node's audioToText conversion, baked in so no container
+# downloads it at runtime. The packages that run it come from uv sync.
+COPY docker/install-stt-model.sh /tmp/install-stt-model.sh
+RUN sh /tmp/install-stt-model.sh /opt/heym/stt && rm /tmp/install-stt-model.sh
+
 # OpenAI Codex CLI (required by the Codex node). Pin via the HEYM_CODEX_CLI_VERSION build arg.
 ARG HEYM_CODEX_CLI_VERSION=latest
 RUN npm install -g @openai/codex@${HEYM_CODEX_CLI_VERSION}

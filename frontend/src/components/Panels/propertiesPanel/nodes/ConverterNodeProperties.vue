@@ -26,6 +26,7 @@ const conversionOptions = [
   { value: "jsonToXml", label: "JSON → XML" },
   { value: "imageToText", label: "Image → Text (OCR)" },
   { value: "pdfToText", label: "PDF → Text (OCR)" },
+  { value: "audioToText", label: "Audio → Text (Voice Transcribe)" },
   { value: "fileConvert", label: "File → Another format" },
 ];
 
@@ -46,6 +47,28 @@ const languageOptions = [
   { value: "jpn", label: "Japanese (jpn)" },
   { value: "kor", label: "Korean (kor)" },
   { value: "custom", label: "Custom codes…" },
+];
+
+// Whisper codes. One multilingual model reads them all; "auto" lets it pick.
+const speechLanguageOptions = [
+  { value: "auto", label: "Auto detect" },
+  { value: "en", label: "English (en)" },
+  { value: "tr", label: "Turkish (tr)" },
+  { value: "de", label: "German (de)" },
+  { value: "fr", label: "French (fr)" },
+  { value: "es", label: "Spanish (es)" },
+  { value: "it", label: "Italian (it)" },
+  { value: "pt", label: "Portuguese (pt)" },
+  { value: "nl", label: "Dutch (nl)" },
+  { value: "pl", label: "Polish (pl)" },
+  { value: "ru", label: "Russian (ru)" },
+  { value: "uk", label: "Ukrainian (uk)" },
+  { value: "ar", label: "Arabic (ar)" },
+  { value: "hi", label: "Hindi (hi)" },
+  { value: "zh", label: "Chinese (zh)" },
+  { value: "ja", label: "Japanese (ja)" },
+  { value: "ko", label: "Korean (ko)" },
+  { value: "custom", label: "Other language code…" },
 ];
 
 const encodingOptions = [
@@ -74,8 +97,9 @@ const conversion = computed((): string => selectedNode.value?.data.conversion ||
 const isOcr = computed(
   (): boolean => conversion.value === "imageToText" || conversion.value === "pdfToText",
 );
+const isAudio = computed((): boolean => conversion.value === "audioToText");
 const isFileConvert = computed((): boolean => conversion.value === "fileConvert");
-const usesFile = computed((): boolean => isOcr.value || isFileConvert.value);
+const usesFile = computed((): boolean => isOcr.value || isAudio.value || isFileConvert.value);
 const usesDelimiter = computed(
   (): boolean => conversion.value === "csvToJson" || conversion.value === "jsonToCsv",
 );
@@ -285,6 +309,42 @@ const usesDelimiter = computed(
       </p>
     </div>
 
+    <template v-if="isAudio">
+      <div
+        class="space-y-2"
+        data-testid="converter-stt-language-field"
+      >
+        <Label>Spoken language</Label>
+        <Select
+          :model-value="selectedNode.data.sttLanguage || 'auto'"
+          :options="speechLanguageOptions"
+          @update:model-value="updateNodeData('sttLanguage', $event || 'auto')"
+        />
+        <p class="text-xs text-muted-foreground">
+          Auto detect works out the language from the recording. Naming it helps on short clips
+          and on recordings that open with silence or music. Works with mp3, wav, and ogg files
+          up to 30 minutes, and runs on this Heym instance.
+        </p>
+      </div>
+
+      <div
+        v-if="selectedNode.data.sttLanguage === 'custom'"
+        class="space-y-2"
+        data-testid="converter-stt-language-custom-field"
+      >
+        <Label>Language code</Label>
+        <Input
+          :model-value="selectedNode.data.sttLanguageCustom || ''"
+          placeholder="yue"
+          @update:model-value="updateNodeData('sttLanguageCustom', $event)"
+        />
+        <p class="text-xs text-muted-foreground">
+          A Whisper language code, such as <code>sv</code> for Swedish or <code>yue</code> for
+          Cantonese.
+        </p>
+      </div>
+    </template>
+
     <template v-if="isOcr">
       <div
         class="space-y-2"
@@ -439,6 +499,13 @@ const usesDelimiter = computed(
       >
         OCR runs also expose <code>.language</code>, <code>.encoding</code>,
         <code>.page_count</code>, <code>.pages</code>, and <code>.file</code>.
+      </p>
+      <p
+        v-if="isAudio"
+        class="text-xs text-muted-foreground"
+      >
+        Transcriptions also expose <code>.language</code>, <code>.duration_seconds</code>,
+        <code>.segments</code>, and <code>.file</code>.
       </p>
       <p
         v-if="isFileConvert"

@@ -888,12 +888,14 @@ dependencies = [
     { name = "pypdf" },
     { name = "python-docx" },
     { name = "python-multipart" },
+    { name = "pywhispercpp" },
     { name = "qdrant-client" },
     { name = "redis" },
     { name = "reportlab" },
     { name = "ruff" },
     { name = "segno" },
     { name = "simpleeval" },
+    { name = "soundfile" },
     { name = "sqlalchemy", extra = ["asyncio"] },
     { name = "tiktoken" },
     { name = "uvicorn", extra = ["standard"] },
@@ -945,12 +947,14 @@ requires-dist = [
     { name = "pypdf", specifier = ">=6.15.0" },
     { name = "python-docx", specifier = ">=1.0.0" },
     { name = "python-multipart", specifier = ">=0.0.31" },
+    { name = "pywhispercpp", specifier = ">=1.5.1" },
     { name = "qdrant-client", specifier = ">=1.17.1" },
     { name = "redis", specifier = ">=7.4.0" },
     { name = "reportlab", specifier = ">=4.0.0" },
     { name = "ruff", specifier = ">=0.15.12" },
     { name = "segno", specifier = ">=1.6.1" },
     { name = "simpleeval", specifier = ">=1.0.7" },
+    { name = "soundfile", specifier = ">=0.13.1" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.49" },
     { name = "tiktoken", specifier = ">=0.5.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.46.0" },
@@ -2153,6 +2157,15 @@ wheels = [
 ]
 
 [[package]]
+name = "platformdirs"
+version = "4.14.5"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/d7/9a/8475be631fb33ca1466915e70fd594c42a4e84b512db650eaa14f90fe75d/platformdirs-4.14.5.tar.gz", hash = "sha256:32e9921db7385aa8169bee4fe9501923e5715ba9fb7ea3b9c69b0d8e0639f7a1", size = 71464, upload-time = "2026-11-04T16:54:50.358Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7c/ae/ecbbbfd0e4343a6a521d49b3c8656fb4643dee2a4f6eaf941cf3280391a8/platformdirs-4.14.5-py3-none-any.whl", hash = "sha256:8e778c6fa421516f4d3369449f8df3b0e1b72c0e0005fe88e3ec772d0a14e750", size = 35402, upload-time = "2026-11-04T16:54:48.875Z" },
+]
+
+[[package]]
 name = "playwright"
 version = "1.58.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2684,6 +2697,69 @@ wheels = [
 ]
 
 [[package]]
+name = "pywhispercpp"
+version = "1.5.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "platformdirs" },
+    { name = "requests" },
+    { name = "tqdm" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/9f/35/610787a277e177e6b7983277a35a2969c0876b46c0d889bc6a0c4b4ac4a7/pywhispercpp-1.5.1.tar.gz", hash = "sha256:5df897e5dd9d9f16804fc937bd85b9f5880a0b29a55f8843585e0e03d76195e5", size = 9756087, upload-time = "2026-08-22T01:41:54.549Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/39/b3/72672a83031668b4026b52fb0c0855b43ec0cf84444649d8bf3eef52ec89/pywhispercpp-1.5.1-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:4a10b4f9c99123eb6515a98cc972f354d2455884af19856b82cd1c0d6ab2602f", size = 4179002, upload-time = "2026-08-22T01:40:15.992Z" },
+    { url = "https://files.pythonhosted.org/packages/5a/4e/56ac240c213086272e688b24ca7dc757965c56481c4604528b68f4c90082/pywhispercpp-1.5.1-cp311-cp311-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:3fd5ce38397f27e1173423f82f14089da2f61a45b2f1fb307a943765f5c56b3e", size = 4179573, upload-time = "2026-08-22T01:40:18.105Z" },
+    { url = "https://files.pythonhosted.org/packages/72/dc/fb7a441ea45bcc3449f06ad3d6f7f8c6c0705e4a3d62a70f0635c83481b7/pywhispercpp-1.5.1-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:a70839d9a1f569e1e5424f27ed01a32133d658beae4cd1459eb39de1e0483bba", size = 4673602, upload-time = "2026-08-22T01:40:20.003Z" },
+    { url = "https://files.pythonhosted.org/packages/f5/cc/40009106d92941a49e8b9f913ba9b54c2aa607764038571e4e1acc5f2e3b/pywhispercpp-1.5.1-cp311-cp311-musllinux_1_2_aarch64.whl", hash = "sha256:4cbc1a5f7cca057fd107ac30c879a16f6bd7de0819c5052a22ec87220fedcd36", size = 4961611, upload-time = "2026-08-22T01:40:22.018Z" },
+    { url = "https://files.pythonhosted.org/packages/4f/45/dc5acdf4d48fe57814939c792a9657a8bcd13b1f3325c25ebc2e6f8f9db8/pywhispercpp-1.5.1-cp311-cp311-musllinux_1_2_x86_64.whl", hash = "sha256:2887206b5de45eb2def3117455b479bf82fc65989eb74d0173ec56539f4a854e", size = 5450990, upload-time = "2026-08-22T01:40:24.119Z" },
+    { url = "https://files.pythonhosted.org/packages/42/b8/c0f87e6802b7b3a111b4ffade72be11c88aa1d9b983dec58e43269bb414b/pywhispercpp-1.5.1-cp311-cp311-win32.whl", hash = "sha256:14f9e64979562e2be9f92f0200179c1e7f0e8dd5270beabe40198b8224dfbd12", size = 1208631, upload-time = "2026-08-22T01:40:27.221Z" },
+    { url = "https://files.pythonhosted.org/packages/6d/c8/14c922c2b57a7b0ad4a587931b1ba13868f675a51db1f3d1f6e970b4ed2f/pywhispercpp-1.5.1-cp311-cp311-win_amd64.whl", hash = "sha256:539fbdc7de1348f16c1fb18802a025bf07340b5f7de1699ff8f7cb60be063145", size = 1374701, upload-time = "2026-08-22T01:40:28.816Z" },
+    { url = "https://files.pythonhosted.org/packages/b3/c1/09d261e4c71944ee51fb6001cc1f5c5667ebf1f4a46cc79b96397bf72b3b/pywhispercpp-1.5.1-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:d929d69b9c9b960114eee2d7ee4a5ec4a3553bcace173c155d951f94f5c835c8", size = 4180193, upload-time = "2026-08-22T01:40:30.506Z" },
+    { url = "https://files.pythonhosted.org/packages/de/90/c3d8f6f76c9ce6b71aa4aca6d6baf063c1f75189b5788546707fa4e5dee5/pywhispercpp-1.5.1-cp312-cp312-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:2f28d7543173082c9d953314ce752588d87a1a2f59a7da440422530480cb4b6a", size = 4179842, upload-time = "2026-08-22T01:40:32.085Z" },
+    { url = "https://files.pythonhosted.org/packages/fe/e2/0509ccac8e2c89489a1b800aa0e45a79ff3a3c86cb7c0a335c81bbebc89b/pywhispercpp-1.5.1-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:973eafb3c27f4bc67f5e13f92491f91cee4ae0dd2d50c1b19c610f34c9ded9d8", size = 4675850, upload-time = "2026-08-22T01:40:34.063Z" },
+    { url = "https://files.pythonhosted.org/packages/e3/53/530d410708f2131bbd224033f74a3f2c28e3811c8aca30c99b052451d102/pywhispercpp-1.5.1-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:91cad302580d17e397fadcd20f93521e6ab7bb066f0317a210060303aee28154", size = 4961103, upload-time = "2026-08-22T01:40:35.907Z" },
+    { url = "https://files.pythonhosted.org/packages/ac/ec/458ac8f9dd43efdd8b16f0d58c71d13407bc0c7863dfa3382347d1b9db50/pywhispercpp-1.5.1-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:9a7a116af88bfc064e29ac74648ca1082b7fc110d97e106f429fa6976ea0cec7", size = 5454043, upload-time = "2026-08-22T01:40:37.778Z" },
+    { url = "https://files.pythonhosted.org/packages/8b/4b/dc62c30216e9257e7ebffa8161bf026aa6705ad8388ae4fa545ac5a971f7/pywhispercpp-1.5.1-cp312-cp312-win32.whl", hash = "sha256:397dd60fd70f98bdc50c0bcd8a8d4a38d2918cad8714666f448a56a4abf03564", size = 1209356, upload-time = "2026-08-22T01:40:39.454Z" },
+    { url = "https://files.pythonhosted.org/packages/5c/cf/fd94fe40ad555906528fcc93b571674cab79a40251d20694aaa8b4a17ecb/pywhispercpp-1.5.1-cp312-cp312-win_amd64.whl", hash = "sha256:73a7233a462926ef86aa8d943e1071c2a087a21f78feff16c629385385ab475a", size = 1376077, upload-time = "2026-08-22T01:40:40.864Z" },
+    { url = "https://files.pythonhosted.org/packages/01/ec/e284dcd0f3e837e67d18a70ece751be19cc880d7b63d3932034713fbd941/pywhispercpp-1.5.1-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:bb91f597d5f03f9a0acd97bc02c8e4aaf22e1499ed4439fb2456ea96ae1564c6", size = 4180269, upload-time = "2026-08-22T01:40:42.896Z" },
+    { url = "https://files.pythonhosted.org/packages/24/27/a3aa9b10e920f136e34ba554e5acbde9883631998286f84b8e347f79a7ad/pywhispercpp-1.5.1-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:28e0499f88354abbc2c5e60e4e645fe417c43349435f23166b4c115f6f295de1", size = 4179826, upload-time = "2026-08-22T01:40:44.762Z" },
+    { url = "https://files.pythonhosted.org/packages/39/d6/157f5c0b4b35a8671570a93228bb63eb9cc3fa3bd1c35f2e66375f35889c/pywhispercpp-1.5.1-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:3078c551ae2ee638292333eaa982481c1118306971e4bbe376a24fedf759acf1", size = 4675987, upload-time = "2026-08-22T01:40:46.657Z" },
+    { url = "https://files.pythonhosted.org/packages/4b/03/b45fe1d6619faf5343104f7bafc95ccf0f045718e1808dbf093386dc208b/pywhispercpp-1.5.1-cp313-cp313-musllinux_1_2_aarch64.whl", hash = "sha256:09ac27ec0698fcc74fe17fb12a053f0eb43f4b843db53fd2b5c31b867f62bab9", size = 4961180, upload-time = "2026-08-22T01:40:48.571Z" },
+    { url = "https://files.pythonhosted.org/packages/df/23/c779d7e84eafaa8023497aa663bf2e57b221e56785816dde13f6d6ba5073/pywhispercpp-1.5.1-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:5df300ecd59fc7120967dd0297a0b5a93c32221c315211d0e223bf5afaa09d17", size = 5454069, upload-time = "2026-08-22T01:40:50.486Z" },
+    { url = "https://files.pythonhosted.org/packages/f7/9a/8409c1b3a0f023ab268bd7e4f073129ef875734e4a00b88e4dec049907a1/pywhispercpp-1.5.1-cp313-cp313-win32.whl", hash = "sha256:48969b2c4a87a1dc16245cededeb0c4240a62ae8fec61ddc8d3a555604dbf94d", size = 1209403, upload-time = "2026-08-22T01:40:51.902Z" },
+    { url = "https://files.pythonhosted.org/packages/53/f8/8649f3d284c673f431fd8455ba86df039163f6c0e1d71b3de9e2ca57c861/pywhispercpp-1.5.1-cp313-cp313-win_amd64.whl", hash = "sha256:d1d31e95972416a089769db2c8db9661c639a1c8be4ecdd97f0712d9e8e77b08", size = 1376108, upload-time = "2026-08-22T01:40:53.406Z" },
+    { url = "https://files.pythonhosted.org/packages/f5/70/22e13b6724324e5d4e94857fb83ea09d276f6e552d83e866ddc36e694ac3/pywhispercpp-1.5.1-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:068c01596ff3ca8f59aeaedc5fbb279a4348559a6c26a632d63078a7b6979b2a", size = 4181028, upload-time = "2026-08-22T01:40:54.994Z" },
+    { url = "https://files.pythonhosted.org/packages/79/1c/a4a3b2a19610c0b66d495b786105e1876968f3e6b7183375b7f910aee353/pywhispercpp-1.5.1-cp314-cp314-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:39813f1cd3b310c32bc98930f0547c8b2d63d17c8dabd21ec19c4ab23d2c7059", size = 4180770, upload-time = "2026-08-22T01:40:56.74Z" },
+    { url = "https://files.pythonhosted.org/packages/c8/7f/bee4244647d2cb4ac9cd5a0ff678e5f835b46e3282602421043a869ee828/pywhispercpp-1.5.1-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:fb9d0ba10ddb7414ec0ce6f8c56d8cb3c0b156e6e68e771418a363af6891b321", size = 4676340, upload-time = "2026-08-22T01:40:58.585Z" },
+    { url = "https://files.pythonhosted.org/packages/0d/58/755b9e76300cce472d37dd1510d2a3c25069de500afab1d5a70e2111aebb/pywhispercpp-1.5.1-cp314-cp314-musllinux_1_2_aarch64.whl", hash = "sha256:4183695cec1181aad26f4bf5fca01c1668c99b7de251b5d4fed5954aa90e5d0a", size = 4962680, upload-time = "2026-08-22T01:41:00.579Z" },
+    { url = "https://files.pythonhosted.org/packages/d3/8f/2cc0fbc57a7f6aac4c7fc41aeb343c0ca5fbfd4b3e951837c840f521ca89/pywhispercpp-1.5.1-cp314-cp314-musllinux_1_2_x86_64.whl", hash = "sha256:d809644739c4c3f2a9814e1aa271181d6463122647cf921c13a77a6f1ef1eaec", size = 5454220, upload-time = "2026-08-22T01:41:02.312Z" },
+    { url = "https://files.pythonhosted.org/packages/7e/a2/75cc9ffc478b3692f0cd60850c8c0c76f9928eb1c634ada82d1fdc4c870d/pywhispercpp-1.5.1-cp314-cp314-win32.whl", hash = "sha256:3a392971d9a080061e4c4e85cf31e5003e8633f42236074bcfb7118b5ba335ec", size = 1243794, upload-time = "2026-08-22T01:41:04.286Z" },
+    { url = "https://files.pythonhosted.org/packages/15/fd/f5519784457b4f7ba068edf79ec3efe46799f77fa3d9f36718fe527f5770/pywhispercpp-1.5.1-cp314-cp314-win_amd64.whl", hash = "sha256:de0d52b45a4cce2c47ae5ea55ecc16ad7f41b9145d3a98aa799d8dcec4ca3bb5", size = 1417604, upload-time = "2026-08-22T01:41:05.942Z" },
+    { url = "https://files.pythonhosted.org/packages/a4/bc/d3a4acceda1ba0f0063571aa7a7d7c902385431046cfae87823a87ea2fee/pywhispercpp-1.5.1-cp314-cp314t-macosx_11_0_arm64.whl", hash = "sha256:bcc99a210427af4e154429455aace076067b9e9a4effdabf22372fc6838bff5a", size = 4196683, upload-time = "2026-08-22T01:41:07.608Z" },
+    { url = "https://files.pythonhosted.org/packages/6e/f7/4f6facc00c43fdbbbe2a73a9c9c3a50494fd3625df0e70e2c4773aef58f7/pywhispercpp-1.5.1-cp314-cp314t-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:d45230de68c9719a6f5f608f446b52ca5461026875fe2f0059531e939d684d6b", size = 4181580, upload-time = "2026-08-22T01:41:09.238Z" },
+    { url = "https://files.pythonhosted.org/packages/84/6a/874889d2cb9fcaa3ae0dd1b97ff1563748d33802a8e46f6dd9f876bc4c54/pywhispercpp-1.5.1-cp314-cp314t-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:f14d615762307a30e86a55e7f688ed62692d276d9f8003dceadca96c467cc0c6", size = 4675863, upload-time = "2026-08-22T01:41:11.099Z" },
+    { url = "https://files.pythonhosted.org/packages/00/5e/973cc2d41b4274277dc208b5d170da08ad118716092ce8efe486581a3cbd/pywhispercpp-1.5.1-cp314-cp314t-musllinux_1_2_aarch64.whl", hash = "sha256:53474d9a12f3105bb62cbe32eefdbe93bc8c2aa40d541b07f38b99c5f0cecbb1", size = 4963296, upload-time = "2026-08-22T01:41:13.023Z" },
+    { url = "https://files.pythonhosted.org/packages/85/51/c0f91fd54cb60a4d763b5c950569efb14ec2cb72f3600b45ce230c5dbea2/pywhispercpp-1.5.1-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:e7a9e722823f5290cdcb90378886b0b4a0b25e2ac1061ef0cd57af304c9358fb", size = 5452711, upload-time = "2026-08-22T01:41:14.749Z" },
+    { url = "https://files.pythonhosted.org/packages/46/17/85184e35ab877c966f0576fa6b838bd9c8cce51f911b8ae8f997da9f48a5/pywhispercpp-1.5.1-cp314-cp314t-win32.whl", hash = "sha256:8813a6d93e13960212e40cbeb2cd5867d4cbf3c1ecdbb2b3d209322437e3b197", size = 1259996, upload-time = "2026-08-22T01:41:16.113Z" },
+    { url = "https://files.pythonhosted.org/packages/7b/74/e354da3b9d4f0706c7b86896c7120f42362c19540e637ff1c0171ebcbc92/pywhispercpp-1.5.1-cp314-cp314t-win_amd64.whl", hash = "sha256:adf381996753bcd805fade64c947011edcba9c030c28a394103d7bf7a9fe525d", size = 1440615, upload-time = "2026-08-22T01:41:17.443Z" },
+    { url = "https://files.pythonhosted.org/packages/a6/a3/1b71d5ffd1f28f665b6ab3fcf1bb340c0d07227f6a6c82b63e73c8c02c3b/pywhispercpp-1.5.1-cp315-cp315-macosx_11_0_arm64.whl", hash = "sha256:e4a4514d8092ddcfb01b853df1789a859eec454b24c1a72b8e8d4da019cd6ab8", size = 4181037, upload-time = "2026-08-22T01:41:18.951Z" },
+    { url = "https://files.pythonhosted.org/packages/63/8c/993c27be3afb83797ee823944505bc1a59003900aaed8b8919bb4dfbed99/pywhispercpp-1.5.1-cp315-cp315-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:75ec2888b5bc2a2adde1d452085e136ee0f77ca7e8f5020fd9bd1455f236c07f", size = 4180798, upload-time = "2026-08-22T01:41:20.773Z" },
+    { url = "https://files.pythonhosted.org/packages/b4/d0/6c291bb5c670efae3c3a626aeecdbae1320087a63e985d6f36ec8eae89b1/pywhispercpp-1.5.1-cp315-cp315-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:3ea09913a894f7aef62674de7ec0083f50f6977f92817867e969a12ae546f28a", size = 4676344, upload-time = "2026-08-22T01:41:22.47Z" },
+    { url = "https://files.pythonhosted.org/packages/9c/7b/c638230f18f96669a273fce3bcc542aefb1cdb050ee96837ffea020ba437/pywhispercpp-1.5.1-cp315-cp315-musllinux_1_2_aarch64.whl", hash = "sha256:26f125630d2c80dcdc5d884941b91bd4cafb0610d75087543e0da92f73149c5e", size = 4962671, upload-time = "2026-08-22T01:41:24.396Z" },
+    { url = "https://files.pythonhosted.org/packages/57/a2/de10df4965b526b3717cf4f8518b072896075cac8a869c7fb1309b6ef600/pywhispercpp-1.5.1-cp315-cp315-musllinux_1_2_x86_64.whl", hash = "sha256:3442e1a7e7292006931af6e26356292e9c52272e138abe5bf0d1f06d79aab3eb", size = 5454227, upload-time = "2026-08-22T01:41:26.417Z" },
+    { url = "https://files.pythonhosted.org/packages/74/89/65d678ac4a5d95456158cb479123ce700cedda154e7a0d935cfb323b2b1d/pywhispercpp-1.5.1-cp315-cp315-win32.whl", hash = "sha256:56a285977210074daf4dc27b740f873a8715432f6f072271c12e6417744afbd7", size = 1243762, upload-time = "2026-08-22T01:41:28.147Z" },
+    { url = "https://files.pythonhosted.org/packages/c6/c1/77a222dafaa4a02ebc5c5beb7f4e711c2ead457e96f79cfee237c32a041a/pywhispercpp-1.5.1-cp315-cp315-win_amd64.whl", hash = "sha256:25a3716a7021db2c5e6fac42a0c8e60b20afd37e6a6ba19bf56dc94c80bc4151", size = 1417607, upload-time = "2026-08-22T01:41:29.475Z" },
+    { url = "https://files.pythonhosted.org/packages/27/f7/64d55c447a1a93052b990717c7b78e439d41a199c31bdf49d6cf71e0f06e/pywhispercpp-1.5.1-cp315-cp315t-macosx_11_0_arm64.whl", hash = "sha256:19bdf60dc92db79d41da5e1c61309a15a5fd9ea2b5f771fec918281d94978425", size = 4196602, upload-time = "2026-08-22T01:41:31.113Z" },
+    { url = "https://files.pythonhosted.org/packages/32/0c/3eef2c65750593b51addf733cfba5a6fd81cf2948d30a4c50ee36ee028cf/pywhispercpp-1.5.1-cp315-cp315t-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:c0161a9656953d87ae8d9adf6bd796f7ca9d8d37f8bd683aaecf931e12dd31db", size = 4181150, upload-time = "2026-08-22T01:41:32.698Z" },
+    { url = "https://files.pythonhosted.org/packages/94/6b/c675bfe850e49c60f94bfdcd389c69475a9e6eeedb7863d393a352a36268/pywhispercpp-1.5.1-cp315-cp315t-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:8d32a52663a07c31446c2202a576a624f7034081df7e20cf3a63b9096910f465", size = 4675452, upload-time = "2026-08-22T01:41:34.434Z" },
+    { url = "https://files.pythonhosted.org/packages/b1/a6/24e257042f9a2f9297f11376004e0bece03affe4ca4de1790d1bde9b394b/pywhispercpp-1.5.1-cp315-cp315t-musllinux_1_2_aarch64.whl", hash = "sha256:ef8ee41d655c8b9a740ab7b65ec7f899ec5b91501805fa8db02f35464e87386c", size = 4962441, upload-time = "2026-08-22T01:41:36.579Z" },
+    { url = "https://files.pythonhosted.org/packages/53/62/09f2ae891e860f320d1c7377363f43b687841e841a25b713fe9c8a783c2d/pywhispercpp-1.5.1-cp315-cp315t-musllinux_1_2_x86_64.whl", hash = "sha256:386edc4dc817897bd2e078a89ac5252ba31a83bce4ce28ee5d42892428469490", size = 5452811, upload-time = "2026-08-22T01:41:38.279Z" },
+    { url = "https://files.pythonhosted.org/packages/27/4f/bf30f8384bc6602af24f5269200f07656e763fa9068b55fcfffd53860f46/pywhispercpp-1.5.1-cp315-cp315t-win32.whl", hash = "sha256:0d51b682bc41e1d0c6e6dbff1b0aecd71d0d9ee92dd8954ff39cb0c29fbbe977", size = 1259947, upload-time = "2026-08-22T01:41:39.681Z" },
+    { url = "https://files.pythonhosted.org/packages/67/94/5afc217bdcd712adff8d1488e271e06b7ca367a540f2d4000df7b207661d/pywhispercpp-1.5.1-cp315-cp315t-win_amd64.whl", hash = "sha256:dbe9cfd3216ec43d8f7848c709b1c9dc3f4db42eb5589ef1ca8fa7c8a04620a4", size = 1440685, upload-time = "2026-08-22T01:41:40.928Z" },
+]
+
+[[package]]
 name = "pywin32"
 version = "311"
 source = { registry = "https://pypi.org/simple" }
@@ -3112,6 +3188,27 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/a2/87/a6771e1546d97e7e041b6ae58d80074f81b7d5121207425c964ddf5cfdbd/sniffio-1.3.1.tar.gz", hash = "sha256:f4324edc670a0f49750a81b895f35c3adb843cca46f0530f79fc1babb23789dc", size = 20372, upload-time = "2024-02-25T23:20:04.057Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e9/44/75a9c9421471a6c4805dbf2356f7c181a29c1879239abab1ea2cc8f38b40/sniffio-1.3.1-py3-none-any.whl", hash = "sha256:2f6da418d1f1e0fddd844478f41680e794e6051915791a034ff65e5f100525a2", size = 10235, upload-time = "2024-02-25T23:20:01.196Z" },
+]
+
+[[package]]
+name = "soundfile"
+version = "0.14.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cffi" },
+    { name = "numpy" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/d2/db/949331952a6fb1c5b12e9de80fd08747966c2039d1a61db4764fbd3981c2/soundfile-0.14.0.tar.gz", hash = "sha256:ba1c1a2d618bca5c406647c83b89f07cc8810fa506a50622a6993ba130c1de11", size = 47842, upload-time = "2026-06-06T08:58:47.869Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b1/d1/5e338af9ca6ed0786cd5bb03f6d60de1c325728c1189014f3b59aae7403c/soundfile-0.14.0-py2.py3-none-any.whl", hash = "sha256:8ba81ae3a89fd5ab3bef8a8eb481fbbe794e806309675a89b4df48b8d31908a8", size = 26799, upload-time = "2026-06-06T08:58:33.269Z" },
+    { url = "https://files.pythonhosted.org/packages/7e/72/c6b21e58d3113596e7e8de0a08d6f1d95173492cfbca0a4db14148cbba2a/soundfile-0.14.0-py2.py3-none-macosx_10_9_x86_64.whl", hash = "sha256:19be05428da76ed61a4cad29b8e4bcf43a3e5c100089d2ec81dc961eed1b0dd4", size = 1144568, upload-time = "2026-06-06T08:58:35.231Z" },
+    { url = "https://files.pythonhosted.org/packages/63/7a/dfdd6f8c748988427119f75eb860a3cedd858d1aea1fe28f39ad8559ef22/soundfile-0.14.0-py2.py3-none-macosx_11_0_arm64.whl", hash = "sha256:d828d35a059626da52f1415b5faee610aeab393319cb3fc4a9aef47b619fc14c", size = 1103726, upload-time = "2026-06-06T08:58:37.948Z" },
+    { url = "https://files.pythonhosted.org/packages/4a/f8/fc39fad6f879633461d27394cd1ddaf1f769ffa0597dca35872f51b16461/soundfile-0.14.0-py2.py3-none-manylinux_2_28_aarch64.whl", hash = "sha256:e85724a90bc99a6e8062c0b4ddf725f53b2a3b70afd4da875e9d2cfc4e92f377", size = 1238050, upload-time = "2026-06-06T08:58:39.932Z" },
+    { url = "https://files.pythonhosted.org/packages/7b/a2/70fd4432b924684c372df8b0a45708c36c057ef3596c9eb53e0a806b980b/soundfile-0.14.0-py2.py3-none-manylinux_2_28_x86_64.whl", hash = "sha256:1e38bac1853412871318e82a1ba69a8be677619b56025bbfcccdb41b6cafe82d", size = 1315963, upload-time = "2026-06-06T08:58:41.716Z" },
+    { url = "https://files.pythonhosted.org/packages/d9/34/c9e80783d83eab739a9531fdee03675d53e0bf1b2ccb4bb3af5844675046/soundfile-0.14.0-py2.py3-none-win32.whl", hash = "sha256:0a6ae43c50c71b4e020cc55382925cb89451c1ed1a0c3d0f5d802da269226849", size = 902199, upload-time = "2026-06-06T08:58:43.289Z" },
+    { url = "https://files.pythonhosted.org/packages/ed/97/b39c18ac1df45e755ca22b8b00e872929da5d107998a207a5e4ac831bfda/soundfile-0.14.0-py2.py3-none-win_amd64.whl", hash = "sha256:299491d3499460fb1b74bb4bd78b57ffc2d243a5fafa7b6ec1b264875c78453e", size = 1021480, upload-time = "2026-06-06T08:58:45.016Z" },
+    { url = "https://files.pythonhosted.org/packages/f4/83/55c65e61cf457805ce2ec157c1c6ae17715d0851aa2374422de0538838ca/soundfile-0.14.0-py2.py3-none-win_arm64.whl", hash = "sha256:e090704718e124e7c844695236f1fce8d18a5e761eaf7c82dfcd124620805f98", size = 888858, upload-time = "2026-06-06T08:58:46.593Z" },
 ]
 
 [[package]]

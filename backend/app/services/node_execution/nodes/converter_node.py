@@ -14,8 +14,9 @@ from app.services.node_execution.base import NodeExecutionContext
 _DELIMITER_ESCAPES = {"\\t": "\t", "\\n": "\n", "\\r": "\r"}
 
 OCR_CONVERSIONS = ("imageToText", "pdfToText")
+AUDIO_CONVERSION = "audioToText"
 # Conversions that read a stored Drive file instead of an expression value.
-FILE_CONVERSIONS = ("imageToText", "pdfToText", "fileConvert")
+FILE_CONVERSIONS = ("imageToText", "pdfToText", AUDIO_CONVERSION, "fileConvert")
 
 _UUID_RE = re.compile(
     r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
@@ -26,11 +27,11 @@ _PDF_MAGIC = b"%PDF"
 _AUTO_LANGUAGE = "auto"
 
 
-def _ocr_language(node_data: dict) -> object:
-    """Resolve the language select, honoring the custom-codes escape hatch."""
-    selected = node_data.get("ocrLanguage", _AUTO_LANGUAGE)
+def _language_choice(node_data: dict, select_key: str, custom_key: str) -> object:
+    """Resolve a language select, honoring the custom-codes escape hatch."""
+    selected = node_data.get(select_key, _AUTO_LANGUAGE)
     if isinstance(selected, str) and selected.strip().lower() == "custom":
-        custom = node_data.get("ocrLanguageCustom", "")
+        custom = node_data.get(custom_key, "")
         return custom if isinstance(custom, str) and custom.strip() else _AUTO_LANGUAGE
     return selected
 
@@ -362,7 +363,9 @@ def _ocr_to_text(ctx: NodeExecutionContext, conversion: str, source_value: objec
     owner_id = _owner_id(ctx)
     file_id = _resolve_source_file_id(ctx, source_value)
 
-    language = ocr_service.parse_language_spec(_ocr_language(node_data))
+    language = ocr_service.parse_language_spec(
+        _language_choice(node_data, "ocrLanguage", "ocrLanguageCustom")
+    )
     encoding = ocr_service.normalize_encoding(node_data.get("ocrEncoding"))
     psm = ocr_service.normalize_psm(node_data.get("ocrPsm"))
     normalize_unicode = node_data.get("ocrNormalizeUnicode", True) is not False
@@ -424,6 +427,45 @@ def _ocr_to_text(ctx: NodeExecutionContext, conversion: str, source_value: objec
     }
 
 
+def _audio_to_text(ctx: NodeExecutionContext, source_value: object) -> dict:
+    """Transcribe the speech in a Drive audio file and return the converter output payload."""
+    from app.db.session import SessionLocal
+    from app.services import speech_to_text_service
+    from app.services.file_storage import load_readable_file_sync
+
+    owner_id = _owner_id(ctx)
+    file_id = _resolve_source_file_id(ctx, source_value)
+    language = speech_to_text_service.parse_language(
+        _language_choice(ctx.node_data, "sttLanguage", "sttLanguageCustom")
+    )
+
+    with SessionLocal() as db:
+        row, file_bytes = load_readable_file_sync(
+            db, file_id=file_id, owner_id=owner_id, context="Converter node"
+        )
+        file_meta = {
+            "id": str(row.id),
+            "filename": row.filename,
+            "mime_type": row.mime_type,
+            "size_bytes": row.size_bytes,
+        }
+
+    result = speech_to_text_service.audio_to_text(
+        file_bytes, filename=file_meta["filename"] or "audio", language=language
+    )
+    return {
+        "result": result.text,
+        "conversion": AUDIO_CONVERSION,
+        "language": result.language,
+        "duration_seconds": result.duration_seconds,
+        "segments": [
+            {"start": segment.start, "end": segment.end, "text": segment.text}
+            for segment in result.segments
+        ],
+        "file": file_meta,
+    }
+
+
 def execute(ctx: NodeExecutionContext) -> object:
     """Execute the converter node.
 
@@ -431,8 +473,8 @@ def execute(ctx: NodeExecutionContext) -> object:
     (CSV text -> list of row objects), ``jsonToCsv`` (a list of objects/rows ->
     CSV text), ``xmlToJson`` (XML text -> object), and ``jsonToXml`` (an object
     -> XML text). File conversions read a stored Drive file: ``imageToText`` and
-    ``pdfToText`` run Tesseract OCR, and ``fileConvert`` writes the file back out
-    in another format. The ``conversion`` field leaves room for more formats
+    ``pdfToText`` run Tesseract OCR, ``audioToText`` transcribes speech with
+    Whisper, and ``fileConvert`` writes the file back out in another format. The ``conversion`` field leaves room for more formats
     later without changing the node's contract.
     """
     self = ctx.executor
@@ -453,6 +495,9 @@ def execute(ctx: NodeExecutionContext) -> object:
 
     if conversion in OCR_CONVERSIONS:
         return _ocr_to_text(ctx, conversion, source_value)
+
+    if conversion == AUDIO_CONVERSION:
+        return _audio_to_text(ctx, source_value)
 
     if conversion == "fileConvert":
         return _convert_stored_file(ctx, source_value)

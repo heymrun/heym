@@ -155,6 +155,18 @@ install_converter_dependencies() {
 
 install_converter_dependencies
 
+# Whisper model behind the Converter node's voice transcription. Images bake it in; a
+# native dev run downloads it once (about 180 MB). Best-effort like the block above.
+install_stt_model() {
+    local target="$PROJECT_ROOT/backend/.cache/stt"
+    ls "$target"/ggml-*.bin >/dev/null 2>&1 || echo -e "${YELLOW}Downloading the Converter voice transcription model...${NC}"
+    if ! sh "$PROJECT_ROOT/docker/install-stt-model.sh" "$target"; then
+        echo -e "${YELLOW}Could not download the voice transcription model. The Converter's Audio to Text conversion will fail until 'sh docker/install-stt-model.sh backend/.cache/stt' succeeds.${NC}"
+    fi
+}
+
+install_stt_model
+
 ENV_FILE="$PROJECT_ROOT/.env"
 ENCRYPTION_KEY_PLACEHOLDER="change_this_to_a_random_32_byte_hex_value"
 

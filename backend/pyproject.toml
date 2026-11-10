@@ -47,6 +47,8 @@ dependencies = [
     "boto3>=1.40.0",
     "xmltodict>=0.14.2",
     "segno>=1.6.1",
+    "pywhispercpp>=1.5.1",
+    "soundfile>=0.13.1",
 ]
 
 [build-system]

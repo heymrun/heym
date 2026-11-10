@@ -1,6 +1,6 @@
 # Converter
 
-The **Converter** node converts data and files between formats without writing code. It is technology-neutral so more formats can be added over time. It converts CSV, JSON, and XML data in both directions, runs Tesseract OCR to pull text out of images and PDFs, and rewrites a stored file in another format.
+The **Converter** node converts data and files between formats without writing code. It is technology-neutral so more formats can be added over time. It converts CSV, JSON, and XML data in both directions, runs Tesseract OCR to pull text out of images and PDFs, transcribes speech in audio files to text, and rewrites a stored file in another format.
 
 ## Overview
 
@@ -8,14 +8,14 @@ The **Converter** node converts data and files between formats without writing c
 |----------|-------|
 | Inputs | 1 |
 | Outputs | 1 |
-| Output | `$nodeLabel.result` (parsed data for `csvToJson` / `xmlToJson`, text for `jsonToCsv` / `jsonToXml`, extracted text for `imageToText` / `pdfToText`, new file metadata for `fileConvert`) |
+| Output | `$nodeLabel.result` (parsed data for `csvToJson` / `xmlToJson`, text for `jsonToCsv` / `jsonToXml`, extracted text for `imageToText` / `pdfToText`, the transcript for `audioToText`, new file metadata for `fileConvert`) |
 
 ## Parameters
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `label` | string | Node identifier (camelCase) |
-| `conversion` | string | `csvToJson` (CSV text → array of row objects), `jsonToCsv` (array of objects/rows → CSV text), `xmlToJson` (XML text → object), `jsonToXml` (object → XML text), `imageToText` (OCR an image), `pdfToText` (OCR every selected PDF page), or `fileConvert` (rewrite a stored file in another format) |
+| `conversion` | string | `csvToJson` (CSV text → array of row objects), `jsonToCsv` (array of objects/rows → CSV text), `xmlToJson` (XML text → object), `jsonToXml` (object → XML text), `imageToText` (OCR an image), `pdfToText` (OCR every selected PDF page), `audioToText` (voice transcribe: speech in an audio file → text), or `fileConvert` (rewrite a stored file in another format) |
 | `source` | expression | The data to convert. Leave empty to use the node's first input |
 | `delimiter` | string | Single-character field separator (default `,`) |
 | `hasHeader` | boolean | `csvToJson` only — treat the first row as the header (default `true`) |
@@ -31,6 +31,8 @@ The **Converter** node converts data and files between formats without writing c
 | `ocrPsm` | string | OCR only — Tesseract page segmentation mode (default `3`) |
 | `ocrDpi` | number | `pdfToText` only — page rasterization DPI (default `300`) |
 | `ocrPageRange` | expression | `pdfToText` only — `3` or `2-5`. Empty means every page |
+| `sttLanguage` | string | `audioToText` only: `auto` (default), a language code such as `tr`, or `custom` |
+| `sttLanguageCustom` | string | `audioToText` only: the language code used when `sttLanguage` is `custom`, e.g. `yue` |
 
 ## Behavior
 
@@ -41,6 +43,7 @@ The **Converter** node converts data and files between formats without writing c
 - **`jsonToXml`** serializes an object to an XML document. The object must have exactly one top-level key, which becomes the XML root element. Use the same `@attribute` and `#text` convention as `xmlToJson` to produce attributes and text alongside child elements.
 - **`imageToText`** runs Tesseract over a single image (PNG, JPEG, TIFF, WebP, BMP).
 - **`pdfToText`** rasterizes each selected page at `ocrDpi` and recognizes it. Every page goes through OCR, so a digital PDF with a perfectly good text layer is still re-read from pixels. That keeps scanned and digital documents behaving identically, at the cost of speed, so narrow `ocrPageRange` on long files.
+- **`audioToText`** transcribes the speech in an audio file (mp3, wav, ogg, and flac). Recognition runs on the Heym instance itself with a Whisper model, so the audio never leaves it and no credential is needed. One multilingual model covers about a hundred languages and detects which one is spoken. Recordings can be up to 30 minutes long.
 - **`fileConvert`** rewrites the source file in another format and stores the result as a **new** Drive file. The original is never modified. Documents go through pandoc, images through Pillow, and JSON to CSV through the Python csv writer. An image cannot become a document and a document cannot become an image; to read text out of an image use `imageToText`.
 
 ## Getting the file in
@@ -61,6 +64,16 @@ Naming the language is still more accurate when you know it. Use a single code (
 
 Every Heym image ships `osd`, English, Turkish, German, French, Spanish, Italian, Portuguese, Dutch, Russian, Arabic, Simplified Chinese, Japanese, Korean, and the Latin, Cyrillic, Arabic, HanS, Japanese, and Hangul script models.
 
+## Voice transcription
+
+`audioToText` reads a recording from Heym Drive and returns what was said. Typical sources are a voice note that arrived through a [File upload trigger](./file-upload-trigger-node.md), a call recording fetched with a [Drive](./drive-node.md) node, or a file a [Slack](./slack-node.md) node downloaded.
+
+Leave `sttLanguage` on `auto` and the model works out the language from the first seconds of speech, then reports it as `$label.language`. Name the language when you know it: short clips and recordings that open with silence or music are where detection is most likely to guess wrong. Codes are the two-letter ones Whisper uses, such as `en`, `tr`, `de`, `es`, `fr`, `ar`, `zh`, and `ja`.
+
+The transcript comes back as one string in `$label.result` and as timed parts in `$label.segments`, which is what you want for subtitles or for quoting the moment something was said. Accuracy depends on the recording: clear speech close to the microphone transcribes well, while crosstalk, background noise, and names or product terms are where mistakes show up. Pass the transcript to an [LLM](./llm-node.md) or [Agent](./agent-node.md) node when you want a summary or a cleaned-up version.
+
+Transcription is CPU work. Expect a recording to take a fraction of its own length on a few cores, and longer on a small instance. A file over 30 minutes is rejected, so split long recordings first.
+
 ## Encoding
 
 Recognized text is UTF-8 and keeps every character Tesseract produced. `ocrNormalizeUnicode` (on by default) applies NFC normalization, so a letter written as `s` plus a combining cedilla becomes a single `ş` — worth leaving on, because the two forms are not equal in comparisons or database lookups.
@@ -78,6 +91,16 @@ Recognized text is UTF-8 and keeps every character Tesseract produced. `ocrNorma
 | `$label.encoding` | The charset the text was normalized to |
 | `$label.page_count` | Number of pages recognized |
 | `$label.pages` | Array of `{ page, text }` for per-page handling |
+| `$label.file` | `{ id, filename, mime_type, size_bytes }` of the source file |
+
+`audioToText` adds:
+
+| Field | Description |
+|-------|-------------|
+| `$label.result` | The full transcript |
+| `$label.language` | The language code that was detected, or the one you chose |
+| `$label.duration_seconds` | Length of the recording |
+| `$label.segments` | Array of `{ start, end, text }` with times in seconds |
 | `$label.file` | `{ id, filename, mime_type, size_bytes }` of the source file |
 
 `fileConvert` returns the new file instead:
@@ -142,6 +165,22 @@ Reading a scanned invoice uploaded through a file upload trigger:
 
 An [Agent](./agent-node.md) or [LLM](./llm-node.md) node downstream can then pull structured fields out of `$readInvoice.result`.
 
+Transcribing a voice note uploaded through a file upload trigger:
+
+```json
+{
+  "type": "converter",
+  "data": {
+    "label": "transcribe",
+    "conversion": "audioToText",
+    "converterFileId": "$audio.file.id",
+    "sttLanguage": "auto"
+  }
+}
+```
+
+`$transcribe.result` holds the transcript and `$transcribe.language` the detected language, ready for an LLM node that summarizes the note or routes it.
+
 Turning an agent's markdown report into a PDF:
 
 ```json
@@ -160,7 +199,7 @@ Downstream nodes read `$convertDoc.download_url` to share the PDF, or `$convertD
 
 ## Requirements
 
-OCR shells out to `tesseract` and poppler's `pdftoppm`, and document conversion uses pandoc. All three ship with every way of running Heym, including `run.sh`, docker-compose, and the single release image, so there is nothing to configure. Page limits, timeouts, and the maximum DPI are fixed platform values rather than settings.
+OCR shells out to `tesseract` and poppler's `pdftoppm`, document conversion uses pandoc, and voice transcription runs a Whisper model. All of them ship with every way of running Heym, including `run.sh`, docker-compose, and the single release image on Docker or Kubernetes, so there is nothing to configure. Page limits, timeouts, the maximum DPI, and the maximum recording length are fixed platform values rather than settings.
 
 ## Related
 

@@ -17,6 +17,29 @@ import type { ReleaseEntry } from "@/features/release-tour/releaseTour.types";
  */
 export const RELEASE_REGISTRY: ReleaseEntry[] = [
   {
+    releaseId: "2026.28",
+    publishedAt: new Date("2026-11-10T12:00:00Z"),
+    headline: "Transcribe voice notes and recordings in the Converter node",
+    releaseTour: {
+      label: "New in Heym", introTitle: "New in this release",
+      introDescription: "Speech becomes text inside your workflow, on your own instance.",
+      tourEnabled: true,
+      sectionOrder: ["voice-transcribe"],
+    },
+    sections: [{
+      id: "voice-transcribe", title: "Voice transcribe in the Converter node",
+      publishedAt: new Date("2026-11-10T12:00:00Z"),
+      blocks: [{ type: "prose", markdown: "Pick **Audio → Text (Voice Transcribe)** in a **Converter** node and point it at an mp3, wav or ogg file in Drive. The node returns what was said as text, together with the language it heard and timed segments. Recognition runs on your own Heym instance with one multilingual model that covers about a hundred languages and detects the spoken one, the same way on Docker and Kubernetes. Recordings can be up to 30 minutes long. Pass the transcript to an LLM or Agent node to summarize a call, route a voice note or fill in a ticket." }],
+      tour: {
+        description: "Turn a voice note or call recording into text inside a workflow, in any language, on your own instance.",
+        useCases: ["Summarize a customer call recording with an LLM node", "Route an uploaded voice note to the right team", "Keep timed transcripts of meetings searchable"],
+        tourVisual: "voice-transcribe",
+        docTarget: { categoryId: "nodes", slug: "converter-node", title: "Converter" },
+      },
+    }],
+  },
+
+  {
     releaseId: "2026.27",
     publishedAt: new Date("2026-11-08T12:00:00Z"),
     headline: "Two-factor sign-in, account deactivation and data retention",
@@ -91,13 +114,13 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
   {
     releaseId: "2026.24",
     publishedAt: new Date("2026-10-30T12:00:00Z"),
-    headline: "Open large files in a sandbox, plan schedules and map database relationships",
+    headline: "Open large files in an isolated sandbox",
     releaseTour: {
       label: "New in Heym",
       introTitle: "New in this release",
-      introDescription: "File analysis in a sandbox, Gantt schedules and entity relationships, in Heym and Heym Work.",
+      introDescription: "File analysis in a sandbox, in Heym and Heym Work.",
       tourEnabled: true,
-      sectionOrder: ["file-analysis", "planning-widgets"],
+      sectionOrder: ["file-analysis"],
     },
     sections: [{
       id: "file-analysis",
@@ -112,20 +135,6 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
         useCases: ["Total a column on one sheet and add a value from the last page", "Summarize the risks in a 200-page contract", "Build a workflow that extracts the same fields from every uploaded invoice"],
         tourVisual: "file-analysis",
         docTarget: { categoryId: "reference", slug: "file-analysis", title: "File Analysis" },
-      },
-    }, {
-      id: "planning-widgets",
-      title: "Gantt schedules and database relationship diagrams",
-      publishedAt: new Date("2026-10-30T12:00:00Z"),
-      blocks: [{
-        type: "prose",
-        markdown: "Add a **Gantt** widget for tasks with start and end dates, completion percentages and dependencies. Choose **Entity relationships (DB)** to show tables, their fields, primary and foreign keys, and the relationships between them. Both types are available in Add widget and the Chart Output node. Heym Work can propose either view and draw a preview using the page’s own plan before you build it.",
-      }],
-      tour: {
-        description: "See project schedules and database relationships on your dashboards and Work pages.",
-        useCases: ["Track a delivery plan with task progress and dependencies", "Document a database with primary and foreign keys", "Preview a proposed timeline or schema in Heym Work"],
-        tourVisual: "planning-widgets",
-        docTarget: { categoryId: "nodes", slug: "chart-output-node", title: "Chart Output" },
       },
     }],
   },

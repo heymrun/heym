@@ -14,6 +14,9 @@
 **/.mypy_cache
 **/*.egg-info
 
+# The voice transcription model a native dev run downloads; images fetch their own.
+**/.cache
+
 # Node / frontend
 **/node_modules
 frontend/dist

@@ -5769,7 +5769,11 @@ export function usePropertiesPanelController() {
         { key: "ocrPageRange", label: "Page range" },
       ];
     }
-    if (conversion === "imageToText" || conversion === "fileConvert") {
+    if (
+      conversion === "imageToText" ||
+      conversion === "audioToText" ||
+      conversion === "fileConvert"
+    ) {
       return [{ key: "converterFileId", label: "File" }];
     }
     return [{ key: "source", label: "Source" }];
