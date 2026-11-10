@@ -73,7 +73,7 @@ def resample(blocks: Iterable[numpy.ndarray], rate: int) -> Iterator[numpy.ndarr
 
 
 def decode_audio(path: str, max_seconds: int) -> numpy.ndarray:
-    """Decode an mp3, wav, ogg or flac file into 16 kHz mono float32 samples."""
+    """Decode an mp3, wav, ogg, opus or flac file into 16 kHz mono float32 samples."""
     import numpy
     import soundfile
 
@@ -99,7 +99,7 @@ def decode_audio(path: str, max_seconds: int) -> numpy.ndarray:
                     )
     except (soundfile.SoundFileError, OSError) as exc:
         raise WorkerError(
-            "the file is not readable audio. mp3, wav and ogg are supported."
+            "the file is not readable audio. mp3, wav, ogg, opus and flac are supported."
         ) from exc
 
     if samples == 0:

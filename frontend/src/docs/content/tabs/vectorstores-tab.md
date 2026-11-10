@@ -21,7 +21,7 @@ The **Vectorstores** tab manages vector stores used by [RAG](../nodes/rag-node.m
   - **Documents** – PDF, Markdown, text, CSV and JSON
   - **Images** – PNG, JPEG, TIFF, WebP and BMP, read with the same Tesseract OCR as the
     [Converter](../nodes/converter-node.md) node, language detected automatically
-  - **Audio** – mp3, wav, ogg and flac, transcribed with the Converter's Whisper model on your
+  - **Audio** – mp3, wav, ogg, opus (WhatsApp voice notes) and flac, transcribed with the Converter's Whisper model on your
     own instance; each chunk keeps where it starts and ends in the recording
     (`start_seconds`, `end_seconds`)
   - **Any other plain-text file** – a file such as `notes` or `README` is read as text when

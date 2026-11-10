@@ -322,8 +322,8 @@ const usesDelimiter = computed(
         />
         <p class="text-xs text-muted-foreground">
           Auto detect works out the language from the recording. Naming it helps on short clips
-          and on recordings that open with silence or music. Works with mp3, wav, and ogg files
-          up to 30 minutes, and runs on this Heym instance.
+          and on recordings that open with silence or music. Works with mp3, wav, ogg, opus
+          (WhatsApp voice notes), and flac files up to 30 minutes, and runs on this Heym instance.
         </p>
       </div>
 

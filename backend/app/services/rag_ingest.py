@@ -43,11 +43,12 @@ DOCUMENT_EXTENSIONS: dict[str, RagFileKind] = {
     ".json": RagFileKind.JSON,
 }
 IMAGE_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".tif", ".tiff", ".webp", ".bmp"})
-AUDIO_EXTENSIONS = frozenset({".mp3", ".wav", ".ogg", ".flac"})
+# .opus is how WhatsApp names its voice notes (Opus in an Ogg container).
+AUDIO_EXTENSIONS = frozenset({".mp3", ".wav", ".ogg", ".opus", ".flac"})
 
 FORMATS_SENTENCE = (
     "Vector stores take PDF, Markdown, text, CSV, JSON, images (PNG, JPEG, TIFF, WebP, BMP), "
-    "audio (mp3, wav, ogg, flac) and other plain-text files."
+    "audio (mp3, wav, ogg, opus, flac) and other plain-text files."
 )
 
 

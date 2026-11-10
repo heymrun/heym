@@ -59,6 +59,7 @@ class ClassifyTests(unittest.TestCase):
             "i.tiff": RagFileKind.IMAGE,
             "j.mp3": RagFileKind.AUDIO,
             "k.flac": RagFileKind.AUDIO,
+            "WhatsApp Audio 2026-11-10 at 10.00.36.opus": RagFileKind.AUDIO,
             ".md": RagFileKind.MARKDOWN,
         }
         for name, kind in cases.items():
@@ -75,7 +76,7 @@ class ClassifyTests(unittest.TestCase):
         message = rag_ingest.unsupported_message("report.docx")
 
         self.assertIn("report.docx", message)
-        self.assertIn("audio (mp3, wav, ogg, flac)", message)
+        self.assertIn("audio (mp3, wav, ogg, opus, flac)", message)
         self.assertIn("other plain-text files", message)
 
 

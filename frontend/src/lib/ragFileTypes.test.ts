@@ -12,6 +12,7 @@ describe("ragFileKind", () => {
     expect(await ragFileKind(file(".md"))).toBe("document");
     expect(await ragFileKind(file("scan.JPEG", new Uint8Array([0])))).toBe("image");
     expect(await ragFileKind(file("call.flac", new Uint8Array([0])))).toBe("audio");
+    expect(await ragFileKind(file("WhatsApp Audio 2026-11-10 at 10.00.36.opus", new Uint8Array([0x4f, 0x67, 0, 0])))).toBe("audio");
   });
 
   it("takes a UTF-8 file of any name as text", async () => {
@@ -24,6 +25,6 @@ describe("ragFileKind", () => {
   });
 
   it("names the formats in one line", () => {
-    expect(RAG_FORMATS_LINE).toContain("audio (mp3, wav, ogg, flac)");
+    expect(RAG_FORMATS_LINE).toContain("audio (mp3, wav, ogg, opus, flac)");
   });
 });

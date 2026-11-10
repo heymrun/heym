@@ -231,6 +231,28 @@ class WorkerDecodeTests(unittest.TestCase):
         self.assertLessEqual(float(abs(pcm).max()), 1.0)
         self.assertGreater(float(abs(pcm).max()), 0.1)
 
+    def test_whatsapp_style_ogg_opus_voice_note_decodes(self) -> None:
+        import soundfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            # WhatsApp voice notes: Opus in an Ogg container, mono 16 kHz, named *.opus.
+            wav = Path(tmp) / "tone.wav"
+            wav.write_bytes(_wav_bytes(1.0, rate=16000, channels=1))
+            samples, rate = soundfile.read(str(wav), dtype="float32")
+            note = Path(tmp) / "WhatsApp Audio 2026-11-10 at 10.00.36.opus"
+            soundfile.write(str(note), samples, rate, format="OGG", subtype="OPUS")
+
+            pcm = worker.decode_audio(str(note), max_seconds=60)
+
+        self.assertAlmostEqual(pcm.size / worker.SAMPLE_RATE, 1.0, delta=0.05)
+        self.assertGreater(float(abs(pcm).max()), 0.1)
+
+    def test_unreadable_audio_names_the_formats(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(worker.WorkerError) as raised:
+                worker.decode_audio(self._write(tmp, b"not audio at all" * 64), max_seconds=60)
+        self.assertIn("mp3, wav, ogg, opus and flac", str(raised.exception))
+
     def test_recording_over_the_limit_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(worker.WorkerError) as raised:
