@@ -591,6 +591,8 @@ export interface NodeData {
   ocrPsm?: string;
   ocrDpi?: string | number;
   ocrPageRange?: string;
+  sttLanguage?: string;
+  sttLanguageCustom?: string;
   pinnedData?: Record<string, unknown> | null;
   credentialId?: string;
   githubCredentialId?: string;

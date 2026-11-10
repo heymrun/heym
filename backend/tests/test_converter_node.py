@@ -3,7 +3,7 @@ import uuid
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from app.services import ocr_service
+from app.services import ocr_service, speech_to_text_service
 from app.services.node_execution.base import NodeExecutionContext
 from app.services.node_execution.nodes import converter_node
 
@@ -587,6 +587,115 @@ class OcrConversionTests(unittest.TestCase):
                 {"conversion": "imageToText", "ocrLanguage": "tur; rm -rf /"},
                 source_value=str(_FILE_UUID),
             )
+
+
+class AudioToTextTests(unittest.TestCase):
+    def _run(self, node_data: dict, *, source_value: object = None) -> tuple[dict, dict]:
+        """Execute a voice transcription with the DB and Whisper stubbed out."""
+        calls: dict = {}
+        row = SimpleNamespace(
+            id=_FILE_UUID, filename="note.ogg", mime_type="audio/ogg", size_bytes=9
+        )
+
+        def fake_loader(_db, *, file_id, owner_id, context):
+            calls["file_id"] = file_id
+            calls["owner_id"] = owner_id
+            return row, b"OggS-data"
+
+        def fake_transcribe(data, **kwargs):
+            calls["audio"] = {"bytes": data, **kwargs}
+            return speech_to_text_service.SttResult(
+                text="Merhaba dünya",
+                language="tr",
+                duration_seconds=3.5,
+                segments=[speech_to_text_service.SttSegment(0.0, 3.5, "Merhaba dünya")],
+            )
+
+        ctx = _ctx(node_data, source_value)
+        ctx.executor.trace_user_id = _OWNER_UUID
+
+        with (
+            patch("app.db.session.SessionLocal", return_value=_FakeSession()),
+            patch("app.services.file_storage.load_readable_file_sync", side_effect=fake_loader),
+            patch.object(speech_to_text_service, "audio_to_text", side_effect=fake_transcribe),
+        ):
+            output = converter_node.execute(ctx)
+
+        return output, calls
+
+    def test_audio_to_text_reads_the_referenced_file(self) -> None:
+        output, calls = self._run(
+            {"conversion": "audioToText", "converterFileId": "$Upload.file.id"},
+            source_value=str(_FILE_UUID),
+        )
+
+        self.assertEqual(calls["file_id"], _FILE_UUID)
+        self.assertEqual(calls["owner_id"], _OWNER_UUID)
+        self.assertEqual(calls["audio"]["bytes"], b"OggS-data")
+        self.assertEqual(calls["audio"]["filename"], "note.ogg")
+        self.assertEqual(calls["audio"]["language"], "auto")
+        self.assertEqual(
+            output,
+            {
+                "result": "Merhaba dünya",
+                "conversion": "audioToText",
+                "language": "tr",
+                "duration_seconds": 3.5,
+                "segments": [{"start": 0.0, "end": 3.5, "text": "Merhaba dünya"}],
+                "file": {
+                    "id": str(_FILE_UUID),
+                    "filename": "note.ogg",
+                    "mime_type": "audio/ogg",
+                    "size_bytes": 9,
+                },
+            },
+        )
+
+    def test_selected_language_is_forwarded(self) -> None:
+        _, calls = self._run(
+            {"conversion": "audioToText", "sttLanguage": "TR"},
+            source_value={"file": {"id": str(_FILE_UUID)}},
+        )
+        self.assertEqual(calls["audio"]["language"], "tr")
+
+    def test_custom_language_option_uses_the_free_text_code(self) -> None:
+        _, calls = self._run(
+            {"conversion": "audioToText", "sttLanguage": "custom", "sttLanguageCustom": "yue"},
+            source_value=str(_FILE_UUID),
+        )
+        self.assertEqual(calls["audio"]["language"], "yue")
+
+    def test_custom_language_without_a_code_falls_back_to_auto(self) -> None:
+        _, calls = self._run(
+            {"conversion": "audioToText", "sttLanguage": "custom", "sttLanguageCustom": " "},
+            source_value=str(_FILE_UUID),
+        )
+        self.assertEqual(calls["audio"]["language"], "auto")
+
+    def test_ocr_language_does_not_leak_into_transcription(self) -> None:
+        _, calls = self._run(
+            {"conversion": "audioToText", "ocrLanguage": "tur"},
+            source_value=str(_FILE_UUID),
+        )
+        self.assertEqual(calls["audio"]["language"], "auto")
+
+    def test_invalid_language_is_rejected_before_any_file_read(self) -> None:
+        with self.assertRaises(ValueError):
+            self._run(
+                {"conversion": "audioToText", "sttLanguage": "tr; rm -rf /"},
+                source_value=str(_FILE_UUID),
+            )
+
+    def test_missing_file_reference_raises(self) -> None:
+        with self.assertRaises(ValueError) as raised:
+            self._run({"conversion": "audioToText"}, source_value="not-a-file")
+        self.assertIn("a Heym file is required", str(raised.exception))
+
+    def test_missing_owner_context_raises(self) -> None:
+        ctx = _ctx({"conversion": "audioToText"}, str(_FILE_UUID))
+        with self.assertRaises(ValueError) as raised:
+            converter_node.execute(ctx)
+        self.assertIn("no owner context", str(raised.exception))
 
 
 class FileConvertTests(unittest.TestCase):

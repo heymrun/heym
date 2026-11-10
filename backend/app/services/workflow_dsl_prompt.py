@@ -1539,11 +1539,11 @@ The http node ALWAYS returns a structured response object:
 4. For modulo/math on set node output: `$generateRandom.randomNumber % 2 == 0` (use the key name, e.g., "randomNumber")
 
 ### 13b. converter (Data Format Conversion)
-- **Purpose**: Convert data between formats without writing code. CSV text <-> JSON rows, XML text <-> JSON objects, Tesseract OCR from an image or PDF to plain text, and file format conversion of a stored Drive file.
+- **Purpose**: Convert data between formats without writing code. CSV text <-> JSON rows, XML text <-> JSON objects, Tesseract OCR from an image or PDF to plain text, voice transcription (speech-to-text) from an audio file, and file format conversion of a stored Drive file.
 - **Inputs**: 1 | **Outputs**: 1
 - **Data fields**:
   - `label`: Node identifier
-  - `conversion`: `"csvToJson"` (CSV text -> array of row objects), `"jsonToCsv"` (array of objects/rows -> CSV text), `"xmlToJson"` (XML text -> object), `"jsonToXml"` (object -> XML text), `"imageToText"` (OCR an image file), `"pdfToText"` (OCR every selected PDF page), or `"fileConvert"` (rewrite a stored file in another format)
+  - `conversion`: `"csvToJson"` (CSV text -> array of row objects), `"jsonToCsv"` (array of objects/rows -> CSV text), `"xmlToJson"` (XML text -> object), `"jsonToXml"` (object -> XML text), `"imageToText"` (OCR an image file), `"pdfToText"` (OCR every selected PDF page), `"audioToText"` (voice transcribe: speech in an mp3, wav, or ogg file -> text), or `"fileConvert"` (rewrite a stored file in another format)
   - `source`: Expression for the input to convert (e.g. `"$previousNode.body"` or `"$userInput.body.text"`). If empty, the first input is used. Text conversions only.
   - `delimiter`: Single-character field delimiter (default `,`). Use `"\\t"` for tab-separated values.
   - `hasHeader`: Boolean, `csvToJson` only — first row is the header (default true). When false each row is an array of cell values instead of an object.
@@ -1551,7 +1551,7 @@ The http node ALWAYS returns a structured response object:
   - `includeHeader`: Boolean, `jsonToCsv` only — write a header row (default true)
   - `converterColumns`: Optional explicit column order for `jsonToCsv` (comma-separated string). When omitted, columns are inferred from the row keys.
   - XML object convention: `xmlToJson` maps attributes to keys prefixed with `@`, text alongside attributes/children to `#text`, and repeated elements to arrays. `jsonToXml` accepts that same object shape and requires exactly one top-level key for the XML root. Entity expansion is disabled.
-  - `converterFileId`: File conversions (`imageToText`, `pdfToText`, `fileConvert`) — expression pointing at a Heym Drive file, e.g. `"$Upload.file.id"`. A file object such as `"$Upload.file"`, an agent file (`"$reportAgent._generated_files[0].id"`), or a Heym download URL works too. The file must already be in Heym Drive (upload it with a `fileUploadTrigger`, or fetch it with a `drive` node `downloadUrl` operation first). Falls back to `source`/the first input when empty.
+  - `converterFileId`: File conversions (`imageToText`, `pdfToText`, `audioToText`, `fileConvert`) — expression pointing at a Heym Drive file, e.g. `"$Upload.file.id"`. A file object such as `"$Upload.file"`, an agent file (`"$reportAgent._generated_files[0].id"`), or a Heym download URL works too. The file must already be in Heym Drive (upload it with a `fileUploadTrigger`, or fetch it with a `drive` node `downloadUrl` operation first). Falls back to `source`/the first input when empty.
   - `converterTargetFormat`: `fileConvert` only — output format. Document outputs `"pdf"` | `"docx"` | `"html"` | `"md"` | `"txt"` | `"epub"` go through pandoc; `"csv"` is only valid when the input is a JSON array of objects; image outputs `"jpg"` | `"png"` | `"bmp"` | `"webp"` are for image inputs. Document inputs are docx/html/md/txt/csv/pdf plus json. Images cannot become documents and documents cannot become images.
   - `ocrLanguage`: `"auto"` (default) detects the script and picks the matching model. Otherwise a Tesseract code such as `"tur"`, `"eng"`, `"deu"`, `"chi_sim"`, or several joined with `+` (`"eng+tur"`). Use `"custom"` together with `ocrLanguageCustom` when the UI select cannot express the codes.
   - `ocrLanguageCustom`: Free-text language codes used when `ocrLanguage` is `"custom"`.
@@ -1560,7 +1560,9 @@ The http node ALWAYS returns a structured response object:
   - `ocrPsm`: Tesseract page segmentation mode — `"3"` (default, automatic), `"1"`, `"4"`, `"6"` (single block), `"7"` (single line), `"11"`, `"12"`, `"13"`.
   - `ocrDpi`: `pdfToText` only — rasterization DPI (default 300, min 72). Raise it for small print, lower it for speed.
   - `ocrPageRange`: `pdfToText` only — `"3"` or `"2-5"`. Empty means every page.
-- **Output**: `$label.result` — parsed rows for `csvToJson`, CSV string for `jsonToCsv`, parsed object for `xmlToJson`, XML string for `jsonToXml`, extracted text for `imageToText`/`pdfToText`, new file metadata for `fileConvert`. `$label.conversion` echoes the conversion that ran. OCR conversions also expose `$label.language` (the model actually used), `$label.encoding`, `$label.page_count`, `$label.pages` (array of `{page, text}`), and `$label.file` (id, filename, mime_type, size_bytes). `fileConvert` stores the output as a new Drive file and exposes `$label.id`, `$label.filename`, `$label.mime_type`, `$label.size_bytes`, `$label.download_url`, and `$label.source_file`; the original file is left untouched.
+  - `sttLanguage`: `audioToText` only: `"auto"` (default) lets the model detect the spoken language; one multilingual model covers about a hundred languages. Otherwise a Whisper language code such as `"en"`, `"tr"`, `"de"`, `"es"`, `"zh"`. Use `"custom"` together with `sttLanguageCustom` when the UI select does not list the code. The `ocr*` fields do not apply to `audioToText`.
+  - `sttLanguageCustom`: Free-text language code used when `sttLanguage` is `"custom"`.
+- **Output**: `$label.result` — parsed rows for `csvToJson`, CSV string for `jsonToCsv`, parsed object for `xmlToJson`, XML string for `jsonToXml`, extracted text for `imageToText`/`pdfToText`, the transcript for `audioToText`, new file metadata for `fileConvert`. `$label.conversion` echoes the conversion that ran. OCR conversions also expose `$label.language` (the model actually used), `$label.encoding`, `$label.page_count`, `$label.pages` (array of `{page, text}`), and `$label.file` (id, filename, mime_type, size_bytes). `audioToText` also exposes `$label.language` (the detected or chosen language code), `$label.duration_seconds`, `$label.segments` (array of `{start, end, text}` with times in seconds), and `$label.file`. `fileConvert` stores the output as a new Drive file and exposes `$label.id`, `$label.filename`, `$label.mime_type`, `$label.size_bytes`, `$label.download_url`, and `$label.source_file`; the original file is left untouched.
 
 **Example** (CSV text -> rows):
 ```json
@@ -1595,6 +1597,20 @@ For `name,age\\nAda,36` downstream nodes read `$toRows.result` -> `[{ "name": "A
 ```
 Downstream nodes read `$readInvoice.result` for the whole document or `$readInvoice.pages` for per-page text.
 
+**Example** (voice note -> transcript):
+```json
+{
+  "type": "converter",
+  "data": {
+    "label": "transcribe",
+    "conversion": "audioToText",
+    "converterFileId": "$audio.file.id",
+    "sttLanguage": "auto"
+  }
+}
+```
+Downstream nodes read `$transcribe.result` for the transcript, `$transcribe.language` for the detected language, and `$transcribe.segments` for timestamped parts.
+
 **⚠️ USE `converter` INSTEAD OF `execute`/`llm` FOR CSV**: When the user asks to parse, read, or build CSV/TSV, use a `converter` node. Do NOT write Python in an `execute` node and do NOT ask an LLM to reformat the rows — quoting, embedded newlines, and BOM handling are already correct here. Loop over `$label.result` with a `loop` node to process rows one by one.
 
 **⚠️ USE `converter` FOR XML**: When the user asks to parse XML or create XML from an object, use `xmlToJson` or `jsonToXml`. Do NOT write XML parsing code in an `execute` node. XML results preserve repeated elements as arrays and attributes as `@attribute` keys.
@@ -1616,6 +1632,8 @@ Access the converted file downstream with `$convertDoc.id` and `$convertDoc.down
 **⚠️ FILE CONVERSION LIVES HERE, NOT ON `drive`**: The `drive` node's old `convertFile` operation was removed. Every format conversion is a `converter` node now. `drive` is for storing, fetching, sharing, and expiring files.
 
 **⚠️ USE `converter` FOR OCR**: When the user asks to read text out of a scan, screenshot, receipt, or image-only PDF, use `imageToText`/`pdfToText`. Do NOT send the raw file to an `llm` node for transcription and do NOT shell out to OCR tools from an `execute` node. The file has to live in Heym Drive first: chain `fileUploadTrigger` -> `converter`, or `drive` (`downloadUrl`) -> `converter`. Leave `ocrLanguage` at `"auto"` unless the user names a language.
+
+**⚠️ USE `converter` FOR VOICE TRANSCRIPTION**: When the user asks to transcribe a voice note, call recording, meeting audio, or any mp3/wav/ogg file, use `audioToText`. It runs locally and needs no credential. Do NOT send the audio to an `llm` node and do NOT call an external speech-to-text API from an `http` node unless the user asks for a specific provider. The file has to live in Heym Drive first: chain `fileUploadTrigger` -> `converter`, or `drive` (`downloadUrl`) -> `converter`, then pass `$label.result` to an `llm` or `agent` node to summarize or act on it. Recordings up to 30 minutes are supported; leave `sttLanguage` at `"auto"` unless the user names a language.
 
 ### 13c. code (Run Python)
 - **Purpose**: Run Python that Heym has no dedicated node for — custom maths, bespoke parsing, algorithms, or reshaping data in a way `set` cannot express. The code runs in a disposable, network-isolated container that is created and destroyed for every execution.
