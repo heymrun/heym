@@ -8,6 +8,7 @@ since PdfReader needs genuine PDF structure.
 import io
 import json
 import unittest
+from dataclasses import dataclass
 
 from reportlab.pdfgen import canvas
 
@@ -307,3 +308,85 @@ class ProcessPdfTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@dataclass
+class _Segment:
+    start: float
+    end: float
+    text: str
+
+
+class PdfPageSplitTests(unittest.TestCase):
+    def test_page_texts_keep_blank_pages_as_empty_strings(self) -> None:
+        texts = FileProcessor().pdf_page_texts(_build_pdf("First page", "", "Third page"))
+
+        self.assertEqual(texts, ["First page", "", "Third page"])
+
+    def test_process_pdf_pages_marks_ocr_pages(self) -> None:
+        chunks = FileProcessor().process_pdf_pages(
+            ["Typed text", "Scanned text"], "scan.pdf", 42, ocr_pages=frozenset({2})
+        )
+
+        self.assertEqual([c.metadata["page"] for c in chunks], [1, 2])
+        self.assertNotIn("ocr", chunks[0].metadata)
+        self.assertTrue(chunks[1].metadata["ocr"])
+        self.assertEqual(chunks[1].metadata["total_pages"], 2)
+        self.assertEqual(chunks[1].metadata["file_type"], "pdf")
+
+    def test_process_pdf_skips_blank_pages_and_numbers_the_rest(self) -> None:
+        pdf = _build_pdf("Alpha page", "", "Gamma page")
+
+        chunks = FileProcessor().process_pdf(pdf, "a.pdf")
+
+        self.assertEqual([c.metadata["page"] for c in chunks], [1, 3])
+        self.assertEqual(chunks[0].metadata["file_size"], len(pdf))
+        self.assertEqual(chunks[0].metadata["total_pages"], 3)
+
+
+class ExtractedTextTests(unittest.TestCase):
+    def test_extracted_text_carries_type_and_extra_metadata(self) -> None:
+        chunks = FileProcessor().process_extracted_text(
+            "Invoice 2026 total 40 EUR",
+            "photo.png",
+            10,
+            file_type="image",
+            extra_metadata={"ocr_language": "eng"},
+        )
+
+        self.assertEqual(len(chunks), 1)
+        self.assertEqual(chunks[0].metadata["file_type"], "image")
+        self.assertEqual(chunks[0].metadata["ocr_language"], "eng")
+        self.assertEqual(chunks[0].metadata["source"], "photo.png")
+
+
+class TimedSegmentTests(unittest.TestCase):
+    def test_segments_group_up_to_chunk_size_and_keep_their_times(self) -> None:
+        # 19 + 12 characters fit in 40 with their separators; the third segment does not.
+        processor = FileProcessor(chunk_size=40, overlap=5)
+        segments = [
+            _Segment(0.0, 2.0, "Hello there friend."),
+            _Segment(2.0, 4.5, "How are you?"),
+            _Segment(4.5, 9.0, "The invoice is late."),
+        ]
+
+        chunks = processor.process_timed_segments(
+            segments, "call.mp3", 99, extra_metadata={"language": "en"}
+        )
+
+        self.assertEqual(len(chunks), 2)
+        self.assertEqual(chunks[0].metadata["start_seconds"], 0.0)
+        self.assertEqual(chunks[0].metadata["end_seconds"], 4.5)
+        self.assertEqual(chunks[1].metadata["start_seconds"], 4.5)
+        self.assertEqual(chunks[1].metadata["end_seconds"], 9.0)
+        self.assertEqual(chunks[1].metadata["file_type"], "audio")
+        self.assertEqual(chunks[1].metadata["language"], "en")
+        self.assertIn("The invoice is late.", chunks[1].text)
+
+    def test_blank_segments_are_skipped(self) -> None:
+        chunks = FileProcessor().process_timed_segments(
+            [_Segment(0.0, 1.0, "  "), _Segment(1.0, 2.0, "Words")], "a.wav", 1
+        )
+
+        self.assertEqual(len(chunks), 1)
+        self.assertEqual(chunks[0].metadata["start_seconds"], 1.0)
