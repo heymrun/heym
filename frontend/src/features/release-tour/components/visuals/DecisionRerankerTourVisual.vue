@@ -45,7 +45,7 @@ function rowClass(index: number): string {
 </script>
 
 <template>
-  <div class="flex h-full w-full flex-col gap-2.5 rounded-lg bg-card p-3.5">
+  <div class="flex h-full w-full flex-col gap-2 rounded-lg bg-card p-3.5">
     <div class="flex items-center gap-2 text-[11px] leading-4 text-muted-foreground">
       <Search class="h-3 w-3" />
       RAG · Search
@@ -58,7 +58,7 @@ function rowClass(index: number): string {
       </span>
     </div>
 
-    <div class="rounded-md border border-border bg-background px-2.5 py-1.5 text-[11px] leading-4 text-foreground">
+    <div class="shrink-0 rounded-md border border-border bg-background px-2.5 py-1 text-[11px] leading-4 text-foreground">
       How do I reset my VPN token?
     </div>
 
@@ -70,7 +70,7 @@ function rowClass(index: number): string {
       <div
         v-for="(finding, index) in ordered"
         :key="finding.id"
-        class="flex items-center gap-2 rounded-md border px-2.5 py-1 text-[11px] leading-4 transition-colors duration-500"
+        class="flex min-h-0 flex-1 items-center gap-2 rounded-md border px-2.5 text-[11px] leading-4 transition-colors duration-500"
         :class="rowClass(index)"
       >
         <span class="w-3 shrink-0 font-mono text-[10px] text-muted-foreground">{{ index + 1 }}</span>
