@@ -59,6 +59,7 @@ Hover a chart to see the node type under the pointer, next to the pointer. A nod
 
 ## Related
 
+- [Operations Runbook (L1): Resource usage](../reference/operations-runbook.md#most-resource-consuming-workflows) - Find high-volume and long-running workflows and correlate CPU, memory, and tokens
 - [Workflows Tab](./workflows-tab.md) – Workflows being measured
 - [Traces Tab](./traces-tab.md) – Detailed trace inspection
 - [Logs Tab](./logs-tab.md) – Runtime logs for debugging

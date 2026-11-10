@@ -391,6 +391,8 @@ git pull
 
 ## Related
 
+- [Incident Playbook (L0)](../reference/incident-playbook.md) - Triage, severity, and escalation for an outage
+- [Operations Runbook (L1)](../reference/operations-runbook.md) - Database checks, service restarts, capacity, and recovery
 - [Introduction](./introduction.md) – Platform overview
 - [Quick Start](./quick-start.md) – Build your first workflow
 - [Environment Variables](https://github.com/heymrun/heym/blob/main/ENVIRONMENT-VARIABLES.md) – Full configuration reference

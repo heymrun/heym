@@ -173,6 +173,7 @@ The canvas and dashboard history dialogs keep their run controls on one row and 
 
 ## Related
 
+- [Operations Runbook (L1): Queue backlog](./operations-runbook.md#queue-backlog-or-apparently-stuck-runs) - Distinguish queued, held, interrupted, and recovered executions before replay
 - [Triggers](./triggers.md) – How workflows are started; history records `trigger_source` (including `board` for runs started by [Board](../tabs/board-tab.md) card moves and follow-ups)
 - [Human-in-the-Loop](./human-in-the-loop.md) – Pending review URLs and resume behavior
 - [Edit History](./edit-history.md) – Version control for workflow saves (revert, diff)

@@ -1,16 +1,17 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import DOMPurify from "dompurify";
-import { marked } from "marked";
 
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { ChevronLeft, ChevronRight } from "lucide-vue-next";
+
+import type { NodeType } from "@/types/workflow";
 
 import NodePreviewCard from "@/components/Docs/NodePreviewCard.vue";
 import Button from "@/components/ui/Button.vue";
 import { getPrevNextDoc } from "@/docs/manifest";
+import { renderDocMarkdown } from "@/docs/renderMarkdown";
 import { getPluginDoc } from "@/services/plugins";
-import type { NodeType } from "@/types/workflow";
 
 interface Props {
   path: string;
@@ -18,6 +19,8 @@ interface Props {
 
 const props = defineProps<Props>();
 const router = useRouter();
+const route = useRoute();
+const articleRef = ref<HTMLElement | null>(null);
 
 const prevNext = computed(() => getPrevNextDoc(props.path));
 
@@ -111,78 +114,9 @@ async function loadContent(): Promise<void> {
   }
 }
 
-/**
- * Resolves a markdown link href to an absolute app path.
- *
- * Markdown files use relative links (e.g. ./quick-start.md or ../nodes/llm-node.md)
- * so they work natively on GitHub. This function converts them to absolute /docs/...
- * paths for use in the app's Vue Router.
- *
- * currentPath is in the form "category/slug" (e.g. "getting-started/introduction").
- */
-function resolveDocLink(href: string, currentPath: string): string {
-  if (!href) return href;
-  if (href.startsWith("http://") || href.startsWith("https://") || href.startsWith("#")) {
-    return href;
-  }
-  if (href.startsWith("/docs/")) return href;
-
-  if (href.includes(".md")) {
-    const hashIndex = href.indexOf("#");
-    const anchor = hashIndex !== -1 ? href.slice(hashIndex) : "";
-    const mdPath = hashIndex !== -1 ? href.slice(0, hashIndex) : href;
-
-    const currentParts = currentPath.split("/");
-    const currentDir = currentParts.length > 1 ? currentParts.slice(0, -1) : [];
-
-    const segments = mdPath.split("/");
-    const resolved: string[] = [...currentDir];
-    for (const seg of segments) {
-      if (seg === "." || seg === "") continue;
-      if (seg === "..") {
-        resolved.pop();
-      } else {
-        resolved.push(seg.replace(/\.md$/, ""));
-      }
-    }
-
-    return `/docs/${resolved.join("/")}${anchor}`;
-  }
-
-  return href;
-}
-
-let _renderPath = "";
-
-marked.use({
-  renderer: {
-    link({ href, title, text }) {
-      const resolved = resolveDocLink(href ?? "", _renderPath);
-      const titleAttr = title ? ` title="${title}"` : "";
-      if (resolved.startsWith("/docs/")) {
-        return `<a href="${resolved}"${titleAttr}>${text}</a>`;
-      }
-      return `<a href="${resolved}" target="_blank" rel="noopener noreferrer"${titleAttr}>${text}</a>`;
-    },
-    code({ text, lang }) {
-      const escaped = text
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;");
-      const langClass = lang ? ` language-${lang}` : "";
-      return `<pre class="doc-code-block${langClass}"><code class="${langClass}">${escaped}</code></pre>`;
-    },
-  },
-});
-
 function renderMarkdown(raw: string, currentPath: string): string {
   if (!raw) return "";
-  _renderPath = currentPath;
-  const html = marked(raw, {
-    breaks: true,
-    gfm: true,
-  }) as string;
+  const html = renderDocMarkdown(raw, currentPath);
   return DOMPurify.sanitize(html, {
     ALLOWED_TAGS: [
       "p", "br", "strong", "em", "u", "s", "code", "pre", "blockquote",
@@ -190,21 +124,41 @@ function renderMarkdown(raw: string, currentPath: string): string {
       "table", "thead", "tbody", "tr", "th", "td", "span", "div",
       "video", "source",
     ],
-    ALLOWED_ATTR: ["href", "target", "rel", "class", "src", "controls", "playsinline", "muted", "loop", "preload", "type", "style"],
+    ALLOWED_ATTR: ["id", "href", "target", "rel", "class", "src", "controls", "playsinline", "muted", "loop", "preload", "type", "style"],
   });
 }
 
 const renderedHtml = computed(() => renderMarkdown(content.value, props.path));
 
-function handleContentClick(event: MouseEvent): void {
+function scrollToSection(): void {
+  if (!route.hash) return;
+  let id: string;
+  try {
+    id = decodeURIComponent(route.hash.slice(1));
+  } catch {
+    return;
+  }
+  const target = Array.from(articleRef.value?.querySelectorAll<HTMLElement>("[id]") ?? [])
+    .find((element) => element.id === id);
+  target?.scrollIntoView({ block: "start" });
+}
+
+async function handleContentClick(event: MouseEvent): Promise<void> {
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
   const target = (event.target as HTMLElement).closest("a");
-  if (!target) return;
-  const href = target.getAttribute("href");
-  if (href?.startsWith("/docs/")) {
+  const href = target?.getAttribute("href");
+  if (href?.startsWith("/docs/") || href?.startsWith("#")) {
     event.preventDefault();
-    void router.push(href);
+    await router.push(href.startsWith("#") ? { hash: href } : href);
+    await nextTick();
+    scrollToSection();
   }
 }
+
+watch([renderedHtml, () => route.hash], async () => {
+  await nextTick();
+  scrollToSection();
+}, { flush: "post" });
 
 watch(
   () => props.path,
@@ -265,6 +219,7 @@ watch(
       >
         <!-- eslint-disable vue/no-v-html -->
         <div
+          ref="articleRef"
           @click="handleContentClick"
           v-html="renderedHtml"
         />
