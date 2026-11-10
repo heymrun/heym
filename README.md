@@ -342,6 +342,8 @@ The main instance serves the UI, API, MCP, and Portal and owns local files and i
 
 Heym is in its pre-1.0 release series. Follow the [version badge and releases](https://github.com/heymrun/heym/releases) for updates. The [deployment guide](frontend/src/docs/content/getting-started/running-and-deployment.md) and [security policy](SECURITY.md) provide the operational setup reference.
 
+For on-call response, use the [Incident Playbook (L0)](frontend/src/docs/content/reference/incident-playbook.md) for triage and the [Runbook (L1)](frontend/src/docs/content/reference/operations-runbook.md) for diagnosis, database checks, service restarts, capacity issues, and recovery procedures.
+
 ---
 
 ## Extending Heym

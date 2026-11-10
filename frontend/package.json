@@ -25,6 +25,7 @@
     "axios": "^1.15.2",
     "clsx": "^2.1.0",
     "dompurify": "^3.4.1",
+    "github-slugger": "2.0.0",
     "grid-layout-plus": "^1.1.1",
     "jsonrepair": "^3.13.2",
     "jszip": "^3.10.1",

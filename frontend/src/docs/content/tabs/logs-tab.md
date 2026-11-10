@@ -45,6 +45,8 @@ If registration is open, create the trusted admin account before enabling Docker
 
 ## Related
 
+- [Incident Playbook (L0)](../reference/incident-playbook.md) - Route runtime symptoms to the right incident procedure
+- [Operations Runbook (L1)](../reference/operations-runbook.md) - Diagnose database, service, cluster, and sandbox failures
 - [Canvas Features](../reference/canvas-features.md) – Execution logs in the workflow Debug panel
 - [Traces Tab](./traces-tab.md) – LLM trace inspection
 - [Analytics Tab](./analytics-tab.md) – Execution metrics

@@ -701,6 +701,12 @@ Point a second Heym instance at the same database and it joins as a worker. Back
 
 See also [Settings](./user-settings.md), [Traces](../tabs/traces-tab.md), and [Analytics](../tabs/analytics-tab.md).
 
+### Operating Heym
+
+The [Incident Playbook (L0)](./incident-playbook.md) gives on-call responders a first-five-minutes checklist, severity guidance, escalation paths, and a deployment handover inventory. The [Operations Runbook (L1)](./operations-runbook.md) provides diagnosis, mitigation, verification, and escalation procedures for PostgreSQL outages and active connections, controlled service restarts, resource-heavy workflows, queue backlogs, cluster checks, ingress failures, sandbox failures, and disaster recovery. Docker Compose and Kubernetes examples use the same procedures, with deployment-specific targets supplied by the operator.
+
+See also [Running & Deployment](../getting-started/running-and-deployment.md), [Load Distribution](./cluster.md), [Analytics](../tabs/analytics-tab.md), and [Logs](../tabs/logs-tab.md).
+
 ### [Third-Party Integrations](./integrations.md)
 
 Heym connects to external services through credentials stored in the [Credentials](../tabs/credentials-tab.md) tab (encrypted at rest). Supported types include OpenAI, Google, Decision Model for the [Decision node](../nodes/decision-node.md), Model Router for automatic model selection (see below), GitHub for the [GitHub node](../nodes/github-node.md) and MCP integrations, Jira for the [Jira node](../nodes/jira-node.md), Notion for the [Notion node](../nodes/notion-node.md), Custom LLM, Cohere, RAG: Qdrant + OpenAI, RAG: Psql + OpenAI, [Grist](../nodes/grist-node.md), SMTP for [Send Email](../nodes/send-email-node.md), [RabbitMQ](../nodes/rabbitmq-node.md), [Redis](../nodes/redis-node.md), [Telegram](../nodes/telegram-node.md), [Slack](../nodes/slack-node.md), Bearer, Header, and FlareSolverr for [Crawler](../nodes/crawler-node.md). Each type documents required fields; credentials can be shared with users or [teams](./teams.md) and referenced by name in nodes or as `$credentials.Name` in expressions.

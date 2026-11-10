@@ -147,6 +147,8 @@ export const DOCS_MANIFEST: Record<string, DocCategory> = {
       { slug: "security", title: "Security" },
       { slug: "sso", title: "Single Sign-On" },
       { slug: "cluster", title: "Load Distribution" },
+      { slug: "incident-playbook", title: "Incident Playbook (L0)" },
+      { slug: "operations-runbook", title: "Operations Runbook (L1)" },
       { slug: "plugin-authoring", title: "Plugin Authoring" },
       { slug: "integrations", title: "Third-Party Integrations" },
       { slug: "guardrails", title: "Guardrails" },

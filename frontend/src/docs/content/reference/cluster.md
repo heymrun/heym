@@ -138,6 +138,8 @@ The UI, the API, MCP and the editor are unavailable while main is down, because 
 
 ## Related
 
+- [Incident Playbook (L0)](./incident-playbook.md) - First response and failure expectations
+- [Operations Runbook (L1): Cluster checks](./operations-runbook.md#cluster-mode-checks) - Eligibility, leadership, queue placement, and main recovery
 - [Running & Deployment](../getting-started/running-and-deployment.md) – Deploy a single instance first; the environment variables and key setup live there
 - [Settings](./user-settings.md) – The Instances tab, and who can see it
 - [Traces](../tabs/traces-tab.md) – Compare real run durations between instances before changing the split
