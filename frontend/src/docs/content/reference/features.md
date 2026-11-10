@@ -811,7 +811,7 @@ See also [Credentials](./credentials.md), [Credentials Sharing](./credentials-sh
 
 ### [Vectorstores](../tabs/vectorstores-tab.md)
 
-The Vectorstores tab manages vector stores used by [RAG](../nodes/rag-node.md) nodes. Create a store with a name and a vector store [credential](./credentials.md) — *RAG: Qdrant + OpenAI* (external Qdrant) or *RAG: Psql + OpenAI* (Heym's own Postgres via pgvector), which fixes the store's backend — optionally set a collection name, then upload documents (PDF, TXT, etc.). Manage content (view, delete sources), edit store details, and share stores with users. In a [RAG](../nodes/rag-node.md) node, pick the Database, select the vector store, and run insert, upsert, delete, or search operations.
+The Vectorstores tab manages vector stores used by [RAG](../nodes/rag-node.md) nodes. Create a store with a name and a vector store [credential](./credentials.md) — *RAG: Qdrant + OpenAI* (external Qdrant) or *RAG: Psql + OpenAI* (Heym's own Postgres via pgvector), which fixes the store's backend — optionally set a collection name, then upload documents (PDF, Markdown, text, CSV, JSON, images read with OCR, mp3/wav/ogg/flac audio transcribed on the instance, and any other UTF-8 text file; audio and scanned PDFs are read in the background). Manage content (view, delete sources), edit store details, and share stores with users. In a [RAG](../nodes/rag-node.md) node, pick the Database, select the vector store, and run insert, upsert, delete, or search operations.
 
 See also [Qdrant RAG](../nodes/rag-node.md), [Credentials](./credentials.md), and [Teams](./teams.md).
 

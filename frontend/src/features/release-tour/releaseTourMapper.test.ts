@@ -381,11 +381,11 @@ describe("shipped release registry", () => {
     const catalog = buildReleaseTourCatalog(RELEASE_REGISTRY);
 
     expect(catalog?.slides.map((slide) => slide.id)).toEqual([
+      "rag-media-upload",
       "decision-reranker",
       "voice-transcribe",
       "account-security",
       "google-meet",
-      "board-task-fields",
     ]);
   });
 
@@ -401,7 +401,7 @@ describe("shipped release registry", () => {
     expect(tours.map((tour) => tour.tourVisual)).toContain("decision-reranker");
     expect(tours.map((tour) => tour.tourVisual)).toContain("voice-transcribe");
     expect(tours.map((tour) => tour.tourVisual)).toContain("google-meet");
-    expect(tours.map((tour) => tour.tourVisual)).toContain("board-task-fields");
+    expect(tours.map((tour) => tour.tourVisual)).toContain("rag-media-upload");
     for (const tour of tours) {
       expect(TOUR_VISUALS[tour.tourVisual], `missing visual for "${tour.tourVisual}"`)
         .toBeDefined();

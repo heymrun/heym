@@ -17,9 +17,26 @@ The **Vectorstores** tab manages vector stores used by [RAG](../nodes/rag-node.m
 
 ## Uploading Documents
 
-- **Upload files** – Drag and drop or select files (PDF, TXT, etc.)
+- **Upload files** – Drag and drop or pick several files. A store takes:
+  - **Documents** – PDF, Markdown, text, CSV and JSON
+  - **Images** – PNG, JPEG, TIFF, WebP and BMP, read with the same Tesseract OCR as the
+    [Converter](../nodes/converter-node.md) node, language detected automatically
+  - **Audio** – mp3, wav, ogg and flac, transcribed with the Converter's Whisper model on your
+    own instance; each chunk keeps where it starts and ends in the recording
+    (`start_seconds`, `end_seconds`)
+  - **Any other plain-text file** – a file such as `notes` or `burak.akgun` is read as text when
+    it is valid UTF-8
+- **Scanned PDFs** – pages without a text layer are read with OCR, up to 200 such pages per file
+- **Background uploads** – audio and PDFs with scanned pages take minutes, so Heym reads them in
+  the background. They show at the top of the store's items as *Transcribing* or *Reading scanned
+  pages* and turn into a normal source when their chunks are in. A failed one shows why and can
+  be dismissed. With **Override existing files**, the old version stays searchable until the new
+  one is ready
 - **Duplicate handling** – Choose to override or skip duplicate filenames
 - **Progress** – Upload progress is shown during ingestion
+
+An image without readable text, an audio file without speech, and a binary file of another type
+are refused with a message.
 
 ## Managing Content
 
