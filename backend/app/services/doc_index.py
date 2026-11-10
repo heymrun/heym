@@ -1,10 +1,11 @@
 """
 Doc Index Service for Heym platform documentation.
 
-Provides keyword search over docs content. Returns full markdown files.
+Provides keyword search over docs content with bounded, relevant markdown excerpts.
 No embedding or vector store - simple text matching.
 """
 
+import json
 import logging
 import re
 from pathlib import Path
@@ -16,6 +17,8 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 _DEFAULT_DOCS_DIR = _PROJECT_ROOT / "frontend" / "src" / "docs" / "content"
 
 TOP_K = 5
+# Leave room below dashboard chat's 96k-character tool-result limit, including JSON escaping.
+MAX_SEARCH_RESULT_CHARS = 80_000
 
 _NODE_DOC_SLUG = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
@@ -88,17 +91,95 @@ def _load_docs(docs_dir: Path) -> list[dict[str, Any]]:
 
 
 def _keyword_score(query: str, doc: dict[str, Any]) -> int:
-    """Score doc by number of query terms found (case-insensitive)."""
-    terms = [t.lower() for t in query.split() if len(t) > 1]
-    if not terms:
-        return 0
-    search_text = doc.get("search_text", "")
-    score = sum(1 for t in terms if t in search_text)
+    """Match whole terms and prefer titles over incidental mentions in a large reference."""
+    terms = [term for term in re.findall(r"[\w-]+", query.lower()) if len(term) > 1]
+    title = doc.get("title", "").lower()
+    search_text = doc.get("search_text", "").lower()
+    score = 0
+    for term in terms:
+        pattern = rf"(?<!\w){re.escape(term)}(?!\w)"
+        score += bool(re.search(pattern, search_text))
+        score += 5 * bool(re.search(pattern, title))
     return score
 
 
+def _encoded_length(text: str) -> int:
+    """Count characters as serialized to the model, excluding surrounding JSON quotes."""
+    return len(json.dumps(text)) - 2
+
+
+def _excerpt_content(query: str, content: str, max_chars: int) -> str:
+    """Keep the introduction and best matching passages within an escaped JSON budget."""
+    if _encoded_length(content) <= max_chars:
+        return content
+
+    passages: list[str] = []
+    start = 0
+    while start < len(content):
+        end = min(start + 2000, len(content))
+        if end < len(content):
+            # Prefer a line boundary and avoid splitting query terms across passages.
+            boundary = content.rfind("\n", start + 1000, end)
+            whitespace = re.search(r"\s", content[end : end + 100])
+            if boundary >= 0:
+                end = boundary + 1
+            elif whitespace:
+                end += whitespace.end()
+        passages.append(content[start:end])
+        start = end
+
+    ranked = sorted(
+        range(len(passages)),
+        key=lambda index: (
+            index == 0,
+            _keyword_score(query, {"search_text": passages[index]}),
+        ),
+        reverse=True,
+    )
+    separator = "\n\n[... documentation passages omitted ...]\n\n"
+    selected: dict[int, str] = {}
+    remaining = max_chars
+    for index in ranked:
+        available = remaining - (_encoded_length(separator) if selected else 0)
+        if available <= 0:
+            break
+        passage = passages[index]
+        while _encoded_length(passage) > available:
+            passage = passage[: len(passage) * available // _encoded_length(passage)]
+        if passage:
+            selected[index] = passage
+            remaining = available - _encoded_length(passage)
+    return separator.join(selected[index] for index in sorted(selected))
+
+
+def _bound_search_results(
+    query: str, results: list[dict[str, Any]], max_chars: int
+) -> list[dict[str, Any]]:
+    """Share the serialized result budget across docs without discarding their evidence."""
+    if len(json.dumps({"results": results})) <= max_chars:
+        return results
+    bounded = [
+        {**doc, "content": "", "excerpted": True, "original_length": len(doc["content"])}
+        for doc in results
+    ]
+    remaining = max_chars - len(json.dumps({"results": bounded}))
+    # Small docs stay whole; their unused allowance goes to longer pages.
+    indices = sorted(
+        range(len(results)), key=lambda index: _encoded_length(results[index]["content"])
+    )
+    for position, index in enumerate(indices):
+        content = results[index]["content"]
+        excerpt = _excerpt_content(query, content, remaining // (len(indices) - position))
+        bounded[index]["content"] = excerpt
+        if excerpt == content:
+            bounded[index].pop("excerpted")
+            bounded[index].pop("original_length")
+        remaining -= _encoded_length(excerpt)
+    return bounded
+
+
 class DocIndexService:
-    """Keyword-based documentation search. Returns full MD content."""
+    """Keyword-based documentation search with a bounded markdown result payload."""
 
     _instance: "DocIndexService | None" = None
 
@@ -134,9 +215,10 @@ class DocIndexService:
         self,
         query: str,
         top_k: int = TOP_K,
+        max_chars: int = MAX_SEARCH_RESULT_CHARS,
     ) -> list[dict[str, Any]]:
         """
-        Search documentation by keyword. Returns full markdown content.
+        Search documentation by keyword, excerpting long results to fit the model context.
 
         Returns list of {title, path, content} for up to top_k distinct docs.
         """
@@ -169,4 +251,4 @@ class DocIndexService:
             if len(results) >= top_k:
                 break
 
-        return results
+        return _bound_search_results(query, results, max_chars)

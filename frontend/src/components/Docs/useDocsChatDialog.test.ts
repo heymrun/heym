@@ -27,6 +27,8 @@ describe("documentation chat conversation identity", () => {
     const stream = vi.mocked(aiApi.dashboardChatStream);
     const first = stream.mock.calls[0];
     expect(first[0].conversationId).toBeTruthy();
+    expect(first[0].chatSurface).toBe("documentation");
+    expect(first[0].userRules).toContain("/docs/nodes/llm");
     first[2]();
     await nextTick();
     chat.inputText.value = "Give an example";
