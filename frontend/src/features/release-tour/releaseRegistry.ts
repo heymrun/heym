@@ -17,6 +17,29 @@ import type { ReleaseEntry } from "@/features/release-tour/releaseTour.types";
  */
 export const RELEASE_REGISTRY: ReleaseEntry[] = [
   {
+    releaseId: "2026.29",
+    publishedAt: new Date("2026-11-10T16:00:00Z"),
+    headline: "Rerank RAG search results with a Decision Model",
+    releaseTour: {
+      label: "New in Heym", introTitle: "New in this release",
+      introDescription: "The best answer first, scored by the model you already use for decisions.",
+      tourEnabled: true,
+      sectionOrder: ["decision-reranker"],
+    },
+    sections: [{
+      id: "decision-reranker", title: "Rerank search results with a Decision Model",
+      publishedAt: new Date("2026-11-10T16:00:00Z"),
+      blocks: [{ type: "prose", markdown: "Turn on **Enable Reranker** in a **RAG** search and the **Reranker Credential** list now offers your **Decision Model** credentials next to Cohere. Enter the model, for example `jev-latest`, and the node sends the question together with every finding in one request: the decision model scores how relevant each finding is to the question, and the results come back ordered by that score, with `relevance_score` from 0 to 1 on each one. A failed call fails the node with the reason, so a workflow never continues with results in the wrong order, and every call shows up in Traces with its token usage. Cohere reranking works as before." }],
+      tour: {
+        description: "Let a decision model score every search result against the question and put the best answer first.",
+        useCases: ["Feed an Agent only the passages that answer the question", "Rerank support articles before drafting a reply", "Use one decision model for routing, judging and reranking"],
+        tourVisual: "decision-reranker",
+        docTarget: { categoryId: "nodes", slug: "rag-node", title: "RAG / Vector Store" },
+      },
+    }],
+  },
+
+  {
     releaseId: "2026.28",
     publishedAt: new Date("2026-11-10T12:00:00Z"),
     headline: "Transcribe voice notes and recordings in the Converter node",
@@ -108,33 +131,6 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
         useCases: ["See who works on which contract and what is overdue", "Ask Chat to move a task to Review and assign it to a colleague", "Keep a plain task board whose cards stay where people put them"],
         tourVisual: "board-task-fields",
         docTarget: { categoryId: "tabs", slug: "board-tab", title: "Board" },
-      },
-    }],
-  },
-  {
-    releaseId: "2026.24",
-    publishedAt: new Date("2026-10-30T12:00:00Z"),
-    headline: "Open large files in an isolated sandbox",
-    releaseTour: {
-      label: "New in Heym",
-      introTitle: "New in this release",
-      introDescription: "File analysis in a sandbox, in Heym and Heym Work.",
-      tourEnabled: true,
-      sectionOrder: ["file-analysis"],
-    },
-    sections: [{
-      id: "file-analysis",
-      title: "Open large files in an isolated sandbox",
-      publishedAt: new Date("2026-10-31T12:00:00Z"),
-      blocks: [{
-        type: "prose",
-        markdown: "Attach a PDF, spreadsheet, DOCX, CSV or JSON file in Chat, or name one in Drive. The file is stored in Drive and Chat opens it in an isolated Python sandbox with no network: it inspects the pages, sheets and columns first, then reads only the part your question needs, so a large file never fills the conversation. Follow-up questions reuse what was already read. Workflows that start with a File Upload trigger get the same ability: an Agent node that receives the uploaded file opens it the same way, with nothing to switch on, and a Code node reads it through **Files** with pandas, openpyxl, pdfplumber and python-docx.",
-      }],
-      tour: {
-        description: "Ask about a large PDF or spreadsheet without pasting it. Chat inspects it in a sandbox and reads only what it needs.",
-        useCases: ["Total a column on one sheet and add a value from the last page", "Summarize the risks in a 200-page contract", "Build a workflow that extracts the same fields from every uploaded invoice"],
-        tourVisual: "file-analysis",
-        docTarget: { categoryId: "reference", slug: "file-analysis", title: "File Analysis" },
       },
     }],
   },

@@ -381,11 +381,11 @@ describe("shipped release registry", () => {
     const catalog = buildReleaseTourCatalog(RELEASE_REGISTRY);
 
     expect(catalog?.slides.map((slide) => slide.id)).toEqual([
+      "decision-reranker",
       "voice-transcribe",
       "account-security",
       "google-meet",
       "board-task-fields",
-      "file-analysis",
     ]);
   });
 
@@ -398,7 +398,7 @@ describe("shipped release registry", () => {
       section.tour ? [section.tour] : [],
     );
 
-    expect(tours.map((tour) => tour.tourVisual)).toContain("file-analysis");
+    expect(tours.map((tour) => tour.tourVisual)).toContain("decision-reranker");
     expect(tours.map((tour) => tour.tourVisual)).toContain("voice-transcribe");
     expect(tours.map((tour) => tour.tourVisual)).toContain("google-meet");
     expect(tours.map((tour) => tour.tourVisual)).toContain("board-task-fields");

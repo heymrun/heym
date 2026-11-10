@@ -74,6 +74,58 @@ def _metadata_from_node_data(executor, node_data: dict, inputs: dict, node_id: s
     return _with_workflow_source(executor, unwrapped)
 
 
+def _rerank_with_decision_model(
+    executor,
+    *,
+    node_id: str,
+    credential_id: str,
+    config: dict,
+    model: str,
+    query: str,
+    documents: list,
+    top_n: int,
+) -> tuple[list, str | None]:
+    """Rerank with a Decision Model credential, failing the node the way a Cohere error does.
+
+    Returns the reranked results and the id of the trace the call wrote, if any.
+    """
+    from importlib import import_module
+
+    from app.services.decision_models import DecisionProviderError, DecisionRequestError
+    from app.services.reranker import DecisionRerankError, DecisionRerankerService
+
+    base_url = str(config.get("base_url") or "").strip()
+    if not base_url:
+        raise ValueError("Reranker failed: the Decision Model credential has no base URL")
+    if not model:
+        raise ValueError("Reranker failed: enter the decision model to rerank with")
+
+    trace_context = executor._build_llm_trace_context(credential_id, node_id)
+    service = DecisionRerankerService(
+        base_url=base_url,
+        api_key=str(config.get("api_key") or ""),
+        model=model,
+        trace_context=trace_context,
+    )
+
+    def _recorded_trace_id() -> str | None:
+        if trace_context is None or not trace_context.trace_ids:
+            return None
+        return str(trace_context.trace_ids[-1])
+
+    try:
+        results = service.rerank(query=query, documents=documents, top_n=top_n)
+    except (DecisionProviderError, DecisionRequestError, DecisionRerankError) as exc:
+        message = f"Reranker failed: {exc}"
+        trace_id = _recorded_trace_id()
+        if trace_id:
+            # A failed call is still traced, so keep the execution log linked to it.
+            workflow_executor = import_module("app.services.workflow_executor")
+            raise workflow_executor.NodeTraceableExecutionError(message, trace_id) from exc
+        raise ValueError(message) from exc
+    return results, _recorded_trace_id()
+
+
 def execute(ctx: NodeExecutionContext) -> object:
     """Execute the rag node."""
     self = ctx.executor
@@ -217,26 +269,42 @@ def execute(ctx: NodeExecutionContext) -> object:
         )
 
         reranked = False
+        reranker_trace_id: str | None = None
         if enable_reranker and reranker_credential_id and results:
+            from app.db.models import CredentialType
             from app.services.reranker import DocumentToRerank, create_reranker_service
 
-            cohere_config: dict = {}
+            reranker_config: dict = {}
+            reranker_type = None
             with SessionLocal() as db:
                 reranker_cred = self._get_accessible_credential(db, reranker_credential_id)
                 if reranker_cred:
-                    cohere_config = decrypt_config(reranker_cred.encrypted_config)
+                    reranker_config = decrypt_config(reranker_cred.encrypted_config)
+                    reranker_type = reranker_cred.type
 
-            if cohere_config and cohere_config.get("api_key"):
-                reranker_service = create_reranker_service(cohere_config["api_key"])
-                docs_to_rerank = [
-                    DocumentToRerank(
-                        id=r.id,
-                        text=r.text,
-                        score=r.score,
-                        metadata=r.metadata,
-                    )
-                    for r in results
-                ]
+            docs_to_rerank = [
+                DocumentToRerank(
+                    id=r.id,
+                    text=r.text,
+                    score=r.score,
+                    metadata=r.metadata,
+                )
+                for r in results
+            ]
+            if reranker_type == CredentialType.decision:
+                results, reranker_trace_id = _rerank_with_decision_model(
+                    self,
+                    node_id=node_id,
+                    credential_id=str(reranker_credential_id),
+                    config=reranker_config,
+                    model=str(node_data.get("rerankerModel") or "").strip(),
+                    query=query_text,
+                    documents=docs_to_rerank,
+                    top_n=reranker_top_n,
+                )
+                reranked = True
+            elif reranker_config.get("api_key"):
+                reranker_service = create_reranker_service(reranker_config["api_key"])
                 reranked_results = reranker_service.rerank(
                     query=query_text,
                     documents=docs_to_rerank,
@@ -268,6 +336,9 @@ def execute(ctx: NodeExecutionContext) -> object:
                 ],
                 "count": len(results),
             }
+            if reranker_trace_id:
+                # The executor pops this into node metadata, which draws the Traces link.
+                output["_trace_id"] = reranker_trace_id
         else:
             output = {
                 "success": True,

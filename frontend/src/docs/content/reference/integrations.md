@@ -19,7 +19,7 @@ Some integration nodes do **not** require credentials. [WebSocket Trigger](../no
 | **Linear** | [Linear node](../nodes/linear-node.md) | `api_key`, or `client_id` + `client_secret` OAuth2 |
 | **Sentry** | [Sentry node](../nodes/sentry-node.md) | `api_token`, optional `base_url` |
 | **Custom** | [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md) | `api_key`, `base_url` |
-| **Decision Model** | [Decision](../nodes/decision-node.md), [Evals](../tabs/evals-tab.md) (LLM-as-Judge judge) | `base_url`, optional `api_key` |
+| **Decision Model** | [Decision](../nodes/decision-node.md), [Evals](../tabs/evals-tab.md) (LLM-as-Judge judge), [RAG](../nodes/rag-node.md#reranking) reranking | `base_url`, optional `api_key` |
 | **Model Router (Auto Model)** | [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md), Chat, AI Defaults | a decision model credential, plus model options referencing your other credentials |
 | **Cohere** | Embeddings | `api_key` |
 | **RAG: Qdrant + OpenAI** | [RAG](../nodes/rag-node.md), Vectorstores | `qdrant_host`, `openai_api_key` |
@@ -112,6 +112,7 @@ A decision model answers typed questions about a state and returns probabilities
 
 - [Decision](../nodes/decision-node.md)
 - [Evals](../tabs/evals-tab.md) – scores `LLM-as-Judge` answers against the expected output
+- [RAG](../nodes/rag-node.md#reranking) – reranks search results by scoring each one against the query
 
 ## OpenAI Codex
 
@@ -368,7 +369,7 @@ store, then pick **Postgres (pgvector)** in the RAG node's Database dropdown.
 ### Notes
 
 - No host/port is needed — vectors are written to Heym's own database; Heym never connects to a different database.
-- Every RAG feature available with Qdrant (insert, search, metadata filters, Cohere reranking, cloning, sharing) works identically with the Postgres backend.
+- Every RAG feature available with Qdrant (insert, search, metadata filters, Cohere or Decision Model reranking, cloning, sharing) works identically with the Postgres backend.
 - Requires the `vector` extension. Heym keeps the official `postgres:16` image unchanged (so existing data is never touched) and **auto-installs the `postgresql-16-pgvector` package at startup** — `run.sh`, `deploy.sh`, and `run_e2e.sh` all handle this. The install is non-fatal: if it cannot run (e.g. no network), Qdrant RAG keeps working and the Postgres backend stays inactive (the migration skips the table gracefully).
 - If you run the published single-container image (`ghcr.io/heymrun/heym`) against **your own external Postgres**, that database must support the `vector` extension (Heym cannot install it into a database it does not manage). Without it, creating or uploading to a Postgres vector store returns a clear message and Qdrant RAG continues to work.
 

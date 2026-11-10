@@ -7,7 +7,7 @@ The node has a **Database** dropdown that selects the backend:
 - **Qdrant** – stores vectors in an external Qdrant server (requires a *RAG: Qdrant + OpenAI* credential).
 - **Postgres (pgvector)** – stores vectors inside Heym's own Postgres database, no external service (requires a *RAG: Psql + OpenAI* credential).
 
-The default is **Qdrant** for backward compatibility. Changing the Database filters the **Vector Store** list to stores backed by that database. Both backends support the same operations, metadata filtering, hybrid (vector + BM25) search, and Cohere reranking.
+The default is **Qdrant** for backward compatibility. Changing the Database filters the **Vector Store** list to stores backed by that database. Both backends support the same operations, metadata filtering, hybrid (vector + BM25) search, and reranking with Cohere or a Decision Model.
 
 Either backend can also be reached through a *RAG: Custom Embeddings* credential, which
 replaces OpenAI with any OpenAI-compatible embedding endpoint and names its own vector
@@ -37,8 +37,9 @@ targets. See [Custom Embeddings](../reference/integrations.md#custom-embeddings-
 | `searchLimit` | number | Max results (default: 5) |
 | `metadataFilters` | JSON string | Metadata filters for search (values support expressions) |
 | `hybridSearch` | boolean | Combine vector search with BM25 keyword search (search only; default: off) |
-| `enableReranker` | boolean | Use Cohere to rerank search results |
-| `rerankerCredentialId` | UUID | Cohere credential for reranking |
+| `enableReranker` | boolean | Rerank search results by relevance to the query |
+| `rerankerCredentialId` | UUID | Cohere or Decision Model credential that does the reranking |
+| `rerankerModel` | string | Decision model name, such as `jev-latest` (Decision Model credential only) |
 | `rerankerTopN` | number | Number of top results to keep after reranking |
 
 ## Operations
@@ -128,8 +129,9 @@ Semantic search for similar documents.
 | `searchLimit` | no | Max results (default: 5) |
 | `metadataFilters` | no | Filter by metadata (exact match JSON object, values support expressions) |
 | `hybridSearch` | no | Fuse vector similarity with BM25 keyword matching (see [Hybrid search](#hybrid-search)) |
-| `enableReranker` | no | Enable Cohere reranking for better relevance |
-| `rerankerCredentialId` | when reranking | Cohere credential |
+| `enableReranker` | no | Rerank results by relevance (see [Reranking](#reranking)) |
+| `rerankerCredentialId` | when reranking | Cohere or Decision Model credential |
+| `rerankerModel` | with a Decision Model credential | Decision model name, such as `jev-latest` |
 | `rerankerTopN` | no | Final number of results after reranking |
 
 **Output:** `$nodeLabel.results` – array of `{ id, text, score, metadata }`
@@ -137,9 +139,22 @@ Semantic search for similar documents.
 When reranking is enabled:
 
 - `$nodeLabel.reranked` becomes `true`
-- Each result also includes `relevance_score`
+- Each result also includes `relevance_score`, from 0 to 1, higher is more relevant
 - `score` remains the original vector similarity score
-- `relevance_score` is the Cohere reranker score
+- Results come back ordered by `relevance_score`
+
+#### Reranking
+
+A vector search ranks by similarity to the query. A reranker reads the query and each result together and orders them by how well each one answers the query. Switch on **Enable Reranker** and pick a credential in **Reranker Credential**. The list holds both kinds:
+
+- **Cohere**: sends the query and the results to Cohere Rerank.
+- **Decision Model**: enter the model in **Decision Model**, for example `jev-latest`. The node sends one request whose state holds the query and the array of results, and asks one score question per result: how relevant is this finding to the query, on a five-level rubric from *Irrelevant* to *Answers it*. Each answer becomes the result's `relevance_score` from 0 to 1.
+
+With either reranker the search first fetches a wider pool, at least 20 results or three times **Search Limit**, and the reranker keeps the best **Reranker Top N**.
+
+A reranker error fails the node, so a workflow never continues with results in the wrong order. A rejected key, a provider failure, or a result the decision model did not score is reported as `Reranker failed: ...` for a Decision Model credential. Turn on **Retry on failure** under the node's **Error Handling** to ride out rate limits.
+
+Decision Model reranking is recorded in the [Traces](../tabs/traces-tab.md) tab as a `decision.systemone` call under the RAG node, with its token usage, and the run's node output links to it.
 
 #### Hybrid search
 
@@ -149,7 +164,7 @@ Vector search finds text that means the same thing as the query. Text that only 
 2. A keyword search scores the stored text against the words of the query with **BM25**, which rewards rare words, repeated words and shorter documents.
 3. The two ranked lists are merged with **reciprocal rank fusion**. A document near the top of both lists ranks first, and a document only one list found still appears.
 
-Metadata filters apply to both searches, and the Cohere reranker, when enabled, runs on the merged list.
+Metadata filters apply to both searches, and the reranker, when enabled, runs on the merged list.
 
 Each result carries the score of both searches:
 
@@ -177,6 +192,7 @@ Good to know:
 - `$ragNode.results.first().vector_score` – vector similarity (hybrid search)
 - `$ragNode.results.first().metadata.source` – top result metadata
 - `$ragNode.results.map("item.text").join("\n\n")` – concatenate for LLM context
+- `$ragNode.results.first().relevance_score` – reranker score from 0 to 1 (reranking)
 - `$ragNode.reranked` – whether reranking was applied
 - `$ragNode.hybrid` – whether hybrid search was applied
 - `$ragNode.count` – number of returned results
@@ -198,6 +214,25 @@ Good to know:
     "enableReranker": true,
     "rerankerCredentialId": "cohere-credential-uuid",
     "rerankerTopN": 5
+  }
+}
+```
+
+## Example – Rerank with a Decision Model
+
+```json
+{
+  "type": "rag",
+  "data": {
+    "label": "searchPolicies",
+    "vectorStoreId": "vector-store-uuid",
+    "ragOperation": "search",
+    "queryText": "$userInput.body.text",
+    "searchLimit": 5,
+    "enableReranker": true,
+    "rerankerCredentialId": "decision-credential-uuid",
+    "rerankerModel": "jev-latest",
+    "rerankerTopN": 3
   }
 }
 ```
