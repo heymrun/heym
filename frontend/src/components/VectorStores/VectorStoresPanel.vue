@@ -13,7 +13,9 @@ import Label from "@/components/ui/Label.vue";
 import Select from "@/components/ui/Select.vue";
 import Textarea from "@/components/ui/Textarea.vue";
 import UserAvatar from "@/components/ui/UserAvatar.vue";
+import VectorStoreIngestJobs from "@/components/VectorStores/VectorStoreIngestJobs.vue";
 import { onDismissOverlays } from "@/composables/useOverlayBackHandler";
+import { RAG_FORMATS_LINE } from "@/lib/ragFileTypes";
 import { formatDate, formatFileSize } from "@/lib/utils";
 import {
   credentialsApi,
@@ -347,6 +349,7 @@ async function submitUpload(): Promise<void> {
 
     let totalChunks = 0;
     let totalPoints = 0;
+    let queued = 0;
     uploadProgress.value = { current: 0, total: uploadFiles.value.length };
 
     for (let i = 0; i < uploadFiles.value.length; i++) {
@@ -358,11 +361,19 @@ async function submitUpload(): Promise<void> {
         file,
         overrideDuplicates.value
       );
-      totalChunks += result.chunks_processed;
-      totalPoints += result.points_inserted;
+      if (result.status === "queued") {
+        queued += 1;
+      } else {
+        totalChunks += result.chunks_processed;
+        totalPoints += result.points_inserted;
+      }
     }
 
-    uploadSuccess.value = `Uploaded ${uploadFiles.value.length} file(s): ${totalChunks} chunks, ${totalPoints} vectors`;
+    const added = uploadFiles.value.length - queued;
+    const notes: string[] = [];
+    if (added > 0) notes.push(`Uploaded ${added} file(s): ${totalChunks} chunks, ${totalPoints} vectors`);
+    if (queued > 0) notes.push(`${queued} file(s) are being read in the background; open the store to follow them`);
+    uploadSuccess.value = notes.join(". ");
     uploadFiles.value = [];
     overrideDuplicates.value = false;
     await loadVectorStores();
@@ -870,7 +881,7 @@ async function deleteItem(pointId: string): Promise<void> {
       <div class="space-y-4">
         <p class="text-sm text-muted-foreground">
           Upload files to <strong>{{ uploadingStore?.name }}</strong>.
-          Supported formats: PDF, Markdown, Text, CSV, JSON
+          Supported formats: {{ RAG_FORMATS_LINE }}.
         </p>
 
         <div
@@ -888,7 +899,6 @@ async function deleteItem(pointId: string): Promise<void> {
             <span class="text-primary hover:underline text-sm">browse</span>
             <input
               type="file"
-              accept=".pdf,.md,.markdown,.txt,.csv,.json"
               multiple
               class="hidden"
               @change="handleFileSelect"
@@ -1237,6 +1247,13 @@ async function deleteItem(pointId: string): Promise<void> {
         >
           {{ itemsError }}
         </p>
+
+        <VectorStoreIngestJobs
+          v-if="itemsStore"
+          :key="itemsStore.id"
+          :store-id="itemsStore.id"
+          @finished="loadItems"
+        />
 
         <div
           v-if="itemsLoading && itemsSourceGroups.length === 0"
