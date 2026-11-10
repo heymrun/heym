@@ -96,7 +96,7 @@ const usesDecisionModel = computed((): boolean =>
           Model is required
         </p>
         <p class="text-xs text-muted-foreground">
-          Scores every result against the query in one request
+          Scores each result against the query in its own request
         </p>
       </div>
 

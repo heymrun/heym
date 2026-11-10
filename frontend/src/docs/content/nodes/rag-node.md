@@ -148,13 +148,13 @@ When reranking is enabled:
 A vector search ranks by similarity to the query. A reranker reads the query and each result together and orders them by how well each one answers the query. Switch on **Enable Reranker** and pick a credential in **Reranker Credential**. The list holds both kinds:
 
 - **Cohere**: sends the query and the results to Cohere Rerank.
-- **Decision Model**: enter the model in **Decision Model**, for example `jev-latest`. The node sends one request whose state holds the query and the array of results, and asks one score question per result: how relevant is this finding to the query, on a five-level rubric from *Irrelevant* to *Answers it*. Each answer becomes the result's `relevance_score` from 0 to 1.
+- **Decision Model**: enter the model in **Decision Model**, for example `jev-latest`. The node scores every result in its own request, up to 8 at a time. Each request's state holds the query and that one result, and asks one score question: how relevant is this finding to the query, on a five-level rubric from *Irrelevant* to *Answers it*. The answer becomes the result's `relevance_score` from 0 to 1. Scoring one result at a time keeps the model from mixing up which text it is judging.
 
 With either reranker the search first fetches a wider pool, at least 20 results or three times **Search Limit**, and the reranker keeps the best **Reranker Top N**.
 
 A reranker error fails the node, so a workflow never continues with results in the wrong order. A rejected key, a provider failure, or a result the decision model did not score is reported as `Reranker failed: ...` for a Decision Model credential. Turn on **Retry on failure** under the node's **Error Handling** to ride out rate limits.
 
-Decision Model reranking is recorded in the [Traces](../tabs/traces-tab.md) tab as a `decision.systemone` call under the RAG node, with its token usage, and the run's node output links to it.
+Each Decision Model rerank is recorded in the [Traces](../tabs/traces-tab.md) tab as a single `decision.systemone` entry under the RAG node, however many results it scored. The entry lists the query, every result and the answer the model gave for each, with the token usage of all requests added up. The run's node output links to it, failed or not.
 
 #### Hybrid search
 
