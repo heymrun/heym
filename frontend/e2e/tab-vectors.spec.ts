@@ -91,7 +91,7 @@ test("adds a plain-text file of any name and follows a background upload", async
 
   await page.goto("/?tab=vectorstores");
   await page.getByTitle("Upload files").click();
-  await expect(page.getByText(/audio \(mp3, wav, ogg, flac\)/)).toBeVisible();
+  await expect(page.getByText(/audio \(mp3, wav, ogg, opus, flac\)/)).toBeVisible();
   await page.locator('input[type="file"]').setInputFiles([
     { name: "burak.akgun", mimeType: "", buffer: Buffer.from("4 rfc ve pr\n") },
     { name: "call.mp3", mimeType: "audio/mpeg", buffer: Buffer.from("ID3\u0000") },
