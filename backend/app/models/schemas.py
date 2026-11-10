@@ -1198,6 +1198,29 @@ class VectorStoreShareResponse(BaseModel):
 class VectorStoreUploadResponse(BaseModel):
     chunks_processed: int
     points_inserted: int
+    # "queued": Heym reads the file in the background (audio, scanned PDF pages); it shows
+    # under GET /vector-stores/{id}/ingest-jobs until its chunks are in the store.
+    status: Literal["done", "queued"] = "done"
+    job_id: uuid.UUID | None = None
+
+
+class VectorStoreIngestJobResponse(BaseModel):
+    id: uuid.UUID
+    filename: str
+    file_size: int
+    kind: Literal["audio", "pdf"]
+    status: Literal["queued", "processing", "failed"]
+    error: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class VectorStoreIngestJobsResponse(BaseModel):
+    jobs: list[VectorStoreIngestJobResponse]
+    total: int
 
 
 class FileCheckItem(BaseModel):

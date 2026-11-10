@@ -2,7 +2,7 @@ import asyncio
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,6 +26,8 @@ from app.models.schemas import (
     TeamShareRequest,
     TeamShareResponse,
     VectorStoreCreate,
+    VectorStoreIngestJobResponse,
+    VectorStoreIngestJobsResponse,
     VectorStoreItem,
     VectorStoreItemsResponse,
     VectorStoreListResponse,
@@ -40,10 +42,10 @@ from app.models.schemas import (
     VectorStoreUpdate,
     VectorStoreUploadResponse,
 )
+from app.services import rag_ingest, rag_ingest_jobs
 from app.services.audit_log import audit
 from app.services.credential_access import team_shared_credential_clause
 from app.services.encryption import decrypt_config
-from app.services.file_processor import create_file_processor
 from app.services.upload_limits import read_upload_file_limited
 from app.services.vector_store import (
     create_vector_store_service_for_credential,
@@ -612,19 +614,23 @@ async def upload_file_to_vector_store(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> VectorStoreUploadResponse:
+    """Add a file to a store.
+
+    Documents, images and plain-text files of any name are read during the request. Audio and
+    PDFs with pages that need OCR are read in the background: the response says ``queued``
+    and the job is listed under ``/ingest-jobs`` until its chunks are in the store.
+    """
     store = await _get_accessible_store(vector_store_id, current_user.id, db)
 
-    allowed_extensions = {".pdf", ".md", ".markdown", ".txt", ".csv", ".json"}
     filename = file.filename or "unknown.txt"
-    ext = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-    if ext not in allowed_extensions:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"File type not allowed. Allowed: {', '.join(allowed_extensions)}",
-        )
-
     file_content = await read_upload_file_limited(file)
     file_size = len(file_content)
+    kind = rag_ingest.classify(filename, file_content)
+    if kind is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=rag_ingest.unsupported_message(filename),
+        )
 
     cred_result = await db.execute(select(Credential).where(Credential.id == store.credential_id))
     credential = cred_result.scalar_one_or_none()
@@ -634,14 +640,52 @@ async def upload_file_to_vector_store(
             detail="Credential not found",
         )
 
+    if await rag_ingest_jobs.has_active_job(db, store.id, filename):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"{filename} is still being processed in this store.",
+        )
+
+    try:
+        chunks = await asyncio.to_thread(
+            rag_ingest.quick_chunks, kind, file_content, filename, file_size
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+
+    if chunks is None:
+        job_id = await rag_ingest_jobs.enqueue(
+            db,
+            store_id=store.id,
+            user_id=current_user.id,
+            filename=filename,
+            data=file_content,
+            kind=kind,
+            override_duplicates=override_duplicates,
+        )
+        audit(
+            action="vector_store.upload",
+            actor=current_user,
+            target_type="vector_store",
+            target_id=store.id,
+            target_name=store.name,
+            file_name=filename,
+            file_size=file_size,
+            points_inserted=0,
+            replaced_duplicates=override_duplicates,
+            queued=True,
+        )
+        return VectorStoreUploadResponse(
+            chunks_processed=0, points_inserted=0, status="queued", job_id=job_id
+        )
+
     config = decrypt_config(credential.encrypted_config)
     service = get_vector_store_service_from_config(config, credential.type)
 
     if override_duplicates:
-        service.delete_by_source(store.collection_name, filename)
-
-    processor = create_file_processor()
-    chunks = processor.process_file(file_content, filename, file_size)
+        await asyncio.to_thread(service.delete_by_source, store.collection_name, filename)
 
     if not chunks:
         return VectorStoreUploadResponse(chunks_processed=0, points_inserted=0)
@@ -650,7 +694,9 @@ async def upload_file_to_vector_store(
     metadata_list = [chunk.metadata for chunk in chunks]
 
     try:
-        point_ids = service.insert_batch(store.collection_name, texts, metadata_list)
+        point_ids = await asyncio.to_thread(
+            service.insert_batch, store.collection_name, texts, metadata_list
+        )
     except VectorStoreBackendUnavailableError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -677,6 +723,42 @@ async def upload_file_to_vector_store(
         chunks_processed=len(chunks),
         points_inserted=len(point_ids),
     )
+
+
+@router.get("/{vector_store_id}/ingest-jobs", response_model=VectorStoreIngestJobsResponse)
+async def list_ingest_jobs(
+    vector_store_id: uuid.UUID,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> VectorStoreIngestJobsResponse:
+    """Uploads of this store that Heym is reading in the background, or failed to read."""
+    store = await _get_accessible_store(vector_store_id, current_user.id, db)
+    await rag_ingest_jobs.fail_stale_jobs(db, store.id)
+    jobs, total = await rag_ingest_jobs.list_jobs(db, store.id, limit=limit, offset=offset)
+    return VectorStoreIngestJobsResponse(
+        jobs=[VectorStoreIngestJobResponse.model_validate(job) for job in jobs],
+        total=total,
+    )
+
+
+@router.delete("/{vector_store_id}/ingest-jobs/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def dismiss_ingest_job(
+    vector_store_id: uuid.UUID,
+    job_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Remove a failed background upload from the store's list."""
+    store = await _get_accessible_store(vector_store_id, current_user.id, db)
+    outcome = await rag_ingest_jobs.dismiss(db, store.id, job_id)
+    if outcome == "missing":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    if outcome == "running":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="This file is still being processed."
+        )
 
 
 @router.get("/{vector_store_id}/shares", response_model=list[VectorStoreShareResponse])
