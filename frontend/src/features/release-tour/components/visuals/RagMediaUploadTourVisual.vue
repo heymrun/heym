@@ -1,40 +1,44 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import { AudioLines, Database, FileText, Image, Loader2 } from "lucide-vue-next";
+import { computed, type Component } from "vue";
+import { AudioLines, Database, FileScan, FileText, Image, Loader2 } from "lucide-vue-next";
 
 import { useCycleStep } from "@/features/release-tour/useCycleStep";
 
-type FileState = "dropped" | "working" | "added";
+interface MockFile {
+  name: string;
+  icon: Component;
+  /** Read during the upload; otherwise in the background, with this label meanwhile. */
+  working: string | null;
+}
 
-// Mock UI only. 0: files dropped · 1: the image is read, audio transcribes · 2: all are sources.
+// Mock UI only. 0: files dropped · 1: images and text are in, the rest is read in the
+// background · 2: every file is a source.
 const step = useCycleStep(3, 2400);
 
-const files = [
-  { name: "receipt.jpg", icon: Image, quick: true },
-  { name: "burak.akgun", icon: FileText, quick: true },
-  { name: "support-call.mp3", icon: AudioLines, quick: false },
+const files: MockFile[] = [
+  { name: "receipt.jpg", icon: Image, working: null },
+  { name: "meeting-notes", icon: FileText, working: null },
+  { name: "contract-scan.pdf", icon: FileScan, working: "Reading scanned pages" },
+  { name: "support-call.mp3", icon: AudioLines, working: "Transcribing" },
 ];
 
 const caption = computed<string>(
   () =>
     [
-      "Drop photos, recordings and text files on a store",
-      "Images are read now, audio transcribes in the background",
+      "Drop photos, scans, recordings and text files on a store",
+      "Images are read now, scans and audio in the background",
       "Every file is a searchable source for RAG",
     ][step.value],
 );
 
-function state(quick: boolean): FileState {
-  if (step.value === 0) return "dropped";
-  if (step.value === 1) return quick ? "added" : "working";
-  return "added";
+function isAdded(file: MockFile): boolean {
+  return step.value === 2 || (step.value === 1 && file.working === null);
 }
 
-const stateLabel: Record<FileState, string> = {
-  dropped: "Dropped",
-  working: "Transcribing",
-  added: "Added",
-};
+function stateLabel(file: MockFile): string {
+  if (step.value === 0) return "Dropped";
+  return isAdded(file) ? "Added" : (file.working ?? "Added");
+}
 </script>
 
 <template>
@@ -47,8 +51,8 @@ const stateLabel: Record<FileState, string> = {
       <div
         v-for="file in files"
         :key="file.name"
-        class="flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-[11px] leading-4 transition-colors duration-500"
-        :class="state(file.quick) === 'added' ? 'border-emerald-500/40 bg-emerald-500/10' : 'border-border bg-background'"
+        class="flex min-h-0 flex-1 items-center gap-2 rounded-md border px-2.5 text-[11px] leading-4 transition-colors duration-500"
+        :class="isAdded(file) ? 'border-emerald-500/40 bg-emerald-500/10' : 'border-border bg-background'"
       >
         <component
           :is="file.icon"
@@ -57,10 +61,10 @@ const stateLabel: Record<FileState, string> = {
         <span class="truncate text-foreground">{{ file.name }}</span>
         <span class="ml-auto flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground">
           <Loader2
-            v-if="state(file.quick) === 'working'"
+            v-if="step > 0 && !isAdded(file)"
             class="h-3 w-3 animate-spin"
           />
-          {{ stateLabel[state(file.quick)] }}
+          {{ stateLabel(file) }}
         </span>
       </div>
     </div>

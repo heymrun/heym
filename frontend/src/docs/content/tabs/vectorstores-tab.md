@@ -24,7 +24,7 @@ The **Vectorstores** tab manages vector stores used by [RAG](../nodes/rag-node.m
   - **Audio** – mp3, wav, ogg and flac, transcribed with the Converter's Whisper model on your
     own instance; each chunk keeps where it starts and ends in the recording
     (`start_seconds`, `end_seconds`)
-  - **Any other plain-text file** – a file such as `notes` or `burak.akgun` is read as text when
+  - **Any other plain-text file** – a file such as `notes` or `README` is read as text when
     it is valid UTF-8
 - **Scanned PDFs** – pages without a text layer are read with OCR, up to 200 such pages per file
 - **Background uploads** – audio and PDFs with scanned pages take minutes, so Heym reads them in

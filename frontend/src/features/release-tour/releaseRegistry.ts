@@ -29,7 +29,7 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
     sections: [{
       id: "rag-media-upload", title: "Images, audio and any text file in vector stores",
       publishedAt: new Date("2026-11-10T22:00:00Z"),
-      blocks: [{ type: "prose", markdown: "Drop a photo, a screenshot, a voice note or a call recording on a vector store and it becomes searchable. Images are read with the Converter's OCR, and audio is transcribed on your own instance with the same Whisper model, in the background, so a long recording does not hold the upload open. PDF pages without a text layer are now read with OCR instead of being skipped, and a plain-text file of any name, such as `notes` or `burak.akgun`, goes in as text. Heym Work's Knowledge pages take the same files." }],
+      blocks: [{ type: "prose", markdown: "Drop a photo, a screenshot, a voice note or a call recording on a vector store and it becomes searchable. Images are read with the Converter's OCR, and audio is transcribed on your own instance with the same Whisper model, in the background, so a long recording does not hold the upload open. PDF pages without a text layer are now read with OCR instead of being skipped, and a plain-text file of any name, such as `notes` or `README`, goes in as text. Heym Work's Knowledge pages take the same files." }],
       tour: {
         description: "Put photos, recordings, scanned PDFs and plain-text files of any name into a vector store.",
         useCases: ["Search call recordings from a RAG node", "Make photographed receipts and whiteboards searchable", "Index scanned contracts without a separate OCR step"],
