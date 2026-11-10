@@ -77,7 +77,14 @@ NODE_CREDENTIAL_FIELDS: dict[str, tuple[CredentialField, ...]] = {
         _field("githubCredentialId", CredentialType.github),
     ),
     "rabbitmq": (_field("credentialId", CredentialType.rabbitmq),),
-    "rag": (_field("rerankerCredentialId", CredentialType.cohere, required=False),),
+    "rag": (
+        _field(
+            "rerankerCredentialId",
+            CredentialType.cohere,
+            CredentialType.decision,
+            required=False,
+        ),
+    ),
     "redis": (_field("credentialId", CredentialType.redis),),
     "s3": (_field("credentialId", CredentialType.s3),),
     "sendEmail": (_field("credentialId", CredentialType.smtp),),
@@ -155,7 +162,8 @@ CREDENTIAL_TYPE_PURPOSE: dict[CredentialType, str] = {
     CredentialType.clickhouse: "ClickHouse connection; ClickHouse node",
     CredentialType.rag: "Vector store and embedding settings; vector stores and the RAG node",
     CredentialType.decision: (
-        "Decision model endpoint such as TypeSafe Jev; Decision node and Model Router"
+        "Decision model endpoint such as TypeSafe Jev; Decision node, Model Router and RAG "
+        "reranking"
     ),
     CredentialType.model_router: (
         "Picks one of the user's LLM credentials per request; LLM and Agent nodes"

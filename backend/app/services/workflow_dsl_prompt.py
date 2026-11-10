@@ -2391,6 +2391,11 @@ The last node in the iteration body MUST connect BACK to the loop node's `loop` 
   - `searchLimit`: Maximum number of results to return (only for "search" operation, default: 3)
   - `metadataFilters`: JSON object with metadata filters for search (only for "search" operation). String values support expressions and are resolved after the JSON is parsed, so `{"url": "$start.url"}` filters on the resolved value, and a whole-string expression keeps its type (`{"count": "$start.count"}` matches a stored number)
   - `hybridSearch`: Boolean (only for "search" operation, default false). When true, the vector search is fused with a BM25 keyword search over the stored text (reciprocal rank fusion), so exact terms such as ids, names and error codes are found next to semantic matches. Combines with `metadataFilters` and the reranker. Results then also carry `vector_score` and `keyword_score`, and `score` is the fused 0-1 score instead of a vector similarity
+  - `enableReranker`: Boolean (only for "search" operation, default false). Reranks the hits by relevance to `queryText`; the search then fetches a wider pool (at least 20) for the reranker to choose from. Results carry `relevance_score` (0-1, higher is more relevant) next to `score`, and `reranked` is true
+  - `rerankerCredentialId`: Credential that does the reranking: a `cohere` credential (Cohere Rerank) or a `decision` credential (Decision Model). A decision model scores each hit against the query in its own request, up to 8 at a time
+  - `rerankerModel`: Decision model name such as "jev-latest". Required when `rerankerCredentialId` is a `decision` credential, ignored for Cohere
+  - `rerankerTopN`: Number of results kept after reranking (default `searchLimit`)
+  - A reranker error (rejected key, provider failure, a hit the decision model did not score) fails the node; it never falls back to the unranked order
 
 **SETUP**: Requires a Vector Store created in the Vector Stores tab with a "RAG: Qdrant + OpenAI" credential (external Qdrant server), a "RAG: Psql + OpenAI" credential (vectors stored in Heym's own Postgres database via pgvector — no external service), or a "RAG: Custom Embeddings" credential (any OpenAI-compatible embedding endpoint by URL, targeting either backend). The same RAG operations, metadata filters, and reranking work identically with every backend.
 
@@ -2401,7 +2406,7 @@ The last node in the iteration body MUST connect BACK to the loop node's `loop` 
 | `insert` | documentContent, documentMetadata (optional) | Insert a document into the vector store |
 | `upsert` | documentId, documentContent, documentIdField (optional), documentMetadata (optional) | Replace every point whose id field matches, then insert the new version |
 | `delete` | documentId, documentIdField (optional) | Delete every point whose id field matches |
-| `search` | queryText, searchLimit (optional), metadataFilters (optional), hybridSearch (optional) | Search for similar documents; with hybridSearch, vector and BM25 keyword matches are fused |
+| `search` | queryText, searchLimit (optional), metadataFilters (optional), hybridSearch (optional), enableReranker + rerankerCredentialId (+ rerankerModel for a decision credential) (optional) | Search for similar documents; with hybridSearch, vector and BM25 keyword matches are fused; with the reranker, hits are reordered by relevance |
 
 **Document source**: a document stored without a `source` key in `documentMetadata` is stamped with `source: "workflow:<workflow name>"`, so the Vectorstores tab can show which workflow stored it. Set `source` yourself to override it.
 

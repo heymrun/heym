@@ -693,6 +693,8 @@ export interface NodeData {
   enableReranker?: boolean;
   rerankerCredentialId?: string;
   rerankerTopN?: number;
+  /** Decision model name; used only when `rerankerCredentialId` is a Decision Model credential. */
+  rerankerModel?: string;
   gristOperation?: GristOperation;
   gristDocId?: string;
   gristTableId?: string;

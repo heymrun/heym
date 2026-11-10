@@ -6,6 +6,7 @@ import Label from "@/components/ui/Label.vue";
 import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 import Select from "@/components/ui/Select.vue";
 import { usePropertiesPanelContext } from "../usePropertiesPanelController";
+import RagRerankerSettings from "./RagRerankerSettings.vue";
 
 const {
   workflowStore,
@@ -14,7 +15,6 @@ const {
   vectorStoreOptions,
   ragDbTypeOptions,
   ragOperationOptions,
-  cohereCredentialOptions,
   updateNodeData,
   ragExpressionFieldCount,
   ragExpressionFieldIndex,
@@ -288,64 +288,7 @@ const {
         </p>
       </div>
 
-      <div class="space-y-3 pt-3 border-t">
-        <div class="flex items-center justify-between">
-          <Label>Enable Reranker</Label>
-          <label class="relative inline-flex items-center cursor-pointer">
-            <input
-              type="checkbox"
-              :checked="selectedNode.data.enableReranker || false"
-              class="sr-only peer"
-              @change="updateNodeData('enableReranker', ($event.target as HTMLInputElement).checked)"
-            >
-            <div
-              class="w-9 h-5 bg-muted rounded-full peer peer-checked:bg-primary transition-colors after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-4"
-            />
-          </label>
-        </div>
-        <p class="text-xs text-muted-foreground">
-          Use Cohere to rerank results for better relevance
-        </p>
-
-        <template v-if="selectedNode.data.enableReranker">
-          <div class="space-y-2">
-            <Label>Cohere Credential</Label>
-            <Select
-              :model-value="selectedNode.data.rerankerCredentialId || ''"
-              :options="cohereCredentialOptions"
-              @update:model-value="updateNodeData('rerankerCredentialId', $event)"
-            />
-            <div v-if="!selectedNode.data.rerankerCredentialId">
-              <p class="text-xs text-amber-500 flex items-center gap-1">
-                <AlertTriangle class="h-3 w-3" />
-                Cohere credential required for reranking
-              </p>
-              <p class="text-xs text-muted-foreground mt-1">
-                <a
-                  href="/?tab=credentials"
-                  class="text-primary hover:underline"
-                  @click.prevent="$router.push('/?tab=credentials')"
-                >Add Cohere credential</a> in Dashboard
-              </p>
-            </div>
-          </div>
-
-          <div class="space-y-2">
-            <Label>Reranker Top N</Label>
-            <Input
-              type="number"
-              :model-value="selectedNode.data.rerankerTopN || selectedNode.data.searchLimit || 5"
-              placeholder="5"
-              min="1"
-              max="50"
-              @update:model-value="updateNodeData('rerankerTopN', $event ? parseInt($event as string) : 5)"
-            />
-            <p class="text-xs text-muted-foreground">
-              Number of top results to return after reranking
-            </p>
-          </div>
-        </template>
-      </div>
+      <RagRerankerSettings />
     </template>
 
     <div class="space-y-2 pt-2 border-t">

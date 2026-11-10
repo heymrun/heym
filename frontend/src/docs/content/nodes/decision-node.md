@@ -214,6 +214,8 @@ Editing a credential keeps the stored key when the key field is left blank; rety
 
 The same credential can judge [Evals](../tabs/evals-tab.md) runs: with **LLM-as-Judge** selected, pick it as the judge and the decision model scores every answer against the expected output.
 
+It can also rerank search results in a [RAG](./rag-node.md#reranking) node: pick it as the **Reranker Credential** and the decision model scores every result against the query.
+
 Heym blocks outbound requests to private and loopback addresses by default, so a decision endpoint you run yourself on `localhost` or a private range needs `HEYM_HTTP_ALLOW_PRIVATE_URLS=true`.
 
 Decision models do not appear in the LLM pricing tables Heym syncs, so the **Cost** column in [Traces](../tabs/traces-tab.md) stays empty for these calls. Token counts are still recorded, and you can add your own price with a pricing override.

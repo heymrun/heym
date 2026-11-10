@@ -1039,6 +1039,11 @@ export function usePropertiesPanelController() {
         } catch {
           cohereCredentials.value = [];
         }
+        try {
+          decisionCredentials.value = await credentialsApi.listDecision();
+        } catch {
+          decisionCredentials.value = [];
+        }
       }
 
       if (type === "grist") {
@@ -6579,35 +6584,6 @@ export function usePropertiesPanelController() {
     );
   });
 
-  const cohereCredentialOptions = computed(() => {
-    const node = selectedNode.value;
-    const selectedCredentialId =
-      node && node.type === "rag"
-        ? (node.data.rerankerCredentialId as string | undefined)
-        : undefined;
-
-    const options: { value: string; label: string }[] = [
-      { value: "", label: "Select Cohere credential..." },
-      ...cohereCredentials.value.map((c) => ({
-        value: c.id,
-        label: c.is_shared ? `${c.name} - shared` : c.name,
-      })),
-    ];
-
-    if (
-      selectedCredentialId &&
-      !cohereCredentials.value.some((c) => c.id === selectedCredentialId) &&
-      !options.some((opt) => opt.value === selectedCredentialId)
-    ) {
-      options.push({
-        value: selectedCredentialId,
-        label: "Shared Cohere credential (from owner)",
-      });
-    }
-
-    return options;
-  });
-
   const googleSheetsAppendPlacementOptions = [
     { value: "append", label: "Bottom (after last row)" },
     { value: "prepend", label: "Top (below row 1)" },
@@ -9673,7 +9649,7 @@ export function usePropertiesPanelController() {
     googleDriveOperationOptions,
     googleDriveExportFormatOptions,
     googleSheetsCredentialOptions,
-    cohereCredentialOptions,
+    cohereCredentials,
     gristOperationOptions,
     googleSheetsOperationOptions,
     googleSheetsAppendPlacementOptions,

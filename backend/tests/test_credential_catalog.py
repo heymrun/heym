@@ -438,7 +438,7 @@ class CredentialsPromptTests(unittest.TestCase):
 
         self.assertIn("- `github`: `credentialId` (github)", prompt)
         self.assertIn("`githubCredentialId` (github)", prompt)
-        self.assertIn("`rerankerCredentialId` (cohere, optional)", prompt)
+        self.assertIn("`rerankerCredentialId` (cohere or decision, optional)", prompt)
         purpose = CREDENTIAL_TYPE_PURPOSE[CredentialType.google_sheets]
         self.assertIn(f"- `google_sheets`: {purpose}", prompt)
 

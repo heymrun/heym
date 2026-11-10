@@ -13,7 +13,7 @@ Credentials store API keys and secrets used by workflow nodes. You add them in t
 | Node type | Typical credential | Purpose |
 |-----------|--------------------|---------|
 | [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md), [Evals](../tabs/evals-tab.md) | OpenAI, Google, Custom | API key for the model |
-| [Decision](../nodes/decision-node.md), [Evals](../tabs/evals-tab.md) judge | Decision Model | Base URL of a decision model endpoint, plus an optional API key |
+| [Decision](../nodes/decision-node.md), [Evals](../tabs/evals-tab.md) judge, [RAG](../nodes/rag-node.md#reranking) reranker | Decision Model | Base URL of a decision model endpoint, plus an optional API key |
 | [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md), Chat, AI Defaults, [Evals](../tabs/evals-tab.md) prompt suites | Model Router (Auto Model) | Picks which of your models serves each request, using a decision model |
 | [Codex](../nodes/codex-node.md) | OpenAI Codex + GitHub | ChatGPT subscription sign-in (OAuth) or a Codex access token for the runner, plus a GitHub PAT for repository operations |
 | [OpenCode Go](../nodes/opencode-go-node.md) | OpenCode Go + GitHub | An OpenCode Go gateway API key (optional base URL) for the runner, plus a GitHub PAT for repository operations |
