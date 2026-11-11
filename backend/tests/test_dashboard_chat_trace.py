@@ -196,13 +196,65 @@ class DashboardChatTurnTraceTests(IsolatedAsyncioTestCase):
         record_trace.assert_called_once()
         kwargs = record_trace.call_args.kwargs
         self.assertTrue(kwargs["response"]["cancelled"])
-        self.assertEqual(len(kwargs["response"]["turn_timings"]), 1)
+        self.assertEqual(len(kwargs["response"]["turn_timings"]), 2)
+        self.assertTrue(kwargs["response"]["turn_timings"][-1]["cancelled"])
+        self.assertIsNone(kwargs["response"]["turn_timings"][-1]["toolCalls"])
         self.assertEqual(kwargs["total_tokens"], 110)
 
-    async def test_cancel_before_any_call_records_nothing(self) -> None:
+    async def test_cancel_before_any_call_records_cancelled_without_inventing_usage(self) -> None:
         cancel_event = Event()
         cancel_event.set()
 
         record_trace = await self._run([_final_response()], _trace_context(), cancel_event)
 
-        record_trace.assert_not_called()
+        record_trace.assert_called_once()
+        kwargs = record_trace.call_args.kwargs
+        self.assertTrue(kwargs["response"]["cancelled"])
+        self.assertEqual(kwargs["response"]["turn_timings"], [])
+        self.assertIsNone(kwargs["total_tokens"])
+
+    async def test_cancel_while_first_model_call_is_pending_records_its_timing(self) -> None:
+        record_trace = await self._run([asyncio.CancelledError()], _trace_context())
+        record_trace.assert_called_once()
+        kwargs = record_trace.call_args.kwargs
+        self.assertTrue(kwargs["response"]["cancelled"])
+        self.assertTrue(kwargs["response"]["turn_timings"][0]["cancelled"])
+        self.assertIsNone(kwargs["total_tokens"])
+
+    async def test_cancel_mid_tool_records_it_and_never_starts_the_next_tool(self) -> None:
+        response = _tool_response()
+        second = MagicMock(id="teams-call")
+        second.function.name = "get_teams"
+        second.function.arguments = "{}"
+        response.choices[0].message.tool_calls.append(second)
+        with (
+            patch.object(
+                ai_assistant,
+                "get_workflows_for_user_with_inputs",
+                AsyncMock(side_effect=asyncio.CancelledError),
+            ),
+            patch.object(ai_assistant, "get_teams_tool", AsyncMock()) as teams,
+            patch.object(ai_assistant, "record_llm_trace") as trace,
+            patch.object(ai_assistant, "record_run_history") as history,
+        ):
+            client = MagicMock()
+            client.chat.completions.create.return_value = response
+            with self.assertRaises(asyncio.CancelledError):
+                async for _ in ai_assistant.stream_dashboard_chat(
+                    client,
+                    "qwen3.8-flash",
+                    "system",
+                    [{"role": "user", "content": "List both"}],
+                    AsyncMock(),
+                    SimpleNamespace(id=uuid.uuid4()),
+                    "OpenAI",
+                    "http://localhost",
+                    _trace_context(),
+                    Event(),
+                ):
+                    pass
+        teams.assert_not_awaited()
+        trace.assert_called_once()
+        self.assertEqual(trace.call_args.kwargs["response"]["tool_calls"][0]["status"], "cancelled")
+        history.assert_called_once()
+        self.assertEqual(history.call_args.kwargs["status"], "cancelled")

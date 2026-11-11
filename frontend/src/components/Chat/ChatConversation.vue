@@ -18,16 +18,16 @@ import {
   TriangleAlert,
   Volume2,
   AudioLines,
-  X,
 } from "lucide-vue-next";
 
-import type { Message, QueuedMessage, WorkflowPreview } from "@/types/chat";
+import type { Message, WorkflowPreview } from "@/types/chat";
 import ChatToolCall from "@/components/Chat/ChatToolCall.vue";
 import ChatContextBadge from "@/components/Chat/ChatContextBadge.vue";
 import ChatAttachmentChips from "@/components/Chat/ChatAttachmentChips.vue";
 import ChatContextChips from "@/components/Chat/ChatContextChips.vue";
 import ChatEvalSuiteCards from "@/components/Chat/ChatEvalSuiteCards.vue";
 import ChatMessageEditor from "@/components/Chat/ChatMessageEditor.vue";
+import ChatMessageQueue from "@/components/Chat/ChatMessageQueue.vue";
 import ReadonlyCanvasPreview from "@/components/Canvas/ReadonlyCanvasPreview.vue";
 import Button from "@/components/ui/Button.vue";
 import ClarifyCard from "@/components/ui/ClarifyCard.vue";
@@ -119,9 +119,6 @@ const copiedMessageId = ref<string | null>(null);
 const editingMessageId = ref<string | null>(null);
 const editError = ref<string | null>(null);
 const isSavingEdit = ref(false);
-const queueEditingId = ref<string | null>(null);
-const queueEditingValue = ref("");
-const queueBusyIds = reactive<Set<string>>(new Set());
 const isFixingTranscription = ref(false);
 // Dictation fills the message box; stopping it asks the model to clean the text up.
 const dictation = useDictation({
@@ -243,11 +240,6 @@ function messageAttachmentNames(msg: Message): string[] {
   if (msg.attachmentNames && msg.attachmentNames.length > 0) return msg.attachmentNames;
   if (msg.role !== "user") return [];
   return splitAttachmentBlocks(msg.content).blocks.map((block) => block.name);
-}
-
-function queuedAttachmentNames(queued: QueuedMessage): string[] {
-  if (queued.attachment_names && queued.attachment_names.length > 0) return queued.attachment_names;
-  return queued.attachment_name ? [queued.attachment_name] : [];
 }
 
 function messageContextItems(msg: Message): ChatContextItem[] {
@@ -628,45 +620,6 @@ async function copyMessage(msg: Message): Promise<void> {
     }, 1600);
   } catch {
     // ignore clipboard errors
-  }
-}
-
-function startQueuedEdit(message: QueuedMessage): void {
-  queueEditingId.value = message.id;
-  queueEditingValue.value = message.content;
-  nextTick(() => {
-    (chatRootRef.value?.querySelector("[data-queued-edit]") as HTMLTextAreaElement | null)
-      ?.focus();
-  });
-}
-
-function cancelQueuedEdit(): void {
-  queueEditingId.value = null;
-  queueEditingValue.value = "";
-}
-
-async function saveQueuedEdit(message: QueuedMessage): Promise<void> {
-  const nextContent = queueEditingValue.value.trim();
-  if (!nextContent || queueBusyIds.has(message.id)) return;
-  queueBusyIds.add(message.id);
-  try {
-    await chatStore.updateQueuedMessage(props.conversationId, message.id, nextContent);
-    cancelQueuedEdit();
-  } finally {
-    queueBusyIds.delete(message.id);
-  }
-}
-
-async function deleteQueuedMessage(message: QueuedMessage): Promise<void> {
-  if (queueBusyIds.has(message.id)) return;
-  queueBusyIds.add(message.id);
-  try {
-    await chatStore.deleteQueuedMessage(props.conversationId, message.id);
-    if (queueEditingId.value === message.id) {
-      cancelQueuedEdit();
-    }
-  } finally {
-    queueBusyIds.delete(message.id);
   }
 }
 
@@ -1468,101 +1421,12 @@ onUnmounted(() => {
         v-if="queuedMessages.length > 0 || attachedFiles.length > 0 || attachmentErrors.length > 0 || contextItems.length > 0"
         class="mb-1.5 flex flex-col gap-1.5 px-1"
       >
-        <div
+        <ChatMessageQueue
           v-if="queuedMessages.length > 0"
-          class="w-full min-w-0 rounded-lg border border-border/50 bg-muted/35 px-2.5 py-2"
-        >
-          <p class="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-            Queue
-          </p>
-          <ul class="flex max-h-24 flex-col divide-y divide-border/40 overflow-y-auto">
-            <li
-              v-for="queued in queuedMessages"
-              :key="queued.id"
-              class="group/queue relative min-w-0 py-1.5 pr-[4.5rem] first:pt-0 last:pb-0"
-            >
-              <template v-if="queueEditingId === queued.id">
-                <div class="mb-1 flex items-center gap-2 text-[10px] font-medium text-muted-foreground">
-                  <span
-                    v-if="queueBusyIds.has(queued.id)"
-                    class="uppercase tracking-wide"
-                  >
-                    Saving...
-                  </span>
-                </div>
-                <textarea
-                  v-model="queueEditingValue"
-                  data-queued-edit
-                  rows="2"
-                  class="min-h-16 w-full resize-y rounded-lg border border-border/60 bg-background/80 px-2 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-primary/40"
-                  :disabled="queueBusyIds.has(queued.id)"
-                  @keydown.enter.exact.prevent="saveQueuedEdit(queued)"
-                  @keydown.esc.prevent="cancelQueuedEdit"
-                />
-                <div class="mt-2 flex justify-end gap-1.5">
-                  <button
-                    type="button"
-                    class="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
-                    title="Cancel edit"
-                    :disabled="queueBusyIds.has(queued.id)"
-                    @click="cancelQueuedEdit"
-                  >
-                    <X class="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    class="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
-                    title="Save queued message"
-                    :disabled="!queueEditingValue.trim() || queueBusyIds.has(queued.id)"
-                    @click="saveQueuedEdit(queued)"
-                  >
-                    <Check class="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              </template>
-              <template v-else>
-                <div class="flex min-w-0 items-start gap-2 text-sm text-foreground">
-                  <span
-                    class="mt-[3px] shrink-0 text-xs leading-none text-muted-foreground"
-                    aria-hidden="true"
-                  >
-                    •
-                  </span>
-                  <div class="min-w-0 flex-1">
-                    <p class="min-w-0 truncate leading-5">
-                      {{ extractChatContext(queued.content).text }}
-                    </p>
-                    <div
-                      v-if="queuedAttachmentNames(queued).length > 0"
-                      class="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground"
-                    >
-                      <Paperclip class="h-3 w-3 shrink-0" />
-                      <span class="truncate">{{ queuedAttachmentNames(queued).join(", ") }}</span>
-                    </div>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  class="absolute right-8 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
-                  title="Edit queued message"
-                  :disabled="queueBusyIds.has(queued.id)"
-                  @click="startQueuedEdit(queued)"
-                >
-                  <Pencil class="h-3.5 w-3.5" />
-                </button>
-                <button
-                  type="button"
-                  class="absolute right-1.5 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
-                  title="Delete queued message"
-                  :disabled="queueBusyIds.has(queued.id)"
-                  @click="deleteQueuedMessage(queued)"
-                >
-                  <X class="h-3.5 w-3.5" />
-                </button>
-              </template>
-            </li>
-          </ul>
-        </div>
+          :key="conversationId"
+          :conversation-id="conversationId"
+          :messages="queuedMessages"
+        />
 
         <ChatContextChips
           v-if="contextItems.length > 0"

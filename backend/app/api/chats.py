@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 import uuid
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass, replace
@@ -62,6 +63,7 @@ from app.services import chat_task_registry as registry
 from app.services.chat_attachments import MAX_CHAT_ATTACHMENTS, stored_attachments
 from app.services.chat_build_mode import BuildRequest
 from app.services.chat_eval_mode import EVAL_SUITE_SAVED_EVENT
+from app.services.chat_history import INTERRUPTED_TURN_INSTRUCTIONS, messages_for_chat_turn
 from app.services.chat_message_edit import (
     EDIT_NOT_FOUND,
     EDIT_WHILE_RUNNING,
@@ -87,9 +89,10 @@ from app.services.heym_agent.links import (
 )
 from app.services.heym_agent.turn import AgentOutcome, AgentTurnResult, outcome_of
 from app.services.hitl_service import build_public_base_url
-from app.services.llm_trace import LLMTraceContext
+from app.services.llm_trace import LLMTraceContext, record_llm_trace
 from app.services.mcp_elicitation import MCPClientChannel
 from app.services.prompt_suite_service import owned_suite_name
+from app.services.run_history import record_run_history
 from app.services.workflow_access import user_can_write_workflow
 
 router = APIRouter()
@@ -129,6 +132,7 @@ class ChatTurn:
     on_event: Callable[[dict], Awaitable[None]] | None = None
     # A2A turns: tags this turn's messages with their task, for the task's history.
     a2a_task_id: uuid.UUID | None = None
+    interrupted: bool = False
 
 
 @dataclass(frozen=True)
@@ -362,6 +366,8 @@ async def _get_conversation_or_404(
 # Postgres-backed registry.
 _cancel_events: dict[str, Event] = {}
 _chat_tasks: dict[str, "asyncio.Task[None]"] = {}
+# Workers still stopping their predecessor and claiming the requested queue item.
+_queue_interrupt_tasks: set[asyncio.Task[None]] = set()
 
 
 def request_chat_cancel(conv_id: str) -> bool:
@@ -404,6 +410,16 @@ async def _run_chat_turn(
     workflow_context_markers: list[str] = []
     tool_calls_for_message: list[dict] = []
     narration = _RoundNarration()
+    started = time.monotonic()
+    stream_started = False
+    trace_context = LLMTraceContext(
+        user_id=user_id,
+        credential_id=turn.credential_id,
+        node_label="Dashboard Chat",
+        source="dashboard_chat",
+        session_id=conv_id,
+    )
+    history: list[dict[str, str]] = []
 
     try:
         async with async_session_maker() as db:
@@ -428,7 +444,7 @@ async def _run_chat_turn(
                 .order_by(DashboardMessage.created_at)
             )
             all_messages = msg_result.scalars().all()
-            history = [{"role": m.role, "content": m.content} for m in all_messages]
+            history = messages_for_chat_turn(all_messages, interrupted=turn.interrupted)
             if len(history) > MAX_DASHBOARD_CHAT_HISTORY:
                 history = history[-MAX_DASHBOARD_CHAT_HISTORY:]
 
@@ -489,6 +505,11 @@ async def _run_chat_turn(
                     parts, full_system_prompt=parts.full_system_prompt + workspace_block
                 )
 
+            if turn.interrupted:
+                parts = replace(
+                    parts,
+                    full_system_prompt=parts.full_system_prompt + INTERRUPTED_TURN_INSTRUCTIONS,
+                )
             # A Model Router decision is a blocking model call; keep it off the event loop.
             client, provider, model, trace_context = await asyncio.to_thread(
                 resolve_model_binding,
@@ -501,6 +522,7 @@ async def _run_chat_turn(
                 message=turn.content,
             )
 
+            stream_started = True
             async for chunk in stream_dashboard_chat(
                 client,
                 model,
@@ -602,6 +624,29 @@ async def _run_chat_turn(
             )
 
     except asyncio.CancelledError:
+        if not stream_started:
+            elapsed_ms = round((time.monotonic() - started) * 1000, 2)
+            record_llm_trace(
+                context=trace_context,
+                request_type="chat.completions",
+                request={
+                    "model": turn.model,
+                    "messages": history or [{"role": "user", "content": turn.content}],
+                },
+                response={"cancelled": True, "text": "", "turn_timings": []},
+                model=turn.model,
+                elapsed_ms=elapsed_ms,
+            )
+            record_run_history(
+                user_id=user_id,
+                run_type="dashboard_chat",
+                workflow_id=None,
+                inputs={"message": turn.content},
+                outputs={"text": ""},
+                status="cancelled",
+                execution_time_ms=elapsed_ms,
+                trigger_source="dashboard_chat",
+            )
         assistant_content = "".join(assistant_chunks)
         for marker in workflow_context_markers:
             if marker and marker not in assistant_content:
@@ -627,12 +672,15 @@ async def _run_chat_turn(
                 select(DashboardConversation).where(DashboardConversation.id == conv_uuid)
             )
             conversation = conv_result.scalar_one_or_none()
-            if conversation is not None:
+            owns_worker = _worker_has_ownership(conv_id)
+            if conversation is not None and owns_worker:
                 conversation.is_running = False
                 conversation.queue_paused_by_message_id = None
-            await _clear_queue_items(cancel_db, conv_uuid)
+            if owns_worker:
+                await _clear_queue_items(cancel_db, conv_uuid)
             await cancel_db.commit()
-        await registry.publish(conv_id, {"type": "queue_cleared"})
+        if owns_worker:
+            await registry.publish(conv_id, {"type": "queue_cleared"})
         await registry.publish(
             conv_id,
             {
@@ -644,7 +692,7 @@ async def _run_chat_turn(
         raise
 
 
-async def _dequeue_next_turn(conv_id: str) -> ChatTurn | None:
+async def _dequeue_next_turn(conv_id: str, item_id: uuid.UUID | None = None) -> ChatTurn | None:
     conv_uuid = uuid.UUID(conv_id)
     async with async_session_maker() as db:
         conv_result = await db.execute(
@@ -660,11 +708,15 @@ async def _dequeue_next_turn(conv_id: str) -> ChatTurn | None:
             await db.commit()
             return None
 
+        item_query = select(DashboardChatQueueItem).where(
+            DashboardChatQueueItem.conversation_id == conv_uuid
+        )
+        if item_id is not None:
+            item_query = item_query.where(DashboardChatQueueItem.id == item_id)
         item_result = await db.execute(
-            select(DashboardChatQueueItem)
-            .where(DashboardChatQueueItem.conversation_id == conv_uuid)
-            .order_by(DashboardChatQueueItem.created_at, DashboardChatQueueItem.id)
-            .limit(1)
+            item_query.order_by(DashboardChatQueueItem.created_at, DashboardChatQueueItem.id).limit(
+                1
+            )
         )
         item = item_result.scalar_one_or_none()
         if item is None:
@@ -706,6 +758,7 @@ async def _dequeue_next_turn(conv_id: str) -> ChatTurn | None:
         )
         queued_item_id = item.id
         await db.delete(item)
+        conversation.is_running = True
         conversation.has_unread = False
         conversation.last_credential_id = turn.credential_id
         conversation.last_model = turn.model
@@ -818,17 +871,38 @@ async def _process_chat_queue(
     conv_id: str,
     user_id: uuid.UUID,
     public_base_url: str,
+    first_item_id: uuid.UUID | None = None,
+    interrupted_task: asyncio.Task[None] | None = None,
 ) -> None:
-    """Background coroutine: starts from the persisted queue and drains it."""
+    """Drain the queue, optionally stopping a predecessor and starting a chosen item."""
     if not await registry.has_task(conv_id) or not _worker_has_ownership(conv_id):
         return
 
     cancel_event = Event()
     _cancel_events[conv_id] = cancel_event
+    turn_started = False
     try:
-        turn = await _dequeue_next_turn(conv_id)
+        if interrupted_task is not None:
+            try:
+                await asyncio.shield(interrupted_task)
+            except asyncio.CancelledError:
+                current = asyncio.current_task()
+                if current is not None and current.cancelling():
+                    raise
+        if not _worker_has_ownership(conv_id):
+            return
+        turn = (
+            await _dequeue_next_turn(conv_id, first_item_id)
+            if first_item_id is not None
+            else await _dequeue_next_turn(conv_id)
+        )
+        if turn is not None and first_item_id is not None:
+            turn = replace(turn, interrupted=True)
+        _queue_interrupt_tasks.discard(asyncio.current_task())
         while turn is not None:
+            turn_started = True
             result = await _run_chat_turn(conv_id, user_id, turn, public_base_url)
+            turn_started = False
             if result.stop_worker or result.paused_for_clarification:
                 break
             turn = await _dequeue_next_turn(conv_id)
@@ -837,6 +911,17 @@ async def _process_chat_queue(
             await registry.finish(conv_id)
     except asyncio.CancelledError:
         if _worker_has_ownership(conv_id):
+            if not turn_started:
+                # Stop can arrive while the previous worker is persisting its partial reply.
+                async with async_session_maker() as cancel_db:
+                    await cancel_db.execute(
+                        sa.update(DashboardConversation)
+                        .where(DashboardConversation.id == uuid.UUID(conv_id))
+                        .values(is_running=False, queue_paused_by_message_id=None)
+                    )
+                    await _clear_queue_items(cancel_db, uuid.UUID(conv_id))
+                    await cancel_db.commit()
+                await registry.publish(conv_id, {"type": "queue_cleared"})
             await registry.finish(conv_id)
         return
     except Exception:
@@ -859,6 +944,7 @@ async def _process_chat_queue(
             await registry.publish(conv_id, {"type": "queue_cleared"})
             await registry.finish(conv_id)
     finally:
+        _queue_interrupt_tasks.discard(asyncio.current_task())
         if _worker_has_ownership(conv_id):
             if (
                 _cancel_events.get(conv_id) is cancel_event
@@ -1639,6 +1725,71 @@ async def update_queued_message(
             },
         )
     return response
+
+
+@router.post(
+    "/{conversation_id}/queue/{item_id}/send-now",
+    response_model=SendMessageResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def send_queued_message_now(
+    http_request: Request,
+    conversation_id: uuid.UUID,
+    item_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SendMessageResponse:
+    """Interrupt the current reply and append this queued message as the next turn.
+
+    Keep the remaining queue, the item's attachments and its saved model/build settings.
+    The existing stream publishes the partial reply before the selected user message.
+    """
+    conversation = await _get_conversation_or_404(
+        conversation_id, current_user.id, db, for_update=True
+    )
+    item = await _get_queue_item_or_404(conversation_id, item_id, current_user.id, db)
+    conv_id = str(conversation_id)
+    previous = _chat_tasks.get(conv_id)
+    if previous is not None and previous.done():
+        previous = None
+    if previous in _queue_interrupt_tasks or (conversation.is_running and previous is None):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="The current response cannot be interrupted yet. Please try again shortly.",
+        )
+    response = _queued_message_response(item)
+    conversation.is_running = True
+    conversation.has_unread = False
+    conversation.queue_paused_by_message_id = None
+
+    def launch_worker() -> None:
+        task = asyncio.create_task(
+            _process_chat_queue(
+                conv_id=conv_id,
+                user_id=current_user.id,
+                public_base_url=build_public_base_url(http_request),
+                first_item_id=item_id,
+                interrupted_task=previous,
+            )
+        )
+        _chat_tasks[conv_id] = task
+        _queue_interrupt_tasks.add(task)
+        task.add_done_callback(_queue_interrupt_tasks.discard)
+
+    if previous is not None:
+        request_chat_cancel(conv_id)
+        # Transfer ownership before releasing the row lock. The old worker persists its
+        # partial reply without clearing the queue; the successor waits for that to finish.
+        launch_worker()
+        await db.commit()
+    else:
+        await db.commit()
+        await registry.create_task(conv_id)
+        launch_worker()
+
+    return SendMessageResponse(
+        conversation_id=conversation_id, status="started", queued_message=response
+    )
 
 
 @router.delete("/{conversation_id}/queue/{item_id}", status_code=status.HTTP_204_NO_CONTENT)

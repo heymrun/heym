@@ -567,8 +567,10 @@ function buildLlmStep(
   if (timing.textChars !== null) detailParts.push(`Returned ${timing.textChars} characters`);
   detailParts.push(`Started ${Math.round(timing.startMs)} ms into the request`);
   if (timing.error) detailParts.push(`Failed: ${timing.error}`);
+  if (timing.cancelled) detailParts.push("Cancelled by the user");
 
   const badges: TraceStepBadge[] = [];
+  if (timing.cancelled) badges.push({ label: "Cancelled" });
   if (timing.provider) badges.push({ label: timing.provider });
   if (timing.toolCalls) {
     badges.push({ label: `${timing.toolCalls} tool${timing.toolCalls === 1 ? "" : "s"}` });

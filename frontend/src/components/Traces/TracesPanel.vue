@@ -442,6 +442,7 @@ function goNext(): void {
 
 function getStatusClass(status: string): string {
   if (status === "error") return "bg-destructive/10 text-destructive";
+  if (status === "cancelled") return "bg-muted text-muted-foreground";
   return "text-emerald-600 bg-emerald-500/10";
 }
 
@@ -1013,7 +1014,7 @@ onMounted(async () => {
             </div>
             <div
               class="mt-1 text-sm font-medium"
-              :class="cn(selectedTrace.status === 'error' ? 'text-destructive' : 'text-emerald-600')"
+              :class="getStatusClass(selectedTrace.status)"
             >
               {{ selectedTrace.status }}
             </div>

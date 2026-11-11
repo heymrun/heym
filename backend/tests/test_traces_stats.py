@@ -62,6 +62,7 @@ class StatsEndpointTests(unittest.IsolatedAsyncioTestCase):
         kpi_row = MagicMock()
         kpi_row.total_calls = 0
         kpi_row.error_calls = 0
+        kpi_row.cancelled_calls = 0
         kpi_row.prompt_tokens = 0
         kpi_row.completion_tokens = 0
         kpi_row.total_tokens = 0
@@ -95,6 +96,7 @@ class StatsEndpointTests(unittest.IsolatedAsyncioTestCase):
         kpi_row = MagicMock()
         kpi_row.total_calls = 10
         kpi_row.error_calls = 2
+        kpi_row.cancelled_calls = 0
         kpi_row.prompt_tokens = 1000
         kpi_row.completion_tokens = 500
         kpi_row.total_tokens = 1500
@@ -186,6 +188,7 @@ class StatsEndpointTests(unittest.IsolatedAsyncioTestCase):
         kpi_row = MagicMock(
             total_calls=10,
             error_calls=0,
+            cancelled_calls=0,
             prompt_tokens=1000,
             completion_tokens=0,
             total_tokens=1000,

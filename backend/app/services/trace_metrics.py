@@ -163,11 +163,25 @@ def trace_filters(
         filters.append(LLMTrace.workflow_id == workflow_id)
     if source:
         apply_source_filter(filters, source)
-    if status == "error":
-        filters.append(LLMTrace.error.is_not(None))
+    if status == "cancelled":
+        filters.append(trace_cancelled_clause())
+    elif status == "error":
+        filters.append(LLMTrace.error.is_not(None) & ~trace_cancelled_clause())
     elif status == "success":
-        filters.append(LLMTrace.error.is_(None))
+        filters.append(LLMTrace.error.is_(None) & ~trace_cancelled_clause())
     return filters
+
+
+def trace_status(error: str | None, response: dict | None) -> str:
+    """The trace's terminal status, with user cancellation separate from provider errors."""
+    if (response or {}).get("cancelled") is True:
+        return "cancelled"
+    return "error" if error else "success"
+
+
+def trace_cancelled_clause() -> ColumnElement[bool]:
+    """Match cancellation flags, treating missing flags on older traces as false."""
+    return func.coalesce(LLMTrace.response["cancelled"].as_boolean(), False)
 
 
 def trace_search_clause(search: str) -> ColumnElement[bool]:
@@ -211,7 +225,10 @@ async def compute_trace_stats(
     kpi_stmt = apply_trace_search(
         select(
             func.count().label("total_calls"),
-            func.sum(case((LLMTrace.error.is_not(None), 1), else_=0)).label("error_calls"),
+            func.sum(
+                case((LLMTrace.error.is_not(None) & ~trace_cancelled_clause(), 1), else_=0)
+            ).label("error_calls"),
+            func.sum(case((trace_cancelled_clause(), 1), else_=0)).label("cancelled_calls"),
             func.coalesce(func.sum(LLMTrace.prompt_tokens), 0).label("prompt_tokens"),
             func.coalesce(func.sum(LLMTrace.completion_tokens), 0).label("completion_tokens"),
             func.coalesce(func.sum(LLMTrace.total_tokens), 0).label("total_tokens"),
@@ -223,7 +240,10 @@ async def compute_trace_stats(
 
     # Speed counts successful calls that produced output; embeddings and images have none.
     speed_eligible = (
-        LLMTrace.error.is_(None) & (LLMTrace.completion_tokens > 0) & (LLMTrace.elapsed_ms > 0)
+        LLMTrace.error.is_(None)
+        & ~trace_cancelled_clause()
+        & (LLMTrace.completion_tokens > 0)
+        & (LLMTrace.elapsed_ms > 0)
     )
     # Skip NULL-model rows like MCP workflow-server invocations.
     by_model_stmt = apply_trace_search(
@@ -256,8 +276,12 @@ async def compute_trace_stats(
             bucket_expr,
             LLMTrace.model.label("model"),
             func.count().label("calls"),
-            func.sum(case((LLMTrace.error.is_(None), 1), else_=0)).label("success"),
-            func.sum(case((LLMTrace.error.is_not(None), 1), else_=0)).label("error"),
+            func.sum(
+                case((LLMTrace.error.is_(None) & ~trace_cancelled_clause(), 1), else_=0)
+            ).label("success"),
+            func.sum(
+                case((LLMTrace.error.is_not(None) & ~trace_cancelled_clause(), 1), else_=0)
+            ).label("error"),
             func.coalesce(func.sum(LLMTrace.prompt_tokens), 0).label("prompt_tokens"),
             func.coalesce(func.sum(LLMTrace.completion_tokens), 0).label("completion_tokens"),
             func.coalesce(func.sum(LLMTrace.total_tokens), 0).label("total_tokens"),
@@ -344,7 +368,7 @@ async def compute_trace_stats(
     return TraceStats(
         kpis=TraceKpis(
             total_calls=total_calls,
-            success_calls=total_calls - error_calls,
+            success_calls=total_calls - error_calls - int(kpi_row.cancelled_calls or 0),
             error_calls=error_calls,
             error_pct=round((error_calls / total_calls * 100.0) if total_calls else 0.0, 2),
             prompt_tokens=int(kpi_row.prompt_tokens or 0),

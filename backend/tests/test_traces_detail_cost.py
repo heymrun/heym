@@ -32,6 +32,12 @@ def _trace(model: str | None) -> MagicMock:
 
 
 class TraceDetailCostTests(unittest.IsolatedAsyncioTestCase):
+    async def test_cancelled_trace_is_not_reported_as_success(self) -> None:
+        trace = _trace("model")
+        trace.response = {"cancelled": True}
+        detail, _, _, _ = await self._get(trace, (None, False))
+        self.assertEqual(detail.status, "cancelled")
+
     async def _get(self, trace: MagicMock, resolved: tuple[Decimal | None, bool]):
         user = MagicMock()
         user.id = uuid.uuid4()

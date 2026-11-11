@@ -35,6 +35,7 @@ export interface ModelRoutingTurnTiming {
   textChars: number | null;
   toolCalls: number | null;
   error: string | null;
+  cancelled?: boolean;
 }
 
 export interface ModelRoutingTrace {
@@ -98,6 +99,7 @@ function readTurnTimings(raw: unknown): ModelRoutingTurnTiming[] {
         textChars: asNullableNumber(value.textChars),
         toolCalls: asNullableNumber(value.toolCalls),
         error: asNullableText(value.error),
+        ...(value.cancelled === true ? { cancelled: true } : {}),
       };
     })
     .filter((entry): entry is ModelRoutingTurnTiming => entry !== null);

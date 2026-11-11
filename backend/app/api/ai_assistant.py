@@ -3658,6 +3658,8 @@ async def stream_dashboard_chat(
     trace_tools: list[dict[str, Any]] = []
     llm_call_started: float | None = None
     turn_trace_recorded = False
+    turn_run_recorded = False
+    active_tool: dict[str, Any] | None = None
 
     from app.services.context_compressor import (
         _estimate_tokens,
@@ -3739,9 +3741,10 @@ async def stream_dashboard_chat(
         duration_ms: float,
         *,
         usage: Any = None,
-        tool_calls: int = 0,
+        tool_calls: int | None = 0,
         text: str | None = None,
         error: str | None = None,
+        cancelled: bool = False,
     ) -> None:
         entry: dict[str, Any] = {
             "turn": len(trace_turns) + 1,
@@ -3763,6 +3766,8 @@ async def stream_dashboard_chat(
             entry["textChars"] = len(text)
         if error:
             entry["error"] = error
+        if cancelled:
+            entry["cancelled"] = True
         trace_turns.append(entry)
 
     def _turn_token_total(key: str) -> int | None:
@@ -3773,11 +3778,16 @@ async def stream_dashboard_chat(
         nonlocal turn_trace_recorded, llm_call_started
         if turn_trace_recorded or trace_context is None:
             return
-        if error and llm_call_started is not None:
-            _record_llm_turn(llm_call_started, (time.time() - llm_call_started) * 1000, error=error)
+        if llm_call_started is not None:
+            _record_llm_turn(
+                llm_call_started,
+                (time.time() - llm_call_started) * 1000,
+                tool_calls=None,
+                error=error,
+                cancelled=cancelled,
+            )
         llm_call_started = None
-        # A turn stopped before the model answered anything cost nothing to trace.
-        if not trace_turns and error is None:
+        if not trace_turns and error is None and not cancelled:
             return
         turn_trace_recorded = True
         elapsed_ms = round((time.time() - start_time) * 1000, 2)
@@ -3795,9 +3805,19 @@ async def stream_dashboard_chat(
             "elapsed_ms": elapsed_ms,
             "turn_timings": trace_turns,
         }
-        if trace_tools:
-            response["tool_calls"] = trace_tools
-            response["tool_metrics"] = summarize_tool_calls(trace_tools)
+        tools = list(trace_tools)
+        if cancelled and active_tool is not None:
+            tools.append(
+                {
+                    **active_tool,
+                    "status": "cancelled",
+                    "elapsed_ms": round(elapsed_ms + trace_offset_ms - active_tool["start_ms"], 2),
+                    "result_chars": 0,
+                }
+            )
+        if tools:
+            response["tool_calls"] = tools
+            response["tool_metrics"] = summarize_tool_calls(tools)
         if cancelled:
             response["cancelled"] = True
         record_llm_trace(
@@ -3820,7 +3840,10 @@ async def stream_dashboard_chat(
     def _record_dashboard_run(
         status: str, elapsed_ms: float, trace_error: str | None = None
     ) -> None:
-        # Every exit passes through here, so the turn's one trace is written here too.
+        nonlocal turn_run_recorded
+        if turn_run_recorded:
+            return
+        turn_run_recorded = True
         _record_turn_trace(trace_error, cancelled=status == "cancelled")
         record_run_history(
             user_id=user_id,
@@ -3999,6 +4022,12 @@ async def stream_dashboard_chat(
                     args = json.loads(tc.function.arguments) if tc.function.arguments else {}
                 except json.JSONDecodeError:
                     args = {}
+                active_tool = {
+                    "tool_call_id": tc.id,
+                    "name": name,
+                    "arguments": args,
+                    "start_ms": _offset_ms(tool_started),
+                }
                 tool_group = (
                     build
                     if build is not None and build.handles(name)
@@ -4009,6 +4038,7 @@ async def stream_dashboard_chat(
                 if tool_group is not None:
                     step_label = tool_group.step_label(name, args)
                     display_args = tool_group.display_args(name, args)
+                    active_tool["arguments"] = display_args
                     yield (
                         "data: "
                         + json.dumps(
@@ -5499,6 +5529,7 @@ async def stream_dashboard_chat(
                         "result_chars": len(content_for_llm),
                     }
                 )
+                active_tool = None
                 messages_to_use.append(
                     {"role": "tool", "content": content_for_llm, "tool_call_id": tc.id}
                 )
@@ -5524,8 +5555,7 @@ async def stream_dashboard_chat(
         _record_dashboard_run("error", round(elapsed_ms, 2), trace_error=str(e))
         yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
     finally:
-        # A task cancelled mid-call skips every exit above; keep the calls it finished.
-        _record_turn_trace(cancelled=True)
+        _record_dashboard_run("cancelled", round((time.time() - start_time) * 1000, 2))
 
 
 async def stream_llm_response(

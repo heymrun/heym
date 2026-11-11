@@ -9,13 +9,18 @@ preventing duplicate background chat tasks or duplicate run starts.
 import asyncio
 import unittest
 import uuid
-from datetime import datetime, timezone
+from collections.abc import AsyncGenerator
+from datetime import datetime, timedelta, timezone
 from threading import Event
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from fastapi import HTTPException
 from sqlalchemy import delete, select
 
+from app.api import ai_assistant, chats
 from app.api.chats import (
+    ChatTurn,
     ChatTurnResult,
     _cancel_events,
     _chat_tasks,
@@ -23,6 +28,7 @@ from app.api.chats import (
     _process_chat,
     run_agent_chat_turn,
     send_message,
+    send_queued_message_now,
 )
 from app.db.models import (
     Credential,
@@ -30,11 +36,15 @@ from app.db.models import (
     DashboardChatQueueItem,
     DashboardConversation,
     DashboardMessage,
+    LLMTrace,
+    RunHistory,
     User,
 )
 from app.db.session import async_session_maker, engine
 from app.models.chat_schemas import MessageCreate
+from app.services.chat_round_stream import RoundAnswer, RoundDraft
 from app.services.heym_agent.errors import AgentError
+from app.services.trace_metrics import compute_trace_stats, trace_filters, trace_status
 
 
 def _make_dummy_http_request() -> MagicMock:
@@ -99,6 +109,159 @@ class DashboardChatConcurrencyRaceTests(unittest.IsolatedAsyncioTestCase):
             await session.execute(delete(User).where(User.id == self.user_id))
             await session.commit()
         await engine.dispose()
+
+    async def test_interrupted_model_call_is_cancelled_and_replacement_only_queries_teams(
+        self,
+    ) -> None:
+        """Persist both terminal states and give the replacement no unfinished user task."""
+        conv_id = str(self.conv_id)
+        first_content = "Which workflows ran today?"
+        latest_content = "Skip the workflow question, just show my teams"
+        selected_id = uuid.uuid4()
+        async with async_session_maker() as db:
+            conversation = await db.get(DashboardConversation, self.conv_id)
+            conversation.is_running = True
+            db.add_all(
+                [
+                    DashboardMessage(
+                        conversation_id=self.conv_id, role="user", content=first_content
+                    ),
+                    DashboardChatQueueItem(
+                        id=selected_id,
+                        conversation_id=self.conv_id,
+                        content=latest_content,
+                        credential_id=self.cred_id,
+                        model="gpt-4o",
+                    ),
+                ]
+            )
+            await db.commit()
+        started = asyncio.Event()
+
+        async def model_round(
+            _client: object, _cancel: Event | None, **kwargs: object
+        ) -> AsyncGenerator[RoundDraft | RoundAnswer, None]:
+            messages = kwargs["messages"]
+            users = [m["content"] for m in messages if m["role"] == "user"]
+            if users[-1].startswith(first_content):
+                yield RoundDraft("Looking up workflow runs")
+                started.set()
+                await asyncio.Event().wait()
+            self.assertNotIn(first_content, users)
+            self.assertIn("Current request after an interruption", messages[0]["content"])
+            calls = None
+            text = "Here are your teams"
+            if not any(m["role"] == "tool" for m in messages):
+                calls = [
+                    SimpleNamespace(
+                        id="teams-call",
+                        type="function",
+                        function=SimpleNamespace(name="get_teams", arguments="{}"),
+                    )
+                ]
+                text = None
+            yield RoundAnswer(
+                SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(message=SimpleNamespace(content=text, tool_calls=calls))
+                    ],
+                    usage=SimpleNamespace(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+                )
+            )
+
+        def binding(*_args: object, **kwargs: object) -> tuple[object, str, str, object]:
+            return MagicMock(), "OpenAI", "gpt-4o", kwargs["trace_context"]
+
+        previous = worker = None
+        try:
+            with (
+                patch.object(chats, "decrypt_config", return_value={}),
+                patch.object(chats, "resolve_model_binding", side_effect=binding),
+                patch.object(chats, "ChatFileTools") as files,
+                patch.object(
+                    chats,
+                    "_assemble_system_prompt_parts",
+                    AsyncMock(return_value=chats.SystemPromptParts("system", "system", "", "", "")),
+                ),
+                patch.object(ai_assistant, "stream_round", model_round),
+                patch.object(
+                    ai_assistant, "get_teams_tool", AsyncMock(return_value='{"teams":[]}')
+                ) as teams,
+                patch.object(ai_assistant, "get_recent_executions_for_user", AsyncMock()) as runs,
+            ):
+                files.return_value.workspace_block.return_value = ""
+                files.return_value.handles.return_value = False
+                files.return_value.schemas.return_value = []
+                await chats.registry.create_task(conv_id)
+                previous = asyncio.create_task(
+                    chats._process_chat(
+                        conv_id,
+                        self.user_id,
+                        first_content,
+                        self.cred_id,
+                        "gpt-4o",
+                        [],
+                        "http://localhost",
+                        False,
+                    )
+                )
+                _chat_tasks[conv_id] = previous
+                await asyncio.wait_for(started.wait(), 5)
+                async with async_session_maker() as db:
+                    await send_queued_message_now(
+                        _make_dummy_http_request(), self.conv_id, selected_id, self.user, db
+                    )
+                worker = _chat_tasks[conv_id]
+                await asyncio.wait_for(worker, 5)
+                await previous
+                teams.assert_awaited_once()
+                runs.assert_not_awaited()
+            async with async_session_maker() as db:
+                traces = (
+                    await db.scalars(
+                        select(LLMTrace)
+                        .where(LLMTrace.user_id == self.user_id)
+                        .order_by(LLMTrace.created_at)
+                    )
+                ).all()
+                self.assertEqual(
+                    [trace_status(t.error, t.response) for t in traces], ["cancelled", "success"]
+                )
+                self.assertTrue(traces[0].response["turn_timings"][0]["cancelled"])
+                self.assertIsNone(traces[0].total_tokens)
+                runs = (
+                    await db.scalars(
+                        select(RunHistory)
+                        .where(RunHistory.user_id == self.user_id)
+                        .order_by(RunHistory.started_at)
+                    )
+                ).all()
+                self.assertEqual([run.status for run in runs], ["cancelled", "success"])
+                filters = trace_filters(self.user_id)
+                stats = await compute_trace_stats(
+                    db,
+                    user_id=self.user_id,
+                    filters=filters,
+                    search=None,
+                    bucket_seconds=3600,
+                    resolve_costs=AsyncMock(return_value=[(None, False)]),
+                )
+                self.assertEqual(stats.kpis.total_calls, 2)
+                self.assertEqual(stats.kpis.success_calls, 1)
+                self.assertEqual(stats.kpis.error_calls, 0)
+                self.assertEqual(sum(row.success for row in stats.by_time), 1)
+                cancelled = (
+                    await db.scalars(
+                        select(LLMTrace.id).where(*trace_filters(self.user_id, status="cancelled"))
+                    )
+                ).all()
+                self.assertEqual(cancelled, [traces[0].id])
+        finally:
+            for task in (previous, worker):
+                if task is not None:
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+            _cancel_events.pop(conv_id, None)
 
     async def test_concurrent_send_message_claims_exactly_one_run(self) -> None:
         """Prove that two concurrent POST /messages calls for the same conversation
@@ -176,6 +339,166 @@ class DashboardChatConcurrencyRaceTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(msgs), 1)
             self.assertEqual(len(queue_items), 1)
             self.assertTrue(conv.is_running)
+
+    async def test_send_now_waits_for_cancel_then_appends_selected_message_with_its_settings(
+        self,
+    ) -> None:
+        """A selected follow-up runs first, after the partial reply, without losing the queue."""
+        conv_id = str(self.conv_id)
+        now = datetime.now(timezone.utc)
+        attachment = {"name": "notes.txt", "kind": "text", "content": "Attached notes"}
+        first_id, selected_id = uuid.uuid4(), uuid.uuid4()
+        async with async_session_maker() as db:
+            conversation = await db.get(DashboardConversation, self.conv_id)
+            conversation.is_running = True
+            db.add_all(
+                [
+                    DashboardChatQueueItem(
+                        id=first_id,
+                        conversation_id=self.conv_id,
+                        content="Older follow-up",
+                        credential_id=self.cred_id,
+                        model="old-model",
+                        created_at=now - timedelta(seconds=2),
+                    ),
+                    DashboardChatQueueItem(
+                        id=selected_id,
+                        conversation_id=self.conv_id,
+                        content="Send this now",
+                        credential_id=self.cred_id,
+                        model="selected-model",
+                        attachment=attachment,
+                        allow_build=True,
+                        build_target_workflow_id=None,
+                        created_at=now - timedelta(seconds=1),
+                    ),
+                ]
+            )
+            await db.commit()
+
+        old_started, old_cancelled, allow_old_finish = (
+            asyncio.Event(),
+            asyncio.Event(),
+            asyncio.Event(),
+        )
+        new_started, allow_new_finish = asyncio.Event(), asyncio.Event()
+        turns: list[ChatTurn] = []
+
+        async def old_worker() -> None:
+            old_started.set()
+            try:
+                await asyncio.sleep(60)
+            except asyncio.CancelledError:
+                old_cancelled.set()
+                await allow_old_finish.wait()
+                async with async_session_maker() as db:
+                    db.add(
+                        DashboardMessage(
+                            conversation_id=self.conv_id, role="assistant", content="Partial reply"
+                        )
+                    )
+                    await db.commit()
+
+        async def run_turn(
+            _conv_id: str, _user_id: uuid.UUID, turn: ChatTurn, _base_url: str
+        ) -> ChatTurnResult:
+            turns.append(turn)
+            new_started.set()
+            await allow_new_finish.wait()
+            return ChatTurnResult(False, uuid.uuid4())
+
+        previous = asyncio.create_task(old_worker())
+        _chat_tasks[conv_id] = previous
+        _cancel_events[conv_id] = Event()
+        await old_started.wait()
+        worker: asyncio.Task[None] | None = None
+        try:
+            with patch("app.api.chats._run_chat_turn", side_effect=run_turn):
+                async with async_session_maker() as db:
+                    response = await send_queued_message_now(
+                        _make_dummy_http_request(), self.conv_id, selected_id, self.user, db
+                    )
+                worker = _chat_tasks[conv_id]
+                self.assertIsNot(worker, previous)
+                self.assertEqual(response.status, "started")
+                await asyncio.wait_for(old_cancelled.wait(), 3)
+                self.assertFalse(new_started.is_set())
+                # A double click while cancellation is pending must not start a second worker.
+                async with async_session_maker() as db:
+                    with self.assertRaises(HTTPException) as raised:
+                        await send_queued_message_now(
+                            _make_dummy_http_request(), self.conv_id, selected_id, self.user, db
+                        )
+                self.assertEqual(raised.exception.status_code, 409)
+
+                allow_old_finish.set()
+                await asyncio.wait_for(new_started.wait(), 3)
+                self.assertEqual(turns[0].content, "Send this now")
+                self.assertEqual(turns[0].model, "selected-model")
+                self.assertTrue(turns[0].interrupted)
+                self.assertEqual(turns[0].attachments, [attachment])
+                self.assertIsNotNone(turns[0].build)
+                async with async_session_maker() as db:
+                    messages = (
+                        await db.scalars(
+                            select(DashboardMessage)
+                            .where(DashboardMessage.conversation_id == self.conv_id)
+                            .order_by(DashboardMessage.created_at)
+                        )
+                    ).all()
+                    self.assertEqual([m.role for m in messages], ["assistant", "user"])
+                    self.assertEqual(messages[0].content, "Partial reply")
+                    self.assertIn("Send this now", messages[1].content)
+                    self.assertIn("Attached notes", messages[1].content)
+                    queued = (
+                        await db.scalars(
+                            select(DashboardChatQueueItem).where(
+                                DashboardChatQueueItem.conversation_id == self.conv_id
+                            )
+                        )
+                    ).all()
+                    self.assertEqual([item.id for item in queued], [first_id])
+                allow_new_finish.set()
+                await asyncio.wait_for(worker, 3)
+                self.assertEqual(
+                    [turn.content for turn in turns], ["Send this now", "Older follow-up"]
+                )
+                self.assertFalse(turns[1].interrupted)
+        finally:
+            allow_old_finish.set()
+            allow_new_finish.set()
+            for task in (previous, worker):
+                if task is not None:
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+            _cancel_events.pop(conv_id, None)
+
+    async def test_send_now_refuses_another_users_conversation_and_wrong_queue_item(self) -> None:
+        """Failed ownership or item checks must leave the existing run untouched."""
+        conv_id = str(self.conv_id)
+        async with async_session_maker() as db:
+            conversation = await db.get(DashboardConversation, self.conv_id)
+            conversation.is_running = True
+            await db.commit()
+        previous = asyncio.create_task(asyncio.sleep(60))
+        _chat_tasks[conv_id] = previous
+        event = Event()
+        _cancel_events[conv_id] = event
+        try:
+            for user in (MagicMock(id=uuid.uuid4()), self.user):
+                async with async_session_maker() as db:
+                    with self.assertRaises(HTTPException) as raised:
+                        await send_queued_message_now(
+                            _make_dummy_http_request(), self.conv_id, uuid.uuid4(), user, db
+                        )
+                self.assertEqual(raised.exception.status_code, 404)
+                self.assertFalse(event.is_set())
+                self.assertIs(_chat_tasks[conv_id], previous)
+                self.assertFalse(previous.done())
+        finally:
+            previous.cancel()
+            await asyncio.gather(previous, return_exceptions=True)
+            _cancel_events.pop(conv_id, None)
 
     async def test_concurrent_send_message_and_mcp_chat_turn(self) -> None:
         """Prove that concurrent send_message and run_agent_chat_turn for the same
