@@ -762,10 +762,8 @@ An agentic kanban board where cards are persistent jobs. Configure each column w
 
 See also [Workflows](../tabs/workflows-tab.md), [Execution History](./execution-history.md), and [Human-in-the-Loop](./human-in-the-loop.md).
 
-<!-- TODO(board-demo): enable when board.webm is recorded
 <video src="/features/showcase/board.webm" controls playsinline muted preload="metadata" style="width:100%;border-radius:12px;margin:16px 0"></video>
 <p class="github-video-link"><a href="../../../../public/features/showcase/board.webm">▶ Watch Board demo</a></p>
--->
 
 ### [Templates](../tabs/templates-tab.md)
 
@@ -791,7 +789,7 @@ The Chat tab is Heym's long-running agent surface for operating the workspace fr
 
 Attach up to 10 files at once (PDF, spreadsheet, DOCX, CSV, JSON, images or any plain text file), or name one in Drive, and Chat opens them with [File Analysis](./file-analysis.md): each file goes to Drive, Chat inspects its structure in an isolated sandbox and reads only what the question needs, and a workflow built around the file uses its real sheet, column and page names. The conversation keeps its working folder for follow-ups until the conversation is deleted, cleared, or unused for 30 days.
 
-Chat keeps running on the backend after the browser closes. While an answer is streaming, you can send more messages; Heym stores them in a database-backed queue, lets you edit or delete queued messages before they start, and runs them in order when the current response finishes. If the assistant needs planning details and returns clarification questions, the queue pauses until you answer those questions, then resumes after the planning response.
+Chat keeps running on the backend after the browser closes. While an answer is streaming, you can send more messages; Heym stores them in a database-backed queue, lets you edit or delete queued messages before they start, and runs them in order when the current response finishes. **Send now** beside a queued message stops the current reply and appends that message immediately, keeping the partial reply, its files and model, and the other queued messages. If the assistant needs planning details and returns clarification questions, the queue pauses until you answer those questions, then resumes after the planning response.
 
 Responses stream with markdown, inline images, workflow preview cards, collapsible tool-call cards, context usage, and automatic context compression. Chat supports attachments, voice input, read-aloud playback, copy actions, quick prompts, User Rules from [Settings](./user-settings.md), and [global variables](./global-variables.md) as context.
 
@@ -851,6 +849,9 @@ A five-step wizard walks through type, scope, condition, response, and review. T
 On the response step an alert can create and assign a new workflow to run when it fires, use one you already have, or do nothing. The firing payload carries the observed value, threshold, window, and the workflows that contributed to the number, which is how alerts reach Slack, email, or Telegram using nodes you already have. Firing history records what was true at the moment each alert fired and is kept for 90 days; acknowledging a firing changes the badge from Firing to Acknowledged without pretending the condition has cleared. The [Chat](../tabs/chat-tab.md) tab can answer what alerts exist and why or when one triggered. Alerts can be shared with users and [teams](../tabs/teams-tab.md).
 
 See also [Analytics](../tabs/analytics-tab.md), [Traces](../tabs/traces-tab.md), and [Execution History](./execution-history.md).
+
+<video src="/features/showcase/alerts.webm" controls playsinline muted preload="metadata" style="width:100%;border-radius:12px;margin:16px 0"></video>
+<p class="github-video-link"><a href="../../../../public/features/showcase/alerts.webm">▶ Watch Alerts demo</a></p>
 
 ### [Analytics](../tabs/analytics-tab.md)
 

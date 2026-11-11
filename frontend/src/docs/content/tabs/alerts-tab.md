@@ -2,6 +2,9 @@
 
 The **Alerts** tab lets you define threshold conditions over a time window and be told when they are crossed. Heym already records execution outcomes, run duration, and LLM spend, but it never volunteers any of it. An alert is how you ask it to.
 
+<video src="/features/showcase/alerts.webm" controls playsinline muted preload="metadata" style="width:100%;border-radius:12px;margin:16px 0"></video>
+<p class="github-video-link"><a href="../../../../public/features/showcase/alerts.webm">▶ Watch Alerts demo</a></p>
+
 Every alert is evaluated over a **time window** you choose, never on a single event. One failed run is noise. Twelve failed runs in ten minutes is an incident.
 
 ## Alert Types

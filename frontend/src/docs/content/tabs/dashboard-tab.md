@@ -2,6 +2,9 @@
 
 The **Dashboard** tab is a Grafana-style space where you build grids of chart widgets. Each widget is rendered from the output of its own hidden Heym workflow, so any data you can produce in a workflow — database queries, API calls, RAG lookups, LLM output — can become a chart. You can keep several dashboards and share each one with people or teams.
 
+<video src="/features/showcase/dashboard.webm" controls playsinline muted preload="metadata" style="width:100%;border-radius:12px;margin:16px 0"></video>
+<p class="github-video-link"><a href="../../../../public/features/showcase/dashboard.webm">▶ Watch Dashboard demo</a></p>
+
 ## Dashboards
 
 Everyone starts with one dashboard, created the first time they open the tab. Use the dashboard selector at the top of the tab to switch between dashboards, and **+** next to it to create a new one. The selector lists your own dashboards first, then the ones shared with you, labelled with the name of the person who shared them.

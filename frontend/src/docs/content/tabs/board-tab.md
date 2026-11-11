@@ -5,10 +5,8 @@ column can execute Heym workflows. A card is not just a task — it is a persist
 agentic job that carries context, conversation history, execution state, outputs,
 and workflow runs.
 
-<!-- TODO(board-demo): enable when board.webm is recorded
 <video src="/features/showcase/board.webm" controls playsinline muted preload="metadata" style="width:100%;border-radius:12px;margin:16px 0"></video>
 <p class="github-video-link"><a href="../../../../public/features/showcase/board.webm">▶ Watch Board demo</a></p>
--->
 
 ## Boards and columns
 
