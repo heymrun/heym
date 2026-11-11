@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive } from "vue";
+import { computed, nextTick, reactive } from "vue";
 
 import type { ClarifyAnswer, ClarifyOption, ClarifyQuestion } from "@/types/clarify";
 import type { Credential } from "@/types/credential";
@@ -22,6 +22,7 @@ const emit = defineEmits<{
 }>();
 
 const state = reactive<Record<string, ClarifyAnswer>>({});
+const otherOpen = reactive<Record<string, boolean>>({});
 const tables = usePort(clarifyPortKey).useClarifyDataTables();
 // Top-level aliases, so the template unwraps the ref.
 const creatingTables = tables.creating;
@@ -38,6 +39,7 @@ function selectSingle(q: ClarifyQuestion, option: ClarifyOption): void {
   // Single choice and free-text are mutually exclusive: picking a chip clears Other.
   state[q.id].selected = [option.label];
   state[q.id].other = "";
+  otherOpen[q.id] = false;
   state[q.id].prefill = option.prefill ?? "";
   tables.select(q, option);
 }
@@ -58,6 +60,17 @@ function onOtherFocus(q: ClarifyQuestion): void {
     state[q.id].selected = [];
     state[q.id].prefill = "";
   }
+}
+
+async function toggleOther(q: ClarifyQuestion, event: MouseEvent): Promise<void> {
+  if (props.disabled) return;
+  const question = (event.currentTarget as HTMLElement).closest(".clarify-question");
+  otherOpen[q.id] = !otherOpen[q.id];
+  state[q.id].other = "";
+  if (!otherOpen[q.id]) return;
+  onOtherFocus(q);
+  await nextTick();
+  question?.querySelector<HTMLInputElement>(".clarify-other-answer")?.focus();
 }
 
 function isSelected(q: ClarifyQuestion, option: ClarifyOption): boolean {
@@ -120,6 +133,8 @@ function onCredentialSaved(q: ClarifyQuestion, credential: Credential): void {
       v-for="q in props.questions"
       :key="q.id"
       class="clarify-question"
+      role="group"
+      :aria-label="q.text"
     >
       <div class="clarify-text">
         {{ q.text }}
@@ -139,6 +154,16 @@ function onCredentialSaved(q: ClarifyQuestion, credential: Credential): void {
           @click="q.type === 'single' ? selectSingle(q, opt) : toggleMulti(q, opt)"
         >
           {{ opt.label }}
+        </button>
+        <button
+          type="button"
+          class="clarify-option"
+          :class="{ active: otherOpen[q.id] }"
+          :aria-expanded="otherOpen[q.id] === true"
+          :disabled="props.disabled"
+          @click="toggleOther(q, $event)"
+        >
+          Other
         </button>
       </div>
 
@@ -175,10 +200,11 @@ function onCredentialSaved(q: ClarifyQuestion, credential: Credential): void {
       />
 
       <input
-        v-if="q.type === 'text' || q.allowOther"
+        v-if="q.type === 'text' || otherOpen[q.id]"
         v-model="state[q.id].other"
         type="text"
-        class="clarify-other"
+        class="clarify-other clarify-other-answer"
+        :aria-label="q.text"
         :placeholder="otherPlaceholder(q)"
         :disabled="props.disabled"
         @focus="onOtherFocus(q)"
@@ -196,102 +222,4 @@ function onCredentialSaved(q: ClarifyQuestion, credential: Credential): void {
   </div>
 </template>
 
-<style scoped>
-.clarify-card {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 12px;
-  margin-top: 8px;
-  border: 1px solid hsl(var(--border));
-  border-radius: 8px;
-  background: hsl(var(--card));
-}
-.clarify-card.disabled {
-  opacity: 0.6;
-}
-.clarify-question {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.clarify-text {
-  font-size: 13px;
-  font-weight: 600;
-  color: hsl(var(--foreground));
-}
-.clarify-options {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.clarify-option {
-  padding: 4px 10px;
-  font-size: 12px;
-  color: hsl(var(--foreground));
-  border: 1px solid hsl(var(--border));
-  border-radius: 999px;
-  background: hsl(var(--background));
-  cursor: pointer;
-  transition:
-    background 0.12s ease,
-    border-color 0.12s ease,
-    color 0.12s ease;
-}
-.clarify-option:not(.active):hover:not(:disabled) {
-  background: hsl(var(--muted));
-}
-.clarify-option.active {
-  background: hsl(var(--primary));
-  color: hsl(var(--primary-foreground));
-  border-color: hsl(var(--primary));
-}
-.clarify-option:disabled {
-  cursor: not-allowed;
-}
-.clarify-other {
-  padding: 6px 8px;
-  font-size: 12px;
-  color: hsl(var(--foreground));
-  background: hsl(var(--background));
-  border: 1px solid hsl(var(--border));
-  border-radius: 6px;
-}
-.clarify-other::placeholder {
-  color: hsl(var(--muted-foreground));
-}
-.clarify-other:focus {
-  outline: none;
-  border-color: hsl(var(--primary));
-  box-shadow: 0 0 0 2px hsl(var(--primary) / 0.15);
-}
-.clarify-prefill {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.clarify-prefill-label {
-  font-size: 12px;
-  color: hsl(var(--muted-foreground));
-}
-.clarify-prefill-input {
-  flex: 1;
-  min-width: 0;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-}
-.clarify-submit {
-  align-self: flex-start;
-  padding: 6px 14px;
-  font-size: 12px;
-  font-weight: 600;
-  border: none;
-  border-radius: 6px;
-  background: hsl(var(--primary));
-  color: hsl(var(--primary-foreground));
-  cursor: pointer;
-}
-.clarify-submit:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-</style>
+<style scoped src="./ClarifyCard.css"></style>

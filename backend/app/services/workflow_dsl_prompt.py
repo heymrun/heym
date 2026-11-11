@@ -5624,8 +5624,11 @@ Rules for the clarify block:
   optional `options` (strings, or the option objects below), optional `allowOther`
   (boolean), optional `optional` (boolean).
 - Use `single` for one choice, `multi` for several, `text` for free input.
-- Provide `options` whenever sensible; set `allowOther: true` when a genuine free-form
-  answer is plausible.
+- Provide `options` whenever sensible. Every question must offer a free-text answer,
+  including credential choices: the UI always offers an Other button for `single` and
+  `multi` questions, even when `allowOther` is omitted or false; clicking it opens the
+  free-text input. Do not add a separate Other option. Free-text answers come back as
+  `Other: "<text>"`.
 - When a `single` choice needs one editable value (for example a header key), an option
   can be an object `{"label": "...", "prefill": "..."}` instead of a string, and the
   question's `prefillLabel` names that value. The selected option's `prefill` appears in

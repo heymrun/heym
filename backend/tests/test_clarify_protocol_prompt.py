@@ -42,6 +42,16 @@ class TestClarifyProtocolConstant(unittest.TestCase):
         self.assertIn('`"optional": true`', text)
         self.assertIn("`(skipped)`", text)
 
+    def test_every_question_offers_a_free_text_answer(self) -> None:
+        """Credential and other choices must leave room for the user's own answer."""
+        text = CLARIFY_PROTOCOL_PROMPT
+        self.assertIn("Every question must offer a free-text answer", text)
+        self.assertIn("including credential choices", text)
+        self.assertIn("an Other button", text)
+        self.assertIn("clicking it opens", text)
+        self.assertIn("even when `allowOther` is omitted or false", text)
+        self.assertIn('`Other: "<text>"`', text)
+
     def test_constant_documents_data_table_options(self) -> None:
         """The answer formats must match what ClarifyCard serializes for data tables."""
         text = CLARIFY_PROTOCOL_PROMPT
