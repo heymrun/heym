@@ -52,6 +52,35 @@ test("opens every shipped feature from the launcher", async ({ page }) => {
   ).toBeVisible();
 });
 
+for (const path of ["/", "/chats", "/docs", "/evals"]) {
+  test(`keeps the header launcher in place while searching on ${path}`, async ({ page }) => {
+    await prepareAuthenticatedPage(page);
+    await page.goto(path);
+
+    const launcher = page.getByRole("button", { name: "New in Heym — open the release tour" });
+    await expect(launcher).toBeVisible();
+    await page.evaluate(async () => { await document.fonts.ready; });
+    const initialBounds = await launcher.boundingBox();
+    expect(initialBounds).not.toBeNull();
+
+    await launcher.click();
+    const tour = page.getByRole("dialog", { name: /New in Heym/ });
+    await expect(tour).toBeVisible();
+
+    await page.keyboard.press("Control+k");
+    const search = page.getByRole("textbox", { name: "Command palette search" });
+    await expect(search).toBeVisible();
+    await expect(tour).toBeHidden();
+    await expect(launcher).toBeVisible();
+    await expect.poll(() => launcher.boundingBox()).toEqual(initialBounds);
+
+    await page.keyboard.press("Escape");
+    await expect(search).toBeHidden();
+    await expect(launcher).toBeVisible();
+    await expect.poll(() => launcher.boundingBox()).toEqual(initialBounds);
+  });
+}
+
 test("every feature's animation fits inside its frame", async ({ page }, testInfo) => {
   await prepareAuthenticatedPage(page);
   await page.setViewportSize({ width: 1440, height: 900 });
