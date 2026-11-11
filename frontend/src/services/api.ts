@@ -4027,6 +4027,10 @@ export const chatApi = {
     await api.delete(`/chats/${conversationId}/queue/${itemId}`);
   },
 
+  sendQueuedMessageNow: async (conversationId: string, itemId: string): Promise<void> => {
+    await api.post(`/chats/${conversationId}/queue/${itemId}/send-now`);
+  },
+
   cancelStream: async (id: string): Promise<void> => {
     await api.post(`/chats/${id}/cancel`);
   },

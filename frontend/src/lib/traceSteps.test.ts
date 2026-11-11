@@ -67,6 +67,20 @@ function makeTrace(overrides: Partial<LLMTraceDetail> = {}): LLMTraceDetail {
   };
 }
 
+it("marks a model call interrupted before its answer as cancelled", () => {
+  const steps = buildTraceSteps(makeTrace({
+    status: "cancelled",
+    response: {
+      cancelled: true,
+      turn_timings: [{ turn: 1, startMs: 0, durationMs: 50, model: "gpt-4o", cancelled: true }],
+    },
+  }));
+  const modelCall = steps.find((step) => step.id === "call_llm_turn_1");
+  expect(modelCall?.badges).toContainEqual({ label: "Cancelled" });
+  expect(modelCall?.detail).toContain("Cancelled by the user");
+  expect(modelCall?.isError).toBe(false);
+});
+
 describe("buildTraceSteps agent tool observability", () => {
   it("adds pending/timeout/cancelled badges on tool steps", () => {
     const pending = buildTraceSteps(makeTrace());

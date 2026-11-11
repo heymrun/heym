@@ -7,7 +7,7 @@ import ReleaseTourLauncher from "@/features/release-tour/components/ReleaseTourL
 import { useReleaseTour } from "@/features/release-tour/useReleaseTour";
 
 interface Props {
-  /** Host page's own rule: the home screen, with no blocking overlay open. */
+  /** Whether the host page allows the tour panel to open over its content. */
   eligible?: boolean;
   /** CSS selector for the header slot the launcher button renders into. */
   launcherTarget?: string;
@@ -44,7 +44,8 @@ const autoOpenAllowed = computed(() => featureAvailable.value && !isShowcaseIntr
 const { activeTour, isOpen, hasUnseenRelease, openTour, completeTour } =
   useReleaseTour(autoOpenAllowed);
 
-const showLauncher = computed(() => featureAvailable.value && activeTour.value !== null);
+// Blocking overlays hide the panel, while the header keeps its layout.
+const showLauncher = computed(() => !isMobile.value && activeTour.value !== null);
 
 // The panel hangs off the launcher button, which lives in the header via Teleport.
 const launcherRef = ref<ComponentPublicInstance | null>(null);

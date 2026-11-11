@@ -6,6 +6,33 @@ test.beforeEach(async ({ page }) => {
   await prepareAuthenticatedPage(page);
 });
 
+test("shows cancelled chat traces and interrupted model calls", async ({ page }) => {
+  const trace = {
+    id: "11111111-1111-4111-8111-111111111141",
+    created_at: new Date().toISOString(), source: "dashboard_chat", request_type: "chat.completions",
+    provider: "OpenAI", model: "gpt-4o", credential_id: null, credential_name: null,
+    router_credential_id: null, router_label: null, workflow_id: null, workflow_name: null,
+    node_id: null, node_label: "Dashboard Chat", status: "cancelled", elapsed_ms: 50,
+    prompt_tokens: null, completion_tokens: null, total_tokens: null,
+    cost_usd: null, is_priced: false, error: null,
+    request: { messages: [{ role: "user", content: "Show workflow runs" }] },
+    response: { cancelled: true, text: "", turn_timings: [
+      { turn: 1, startMs: 0, durationMs: 50, model: "gpt-4o", cancelled: true },
+    ] },
+  };
+  await page.route("**/api/traces?**", async (route) => {
+    await route.fulfill({ json: { items: [trace], total: 1, limit: 50, offset: 0 } });
+  });
+  await page.route(`**/api/traces/${trace.id}`, async (route) => {
+    await route.fulfill({ json: trace });
+  });
+  await page.goto("/?tab=traces");
+  await page.getByRole("main").getByText("cancelled", { exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByText("cancelled", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("Cancelled", { exact: true })).toBeVisible();
+});
+
 test("shows the traces empty state and filter controls", async ({ page }) => {
   await page.goto("/?tab=traces");
   const main = page.getByRole("main");

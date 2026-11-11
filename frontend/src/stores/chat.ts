@@ -607,7 +607,15 @@ export const useChatStore = defineStore("chat", () => {
           _setStreamState(conversationId, { contextUsage: payload });
           contextUsageByConv.value = { ...contextUsageByConv.value, [conversationId]: payload };
         },
-        () => {
+        (payload) => {
+          if (payload.cancelled) {
+            const current = getStreamState(conversationId);
+            _setStreamState(conversationId, {
+              toolCalls: current.toolCalls.map((tool) => tool.status === "running"
+                ? { ...tool, status: "cancelled", response_summary: "Cancelled" }
+                : tool),
+            });
+          }
           const hasContent = _finalizeStreamingAssistant(conversationId);
           _setStreamState(conversationId, _emptyStreamingPatch(true));
           _refreshConversationTimestamp(conversationId);
@@ -666,8 +674,8 @@ export const useChatStore = defineStore("chat", () => {
         _patchConversationFlag(conversationId, "is_running", false);
       }
     } finally {
-      foregroundSubscribedConvIds.delete(conversationId);
       if (activeControllersByConv.get(conversationId) === controller) {
+        foregroundSubscribedConvIds.delete(conversationId);
         activeControllersByConv.delete(conversationId);
       }
     }
@@ -737,6 +745,20 @@ export const useChatStore = defineStore("chat", () => {
   async function deleteQueuedMessage(conversationId: string, itemId: string): Promise<void> {
     await chatApi.deleteQueuedMessage(conversationId, itemId);
     _removeQueuedMessage(conversationId, itemId);
+  }
+
+  async function sendQueuedMessageNow(conversationId: string, itemId: string): Promise<void> {
+    await chatApi.sendQueuedMessageNow(conversationId, itemId);
+    userCancelledConvIds.delete(conversationId);
+    // Keep the current reader: it receives the cancelled partial reply, followed by
+    // queued_message_started and the new answer, with no gap in the conversation.
+    if (!foregroundSubscribedConvIds.has(conversationId) || !getStreamState(conversationId).isStreaming) {
+      activeControllersByConv.get(conversationId)?.abort();
+      activeControllersByConv.delete(conversationId);
+      foregroundSubscribedConvIds.delete(conversationId);
+      _patchConversationFlag(conversationId, "is_running", true);
+      void _subscribeToStream(conversationId);
+    }
   }
 
   function _patchConversation(updated: Conversation): void {
@@ -1001,6 +1023,7 @@ export const useChatStore = defineStore("chat", () => {
     deleteConversation,
     clearConversations,
     sendMessage,
+    sendQueuedMessageNow,
     editMessage,
     cancelStreaming,
     updateQueuedMessage,

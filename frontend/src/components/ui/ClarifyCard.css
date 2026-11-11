@@ -1,0 +1,97 @@
+.clarify-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  margin-top: 8px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+  background: hsl(var(--card));
+}
+.clarify-card.disabled {
+  opacity: 0.6;
+}
+.clarify-question {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.clarify-text {
+  font-size: 13px;
+  font-weight: 600;
+  color: hsl(var(--foreground));
+}
+.clarify-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.clarify-option {
+  padding: 4px 10px;
+  font-size: 12px;
+  color: hsl(var(--foreground));
+  border: 1px solid hsl(var(--border));
+  border-radius: 999px;
+  background: hsl(var(--background));
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease,
+    color 0.12s ease;
+}
+.clarify-option:not(.active):hover:not(:disabled) {
+  background: hsl(var(--muted));
+}
+.clarify-option.active {
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  border-color: hsl(var(--primary));
+}
+.clarify-option:disabled {
+  cursor: not-allowed;
+}
+.clarify-other {
+  padding: 6px 8px;
+  font-size: 12px;
+  color: hsl(var(--foreground));
+  background: hsl(var(--background));
+  border: 1px solid hsl(var(--border));
+  border-radius: 6px;
+}
+.clarify-other::placeholder {
+  color: hsl(var(--muted-foreground));
+}
+.clarify-other:focus {
+  outline: none;
+  border-color: hsl(var(--primary));
+  box-shadow: 0 0 0 2px hsl(var(--primary) / 0.15);
+}
+.clarify-prefill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.clarify-prefill-label {
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+}
+.clarify-prefill-input {
+  flex: 1;
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.clarify-submit {
+  align-self: flex-start;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  border: none;
+  border-radius: 6px;
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  cursor: pointer;
+}
+.clarify-submit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
