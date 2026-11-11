@@ -446,6 +446,12 @@ function getStatusClass(status: string): string {
   return "text-emerald-600 bg-emerald-500/10";
 }
 
+function getStatusTextClass(status: string): string {
+  if (status === "error") return "text-destructive";
+  if (status === "cancelled") return "text-muted-foreground";
+  return "text-emerald-600";
+}
+
 function formatMillis(value: number | null): string {
   if (value === null || Number.isNaN(value)) return "-";
   return `${Math.round(value)} ms`;
@@ -1013,8 +1019,8 @@ onMounted(async () => {
               Status
             </div>
             <div
-              class="mt-1 text-sm font-medium"
-              :class="getStatusClass(selectedTrace.status)"
+              class="mt-1 text-sm font-bold"
+              :class="getStatusTextClass(selectedTrace.status)"
             >
               {{ selectedTrace.status }}
             </div>

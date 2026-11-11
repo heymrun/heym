@@ -500,3 +500,67 @@ test("renders JSON trace events as expandable trees with a raw toggle", async ({
   await toolStep.scrollIntoViewIfNeeded();
   await page.screenshot({ path: ".e2e-artifacts/traces-json-tree.png" });
 });
+
+test("keeps the wheel on the page until the pointer is moved onto a JSON box", async ({ page }) => {
+  const rows = Array.from({ length: 120 }, (_, index) => ({ id: index }));
+  const trace = {
+    id: "11111111-1111-4111-8111-111111111142",
+    created_at: new Date().toISOString(), source: "workflow", request_type: "chat.completions",
+    provider: "OpenAI", model: "gpt-4o", credential_id: null, credential_name: null,
+    router_credential_id: null, router_label: null, workflow_id: null,
+    workflow_name: "Scroll workflow", node_id: null, node_label: "Agent", status: "success",
+    elapsed_ms: 50, prompt_tokens: null, completion_tokens: null, total_tokens: null,
+    cost_usd: null, is_priced: false, error: null,
+    request: { messages: [{ role: "user", content: "Look it up" }] },
+    response: {
+      text: "done",
+      tool_calls: Array.from({ length: 5 }, (_, index) => ({
+        tool_call_id: `call-${index}`, name: "lookup", arguments: { q: "x" }, result: { rows },
+      })),
+    },
+  };
+  await page.route("**/api/traces?**", async (route) => {
+    await route.fulfill({ json: { items: [trace], total: 1, limit: 25, offset: 0 } });
+  });
+  await page.route(`**/api/traces/${trace.id}`, async (route) => {
+    await route.fulfill({ json: trace });
+  });
+  await page.goto("/?tab=traces");
+  await page.getByRole("button", { name: /Scroll workflow/ }).click();
+  const dialog = page.getByRole("dialog");
+  const pageScroller = dialog.locator(".dialog-body");
+  // The first tool call's Result: taller than its box, so it could take the wheel.
+  const box = dialog.getByTestId("trace-json-scroll").nth(1);
+  await expect(box).toBeVisible();
+
+  // Rest the pointer on the summary cards, then slide the box under it without moving it.
+  const cards = await dialog.getByText("Status", { exact: true }).boundingBox();
+  const target = await box.boundingBox();
+  if (!cards || !target) throw new Error("trace details did not lay out");
+  const rest = { x: target.x + target.width / 2, y: cards.y + 10 };
+  await page.mouse.move(rest.x, rest.y);
+  await box.evaluate((element, y) => {
+    const scroller = element.closest(".dialog-body");
+    if (scroller) scroller.scrollTop += element.getBoundingClientRect().top - y + 40;
+  }, rest.y);
+  await expect
+    .poll(() => box.evaluate((element, point) =>
+      element.contains(document.elementFromPoint(point.x, point.y)), rest))
+    .toBe(true);
+
+  const pageTop = await pageScroller.evaluate((element) => element.scrollTop);
+  await page.mouse.wheel(0, 100);
+  await expect.poll(() => pageScroller.evaluate((element) => element.scrollTop)).toBeGreaterThan(pageTop);
+  expect(await box.evaluate((element) => element.scrollTop)).toBe(0);
+
+  // Moving the pointer onto the box is what hands it the wheel.
+  await box.evaluate((element) => element.scrollIntoView({ block: "center" }));
+  const hovered = await box.boundingBox();
+  if (!hovered) throw new Error("JSON box is not visible");
+  await page.mouse.move(hovered.x + hovered.width / 2, hovered.y + hovered.height / 2);
+  await page.mouse.move(hovered.x + hovered.width / 2 + 5, hovered.y + hovered.height / 2 + 5);
+  const settledTop = await pageScroller.evaluate((element) => element.scrollTop);
+  await page.mouse.wheel(0, 100);
+  await expect.poll(() => box.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  expect(await pageScroller.evaluate((element) => element.scrollTop)).toBe(settledTop);
+});

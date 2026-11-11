@@ -37,6 +37,21 @@ watch(
     viewMode.value = "tree";
   },
 );
+
+// A scrolling box is its own compositor layer and takes the wheel from the page, so it
+// only scrolls once the pointer is moved onto it, not when the page slides it under one.
+const scrollArmed = ref(false);
+
+function armScroll(event: PointerEvent): void {
+  if (event.type === "pointermove" && event.movementX === 0 && event.movementY === 0) return;
+  scrollArmed.value = true;
+}
+
+function disarmScroll(event: PointerEvent): void {
+  // A drag that leaves the box is selecting text and still needs it to scroll.
+  if (event.buttons !== 0) return;
+  scrollArmed.value = false;
+}
 </script>
 
 <template>
@@ -94,8 +109,12 @@ watch(
     </div>
 
     <div
-      class="overflow-auto rounded-md border bg-muted/30"
-      :class="maxHeightClass"
+      class="trace-json-scroll overflow-auto rounded-md border bg-muted/30"
+      :class="[maxHeightClass, { 'trace-json-scroll--idle': !scrollArmed }]"
+      data-testid="trace-json-scroll"
+      @pointermove="armScroll"
+      @pointerdown="armScroll"
+      @pointerleave="disarmScroll"
     >
       <div
         v-if="content.isJson && viewMode === 'tree' && !isEmptyContainer"
@@ -114,3 +133,17 @@ watch(
     </div>
   </div>
 </template>
+
+<style scoped>
+/* Hover pointers only: a touch has to scroll the box it lands on. */
+@media (hover: hover) and (pointer: fine) {
+  /* The scrollbar's space is held either way, so arming a box moves nothing. */
+  .trace-json-scroll {
+    scrollbar-gutter: stable;
+  }
+
+  .trace-json-scroll--idle {
+    overflow: hidden;
+  }
+}
+</style>
