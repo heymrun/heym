@@ -6,13 +6,44 @@ from datetime import datetime, timedelta, timezone
 import jwt
 
 from app.config import settings
-from app.services.playwright_execution_tokens import create_token, validate_token
+from app.services.playwright_execution_tokens import (
+    PlaywrightExecutionClaims,
+    create_token,
+    validate_token,
+)
 
 
 class CreateAndValidateTokenTests(unittest.TestCase):
     def test_round_trip_returns_the_same_user_id(self) -> None:
         token = create_token("user-123")
-        self.assertEqual(validate_token(token), "user-123")
+        self.assertEqual(validate_token(token), PlaywrightExecutionClaims(user_id="user-123"))
+
+    def test_round_trip_carries_the_run_context(self) -> None:
+        token = create_token(
+            "user-123",
+            workflow_id="wf-1",
+            node_id="pw1",
+            node_label="Browser",
+            session_id="exec-1",
+        )
+        self.assertEqual(
+            validate_token(token),
+            PlaywrightExecutionClaims(
+                user_id="user-123",
+                workflow_id="wf-1",
+                node_id="pw1",
+                node_label="Browser",
+                session_id="exec-1",
+            ),
+        )
+
+    def test_token_without_subject_is_invalid(self) -> None:
+        payload = {
+            "exp": datetime.now(timezone.utc) + timedelta(seconds=600),
+            "type": "playwright_execution",
+        }
+        token = jwt.encode(payload, settings.secret_key, algorithm=settings.jwt_algorithm)
+        self.assertIsNone(validate_token(token))
 
     def test_none_token_is_invalid(self) -> None:
         self.assertIsNone(validate_token(None))

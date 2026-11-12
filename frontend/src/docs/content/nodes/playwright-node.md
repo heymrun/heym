@@ -77,6 +77,8 @@ Enable **Auto heal mode** in the AI step properties. If the saved step fails:
 
 This reduces flakiness when sites update their markup or class names.
 
+Every AI step and Auto Heal LLM call is recorded in the [Traces tab](../tabs/traces-tab.md) under the workflow and Playwright node that made it. Steps replayed from `saveStepsForFuture` make no LLM call and leave no trace.
+
 ## Reduce automation flags
 
 Enable **Reduce automation flags** (`playwrightStealth: true`) when a site treats Playwright's bundled Chromium as a bot because of standard automation signals (`HeadlessChrome` in the user agent, `navigator.webdriver`, missing `window.chrome`).
