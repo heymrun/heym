@@ -1457,6 +1457,7 @@ Do NOT use downstream nodes that depend on `$notifyWorkflow.outputs` when `execu
 
 **Rules**:
 - Unwrapping applies **only when the sole terminal is one `htmlOutputMapper`**. With a second terminal the runtime falls back to the normal per-label JSON map.
+- Pages run **sandboxed** (`Content-Security-Policy: sandbox`, whatever `contentType` is). Scripts, forms, popups and downloads work, but the page has an opaque origin: cookies, localStorage and requests to the Heym API with the visitor's session are not available. Do not build a page that expects to call `/api/...` as the signed-in user.
 - Same loop restriction as `output`: **never** place `htmlOutputMapper` inside a loop iteration branch (only after `done`).
 - **Never** connect `htmlOutputMapper` to an agent's `tool-input` handle. It is a terminal sink, not a callable tool. The same applies to `jsonOutputMapper`.
 

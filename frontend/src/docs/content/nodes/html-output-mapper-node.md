@@ -40,6 +40,10 @@ Read those values with `$input.query.name`. See [Webhooks](../reference/webhooks
 
 A workflow with no trigger node whose only terminal is this node shows a **WEB** chip in the [Workflows tab](../tabs/workflows-tab.md).
 
+### Pages run sandboxed
+
+Every page response carries `Content-Security-Policy: sandbox …` and `X-Content-Type-Options: nosniff`, whatever `contentType` you set. Scripts, forms, popups, dialogs and downloads still work, but the page gets an opaque origin: it cannot read cookies or localStorage, and it cannot call the Heym API with the session of whoever opens it. A page that needs data should get it from the workflow (template expressions such as `$llm.text`), not by calling `/api/…` from its script.
+
 ## Agent tool usage
 
 Not supported. This node is a terminal sink, so it cannot be attached to an [Agent Node](./agent-node.md) tools handle. The same applies to [JSON output mapper](./json-output-mapper-node.md).

@@ -133,3 +133,7 @@ vulnerabilities in Heym:
   backend's files, including the Kubernetes ServiceAccount token that leads to
   every stored credential, and for contributing the remediation
   (GHSA-hmfh-wpg2-vff4).
+- [@Shxsu1x](https://github.com/Shxsu1x) for stored XSS through HTML page
+  workflows, where a page served by an `htmlOutputMapper` workflow ran on the
+  instance's own origin with the session of whoever opened it, and for
+  contributing the remediation (GHSA-hhvf-v27f-g7c7).
