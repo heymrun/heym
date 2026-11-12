@@ -1,5 +1,6 @@
 import { expect, request, test, type Page } from "@playwright/test";
 
+import { heymClientHeaders } from "../src/constants/httpIdentity";
 import { acceptNextDialog, createWorkflow, E2E_USER, expectOk, prepareAuthenticatedPage } from "./support";
 
 async function signInAsAdmin(page: Page): Promise<void> {
@@ -64,7 +65,10 @@ test("instance admin opens, pauses, resumes, and deletes another user's workflow
     expect((await schedules.json()).events.some((event: { workflow_id: string }) => event.workflow_id === workflow.id)).toBe(true);
 
     // Start a long run as the owner; deleting from another session must wait for it.
-    const execution = owner.post(`/api/workflows/${workflow.id}/execute`, { data: { inputs: {} } });
+    const execution = owner.post(`/api/workflows/${workflow.id}/execute`, {
+      data: { inputs: {} },
+      headers: heymClientHeaders,
+    });
     await expect.poll(async () => {
       const response = await page.request.get("/api/workflows/executions/active");
       return (await response.json()).some((run: { workflow_id: string }) => run.workflow_id === workflow.id);

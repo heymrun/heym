@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { heymClientHeaders } from "../src/constants/httpIdentity";
 import { createWorkflow, deleteWorkflow, prepareAuthenticatedPage } from "./support";
 
 interface WorkflowNodeFixture {
@@ -199,17 +200,21 @@ test("opens one running execution live from both history dialogs", async ({ page
     // wait window (CI with parallel workers can make a cold dashboard load exceed 6s).
     await Promise.all([page.goto(`/workflows/${workflow.id}`), allHistoryPage.goto("/")]);
     await expect(page.locator(".vue-flow__node")).toHaveCount(5);
-    await page.evaluate((workflowId) => {
-      void fetch(`/api/workflows/${workflowId}/execute?trigger_source=E2E`, {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-          "x-simple-response": "false",
-        },
-        body: JSON.stringify({ text: "live input payload" }),
-      });
-    }, workflow.id);
+    await page.evaluate(
+      ({ workflowId, clientHeaders }) => {
+        void fetch(`/api/workflows/${workflowId}/execute?trigger_source=E2E`, {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            ...clientHeaders,
+            "Content-Type": "application/json",
+            "x-simple-response": "false",
+          },
+          body: JSON.stringify({ text: "live input payload" }),
+        });
+      },
+      { workflowId: workflow.id, clientHeaders: heymClientHeaders },
+    );
 
     await expect
       .poll(async () => {
