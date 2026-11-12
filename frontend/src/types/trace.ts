@@ -84,7 +84,7 @@ export interface LLMTraceListResponse {
   offset: number;
 }
 
-export type TraceTimeRange = "1h" | "24h" | "7d" | "30d" | "all";
+export type TraceTimeRange = "1h" | "3h" | "6h" | "24h" | "7d" | "30d" | "all";
 
 export interface TraceStatsRangeMeta {
   start: string | null;

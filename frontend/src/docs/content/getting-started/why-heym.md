@@ -192,7 +192,7 @@ The trace system is purpose-built for debugging agentic behavior, with full requ
 Every LLM call in Heym is automatically costed. The [Traces Tab](../tabs/traces-tab.md) shows per-trace input and output token counts alongside a real-time USD cost derived from a synced pricing table.
 
 - **Per-trace cost** – Input tokens, output tokens, and total USD shown on every trace row
-- **Cost analytics** – KPI cards and a per-model cost chart update with the selected time range (1h / 24h / 7d / 30d / All)
+- **Cost analytics** – KPI cards and a per-model cost chart update with the selected time range (1h / 3h / 6h / 24h / 7d / 30d / All)
 - **LLM Cost Table** – A system table in the [DataTable tab](../tabs/datatable-tab.md) is seeded from Helicone every 24 hours; you can override prices or add custom rows for models not yet listed
 - **Missing-price warning** – Traces for models without a pricing entry surface an inline warning with a direct link to the cost table
 

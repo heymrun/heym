@@ -22,6 +22,20 @@ class RangeResolverTests(unittest.TestCase):
         self.assertEqual(start, now - timedelta(hours=1))
         self.assertEqual(bucket, 300)
 
+    def test_3h_window_15min_bucket(self):
+        now = self._fixed_now()
+        start, end, bucket = _resolve_range("3h", now=now)
+        self.assertEqual(end, now)
+        self.assertEqual(start, now - timedelta(hours=3))
+        self.assertEqual(bucket, 900)
+
+    def test_6h_window_30min_bucket(self):
+        now = self._fixed_now()
+        start, end, bucket = _resolve_range("6h", now=now)
+        self.assertEqual(end, now)
+        self.assertEqual(start, now - timedelta(hours=6))
+        self.assertEqual(bucket, 1800)
+
     def test_24h_window_1h_bucket(self):
         now = self._fixed_now()
         start, end, bucket = _resolve_range("24h", now=now)

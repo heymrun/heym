@@ -358,7 +358,13 @@ def _execute_playwright_node(
                 "AI steps cannot run in anonymous or cron-triggered workflows without user context."
             )
         heym_api_url = os.environ.get("HEYM_API_URL", "http://localhost:10105")
-        heym_execution_token = create_token(str(executor.trace_user_id))
+        heym_execution_token = create_token(
+            str(executor.trace_user_id),
+            workflow_id=str(executor.workflow_id) if executor.workflow_id else None,
+            node_id=node_id,
+            node_label=node_label,
+            session_id=executor.llm_session_id,
+        )
 
     import subprocess
     import sys

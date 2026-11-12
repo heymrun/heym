@@ -17,6 +17,8 @@ const emit = defineEmits<Emits>();
 
 const options = computed<Array<{ value: TraceTimeRange; label: string }>>(() => [
   { value: "1h", label: "Last 1 hour" },
+  { value: "3h", label: "Last 3 hours" },
+  { value: "6h", label: "Last 6 hours" },
   { value: "24h", label: "Last 24 hours" },
   { value: "7d", label: "Last 7 days" },
   { value: "30d", label: "Last 30 days" },

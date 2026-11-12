@@ -40,7 +40,7 @@ async def list_traces(
     search: str | None = Query(None),
     model: str | None = None,
     order: str = Query("desc", pattern="^(asc|desc)$"),
-    range: str | None = Query(None, description="Optional time window: 1h|24h|7d|30d|all"),
+    range: str | None = Query(None, description="Optional time window: 1h|3h|6h|24h|7d|30d|all"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> LLMTraceListResponse:
@@ -119,7 +119,7 @@ async def list_traces(
 
 @router.get("/stats", response_model=TraceStatsResponse)
 async def get_trace_stats(
-    range: str = Query("7d", description="1h | 24h | 7d | 30d | all"),
+    range: str = Query("7d", description="1h | 3h | 6h | 24h | 7d | 30d | all"),
     source: str | None = None,
     credential_id: uuid.UUID | None = None,
     workflow_id: uuid.UUID | None = None,

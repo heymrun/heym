@@ -12,6 +12,7 @@ from app.db.models import CredentialType
 from app.services import agent_memory_service
 from app.services.llm_trace import LLMTraceContext
 from app.services.model_router import ModelRouter
+from app.services.playwright_execution_tokens import PlaywrightExecutionClaims
 
 
 def _router_config() -> dict:
@@ -39,6 +40,10 @@ def _router_config() -> dict:
     }
 
 
+def _claims() -> PlaywrightExecutionClaims:
+    return PlaywrightExecutionClaims(user_id=str(uuid.uuid4()))
+
+
 def _credential(credential_type: CredentialType) -> SimpleNamespace:
     return SimpleNamespace(
         id=uuid.uuid4(), name="Test credential", type=credential_type, encrypted_config="encrypted"
@@ -60,7 +65,7 @@ class PlaywrightRouterTests(unittest.IsolatedAsyncioTestCase):
         for endpoint in (playwright.ai_step, playwright.ai_step_heal):
             with self.subTest(endpoint=endpoint.__name__):
                 with (
-                    patch.object(playwright, "validate_token", return_value=str(uuid.uuid4())),
+                    patch.object(playwright, "validate_token", return_value=_claims()),
                     patch.object(playwright, "decrypt_config", return_value=_router_config()),
                     patch.object(
                         playwright,
@@ -90,7 +95,7 @@ class PlaywrightRouterTests(unittest.IsolatedAsyncioTestCase):
         for endpoint in (playwright.ai_step, playwright.ai_step_heal):
             with self.subTest(endpoint=endpoint.__name__):
                 with (
-                    patch.object(playwright, "validate_token", return_value=str(uuid.uuid4())),
+                    patch.object(playwright, "validate_token", return_value=_claims()),
                     patch.object(playwright, "decrypt_config", return_value={}),
                     patch.object(playwright, "execute_llm", AsyncMock()) as execute,
                     self.assertRaises(HTTPException) as ctx,

@@ -14,12 +14,13 @@ from app.db.models import LLM_CREDENTIAL_TYPES, Credential, CredentialShare, Use
 from app.db.session import get_db
 from app.services.encryption import decrypt_config
 from app.services.llm_service import execute_llm
+from app.services.llm_trace import LLMTraceContext
 from app.services.model_router import build_router_for_credential
 from app.services.playwright_code_generator import (
     generate_playwright_code,
     normalize_playwright_auth_state,
 )
-from app.services.playwright_execution_tokens import validate_token
+from app.services.playwright_execution_tokens import PlaywrightExecutionClaims, validate_token
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,25 @@ def llm_exception_message(exc: BaseException) -> str:
     if message:
         return str(message)
     return str(exc)
+
+
+def _ai_step_trace_context(
+    claims: PlaywrightExecutionClaims, user_id: uuid.UUID, credential_id: uuid.UUID
+) -> LLMTraceContext:
+    """Trace an AI step's LLM call against the workflow node that ran it."""
+    try:
+        workflow_id = uuid.UUID(claims.workflow_id) if claims.workflow_id else None
+    except ValueError:
+        workflow_id = None
+    return LLMTraceContext(
+        user_id=user_id,
+        credential_id=credential_id,
+        workflow_id=workflow_id,
+        node_id=claims.node_id,
+        node_label=claims.node_label,
+        source="workflow",
+        session_id=claims.session_id,
+    )
 
 
 AI_STEP_SYSTEM_PROMPT = """You are a Playwright automation expert. Given HTML (and optionally a screenshot description), analyze the page and return a JSON object with a "steps" array of Playwright actions to fulfill the user's instructions.
@@ -144,8 +164,8 @@ async def ai_step(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """LLM-powered step: analyze HTML and return Playwright actions. Called from Playwright subprocess."""
-    user_id = validate_token(x_execution_token)
-    if not user_id:
+    claims = validate_token(x_execution_token)
+    if claims is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired execution token",
@@ -170,7 +190,7 @@ async def ai_step(
             detail="credentialId and model are required",
         )
 
-    user_uuid = uuid.UUID(user_id)
+    user_uuid = uuid.UUID(claims.user_id)
     result = await db.execute(
         select(Credential).where(Credential.id == credential_id, Credential.owner_id == user_uuid)
     )
@@ -200,6 +220,7 @@ async def ai_step(
         return {"steps": saved_steps}
 
     config = decrypt_config(credential.encrypted_config)
+    trace_context = _ai_step_trace_context(claims, user_uuid, credential.id)
     router = build_router_for_credential(
         credential_id=str(credential.id),
         credential_name=credential.name,
@@ -285,6 +306,7 @@ async def ai_step(
             response_format=response_format,
             image_input=image_input,
             router=router,
+            trace_context=trace_context,
         )
     except UnprocessableEntityError as e:
         err_msg = str(e).lower()
@@ -306,6 +328,7 @@ async def ai_step(
                     response_format=response_format,
                     image_input=None,
                     router=router,
+                    trace_context=trace_context,
                 )
             except Exception as retry_e:
                 logger.exception("Playwright AI step LLM retry without image failed")
@@ -361,8 +384,8 @@ async def ai_step_heal(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """LLM-powered heal: selector failed, return alternative step using text/role locators."""
-    user_id = validate_token(x_execution_token)
-    if not user_id:
+    claims = validate_token(x_execution_token)
+    if claims is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired execution token",
@@ -392,7 +415,7 @@ async def ai_step_heal(
             failed_step,
         )
 
-    user_uuid = uuid.UUID(user_id)
+    user_uuid = uuid.UUID(claims.user_id)
     result = await db.execute(
         select(Credential).where(Credential.id == credential_id, Credential.owner_id == user_uuid)
     )
@@ -417,6 +440,7 @@ async def ai_step_heal(
         )
 
     config = decrypt_config(credential.encrypted_config)
+    trace_context = _ai_step_trace_context(claims, user_uuid, credential.id)
     router = build_router_for_credential(
         credential_id=str(credential.id),
         credential_name=credential.name,
@@ -497,6 +521,7 @@ async def ai_step_heal(
             response_format=response_format,
             image_input=image_input,
             router=router,
+            trace_context=trace_context,
         )
     except UnprocessableEntityError as e:
         err_msg = str(e).lower()
@@ -520,6 +545,7 @@ async def ai_step_heal(
                     response_format=response_format,
                     image_input=None,
                     router=router,
+                    trace_context=trace_context,
                 )
             except Exception as retry_e:
                 logger.exception("Playwright AI step heal LLM retry without image failed")

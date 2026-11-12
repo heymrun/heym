@@ -24,6 +24,8 @@ CostResolver = Callable[
 
 RANGE_TABLE: dict[str, tuple[timedelta, int]] = {
     "1h": (timedelta(hours=1), 300),
+    "3h": (timedelta(hours=3), 900),
+    "6h": (timedelta(hours=6), 1800),
     "24h": (timedelta(hours=24), 3600),
     "7d": (timedelta(days=7), 6 * 3600),
     "30d": (timedelta(days=30), 86400),

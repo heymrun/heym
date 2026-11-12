@@ -12,24 +12,25 @@ The page opens with a stats summary above the trace list, computed across the se
 - **KPI cards** – Total Calls, Total Tokens, Total Cost (USD), Avg Latency, Error %
 - **Tokens by Model** – Donut chart of token volume per model
 - **Cost by Model** – Donut chart of USD spend per model. Models without pricing show a "Configure pricing" link to the [LLM Cost Table](./datatable-tab.md#llm-cost-table-system-table)
-- **Calls Over Time** – Stacked area chart of successful vs failed calls per bucket (5 min / 1 h / 6 h / 1 day, chosen automatically per range)
+- **Calls Over Time** – Stacked area chart of successful vs failed calls per bucket (5 min / 15 min / 30 min / 1 h / 6 h / 1 day, chosen automatically per range)
 - **Tokens/sec by Model**: Output speed per model as the caller experiences it: completion tokens divided by the time spent waiting on the model, network and first-token wait included. Only successful calls with output count; for Dashboard Chat turns, time spent running tools is left out. Models are sorted fastest first
 - **Unpriced models notice** – Appears below the charts when some traced models have no pricing row, linking to the LLM Cost Table
 
 ## Time Range
 
-A single **Time range** selector at the top of the filter bar drives both the stats header and the trace list. Choices: Last 1 hour, Last 24 hours, Last 7 days (default), Last 30 days, All time. Changing the range resets pagination and reloads charts and list together.
+A single **Time range** selector at the top of the filter bar drives both the stats header and the trace list. Choices: Last 1 hour, Last 3 hours, Last 6 hours, Last 24 hours, Last 7 days (default), Last 30 days, All time. Changing the range resets pagination and reloads charts and list together.
 
 ## Trace List
 
 - Paginated list of recent traces within the selected time range
 - Each trace shows: workflow, node, credential, timestamp, duration
+- [Playwright](../nodes/playwright-node.md) AI step and Auto Heal calls appear under the workflow and Playwright node that made them
 - Click a trace to open the detail view
 - Use **Prev / Next** inside the detail dialog to move between traces without closing it
 
 ## Filtering
 
-- **Time range** – 1h / 24h / 7d / 30d / All; filters charts and list together
+- **Time range** – 1h / 3h / 6h / 24h / 7d / 30d / All; filters charts and list together
 - **Credential** – Filter by credential (API key) used
 - **Source** – Filter by workflow or execution source
 - **Search** – Search by model, workflow, credential, or node label
