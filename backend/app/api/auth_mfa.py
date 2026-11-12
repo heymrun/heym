@@ -92,6 +92,7 @@ async def mfa_setup(
         if await mfa.verify_second_factor(db, current_user, body.code or "") is None:
             audit(action="auth.mfa_replace", outcome=OUTCOME_FAILURE, actor=current_user)
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_CODE_INVALID)
+        mfa.mfa_limiter.record_success(str(current_user.id))
     offer = mfa.create_setup_offer(current_user)
     return MfaSetupResponse(
         setup_token=offer.setup_token,
@@ -120,6 +121,7 @@ async def mfa_enable(
     if codes is None:
         audit(action="auth.mfa_replace", outcome=OUTCOME_FAILURE, actor=current_user)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_CODE_INVALID)
+    mfa.mfa_limiter.record_success(str(current_user.id))
     audit(action="auth.mfa_replace" if replacing else "auth.mfa_enable", actor=current_user)
     return MfaRecoveryCodesResponse(recovery_codes=codes)
 
@@ -140,6 +142,7 @@ async def mfa_regenerate_recovery_codes(
             actor=current_user,
         )
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_CODE_INVALID)
+    mfa.mfa_limiter.record_success(str(current_user.id))
     codes = await mfa.regenerate_recovery_codes(db, current_user)
     audit(action="auth.mfa_recovery_codes_regenerate", actor=current_user)
     return MfaRecoveryCodesResponse(recovery_codes=codes)

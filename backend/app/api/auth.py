@@ -280,12 +280,14 @@ async def mfa_sign_in(
             audit(action="auth.mfa_enable", outcome=OUTCOME_FAILURE, actor=user, client=client)
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=_CODE_INVALID)
         audit(action="auth.mfa_enable", actor=user, client=client, during="sign_in")
+        mfa.mfa_limiter.record_success(str(user.id))
         return user, codes, "totp"
 
     method = await mfa.verify_second_factor(db, user, body.code)
     if method is None:
         audit(action="auth.mfa_verify", outcome=OUTCOME_FAILURE, actor=user, client=client)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=_CODE_INVALID)
+    mfa.mfa_limiter.record_success(str(user.id))
     return user, None, method
 
 
