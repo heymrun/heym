@@ -180,6 +180,37 @@ async def get_current_user_optional(
     return await _load_token_user(db, claims)
 
 
+#: Sent by Heym's own frontend on every API call (``heymClientHeaders`` in
+#: ``frontend/src/constants/httpIdentity.ts``). A custom header cannot be added to a
+#: top-level navigation, and a cross-site script cannot send one without a CORS
+#: preflight that only ``CORS_ORIGINS`` pass, so its presence marks a request that Heym
+#: itself made.
+HEYM_CLIENT_HEADER = "X-Heym-Client"
+
+
+async def get_execution_caller(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security_optional),
+    db: AsyncSession = Depends(get_db),
+) -> User | None:
+    """The signed-in user a workflow run may execute as, or None (GHSA-m2cg-mg73-qc82).
+
+    The run's credential and global-variable context belong to whoever this returns, so
+    the browser's session cookie must not decide it on its own. A link followed from
+    another site, or opened from an e-mail, carries the ``access_token`` cookie
+    (``SameSite=Lax``) but the user never asked Heym to run anything. A session that
+    arrives only as that cookie therefore counts only on Heym's own API calls, which
+    carry ``X-Heym-Client``. Everything else is treated as a caller with no session: an
+    anonymous workflow runs in its owner's context, a jwt workflow answers 401.
+
+    A bearer token in ``Authorization`` (API clients, Heym Work, execution tokens) is an
+    explicit choice of credential and is resolved as before.
+    """
+    if credentials is None and not request.headers.get(HEYM_CLIENT_HEADER):
+        return None
+    return await get_current_user_optional(request, credentials, db)
+
+
 def require_instance_admin(current_user: User) -> None:
     """Raise 403 unless the caller is an instance administrator."""
     if not is_instance_admin(current_user):

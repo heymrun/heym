@@ -72,7 +72,7 @@ Configure per workflow in the editor (workflow settings). Auth is checked before
 | **jwt** | Bearer token required. Accepts either a user session token (user must have workflow access) or a scoped [Execution Token](./execution-tokens.md) created for this workflow. |
 | **header_auth** | Custom header must match. Set `auth_header_key` (e.g. `X-API-Key`) and `auth_header_value`. |
 
-For `header_auth`, the request header value must exactly match the configured value. JWT users with workflow access can also call without the custom header.
+For `header_auth`, the request header value must exactly match the configured value. A user with workflow access can also call without the custom header when the request sends their token as `Authorization: Bearer …`, or when it is a run started from inside Heym. A link opened in the browser carries only the session cookie, so it does not count as that user and needs the custom header like any other caller. See [Who counts as the caller](./workflow-organization.md#who-counts-as-the-caller).
 
 For `jwt`, [Execution Tokens](./execution-tokens.md) are the recommended way to call workflows from external systems — they are scoped to a single workflow and can be revoked independently.
 
