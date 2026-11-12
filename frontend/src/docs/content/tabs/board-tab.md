@@ -32,6 +32,12 @@ and workflow runs.
 
 ## Card details
 
+Card details open in a wide dialog on desktop and fit the viewport on phones.
+Use **Preview** beside **Description** to view Markdown formatting, including unsaved
+edits. Choose **Edit** to return to the source text, then **Save description** to keep
+your changes. Label chips use brighter text in dark mode; hover over a shortened label
+to read its full name.
+
 Open a card to set its **Details**:
 
 - **Assignee** — anyone who can open the board: its owner, and the people and team

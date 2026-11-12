@@ -97,6 +97,31 @@ async function createBoardWithCard(
   return { boardId: board.id, cardId: card.id, columns };
 }
 
+async function contrastRatio(locator: Locator): Promise<number> {
+  return locator.evaluate((element) => {
+    const rgba = (value: string): number[] => value.match(/[\d.]+/g)!.map(Number);
+    const luminance = (rgb: number[]): number => {
+      const linear = rgb.map((channel) => {
+        const value = channel / 255;
+        return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+      });
+      return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722;
+    };
+    const backgrounds: number[][] = [];
+    for (let node: Element | null = element; node; node = node.parentElement) {
+      backgrounds.unshift(rgba(getComputedStyle(node).backgroundColor));
+    }
+    const background = backgrounds.reduce((base, color) => {
+      const alpha = color[3] ?? 1;
+      return base.map((channel, index) => color[index] * alpha + channel * (1 - alpha));
+    }, [255, 255, 255]);
+    const foreground = rgba(getComputedStyle(element).color).slice(0, 3);
+    const light = luminance(foreground);
+    const dark = luminance(background);
+    return (Math.max(light, dark) + 0.05) / (Math.min(light, dark) + 0.05);
+  });
+}
+
 async function dispatchSingleTouch(
   target: Locator,
   type: "touchstart" | "touchmove" | "touchend" | "touchcancel",
@@ -1028,6 +1053,99 @@ test("opens card detail, saves the description and posts a comment", async ({ pa
   await page.getByTestId("card-comment-input").fill("Focus on developer onboarding");
   await page.getByTestId("card-comment-submit").click();
   await expect(page.getByText("Focus on developer onboarding")).toBeVisible();
+});
+
+test("previews Markdown descriptions without saving or losing edits in a wider dialog", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const { boardId, cardId } = await createBoardWithCard(page, "Formatted brief");
+  await page.goto(`/?tab=board&board=${boardId}`);
+  await page.getByTestId(`board-card-${cardId}`).click();
+
+  const dialog = page.getByRole("dialog", { name: "Formatted brief", exact: true });
+  await expect.poll(async () => (await dialog.boundingBox())?.width ?? 0).toBe(896);
+  await dialog.getByRole("button", { name: "Preview", exact: true }).click();
+  const preview = page.getByTestId("card-description-preview");
+  await expect(preview).toContainText("No description yet.");
+  await expect(page.getByTestId("card-description-save")).toHaveCount(0);
+  await dialog.getByRole("button", { name: "Edit", exact: true }).click();
+
+  const markdown = [
+    "## Launch plan",
+    "Share the **beta brief** with [the team](https://example.com).",
+    "- Collect feedback",
+    "",
+    "```text",
+    "A long code sample " + "word ".repeat(100),
+    "```",
+    "",
+    "| Task | Owner |",
+    "| --- | --- |",
+    "| Review | Team |",
+    '<img src="x" onerror="window.__boardPreviewUnsafe = true">',
+    '<a href="javascript:alert(1)">Unsafe link</a>',
+  ].join("\n");
+  const editor = page.getByPlaceholder("Describe the job for this card");
+  await editor.fill(markdown);
+  await dialog.getByRole("button", { name: "Preview", exact: true }).click();
+  await expect(dialog.getByRole("button", { name: "Edit", exact: true }))
+    .toHaveAttribute("aria-pressed", "true");
+  await expect(preview.getByRole("heading", { name: "Launch plan" })).toBeVisible();
+  await expect(preview.locator("strong")).toHaveText("beta brief");
+  await expect(preview.getByRole("listitem")).toHaveText("Collect feedback");
+  await expect(preview.getByRole("link", { name: "the team" }))
+    .toHaveAttribute("href", "https://example.com");
+  expect(await contrastRatio(preview.getByRole("link", { name: "the team" })))
+    .toBeGreaterThanOrEqual(4.5);
+  await expect(preview.getByRole("cell", { name: "Review", exact: true })).toBeVisible();
+  await expect(preview.locator("[onerror], a[href^='javascript:'], script")).toHaveCount(0);
+  await expect(editor).toHaveCount(0);
+  const unsaved = await page.request.get(`/api/boards/${boardId}/cards/${cardId}`);
+  expect((await unsaved.json()).card.content).toBe("");
+  await dialog.screenshot({ path: testInfo.outputPath("description-preview-desktop.png") });
+
+  await dialog.getByRole("button", { name: "Edit", exact: true }).click();
+  await expect(editor).toHaveValue(markdown);
+  await dialog.getByRole("button", { name: "Preview", exact: true }).click();
+  await page.getByTestId("card-description-save").click();
+  await expect(page.getByTestId("card-description-saved")).toBeVisible();
+  const saved = await page.request.get(`/api/boards/${boardId}/cards/${cardId}`);
+  expect((await saved.json()).card.content).toBe(markdown);
+
+  await page.keyboard.press("Escape");
+  await page.getByTestId(`board-card-${cardId}`).click();
+  await expect(editor).toHaveValue(markdown);
+  await expect(preview).toHaveCount(0);
+
+  await page.setViewportSize({ width: 320, height: 800 });
+  await dialog.getByRole("button", { name: "Preview", exact: true }).click();
+  await expect(preview).toBeVisible();
+  const mobileLayout = await dialog.evaluate((element) => ({
+    width: element.getBoundingClientRect().width,
+    scrollWidth: element.scrollWidth,
+    clientWidth: element.clientWidth,
+  }));
+  expect(mobileLayout.width).toBeLessThanOrEqual(288);
+  expect(mobileLayout.scrollWidth).toBeLessThanOrEqual(mobileLayout.clientWidth);
+  await dialog.screenshot({ path: testInfo.outputPath("description-preview-mobile.png") });
+});
+
+test("keeps label chips readable in both themes and exposes their full names", async ({ page }) => {
+  const { boardId, cardId } = await createBoardWithCard(page, "Labeled brief");
+  const label = "Customer onboarding project";
+  const response = await page.request.patch(`/api/boards/${boardId}/cards/${cardId}`, {
+    data: { labels: [label] },
+  });
+  expect(response.ok()).toBeTruthy();
+  await page.goto(`/?tab=board&board=${boardId}`);
+
+  for (const theme of ["light", "dark"]) {
+    await page.evaluate((value) => localStorage.setItem("theme", value), theme);
+    await page.reload();
+    const chip = page.getByTestId(`board-card-label-${cardId}`);
+    await expect(chip).toBeVisible();
+    await expect(chip).toHaveAttribute("title", label);
+    expect(await contrastRatio(chip), `${theme} label contrast`).toBeGreaterThanOrEqual(4.5);
+  }
 });
 
 test("attaches a file to a card and removes it", async ({ page }) => {
