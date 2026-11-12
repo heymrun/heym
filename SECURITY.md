@@ -133,3 +133,8 @@ vulnerabilities in Heym:
   backend's files, including the Kubernetes ServiceAccount token that leads to
   every stored credential, and for contributing the remediation
   (GHSA-hmfh-wpg2-vff4).
+- [@Shxsu1x](https://github.com/Shxsu1x) for one-click credential theft through
+  workflow execute links, where the browser's session cookie alone made whoever
+  followed the link the run's actor, so the workflow's author read their
+  credentials and global variables from run history, and for contributing the
+  remediation (GHSA-m2cg-mg73-qc82).

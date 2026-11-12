@@ -28,7 +28,12 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.api.analytics import upsert_workflow_analytics_snapshot
-from app.api.deps import get_client_ip, get_current_user, get_current_user_optional
+from app.api.deps import (
+    get_client_ip,
+    get_current_user,
+    get_current_user_optional,
+    get_execution_caller,
+)
 from app.api.workflow_run_audit import RunActor, audit_workflow_run
 from app.db.models import (
     ActiveWorkflowExecution,
@@ -3278,7 +3283,7 @@ async def execute_workflow_endpoint(
     workflow_id: uuid.UUID,
     request: Request,
     background_tasks: BackgroundTasks = None,
-    current_user: User | None = Depends(get_current_user_optional),
+    current_user: User | None = Depends(get_execution_caller),
     db: AsyncSession = Depends(get_db),
 ) -> WorkflowExecuteResponse:
     raw_body, test_run, trigger_source, simple_response = await parse_execute_body(request)
@@ -4044,7 +4049,7 @@ async def clear_execution_history(
 async def execute_workflow_stream(
     workflow_id: uuid.UUID,
     request: Request,
-    current_user: User | None = Depends(get_current_user_optional),
+    current_user: User | None = Depends(get_execution_caller),
     db: AsyncSession = Depends(get_db),
     run_until_node_id: Annotated[
         str | None,
