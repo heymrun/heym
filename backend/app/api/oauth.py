@@ -272,6 +272,7 @@ async def _verify_consent_second_factor(
         return None
     if await mfa.verify_second_factor(db, user, code) is None:
         return None
+    mfa.mfa_limiter.record_success(str(user.id))
     return user
 
 
