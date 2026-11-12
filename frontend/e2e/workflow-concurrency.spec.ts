@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 
+import { heymClientHeaders } from "../src/constants/httpIdentity";
 import { createWorkflow, deleteWorkflow, prepareAuthenticatedPage } from "./support";
 
 test.beforeEach(async ({ page }) => {
@@ -82,6 +83,7 @@ test("a second production run waits in the queue and shows in History", async ({
 
     const first = page.request.post(`/api/workflows/${workflow.id}/execute`, {
       data: { inputs: {} },
+      headers: heymClientHeaders,
       timeout: 60_000,
     });
     await expect
@@ -94,6 +96,7 @@ test("a second production run waits in the queue and shows in History", async ({
 
     const second = await page.request.post(`/api/workflows/${workflow.id}/execute`, {
       data: { inputs: {} },
+      headers: heymClientHeaders,
     });
     expect(second.status()).toBe(202);
     const body = (await second.json()) as {

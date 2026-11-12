@@ -38,6 +38,8 @@ curl -X GET "https://your-host/api/workflows/<workflow-id>/execute?name=Ada"
 
 Read those values with `$input.query.name`. See [Webhooks](../reference/webhooks.md) for the full method contract.
 
+Set the workflow's auth to **Anonymous** for a page people open from a link. A browser navigation cannot send an `Authorization` header, so a **JWT** or **Header Auth** workflow answers `401` there, even for a signed-in member. An Anonymous page runs in the owner's context, with the owner's credentials and global variables, even when the visitor is signed in to Heym. See [Who counts as the caller](../reference/workflow-organization.md#who-counts-as-the-caller).
+
 A workflow with no trigger node whose only terminal is this node shows a **WEB** chip in the [Workflows tab](../tabs/workflows-tab.md).
 
 ### Pages run sandboxed
