@@ -81,8 +81,9 @@ const DUE_TITLES: Record<DueState, string> = {
     <span
       v-for="label in model.labels"
       :key="label"
-      class="max-w-[7rem] truncate rounded-full bg-primary/10 px-1.5 py-0.5 text-primary"
+      class="max-w-[7rem] truncate rounded-full bg-primary/10 px-1.5 py-0.5 text-primary dark:bg-primary/20 dark:text-brand-primary-soft"
       :data-testid="`board-card-label-${card.id}`"
+      :title="label"
     >
       {{ label }}
     </span>

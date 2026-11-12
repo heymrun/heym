@@ -17,15 +17,16 @@ import {
   User as UserIcon,
 } from "lucide-vue-next";
 
+import type { BoardCard, CardActivity, CardAttachment, CardDetail, CardRun } from "@/types/board";
 import Dialog from "@/components/ui/Dialog.vue";
 import Button from "@/components/ui/Button.vue";
 import Textarea from "@/components/ui/Textarea.vue";
 import UserAvatar from "@/components/ui/UserAvatar.vue";
-import type { BoardCard, CardActivity, CardAttachment, CardDetail, CardRun } from "@/types/board";
 import { boardApi } from "@/services/api";
 import { useBoardStore } from "@/stores/board";
 import { playSuccessSound } from "@/utils/audio";
 import { useToast } from "@/composables/useToast";
+import BoardCardDescription from "./BoardCardDescription.vue";
 import BoardCardFieldsEditor from "./BoardCardFieldsEditor.vue";
 
 const props = defineProps<{ open: boolean; cardId: string | null }>();
@@ -338,6 +339,7 @@ async function openLiveRun(run: CardRun): Promise<void> {
   <Dialog
     :open="open"
     :title="detail?.card.title ?? 'Card'"
+    size="4xl"
     close-on-back
     @close="emit('close')"
   >
@@ -428,15 +430,10 @@ async function openLiveRun(run: CardRun): Promise<void> {
         />
       </section>
 
-      <section>
-        <h3 class="mb-1 text-xs font-semibold uppercase text-muted-foreground">
-          Description
-        </h3>
-        <Textarea
-          v-model="editedContent"
-          :rows="3"
-          placeholder="Describe the job for this card"
-        />
+      <BoardCardDescription
+        :key="detail.card.id"
+        v-model="editedContent"
+      >
         <div class="mt-2 flex items-center justify-end gap-2">
           <span
             v-if="descriptionSaved"
@@ -455,7 +452,7 @@ async function openLiveRun(run: CardRun): Promise<void> {
             Save description
           </Button>
         </div>
-      </section>
+      </BoardCardDescription>
 
       <section>
         <h3 class="mb-1 text-xs font-semibold uppercase text-muted-foreground">
