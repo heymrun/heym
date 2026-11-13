@@ -28,11 +28,15 @@ from app.services.llm_chat_bridge import BridgedChatTransport, OpenAIChatTranspo
 from app.services.llm_provider import is_reasoning_model
 from app.services.llm_trace import LLMTraceContext, record_llm_trace
 from app.services.llm_transport import (
+    MAX_TRUNCATED_TOOL_TURNS,
+    TRUNCATED_TOOL_CALL_ERROR,
     ChatCompletionsTransport,
     LLMTransport,
     RequestOpts,
     ResponsesTransport,
     ToolResult,
+    is_truncated_turn,
+    parse_tool_arguments,
 )
 from app.services.llm_transport_gemini import GeminiTransport
 from app.services.llm_transport_messages import AnthropicMessagesTransport
@@ -1458,6 +1462,7 @@ class LLMService:
         last_assistant_turn_had_tool_calls = False
         output_repairs = 0
         repair_errors: list[str] = []
+        truncated_tool_turns = 0
         # With a router this is the Chat Completions transport a turn falls back to.
         run_transport = transport
         repair_turn = False
@@ -1785,6 +1790,71 @@ class LLMService:
                 )
                 return self._attach_routing_summary(result)
 
+            def _refused_tool_call(tc: Any, reason: str) -> tuple[str, dict[str, Any]]:
+                """The error the model gets, and the trace entry, for a call that is not run."""
+                tool_result = {"error": reason, "status": "error"}
+                now_ms = int(time.time() * 1000)
+                entry = sanitize_persisted_tool_entry(
+                    {
+                        "tool_call_id": getattr(tc, "id", None),
+                        "name": tc.name,
+                        # What the model wrote, redacted and bounded like any other arguments.
+                        "arguments": {"raw_arguments": tc.arguments or ""},
+                        "result": tool_result,
+                        "elapsed_ms": 0.0,
+                        "start_ms": self._offset_ms(),
+                        "status": "error",
+                        "started_at": now_ms,
+                        "finished_at": now_ms,
+                    }
+                )
+                if on_tool_call:
+                    for phase in ("start", "end", "result"):
+                        on_tool_call(
+                            {
+                                "name": tc.name,
+                                "arguments": {},
+                                "result": entry["result"] if phase == "result" else None,
+                                "elapsed_ms": 0,
+                                "phase": phase,
+                                **({} if phase == "start" else {"status": "error"}),
+                                "tool_call_id": getattr(tc, "id", None),
+                                "timestamp": now_ms,
+                            }
+                        )
+                return json.dumps(tool_result), entry
+
+            if is_truncated_turn(turn.finish_reason):
+                # Before the HITL branch: no call of a cut turn runs or pauses, including
+                # calls whose own arguments arrived whole.
+                truncated_tool_turns += 1
+                logger.warning(
+                    "Turn from %s stopped at the output token limit (%s) with %d tool call(s); "
+                    "not running them",
+                    model,
+                    turn.finish_reason,
+                    len(tool_calls),
+                )
+                transport.append_turn(history, turn)
+                refused = [_refused_tool_call(tc, TRUNCATED_TOOL_CALL_ERROR) for tc in tool_calls]
+                tool_calls_collected.extend(entry for _result_str, entry in refused)
+                transport.append_tool_results(
+                    history,
+                    [
+                        ToolResult(call_id=tc.id, output=result_str)
+                        for tc, (result_str, _entry) in zip(tool_calls, refused)
+                    ],
+                )
+                if truncated_tool_turns >= MAX_TRUNCATED_TOOL_TURNS:
+                    limit = max_tokens if max_tokens is not None else "the provider default"
+                    return _build_error_result(
+                        f"The model reached the output token limit in {truncated_tool_turns} "
+                        "tool-calling turns in a row, so their tool calls were not run. "
+                        f"Raise maxTokens on this node (now {limit})."
+                    )
+                continue
+            truncated_tool_turns = 0
+
             messages_before_tool_response = copy.deepcopy(transport.dump(history))
             hitl_tcs = [
                 tc for tc in tool_calls if tools_by_name.get(tc.name, {}).get("_source") == "hitl"
@@ -1874,10 +1944,7 @@ class LLMService:
                 name = tc.name
                 tool_call_id = getattr(tc, "id", None)
                 args_str = tc.arguments or "{}"
-                try:
-                    args = json.loads(args_str)
-                except json.JSONDecodeError:
-                    args = {}
+                args, args_error = parse_tool_arguments(tc.arguments)
                 tool_def = tools_by_name.get(name)
                 # Preflight: stop before start/executor when the run was cancelled after
                 # a prior tool's terminal callbacks (or between sequential tools).
@@ -1885,6 +1952,10 @@ class LLMService:
                     preflight_abort = should_abort()
                     if preflight_abort:
                         return tc.id, None, None, None, preflight_abort
+                if args_error is not None:
+                    # Running on `{}` would act on the tool's defaults, not on the request.
+                    result_str, entry = _refused_tool_call(tc, args_error)
+                    return tc.id, result_str, entry, None, None
                 # Emit "tool started" progress early (do not include values to avoid secrets).
                 if on_tool_call:
                     safe_args = _progress_safe_tool_arguments(name, tool_def, args)
@@ -2132,13 +2203,16 @@ class LLMService:
 
             if hitl_tcs:
                 paused_tc = hitl_tcs[0]
-                _tid, _result_str, entry, pause_request, abort_reason = await _run_one_tool(
+                _tid, hitl_result_str, entry, pause_request, abort_reason = await _run_one_tool(
                     paused_tc
                 )
                 if pause_request is not None:
                     return _build_pending_result(paused_tc.name, pause_request, entry)
                 if abort_reason:
                     return _build_error_result(abort_reason, entry)
+                # A call that did not pause (unparseable arguments, for one) still owes the
+                # model its result.
+                _store_completed_tool_slot(tool_calls.index(paused_tc), hitl_result_str, entry)
 
             transport.append_turn(history, turn)
 

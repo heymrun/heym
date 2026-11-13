@@ -8,6 +8,7 @@ must survive every turn. The loop never inspects a history's contents.
 from __future__ import annotations
 
 import copy
+import json
 import logging
 from dataclasses import dataclass, field, replace
 from typing import Any, Protocol
@@ -41,6 +42,40 @@ class TurnResult:
     total_tokens: int = 0
     finish_reason: str | None = None
     raw_items: list[Any] = field(default_factory=list)
+
+
+# How each API says the reply stopped at the output token limit: Chat Completions,
+# Anthropic Messages, Gemini, and the Responses API's `status`. A tool call in such a turn
+# may be cut short, and on the last three its arguments still arrive as valid JSON.
+TRUNCATED_FINISH_REASONS = frozenset({"length", "max_tokens", "MAX_TOKENS", "incomplete"})
+# Cut turns in a row before a tool loop gives up instead of asking the model to retry.
+MAX_TRUNCATED_TOOL_TURNS = 2
+TRUNCATED_TOOL_CALL_ERROR = (
+    "Not run: the reply reached the output token limit before this turn's tool calls were "
+    "complete, so none of them ran. Call the tools again with shorter arguments."
+)
+
+
+def is_truncated_turn(finish_reason: Any) -> bool:
+    """True when the provider stopped the turn at its output token limit."""
+    return isinstance(finish_reason, str) and finish_reason in TRUNCATED_FINISH_REASONS
+
+
+def parse_tool_arguments(raw: str | None) -> tuple[dict[str, Any], str | None]:
+    """Parse a tool call's arguments, or say why they cannot be used.
+
+    A call whose arguments do not parse to an object must not run with `{}` in their place.
+    """
+    try:
+        parsed = json.loads(raw or "{}")
+    except json.JSONDecodeError as exc:
+        return {}, (
+            f"Not run: the tool call arguments are not valid JSON ({exc.msg} at position "
+            f"{exc.pos}). Send the call again with its arguments as a JSON object."
+        )
+    if not isinstance(parsed, dict):
+        return {}, "Not run: the tool call arguments must be a JSON object."
+    return parsed, None
 
 
 @dataclass
