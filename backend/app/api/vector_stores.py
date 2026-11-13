@@ -26,6 +26,7 @@ from app.models.schemas import (
     TeamShareRequest,
     TeamShareResponse,
     VectorStoreCreate,
+    VectorStoreDeleteResponse,
     VectorStoreIngestJobResponse,
     VectorStoreIngestJobsResponse,
     VectorStoreItem,
@@ -43,7 +44,7 @@ from app.models.schemas import (
     VectorStoreUploadResponse,
 )
 from app.services import rag_ingest, rag_ingest_jobs
-from app.services.audit_log import audit
+from app.services.audit_log import OUTCOME_FAILURE, OUTCOME_SUCCESS, audit
 from app.services.credential_access import team_shared_credential_clause
 from app.services.encryption import decrypt_config
 from app.services.upload_limits import read_upload_file_limited
@@ -452,13 +453,27 @@ async def update_vector_store(
     )
 
 
-@router.delete("/{vector_store_id}", status_code=status.HTTP_204_NO_CONTENT)
+_DROP_FAILED_WARNING = "Store removed, but the vectors could not be deleted"
+
+
+def _collection_is_missing(exc: BaseException) -> bool:
+    """A missing collection is not a drop failure. Qdrant reports that as HTTP 404."""
+    return getattr(exc, "status_code", None) == 404
+
+
+@router.delete("/{vector_store_id}", response_model=VectorStoreDeleteResponse)
 async def delete_vector_store(
     vector_store_id: uuid.UUID,
     delete_collection: bool = True,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> None:
+) -> VectorStoreDeleteResponse:
+    """Delete the Heym row, then drop the collection and report what actually happened.
+
+    The row is committed before the backend call, so a Qdrant outage cannot put it back.
+    The response and the audit line use the real drop result. Backend error text stays in
+    the log.
+    """
     result = await db.execute(
         select(VectorStore).where(
             VectorStore.id == vector_store_id,
@@ -473,28 +488,66 @@ async def delete_vector_store(
             detail="Vector store not found",
         )
 
+    store_id = store.id
+    store_name = store.name
+    collection_name = store.collection_name
+    credential_id = store.credential_id
+    await db.delete(store)
+    await db.commit()
+
+    collection_dropped = False
+    reason = "skipped"
+    warning: str | None = None
     if delete_collection:
+        reason = "failed"
+        warning = _DROP_FAILED_WARNING
         try:
-            cred_result = await db.execute(
-                select(Credential).where(Credential.id == store.credential_id)
-            )
+            cred_result = await db.execute(select(Credential).where(Credential.id == credential_id))
             credential = cred_result.scalar_one_or_none()
-            if credential:
-                config = decrypt_config(credential.encrypted_config)
-                service = get_vector_store_service_from_config(config, credential.type)
-                service.delete_collection(store.collection_name)
-        except Exception:
-            pass
+            if credential is None:
+                raise RuntimeError("vector store credential row is missing")
+            config = decrypt_config(credential.encrypted_config)
+            service = get_vector_store_service_from_config(config, credential.type)
+            if not service.collection_exists(collection_name):
+                reason = "missing"
+                warning = None
+            else:
+                service.delete_collection(collection_name)
+                collection_dropped = True
+                reason = "dropped"
+                warning = None
+        except Exception as exc:
+            if _collection_is_missing(exc):
+                logger.info(
+                    "Collection %s for vector store %s is already gone",
+                    collection_name,
+                    store_id,
+                )
+                reason = "missing"
+                warning = None
+            else:
+                logger.warning(
+                    "Failed to drop collection %s for vector store %s",
+                    collection_name,
+                    store_id,
+                    exc_info=True,
+                )
 
     audit(
         action="vector_store.delete",
         actor=current_user,
+        outcome=OUTCOME_FAILURE if reason == "failed" else OUTCOME_SUCCESS,
         target_type="vector_store",
-        target_id=store.id,
-        target_name=store.name,
-        collection_dropped=delete_collection,
+        target_id=store_id,
+        target_name=store_name,
+        collection_dropped=collection_dropped,
+        collection_result=reason,
     )
-    await db.delete(store)
+    return VectorStoreDeleteResponse(
+        collection_dropped=collection_dropped,
+        reason=reason,
+        warning=warning,
+    )
 
 
 @router.post("/{vector_store_id}/clone", response_model=VectorStoreResponse)

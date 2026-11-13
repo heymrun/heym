@@ -34,6 +34,7 @@ const showDeleteDialog = ref(false);
 const showUploadDialog = ref(false);
 const deletingStore = ref<VectorStoreListItem | null>(null);
 const deleteCollection = ref(true);
+const deleteWarning = ref("");
 const uploadingStore = ref<VectorStoreListItem | null>(null);
 
 const showShareDialog = ref(false);
@@ -203,11 +204,13 @@ function openDeleteDialog(store: VectorStoreListItem, event: Event): void {
 async function confirmDelete(): Promise<void> {
   if (!deletingStore.value) return;
 
+  const storeId = deletingStore.value.id;
   try {
-    await vectorStoresApi.delete(deletingStore.value.id, deleteCollection.value);
-    vectorStores.value = vectorStores.value.filter((s) => s.id !== deletingStore.value?.id);
+    const result = await vectorStoresApi.delete(storeId, deleteCollection.value);
+    vectorStores.value = vectorStores.value.filter((s) => s.id !== storeId);
     showDeleteDialog.value = false;
     deletingStore.value = null;
+    deleteWarning.value = result.warning ?? "";
   } catch {
     createError.value = "Failed to delete vector store";
   }
@@ -578,6 +581,13 @@ async function deleteItem(pointId: string): Promise<void> {
         New Vector Store
       </Button>
     </div>
+
+    <p
+      v-if="deleteWarning"
+      class="mb-4 text-sm text-amber-500"
+    >
+      {{ deleteWarning }}
+    </p>
 
     <div
       v-if="loading"

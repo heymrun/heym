@@ -1144,6 +1144,14 @@ class VectorStoreUpdate(BaseModel):
     description: str | None = None
 
 
+class VectorStoreDeleteResponse(BaseModel):
+    """Row is already gone. `warning` is a fixed sentence, never a backend error."""
+
+    collection_dropped: bool
+    reason: Literal["dropped", "missing", "failed", "skipped"]
+    warning: str | None = None
+
+
 class VectorStoreStatsResponse(BaseModel):
     vector_count: int
     points_count: int
