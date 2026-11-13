@@ -174,6 +174,12 @@ from app.services.hitl_service import (
 from app.services.llm_chat_bridge import completion_caller, gateway_protocol, skip_compression
 from app.services.llm_provider import is_reasoning_model
 from app.services.llm_trace import LLMTraceContext, record_llm_trace
+from app.services.llm_transport import (
+    MAX_TRUNCATED_TOOL_TURNS,
+    TRUNCATED_TOOL_CALL_ERROR,
+    is_truncated_turn,
+    parse_tool_arguments,
+)
 from app.services.mcp_progress import running_node_message
 from app.services.model_router import (
     RouteDecision,
@@ -3858,6 +3864,7 @@ async def stream_dashboard_chat(
         )
 
     finished_summary: str | None = None
+    truncated_rounds = 0
     try:
         while rounds < MAX_DASHBOARD_CHAT_TOOL_ROUNDS:
             if cancel_event is not None and cancel_event.is_set():
@@ -3993,6 +4000,8 @@ async def stream_dashboard_chat(
                 yield f"data: {json.dumps({'type': 'done'})}\n\n"
                 return
 
+            # Every call of a round cut at the output token limit is refused, complete or not.
+            round_truncated = is_truncated_turn(getattr(choice, "finish_reason", None))
             messages_to_use.append(
                 {
                     "role": "assistant",
@@ -4018,10 +4027,9 @@ async def stream_dashboard_chat(
                     elapsed_ms = (time.time() - start_time) * 1000
                     _record_dashboard_run("cancelled", round(elapsed_ms, 2))
                     return
-                try:
-                    args = json.loads(tc.function.arguments) if tc.function.arguments else {}
-                except json.JSONDecodeError:
-                    args = {}
+                args, args_error = parse_tool_arguments(tc.function.arguments)
+                if round_truncated:
+                    args_error = TRUNCATED_TOOL_CALL_ERROR
                 active_tool = {
                     "tool_call_id": tc.id,
                     "name": name,
@@ -4035,7 +4043,38 @@ async def stream_dashboard_chat(
                     if files is not None and files.handles(name)
                     else None
                 )
-                if tool_group is not None:
+                if args_error is not None:
+                    step_label = f"Not running {name}"
+                    yield (
+                        "data: "
+                        + json.dumps(
+                            {
+                                "type": "tool_start",
+                                "id": tc.id,
+                                "name": name,
+                                "label": step_label,
+                                "args": {},
+                            }
+                        )
+                        + "\n\n"
+                    )
+                    result = json.dumps({"error": args_error, "status": "error"})
+                    run_steps.append(
+                        {
+                            "label": step_label,
+                            "tool": name,
+                            "request": {},
+                            "response_summary": _summarize_tool_result(name, result),
+                            "execution_time_ms": 0.0,
+                        }
+                    )
+                    yield _tool_end_yield(
+                        tc.id,
+                        run_steps[-1]["response_summary"],
+                        run_steps[-1]["execution_time_ms"],
+                        status="error",
+                    )
+                elif tool_group is not None:
                     step_label = tool_group.step_label(name, args)
                     display_args = tool_group.display_args(name, args)
                     active_tool["arguments"] = display_args
@@ -5533,6 +5572,17 @@ async def stream_dashboard_chat(
                 messages_to_use.append(
                     {"role": "tool", "content": content_for_llm, "tool_call_id": tc.id}
                 )
+            truncated_rounds = truncated_rounds + 1 if round_truncated else 0
+            if truncated_rounds >= MAX_TRUNCATED_TOOL_TURNS:
+                cut_error = (
+                    f"The model reached its output token limit in {truncated_rounds} tool-calling "
+                    "rounds in a row, so their tool calls were not run. Ask for a smaller step, or "
+                    "use a model with a larger output limit."
+                )
+                elapsed_ms = (time.time() - start_time) * 1000
+                _record_dashboard_run("error", round(elapsed_ms, 2), trace_error=cut_error)
+                yield f"data: {json.dumps({'type': 'error', 'message': cut_error})}\n\n"
+                return
             if finished_summary is not None:
                 # finish ends the turn: its summary is the reply, the Verified card shows it.
                 response_parts.append(finished_summary)
