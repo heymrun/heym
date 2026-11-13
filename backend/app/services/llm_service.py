@@ -1790,9 +1790,35 @@ class LLMService:
                 )
                 return self._attach_routing_summary(result)
 
-            def _refused_tool_call(tc: Any, reason: str) -> tuple[str, dict[str, Any]]:
-                """The error the model gets, and the trace entry, for a call that is not run."""
+            def _refused_tool_call(
+                tc: Any, reason: str, refusal: str
+            ) -> tuple[str, dict[str, Any]]:
+                """The error the model gets, and the trace entry, for a call that is not run.
+
+                ``refusal`` (``truncated`` or ``invalid_arguments``) is the span's
+                ``heym.agent.tool.refused`` value. No raw arguments go on the span.
+                """
                 tool_result = {"error": reason, "status": "error"}
+                refused_def = tools_by_name.get(tc.name)
+                with tracing.agent_tool_span(
+                    tool_name=tc.name,
+                    tool_call_id=getattr(tc, "id", None),
+                    source=refused_def.get("_source") if refused_def else None,
+                    mcp_server=refused_def.get("_mcp_server") if refused_def else None,
+                    workflow_id=(
+                        str(self.trace_context.workflow_id)
+                        if self.trace_context and self.trace_context.workflow_id
+                        else None
+                    ),
+                    node_id=self.trace_context.node_id if self.trace_context else None,
+                    node_label=self.trace_context.node_label if self.trace_context else None,
+                    iteration=iteration,
+                ) as refused_span:
+                    from opentelemetry.trace import StatusCode
+
+                    tracing.set_span_attribute(refused_span, "heym.agent.tool.status", "error")
+                    tracing.set_span_attribute(refused_span, "heym.agent.tool.refused", refusal)
+                    tracing.set_span_status(refused_span, StatusCode.ERROR, reason)
                 now_ms = int(time.time() * 1000)
                 entry = sanitize_persisted_tool_entry(
                     {
@@ -1836,7 +1862,10 @@ class LLMService:
                     len(tool_calls),
                 )
                 transport.append_turn(history, turn)
-                refused = [_refused_tool_call(tc, TRUNCATED_TOOL_CALL_ERROR) for tc in tool_calls]
+                refused = [
+                    _refused_tool_call(tc, TRUNCATED_TOOL_CALL_ERROR, "truncated")
+                    for tc in tool_calls
+                ]
                 tool_calls_collected.extend(entry for _result_str, entry in refused)
                 transport.append_tool_results(
                     history,
@@ -1954,7 +1983,7 @@ class LLMService:
                         return tc.id, None, None, None, preflight_abort
                 if args_error is not None:
                     # Running on `{}` would act on the tool's defaults, not on the request.
-                    result_str, entry = _refused_tool_call(tc, args_error)
+                    result_str, entry = _refused_tool_call(tc, args_error, "invalid_arguments")
                     return tc.id, result_str, entry, None, None
                 # Emit "tool started" progress early (do not include values to avoid secrets).
                 if on_tool_call:

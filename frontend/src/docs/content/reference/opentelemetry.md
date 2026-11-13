@@ -72,6 +72,7 @@ Name: `heym.agent.tool.execute`, created under the active Agent node span.
 | `heym.agent.tool.args_bytes` | UTF-8 size of serialized tool arguments. |
 | `heym.agent.tool.result_bytes` | UTF-8 size of serialized tool result. |
 | `heym.agent.tool.status` | `success`, `error`, `pending`, `timeout`, or `cancelled`. Tool errors set the span status to `ERROR`. |
+| `heym.agent.tool.refused` | `truncated` or `invalid_arguments`. Set only on tool calls that were refused without being executed. |
 
 Raw tool arguments and results are not attached to spans by default.
 
