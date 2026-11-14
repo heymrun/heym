@@ -1,0 +1,51 @@
+"""spawn_background_task keeps a running task alive until it finishes."""
+
+import asyncio
+import gc
+import unittest
+import weakref
+
+from app.services import background_tasks
+from app.services.background_tasks import spawn_background_task
+
+
+class SpawnBackgroundTaskTests(unittest.IsolatedAsyncioTestCase):
+    async def test_a_suspended_task_survives_garbage_collection(self) -> None:
+        refs: list[weakref.ref[asyncio.Task[None]]] = []
+
+        async def work() -> None:
+            refs.append(weakref.ref(asyncio.current_task()))  # type: ignore[arg-type]
+            # Nothing else references this future, like a run awaiting a callback.
+            await asyncio.get_running_loop().create_future()
+
+        task = spawn_background_task(work())
+        task_id = id(task)
+        del task
+        await asyncio.sleep(0)
+        gc.collect()
+        self.assertEqual(len(refs), 1)
+        own = refs[0]()
+        self.assertIsNotNone(own)
+        assert own is not None
+        self.assertEqual(id(own), task_id)
+        own.cancel()
+        for _ in range(3):
+            await asyncio.sleep(0)
+        # Only this test's task: other tests may leave patched tasks in the shared set.
+        self.assertNotIn(own, background_tasks._BACKGROUND_TASKS)
+
+    async def test_the_returned_task_yields_the_coroutine_result(self) -> None:
+        async def work() -> str:
+            return "done"
+
+        self.assertEqual(await spawn_background_task(work()), "done")
+
+    async def test_a_failed_task_is_forgotten_too(self) -> None:
+        async def boom() -> None:
+            raise ValueError("expected")
+
+        task = spawn_background_task(boom())
+        with self.assertRaises(ValueError):
+            await task
+        await asyncio.sleep(0)
+        self.assertNotIn(task, background_tasks._BACKGROUND_TASKS)

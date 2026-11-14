@@ -2,7 +2,6 @@
 upserts into llm_pricing, never touches llm_pricing_override.
 """
 
-import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -15,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.db.models import LLMPricing
 from app.db.session import async_session_maker
+from app.services.background_tasks import spawn_background_task
 
 logger = logging.getLogger(__name__)
 
@@ -114,5 +114,5 @@ async def ensure_pricing_synced(db: AsyncSession, *, force: bool = False) -> boo
             if datetime.now(timezone.utc) - last_synced < SYNC_TTL:
                 return False
 
-    asyncio.create_task(_run_sync_with_own_session())
+    spawn_background_task(_run_sync_with_own_session())
     return True

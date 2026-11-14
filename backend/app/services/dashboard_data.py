@@ -15,6 +15,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.db.models import DashboardWidget, DashboardWidgetRecordCache, ExecutionHistory, Workflow
 from app.db.session import async_session_maker
 from app.models.dashboard_schemas import WidgetDataResponse
+from app.services.background_tasks import spawn_background_task
 from app.services.cluster.dispatch import dispatch_workflow
 from app.services.dashboard_widget_policy import dashboard_widget_blocked_nodes_error
 from app.services.execution_cancellation import clear_execution, register_execution
@@ -491,7 +492,7 @@ async def compute_widget_data(
     await db.commit()
 
     if background_finalize:
-        asyncio.create_task(
+        spawn_background_task(
             _finalize_widget_allow_downstream(
                 history_entry_id=history_entry.id if history_entry is not None else None,
                 workflow_id=workflow.id,
@@ -593,7 +594,7 @@ async def _run_widget_workflow(
         await _persist_widget_global_variables(db, run_as_user_id, nodes, workflow_cache, result)
     await db.commit()
     if background_finalize:
-        asyncio.create_task(
+        spawn_background_task(
             _finalize_widget_allow_downstream(
                 history_entry_id=history_entry.id if history_entry is not None else None,
                 workflow_id=workflow.id,
