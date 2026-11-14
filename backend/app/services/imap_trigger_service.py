@@ -26,6 +26,9 @@ from app.services.trigger_run_dispatch import (
 
 logger = logging.getLogger("imap_trigger")
 
+# Seconds a socket operation may block. Without it one silent mailbox stalls the poller.
+IMAP_TIMEOUT_SECONDS = 30
+
 
 @dataclass(frozen=True)
 class ImapCursor:
@@ -214,7 +217,10 @@ def _open_mailbox(credential_config: dict[str, Any]) -> Iterator[tuple[Any, str 
     use_ssl = bool(credential_config.get("imap_use_ssl", True))
 
     client: imaplib.IMAP4 | imaplib.IMAP4_SSL
-    client = imaplib.IMAP4_SSL(host, port) if use_ssl else imaplib.IMAP4(host, port)
+    if use_ssl:
+        client = imaplib.IMAP4_SSL(host, port, timeout=IMAP_TIMEOUT_SECONDS)
+    else:
+        client = imaplib.IMAP4(host, port, timeout=IMAP_TIMEOUT_SECONDS)
 
     try:
         login_status, _ = client.login(username, password)
@@ -363,7 +369,13 @@ class ImapTriggerManager:
                     continue
 
                 self._last_poll_at[key] = now
-                await self._poll_workflow_node(workflow, node)
+                try:
+                    await self._poll_workflow_node(workflow, node)
+                except Exception:
+                    # One unreachable mailbox must not keep the other triggers from polling.
+                    logger.exception(
+                        "IMAP trigger poll failed for workflow %s node %s", workflow.id, node_id
+                    )
 
         stale_keys = set(self._last_poll_at.keys()) - current_keys
         for key in stale_keys:
