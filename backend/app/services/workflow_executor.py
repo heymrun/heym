@@ -216,14 +216,11 @@ def _build_data_table_filter_clauses(filter_dict: dict, columns: list) -> list:
     ``$eq``, ``$ne``, ``$gt``, ``$gte``, ``$lt``, ``$lte``, ``$contains`` (ILIKE
     substring) and ``$in`` (list membership).
 
-    User-defined schema columns live in the JSON ``data`` blob and are matched as
-    text (numeric comparisons cast to ``NUMERIC`` when the column type is ``number``;
-    boolean values normalize to lowercase ``"true"`` / ``"false"`` when the column
-    type is ``boolean``).
-    Row metadata (``id``, ``created_at``, ``updated_at``, ``created_by``,
-    ``updated_by``, ``table_id``) are real table columns, so they are matched against
-    the model attribute directly; ``$contains`` casts them to text. A schema column
-    that happens to share a metadata name still resolves against the JSON blob.
+    User-defined schema columns live in the JSON ``data`` blob and are matched as text
+    (numeric comparisons cast to ``NUMERIC`` when ``number``; booleans use ``"true"``/``"false"``).
+    Row metadata (``id``, ``created_at``, ``updated_at``, ``created_by``, ``updated_by``,
+    ``table_id``) are real table columns matched directly; ``$contains`` casts them to text.
+    A schema column sharing a metadata name still resolves against the JSON blob.
     Unknown operators are ignored.
     """
     from sqlalchemy import Numeric, String, cast
@@ -234,28 +231,16 @@ def _build_data_table_filter_clauses(filter_dict: dict, columns: list) -> list:
         return []
 
     schema_cols = {c["name"]: c for c in (columns or [])}
-    meta_columns = {
-        "id": DataTableRow.id,
-        "table_id": DataTableRow.table_id,
-        "created_at": DataTableRow.created_at,
-        "updated_at": DataTableRow.updated_at,
-        "created_by": DataTableRow.created_by,
-        "updated_by": DataTableRow.updated_by,
-    }
+    meta_cols = {"id", "table_id", "created_at", "updated_at", "created_by", "updated_by"}
     clauses: list = []
 
     for col_name, condition in filter_dict.items():
-        is_meta = col_name not in schema_cols and col_name in meta_columns
+        is_meta = col_name not in schema_cols and col_name in meta_cols
         if is_meta:
-            # Real typed column (timestamp/uuid): compare natively, no text coercion.
-            field = meta_columns[col_name]
-            is_json = False
-            is_number = False
+            field, is_json, is_number = getattr(DataTableRow, col_name), False, False
         else:
-            # User data lives in JSON; ``->>`` yields text.
             field = DataTableRow.data.op("->>")(col_name)
-            is_json = True
-            is_number = schema_cols.get(col_name, {}).get("type") == "number"
+            is_json, is_number = True, schema_cols.get(col_name, {}).get("type") == "number"
 
         is_boolean = schema_cols.get(col_name, {}).get("type") == "boolean"
 
