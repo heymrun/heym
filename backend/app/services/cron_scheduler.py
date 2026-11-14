@@ -60,6 +60,9 @@ class CronScheduler:
         self._running = False
         self._task: asyncio.Task | None = None
         self._last_check: dict[str, datetime] = {}
+        # Claimed slots run as tasks so one long run never holds up the pass: other
+        # workflows' slots, alerts and queue maintenance are checked meanwhile.
+        self._slot_runs: dict[uuid.UUID, asyncio.Task] = {}
         self._last_cleanup_date: str | None = None
         self._last_portal_session_cleanup_date: str | None = None
         self._last_workflow_version_cleanup_date: str | None = None
@@ -86,6 +89,10 @@ class CronScheduler:
                 await self._task
             except asyncio.CancelledError:
                 pass
+        slot_runs = list(self._slot_runs.values())
+        for run in slot_runs:
+            run.cancel()
+        await asyncio.gather(*slot_runs, return_exceptions=True)
         logger.info("Cron scheduler stopped")
 
     async def _run_loop(self) -> None:
@@ -123,6 +130,10 @@ class CronScheduler:
             for workflow in workflows:
                 cron_nodes = self._find_cron_nodes(workflow.nodes)
                 for node in cron_nodes:
+                    if workflow.id in self._slot_runs:
+                        # One run per workflow at a time, as when the pass waited for it:
+                        # its next slot stays due until this run ends.
+                        break
                     cron_expr = node.get("data", {}).get("cronExpression", "")
                     if not cron_expr:
                         continue
@@ -147,7 +158,7 @@ class CronScheduler:
                             # risk a duplicate.
                             self.mark_slot_handled(node_key, slot)
                             if claimed:
-                                await self._execute_workflow(db, workflow)
+                                self._start_slot_run(workflow)
                             else:
                                 logger.debug(
                                     "Cron slot %s for %s already claimed by another worker",
@@ -229,6 +240,25 @@ class CronScheduler:
     def mark_slot_handled(self, node_key: str, slot: datetime) -> None:
         """Record a slot as settled for this process so later passes skip it."""
         self._last_check[node_key] = slot
+
+    def _start_slot_run(self, workflow: Workflow) -> None:
+        """Run a claimed slot without making the scheduler pass wait for it."""
+        task = asyncio.create_task(self._run_slot(workflow))
+        self._slot_runs[workflow.id] = task
+
+        def _forget(done: asyncio.Task, workflow_id: uuid.UUID = workflow.id) -> None:
+            if self._slot_runs.get(workflow_id) is done:
+                del self._slot_runs[workflow_id]
+
+        task.add_done_callback(_forget)
+
+    async def _run_slot(self, workflow: Workflow) -> None:
+        """Execute one claimed slot in its own session; the pass's session closes first."""
+        try:
+            async with async_session_maker() as db:
+                await self._execute_workflow(db, workflow)
+        except Exception:
+            logger.exception("Cron run for workflow %s failed", workflow.id)
 
     async def _execute_workflow(self, db: AsyncSession, workflow: Workflow) -> None:
         logger.info("Executing workflow %s via cron trigger", workflow.id)

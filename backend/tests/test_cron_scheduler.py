@@ -1,3 +1,4 @@
+import asyncio
 import inspect
 import threading
 import unittest
@@ -513,6 +514,7 @@ class CronSlotClaimTests(unittest.IsolatedAsyncioTestCase):
             patch("app.services.cron_scheduler.claim_cron_slot", claim),
         ):
             await scheduler._check_and_execute()
+            await asyncio.gather(*scheduler._slot_runs.values())
         self.claim = claim
         return execute
 
@@ -557,6 +559,127 @@ class CronSlotClaimTests(unittest.IsolatedAsyncioTestCase):
         failed.assert_not_awaited()
         execute.assert_awaited_once()
         self.assertEqual(self.claim.await_args.kwargs["slot_at"], failed_slot)
+
+
+class CronLongRunTests(unittest.IsolatedAsyncioTestCase):
+    """A claimed slot runs in the background: a long run holds up nothing but itself.
+
+    The pass used to await each run. A 16-minute run of one workflow kept every other
+    workflow's slot unchecked until it ended, and by then those slots were older than
+    the misfire grace window and were skipped.
+    """
+
+    DAY = datetime(2026, 11, 16, tzinfo=timezone.utc)
+
+    def _workflow(self, expr: str) -> SimpleNamespace:
+        return SimpleNamespace(
+            id=uuid.uuid4(),
+            owner_id=uuid.uuid4(),
+            name="Cron workflow",
+            nodes=[{"id": "n1", "type": "cron", "data": {"cronExpression": expr}}],
+            edges=[],
+            concurrency_limit=None,
+        )
+
+    async def _run(self, workflows: list, script) -> list[tuple[uuid.UUID, datetime]]:
+        """Run `script(pass_at, release)` with a fake clock; return (workflow, start) pairs."""
+        clock = {"now": self.DAY}
+        started: list[tuple[uuid.UUID, datetime]] = []
+        gates = {workflow.id: asyncio.Event() for workflow in workflows}
+
+        class _Clock(datetime):
+            @classmethod
+            def now(cls, tz=None):  # type: ignore[override]
+                return clock["now"].astimezone(tz) if tz else clock["now"]
+
+        async def fake_execute(_self, _db, workflow) -> None:
+            started.append((workflow.id, clock["now"]))
+            await gates[workflow.id].wait()
+
+        session = AsyncMock()
+        session.__aenter__.return_value = session
+        session.__aexit__.return_value = False
+        scheduler = CronScheduler()
+
+        async def pass_at(hour: int, minute: int, second: int) -> None:
+            clock["now"] = self.DAY.replace(hour=hour, minute=minute, second=second)
+            # A pass that waits for a run would never return here: fail instead of hanging.
+            await asyncio.wait_for(scheduler._check_and_execute(), timeout=5)
+            await asyncio.sleep(0)
+
+        async def release(workflow) -> None:
+            gates[workflow.id].set()
+            for _ in range(3):
+                await asyncio.sleep(0)
+
+        with (
+            patch("app.services.cron_scheduler.datetime", _Clock),
+            patch("app.services.cron_scheduler.get_configured_timezone", lambda: timezone.utc),
+            patch("app.services.cron_scheduler.async_session_maker", return_value=session),
+            patch.object(
+                CronScheduler, "_get_workflows_with_cron", AsyncMock(return_value=workflows)
+            ),
+            patch.object(CronScheduler, "_execute_workflow", fake_execute),
+            patch("app.services.cron_scheduler.claim_cron_slot", AsyncMock(return_value=True)),
+        ):
+            await script(scheduler, pass_at, release)
+            for gate in gates.values():
+                gate.set()
+            await asyncio.gather(*scheduler._slot_runs.values())
+        return started
+
+    async def test_a_long_run_does_not_hold_up_another_workflows_slot(self) -> None:
+        long_run = self._workflow("0 9 * * *")
+        other = self._workflow("5 9 * * *")
+
+        async def script(scheduler, pass_at, _release) -> None:
+            await pass_at(8, 59, 40)
+            await pass_at(9, 0, 10)
+            await pass_at(9, 5, 10)
+            self.assertIn(long_run.id, scheduler._slot_runs)
+
+        started = await self._run([long_run, other], script)
+
+        self.assertEqual(
+            started,
+            [
+                (long_run.id, self.DAY.replace(hour=9, minute=0, second=10)),
+                (other.id, self.DAY.replace(hour=9, minute=5, second=10)),
+            ],
+        )
+
+    async def test_a_workflow_never_overlaps_its_own_running_slot(self) -> None:
+        every_minute = self._workflow("* * * * *")
+
+        async def script(_scheduler, pass_at, release) -> None:
+            await pass_at(9, 0, 10)
+            await pass_at(9, 1, 10)  # still running: the 09:01 slot waits
+            await release(every_minute)
+            await pass_at(9, 1, 40)  # finished: the 09:01 slot runs now
+
+        started = await self._run([every_minute], script)
+
+        self.assertEqual(
+            [moment for _workflow_id, moment in started],
+            [
+                self.DAY.replace(hour=9, minute=0, second=10),
+                self.DAY.replace(hour=9, minute=1, second=40),
+            ],
+        )
+
+    async def test_stop_cancels_a_run_in_progress(self) -> None:
+        long_run = self._workflow("0 9 * * *")
+        runs: list[asyncio.Task] = []
+
+        async def script(scheduler, pass_at, _release) -> None:
+            await pass_at(9, 0, 10)
+            runs.extend(scheduler._slot_runs.values())
+            await scheduler.stop()
+
+        await self._run([long_run], script)
+
+        self.assertEqual(len(runs), 1)
+        self.assertTrue(runs[0].cancelled())
 
 
 class CronExecutorThreadingTests(unittest.IsolatedAsyncioTestCase):
