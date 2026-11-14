@@ -7,7 +7,11 @@ import AgentFieldToggle from "@/components/ui/AgentFieldToggle.vue";
 import ExpressionInput from "@/components/ui/ExpressionInput.vue";
 import Label from "@/components/ui/Label.vue";
 import Select from "@/components/ui/Select.vue";
-import { GOOGLE_MEET_BUSY_TITLES_OPTION, GOOGLE_MEET_OPERATIONS } from "@/lib/googleMeetFields";
+import { GOOGLE_MEET_BUSY_DETAILS_OPTION, GOOGLE_MEET_OPERATIONS } from "@/lib/googleMeetFields";
+import {
+  isBusyDetailsChecked as computeIsBusyDetailsChecked,
+  setBusyDetailsChecked,
+} from "./googleMeetNodeProperties";
 import { credentialsApi } from "@/services/api";
 import { usePropertiesPanelContext } from "../usePropertiesPanelController";
 
@@ -16,6 +20,20 @@ const {
   selectedNodeEvaluateDialogLabel, googleMeetExpressionFields,
 } = usePropertiesPanelContext();
 const { fields, register, navigate, registerIndex } = googleMeetExpressionFields;
+const isBusyDetailsChecked = computed({
+  get(): boolean {
+    return computeIsBusyDetailsChecked(selectedNode.value?.data);
+  },
+  set(checked: boolean): void {
+    setBusyDetailsChecked(checked, updateNodeData);
+  },
+});
+
+function onBusyDetailsChange(event: Event): void {
+  const target = event.target as HTMLInputElement | null;
+  if (!target) return;
+  setBusyDetailsChecked(target.checked, updateNodeData);
+}
 const credentials = ref<CredentialListItem[]>([]);
 const credentialError = ref("");
 const credentialOptions = computed(() => {
@@ -114,24 +132,24 @@ onMounted(async (): Promise<void> => {
     <div
       v-if="(selectedNode.data.gmOperation || 'read') === 'read'"
       class="space-y-2"
-      data-testid="gm-busy-titles-option"
+      data-testid="gm-busy-details-option"
     >
       <div class="flex items-center gap-2">
         <input
-          id="gm-include-busy-titles"
+          id="gm-include-busy-details"
           type="checkbox"
           class="rounded border-border"
-          :checked="selectedNode.data.gmIncludeBusyTitles === true"
-          @change="updateNodeData(GOOGLE_MEET_BUSY_TITLES_OPTION.key, ($event.target as HTMLInputElement).checked)"
+          :checked="isBusyDetailsChecked"
+          @change="onBusyDetailsChange"
         >
-        <Label for="gm-include-busy-titles">{{ GOOGLE_MEET_BUSY_TITLES_OPTION.label }}</Label>
+        <Label for="gm-include-busy-details">{{ GOOGLE_MEET_BUSY_DETAILS_OPTION.label }}</Label>
         <AgentFieldToggle
           :node-id="selectedNode.id"
-          :field-key="GOOGLE_MEET_BUSY_TITLES_OPTION.key"
+          :field-key="GOOGLE_MEET_BUSY_DETAILS_OPTION.key"
         />
       </div>
       <p class="text-xs text-muted-foreground">
-        {{ GOOGLE_MEET_BUSY_TITLES_OPTION.help }}
+        {{ GOOGLE_MEET_BUSY_DETAILS_OPTION.help }}
       </p>
     </div>
     <p

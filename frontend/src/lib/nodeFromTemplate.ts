@@ -10,6 +10,26 @@ interface SourceForRefs {
 }
 
 /**
+ * Normalizes boolean and boolean-string representations.
+ * Invalid values return false (never silently converted to true).
+ */
+export function normalizeBoolean(value: unknown): boolean {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim().toLowerCase();
+    if (trimmed === "true") {
+      return true;
+    }
+    if (trimmed === "false") {
+      return false;
+    }
+  }
+  return false;
+}
+
+/**
  * Build a canvas node from a saved node template (defaults merged with template data).
  */
 export function buildWorkflowNodeFromNodeTemplate(
@@ -21,6 +41,13 @@ export function buildWorkflowNodeFromNodeTemplate(
   const definition = NODE_DEFINITIONS[type];
   const defaults = definition ? { ...definition.defaultData } : ({} as WorkflowNode["data"]);
   let merged = { ...defaults, ...template.node_data } as WorkflowNode["data"];
+  if (type === "googleMeet" && template.node_data) {
+    if ("gmIncludeBusyDetails" in template.node_data) {
+      merged.gmIncludeBusyDetails = normalizeBoolean(template.node_data.gmIncludeBusyDetails);
+    } else if ("gmIncludeBusyTitles" in template.node_data) {
+      merged.gmIncludeBusyDetails = normalizeBoolean(template.node_data.gmIncludeBusyTitles);
+    }
+  }
   if (sourceForRefs) {
     merged = replaceInputRefs(merged, sourceForRefs);
   }

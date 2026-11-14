@@ -36,26 +36,31 @@ def execute(ctx: NodeExecutionContext) -> object:
         service = GoogleMeetService(credential_id, decrypt_config(credential.encrypted_config), db)
         calendar_id = resolve("gmCalendarId", "primary") or "primary"
         if operation == "read":
-            include_titles = ctx.node_data.get("gmIncludeBusyTitles", False)
-            if isinstance(include_titles, str):
-                value = include_titles.strip().lower()
+            if "gmIncludeBusyDetails" in ctx.node_data:
+                raw_value = ctx.node_data["gmIncludeBusyDetails"]
+            else:
+                raw_value = ctx.node_data.get("gmIncludeBusyTitles")
+            if raw_value is None:
+                include_details = False
+            elif isinstance(raw_value, str):
+                value = raw_value.strip().lower()
                 if value not in {"true", "false", ""}:
                     raise HTTPException(
-                        400, "Google Meet: Include Busy Event Titles must be true or false"
+                        400, "Google Meet: Include Busy Event Details must be true or false"
                     )
-                include_titles = value == "true"
-            if include_titles is None:
-                include_titles = False
-            if not isinstance(include_titles, bool):
+                include_details = value == "true"
+            elif isinstance(raw_value, bool):
+                include_details = raw_value
+            else:
                 raise HTTPException(
-                    400, "Google Meet: Include Busy Event Titles must be true or false"
+                    400, "Google Meet: Include Busy Event Details must be true or false"
                 )
             return service.read_availability(
                 calendar_id,
                 resolve("gmStartDate"),
                 resolve("gmEndDate"),
                 (resolve("gmTimeZone", "UTC") or "UTC"),
-                include_busy_titles=include_titles,
+                include_busy_details=include_details,
             )
         if operation == "delete":
             return service.delete_event(calendar_id, resolve("gmEventId"))

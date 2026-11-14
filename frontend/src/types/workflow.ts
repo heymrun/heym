@@ -1095,6 +1095,7 @@ export interface NodeData {
   gmStartDate?: string;
   gmEndDate?: string;
   gmIncludeBusyTitles?: boolean;
+  gmIncludeBusyDetails?: boolean;
   gmEventId?: string;
   gmTitle?: string;
   gmDescription?: string;

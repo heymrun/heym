@@ -915,7 +915,7 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
     defaultData: {
       label: "googleMeet", credentialId: "", gmOperation: "read",
       gmCalendarId: "primary", gmTimeZone: "UTC", gmStartDate: "", gmEndDate: "",
-      gmIncludeBusyTitles: false,
+      gmIncludeBusyDetails: false,
       gmEventId: "", gmTitle: "", gmDescription: "", gmStartTime: "", gmEndTime: "",
       gmAttendees: "", gmLocation: "",
     },
