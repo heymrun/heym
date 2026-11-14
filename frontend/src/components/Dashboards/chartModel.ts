@@ -30,6 +30,7 @@ const CHART_TYPES = new Set<ChartPayload["type"]>([
   "erDiagram",
   "barGauge",
   "text",
+  "html",
   "hitl",
 ]);
 
@@ -126,6 +127,7 @@ export function isChartEmpty(p: ChartPayload | null): boolean {
   if (p.type === "numeric") return p.value === null || p.value === undefined;
   if (p.type === "gauge") return p.value === null || p.value === undefined;
   if (p.type === "text") return !p.text || p.text.trim().length === 0;
+  if (p.type === "html") return !p.html || p.html.trim().length === 0;
   if (p.type === "hitl") return false;
   return !p.series || p.series.length === 0;
 }

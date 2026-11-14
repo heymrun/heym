@@ -83,6 +83,7 @@ export interface ChartPayload {
     | "erDiagram"
     | "barGauge"
     | "text"
+    | "html"
     | "hitl";
   orientation?: "horizontal" | "vertical";
   labels?: string[];
@@ -100,6 +101,8 @@ export interface ChartPayload {
   text?: string;
   // When true, GFM task list checkboxes can be toggled from the dashboard.
   text_interactive?: boolean;
+  // Author HTML for the `html` chart type, rendered in a sandboxed frame (htmlWidgetDocument.ts).
+  html?: string;
   unit?: string;
   decimals?: number;
   min?: number;

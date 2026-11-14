@@ -49,6 +49,7 @@ _CHART_PAYLOAD_TYPES = frozenset(
         "erDiagram",
         "barGauge",
         "text",
+        "html",
         "hitl",
     )
 )

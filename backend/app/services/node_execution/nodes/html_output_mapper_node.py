@@ -16,13 +16,20 @@ def _coerce_status_code(raw: object) -> int:
     return code
 
 
+def render_html_template(ctx: NodeExecutionContext) -> str:
+    """The node's ``html`` template with its ``$`` expressions filled in.
+
+    Shared with the chartOutput node's ``html`` chart type, so a widget's HTML and a page's
+    HTML resolve expressions the same way.
+    """
+    template = str(ctx.node_data.get("html") or "")
+    return ctx.executor.evaluate_nonempty_message_template(template, ctx.inputs, ctx.node_id)
+
+
 def execute(ctx: NodeExecutionContext) -> object:
     """Execute the htmlOutputMapper node."""
-    self = ctx.executor
     node_data = ctx.node_data
-
-    template = str(node_data.get("html") or "")
-    html = self.evaluate_nonempty_message_template(template, ctx.inputs, ctx.node_id)
+    html = render_html_template(ctx)
 
     content_type = str(node_data.get("contentType") or "").strip() or DEFAULT_CONTENT_TYPE
 

@@ -26,7 +26,7 @@ When you only have example/sample data (no real source), produce these rows with
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `label` | string | Node identifier (camelCase) |
-| `chartType` | string | `pie`, `bar`, `line`, `area`, `table`, `numeric`, `gauge`, `scatter`, `proportion`, `barGauge`, `gantt`, `erDiagram`, `text`, or `hitl` |
+| `chartType` | string | `pie`, `bar`, `line`, `area`, `table`, `numeric`, `gauge`, `scatter`, `proportion`, `barGauge`, `gantt`, `erDiagram`, `text`, `html`, or `hitl` |
 | `orientation` | string | `vertical` or `horizontal` (bar charts only) |
 | `dataPath` | string | Dot path to the rows array (or graph object for `erDiagram`) inside the upstream output (e.g. `data` or `result.items`). Leave empty to auto-detect. |
 | `labelField` | string | Row key used as the category label (pie/bar/line) |
@@ -41,6 +41,7 @@ When you only have example/sample data (no real source), produce these rows with
 | `min` / `max` | number | Numeric range for `gauge` (default `0` / `100`) |
 | `unit` | string | Optional unit shown next to a `numeric` or `gauge` value |
 | `text` | string | Markdown message for the `text` chart type. Leave empty and set `valueField` to render a dynamic message pulled from upstream data. |
+| `html` | string | HTML template for the `html` chart type. `$nodeLabel.field` expressions are filled in as in the [HTML output mapper](./html-output-mapper-node.md). Leave empty and set `valueField` to show HTML produced upstream. |
 | `title` | string | Optional chart title |
 | `hitlWorkflowId` | string | `hitl` only. Show only the reviews of this workflow. Left empty, the widget shows every review. |
 | `hitlNodeId` | string | `hitl` only. Narrow `hitlWorkflowId` to one step: an Agent with human review, or a Slack approval, buttons or form step. |
@@ -57,6 +58,7 @@ When you only have example/sample data (no real source), produce these rows with
 - **gantt** — task schedules with dates, progress and dependencies; see [Gantt schedules](#gantt-schedules).
 - **erDiagram** — database entities, fields, keys and relationships; see [Entity relationships](#entity-relationships-db).
 - **text** — a markdown message (e.g. a status note like "Last execution at 19:47"). Put the markdown in `text` for a static message, or leave `text` empty and set `valueField` to render a string produced upstream. Supports headings, bold/italic, [lists](../nodes/chart-output-node.md#interactive-task-lists), links, and inline code.
+- **html**: your own HTML, CSS and JavaScript, rendered in a sandboxed frame; see [HTML widgets](#html-widgets).
 - **hitl** — a carousel of your pending human reviews. The header shows `1/n pending`; the left arrow is disabled on the first card and the right arrow on the last. The workflow name opens that run on the canvas. **Approve**, **Request changes**, and **Reject** resolve it, and the history icon beside the widget title opens that run in the history dialog on the same page. This chart type ignores upstream rows, so the widget workflow is only the Chart Output node. Each signed-in person sees the reviews on workflows they own. Pick a **Workflow** (and **Select agent** when it has several review steps) in the node's properties or the widget's Settings to show that workflow's reviews instead, to everyone who can open it; see [HITL widgets](../tabs/dashboard-tab.md#hitl-widgets).
 
 ### Gantt schedules
@@ -153,6 +155,35 @@ Resulting markdown:
 
 For a simple ascending list starting at 1, either prefix each line (`1.`, `2.`, `3.`) or use a loop with `$loop.index + 1`. Use [bullet lists](#interactive-task-lists) (`- item`) when you do not need numbers.
 
+## HTML widgets
+
+Choose **HTML** (`html`) for a card that no other chart type draws. Put the markup in `html`. Its `$nodeLabel.field` expressions resolve exactly as in an [HTML output mapper](./html-output-mapper-node.md) node, so a template moves between a page and a widget unchanged. To show HTML built upstream, such as an [LLM](./llm-node.md) node's answer, leave `html` empty and set `valueField` (with `dataPath` when the rows are nested).
+
+```json
+{
+  "type": "chartOutput",
+  "data": {
+    "label": "summaryCard",
+    "chartType": "html",
+    "html": "<style>.n{font-size:32px;font-weight:600}</style><div class=\"n\">$stats.open</div><div>open tickets</div>",
+    "title": "Summary"
+  }
+}
+```
+
+### Sandbox
+
+The dashboard shows the HTML in an `<iframe sandbox="allow-scripts">` with its own Content Security Policy. Widget content can come from data someone else controls, such as a table row, an HTTP response or an LLM answer, so the frame keeps it away from the person viewing the dashboard:
+
+| Works | Blocked |
+|-------|---------|
+| Inline `<style>`, `<script>` and SVG | Heym's cookies, localStorage and session: the frame has an opaque origin |
+| Styles, scripts, images and fonts over `https:` and `data:` URLs | `fetch`, XHR, WebSocket, EventSource and beacons |
+| Links, which open in a new tab (http(s) URLs and paths inside Heym only) | Forms, popups, dialogs, downloads and navigating the Heym tab |
+| Animations and timers | Nested frames, workers, plugins and `<base>` |
+
+Because the frame cannot make requests, put every value the widget shows into the template with expressions, as the example does with `$stats.open`. The frame follows the dashboard's light or dark theme through `color-scheme`, has a transparent background and scrolls when the content is taller than the widget. The same rules apply on [Heym Work](../reference/heym-work.md) pages.
+
 ## Status chips
 
 A `table` can show one column as colored chips. Set **Status column** in the node's properties (or `statusColumn` in the DSL) to a column name. Each value gets one of five tones, and common words get one without configuration:
@@ -233,6 +264,7 @@ The value comes from a URL that anyone can edit. The dashboard only accepts valu
 5. For `numeric` and `gauge`, the value comes from `valueField` on the first row (or the first numeric field).
 6. For `scatter`, each row becomes an `[xField, yField]` point.
 7. For `text`, the message is taken from `valueField` on the first row when set, otherwise from the static `text` config (otherwise the first string field of the first row).
+8. For `html`, the markup is the `html` template when it is set, otherwise `valueField` on the first row. Unlike `text`, it never falls back to another string field.
 
 ## Example
 
@@ -363,6 +395,19 @@ Text (dynamic — the message string is produced upstream and pulled via `valueF
 }
 ```
 
+HTML (a custom card; the values come from upstream expressions):
+
+```json
+{
+  "type": "chartOutput",
+  "data": {
+    "label": "releaseCard",
+    "chartType": "html",
+    "html": "<div style=\"padding:12px\"><h3 style=\"margin:0\">$release.name</h3><p>$release.passed of $release.total checks passed</p></div>"
+  }
+}
+```
+
 ## Example AI prompts
 
 When generating a widget with **AI**, prompts like these map cleanly to each type:
@@ -377,6 +422,7 @@ When generating a widget with **AI**, prompts like these map cleanly to each typ
 - **Scatter** — "Plot request latency versus payload size as a scatter chart with example data."
 - **Proportion** — "Show my most used languages as a proportion bar: Kotlin 49.64%, JavaScript 23.73%, TypeScript 11.64%, Java 8.92%, Python 6.06%. Use example data."
 - **Bar gauge** — "Show free disk space per volume (sda1 to sda7) as a bar gauge in GB. Use example data."
+- **HTML**: "Add an HTML card with a gradient background that shows release readiness as 86% with a progress bar and 12 of 14 checks passed. Use example data."
 - **Text** — "Add a text widget with a markdown checklist (one checked item, two unchecked), or list the 5 newest tutorial videos in descending order (5. down to 1.) with YouTube links — prefix each line with an explicit number (`5. Title`, `4. Title`, …)."
 
 ## Related

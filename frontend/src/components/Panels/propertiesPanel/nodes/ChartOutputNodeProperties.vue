@@ -33,11 +33,14 @@ const structuredHint = computed((): string => {
   return "";
 });
 
+const multiLine = new Set<ChartOutputExpressionFieldKey>(["text", "html"]);
+
 const placeholders: Partial<Record<ChartOutputExpressionFieldKey, string>> = {
   dataPath: "e.g. rows, tasks or graph",
   labelField: "row key used as category label",
   valueField: "row key holding the value",
   text: "e.g. **Last execution** at `19:47`",
+  html: "e.g. <h2>$stats.open</h2><p>open tickets</p>",
   xField: "row key for the X axis (numeric)",
   yField: "row key for the Y axis (numeric)",
   unit: "e.g. USD, %, ms",
@@ -103,8 +106,8 @@ function fieldValue(key: ChartOutputExpressionFieldKey): string {
         :ref="(el: unknown) => setChartOutputExpressionInputRef(field.key, el)"
         :model-value="fieldValue(field.key)"
         :placeholder="placeholders[field.key]"
-        :rows="field.key === 'text' ? 5 : undefined"
-        :single-line="field.key !== 'text'"
+        :rows="field.key === 'html' ? 8 : field.key === 'text' ? 5 : undefined"
+        :single-line="!multiLine.has(field.key)"
         :nodes="workflowStore.nodes"
         :node-results="workflowStore.nodeResults"
         :edges="workflowStore.edges"
@@ -124,6 +127,13 @@ function fieldValue(key: ChartOutputExpressionFieldKey): string {
         class="text-xs text-muted-foreground"
       >
         Markdown is supported. Leave empty and set a Value field to pull the message from upstream data.
+      </p>
+      <p
+        v-if="field.key === 'html'"
+        class="text-xs text-muted-foreground"
+      >
+        Filled in like the HTML output node. The widget runs it in a sandboxed frame: scripts and styles work,
+        but it has no network access, cookies or Heym session. Leave empty and set a Value field to show HTML built upstream.
       </p>
       <p
         v-if="field.key === 'dataPath'"
