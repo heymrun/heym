@@ -541,6 +541,82 @@ class NodeSpanTest(_EnabledTracingTestBase):
         self.assertEqual(attrs["heym.agent.tool.refused"], "invalid_arguments")
         self.assertNotIn("heym.agent.tool.args", attrs)
 
+    def test_sibling_of_a_malformed_review_call_gets_a_review_deferred_span(self) -> None:
+        from types import SimpleNamespace
+
+        from app.db.models import CredentialType
+        from app.services.llm_service import HumanReviewPause, LLMService
+        from app.services.workflow_executor import run_async
+
+        def call(call_id: str, name: str, arguments: str) -> SimpleNamespace:
+            return SimpleNamespace(
+                id=call_id,
+                type="function",
+                function=SimpleNamespace(name=name, arguments=arguments),
+            )
+
+        def completion(calls: list[SimpleNamespace]) -> SimpleNamespace:
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(content=None, tool_calls=calls),
+                        finish_reason="tool_calls",
+                    )
+                ],
+                usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+            )
+
+        responses = [
+            completion(
+                [
+                    call("call-review", "review", "{'review_markdown': 'x'}"),
+                    call("call-sibling", "fetch_data", '{"url": "x"}'),
+                ]
+            ),
+            completion([call("call-review-2", "review", '{"review_markdown": "x"}')]),
+        ]
+        client = SimpleNamespace(
+            base_url="http://test",
+            chat=SimpleNamespace(
+                completions=SimpleNamespace(create=lambda **_kwargs: responses.pop(0))
+            ),
+        )
+        service = LLMService(CredentialType.openai, "test-key")
+        executed: list[str] = []
+
+        def tool_executor(_tool_def: object, name: str, *_rest: object) -> object:
+            executed.append(name)
+            return HumanReviewPause(review_markdown="x")
+
+        with patch.object(service, "_get_client", return_value=(client, "Test")):
+            result = run_async(
+                service.execute_with_tools(
+                    model="test-model",
+                    system_instruction=None,
+                    user_message="run tool",
+                    tools=[
+                        {"name": "review", "parameters": {"type": "object"}, "_source": "hitl"},
+                        {
+                            "name": "fetch_data",
+                            "parameters": {"type": "object"},
+                            "_source": "node_tool",
+                        },
+                    ],
+                    tool_executor=tool_executor,
+                )
+            )
+
+        self.assertIn("_hitl_pending", result)
+        self.assertEqual(executed, ["review"])
+        spans = {
+            dict(s.attributes)["heym.agent.tool.call_id"]: dict(s.attributes)
+            for s in self.exporter.get_finished_spans()
+            if s.name == "heym.agent.tool.execute"
+        }
+        self.assertEqual(spans["call-review"]["heym.agent.tool.refused"], "invalid_arguments")
+        self.assertEqual(spans["call-sibling"]["heym.agent.tool.refused"], "review_deferred")
+        self.assertEqual(spans["call-sibling"]["heym.agent.tool.status"], "error")
+
     def test_agent_tool_span_nests_when_run_async_uses_worker_thread(self) -> None:
         """When a loop is already running, run_async must reattach OTel context."""
         import asyncio

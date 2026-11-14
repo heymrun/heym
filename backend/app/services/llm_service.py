@@ -1802,8 +1802,8 @@ class LLMService:
             ) -> tuple[str, dict[str, Any]]:
                 """The error the model gets, and the trace entry, for a call that is not run.
 
-                ``refusal`` (``truncated`` or ``invalid_arguments``) is the span's
-                ``heym.agent.tool.refused`` value. No raw arguments go on the span.
+                ``refusal`` (``truncated``, ``invalid_arguments`` or ``review_deferred``) is
+                the span's ``heym.agent.tool.refused`` value. No raw arguments go on the span.
                 """
                 tool_result = {"error": reason, "status": "error"}
                 refused_def = tools_by_name.get(tc.name)
@@ -2262,7 +2262,9 @@ class LLMService:
                     # is approved. Defer the rest until the model sends a review that parses.
                     for slot, tc in enumerate(tool_calls):
                         if tc is not paused_tc:
-                            slot_results[slot] = _refused_tool_call(tc, HITL_REVIEW_DEFERRED_ERROR)
+                            slot_results[slot] = _refused_tool_call(
+                                tc, HITL_REVIEW_DEFERRED_ERROR, "review_deferred"
+                            )
                     transport.append_turn(history, turn)
                     _commit_completed_tool_slots()
                     continue
