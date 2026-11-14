@@ -1,4 +1,4 @@
-"""Opt-in event titles layered over authoritative Calendar free/busy intervals."""
+"""Opt-in event details layered over authoritative Calendar free/busy intervals."""
 
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -9,6 +9,47 @@ from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
 
+DOCUMENTED_VISIBILITIES = frozenset({"default", "public", "private", "confidential"})
+
+
+def can_see_event_details(role: str | None, raw_visibility: Any) -> bool:
+    """Determine whether event details (title, attendees) may be exposed.
+
+    Rules:
+    - writer / owner: allow all documented visibility values.
+    - reader / writerWithoutPrivateAccess: explicitly allow only public and default visibility.
+    - freeBusyReader: allow only public visibility.
+    - Missing visibility means default.
+    - Unknown visibility values fail closed (False).
+    - Missing or unknown access roles fail closed (False).
+    """
+    if not isinstance(role, str):
+        return False
+    normalized_role = role.lower()
+    if normalized_role not in {
+        "owner",
+        "writer",
+        "reader",
+        "writerwithoutprivateaccess",
+        "freebusyreader",
+    }:
+        return False
+
+    if raw_visibility is None:
+        visibility = "default"
+    elif isinstance(raw_visibility, str) and raw_visibility.lower() in DOCUMENTED_VISIBILITIES:
+        visibility = raw_visibility.lower()
+    else:
+        return False
+
+    if normalized_role in ("owner", "writer"):
+        return True
+    if normalized_role in ("reader", "writerwithoutprivateaccess"):
+        return visibility in ("public", "default")
+    if normalized_role == "freebusyreader":
+        return visibility == "public"
+    return False
+
 
 @dataclass(frozen=True)
 class BusyEvent:
@@ -17,6 +58,7 @@ class BusyEvent:
     start: datetime
     end: datetime
     title: str | None
+    attendees: list[str] | None = None
 
 
 def read_busy_events(
@@ -25,7 +67,7 @@ def read_busy_events(
     lower: datetime,
     upper: datetime,
 ) -> list[BusyEvent]:
-    """Read every occurrence in the window without fetching descriptions or guest lists."""
+    """Read every occurrence in the window without fetching descriptions."""
     from app.services.google_meet_service import calendar_zone, parse_datetime
 
     events: list[BusyEvent] = []
@@ -38,11 +80,15 @@ def read_busy_events(
             "singleEvents": True,
             "showDeleted": False,
             "maxResults": 2500,
-            "fields": "nextPageToken,timeZone,items(summary,start,end,status,transparency)",
+            "fields": (
+                "accessRole,nextPageToken,timeZone,"
+                "items(summary,start,end,status,transparency,visibility,attendeesOmitted,attendees(email,resource))"
+            ),
         }
         if page_token:
             params["pageToken"] = page_token
         page = request("GET", f"calendars/{quote(calendar_id, safe='')}/events", params=params)
+        access_role = page.get("accessRole")
         items = page.get("items", [])
         if not isinstance(items, list):
             raise HTTPException(502, "Google Meet: invalid Calendar events response")
@@ -70,12 +116,35 @@ def read_busy_events(
             if right <= left:
                 raise HTTPException(502, "Google Meet: Calendar event has an invalid time range")
             if left < upper and right > lower:
-                title = event.get("summary")
+                role = access_role.lower() if isinstance(access_role, str) else None
+                can_see_details = can_see_event_details(role, event.get("visibility"))
+
+                if not can_see_details:
+                    title = None
+                    attendees = None
+                else:
+                    raw_title = event.get("summary")
+                    title = raw_title if isinstance(raw_title, str) else None
+                    if event.get("attendeesOmitted") is True:
+                        attendees = None
+                    else:
+                        raw_attendees = event.get("attendees")
+                        attendees: list[str] = []
+                        if isinstance(raw_attendees, list):
+                            for attendee in raw_attendees:
+                                if (
+                                    isinstance(attendee, dict)
+                                    and attendee.get("resource") is not True
+                                ):
+                                    email = attendee.get("email")
+                                    if isinstance(email, str) and email:
+                                        attendees.append(email)
                 events.append(
                     BusyEvent(
                         max(left, lower),
                         min(right, upper),
-                        title if isinstance(title, str) else None,
+                        title,
+                        attendees,
                     )
                 )
         page_token = page.get("nextPageToken", "")
@@ -88,12 +157,14 @@ def read_busy_events(
 
 def label_busy_intervals(
     busy: list[tuple[datetime, datetime]], events: list[BusyEvent], zone: ZoneInfo
-) -> list[dict[str, str | None]]:
-    """Keep each event's title and retain any unlabelled busy time with a null title."""
+) -> list[dict[str, Any]]:
+    """Keep each event's details and retain any unlabelled busy time with null details."""
     slots: list[BusyEvent] = []
 
-    def append(left: datetime, right: datetime, title: str | None) -> None:
-        slots.append(BusyEvent(left, right, title))
+    def append(
+        left: datetime, right: datetime, title: str | None, attendees: list[str] | None
+    ) -> None:
+        slots.append(BusyEvent(left, right, title, attendees))
 
     ordered_events = sorted(events, key=lambda event: (event.start, event.end))
     for left, right in busy:
@@ -103,16 +174,17 @@ def label_busy_intervals(
                 continue
             start, end = max(left, event.start), min(right, event.end)
             if cursor < start:
-                append(cursor, start, None)
-            append(start, end, event.title)
+                append(cursor, start, None, None)
+            append(start, end, event.title, event.attendees)
             cursor = max(cursor, end)
         if cursor < right:
-            append(cursor, right, None)
+            append(cursor, right, None, None)
     return [
         {
             "start": slot.start.astimezone(zone).isoformat(),
             "end": slot.end.astimezone(zone).isoformat(),
             "title": slot.title,
+            "attendees": slot.attendees,
         }
         for slot in sorted(slots, key=lambda slot: (slot.start, slot.end))
     ]

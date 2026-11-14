@@ -58,10 +58,10 @@ class TestGoogleMeetNode(unittest.TestCase):
     def test_read_defaults_do_not_resolve_blank_templates_into_inputs(self) -> None:
         execute(context({"credentialId": "credential", "gmOperation": "read", "gmEndDate": ""}))
         self.service.read_availability.assert_called_once_with(
-            "primary", "", "", "UTC", include_busy_titles=False
+            "primary", "", "", "UTC", include_busy_details=False
         )
 
-    def test_busy_title_opt_in_accepts_boolean_and_agent_boolean_strings(self) -> None:
+    def test_busy_details_opt_in_accepts_boolean_and_agent_boolean_strings(self) -> None:
         for value, expected in (
             (True, True),
             (False, False),
@@ -71,15 +71,82 @@ class TestGoogleMeetNode(unittest.TestCase):
         ):
             with self.subTest(value=value):
                 self.service.reset_mock()
-                execute(context({"credentialId": "credential", "gmIncludeBusyTitles": value}))
+                execute(context({"credentialId": "credential", "gmIncludeBusyDetails": value}))
                 self.assertIs(
-                    self.service.read_availability.call_args.kwargs["include_busy_titles"], expected
+                    self.service.read_availability.call_args.kwargs["include_busy_details"],
+                    expected,
                 )
 
-    def test_invalid_title_opt_in_never_silently_enables_title_reads(self) -> None:
-        for value in ("anything", "1", 1, [], {}):
-            with self.subTest(value=value), self.assertRaises(HTTPException):
+    def test_legacy_busy_titles_opt_in_continues_working(self) -> None:
+        for value, expected in (
+            (True, True),
+            (False, False),
+            ("true", True),
+            ("false", False),
+        ):
+            with self.subTest(value=value):
+                self.service.reset_mock()
                 execute(context({"credentialId": "credential", "gmIncludeBusyTitles": value}))
+                self.assertIs(
+                    self.service.read_availability.call_args.kwargs["include_busy_details"],
+                    expected,
+                )
+
+    def test_new_details_key_takes_precedence_over_legacy_key(self) -> None:
+        for details_val, titles_val, expected in (
+            (False, True, False),
+            ("false", True, False),
+            (None, True, False),
+            (None, "true", False),
+            (True, False, True),
+            ("true", False, True),
+            (False, "true", False),
+            (True, "false", True),
+        ):
+            with self.subTest(details=details_val, titles=titles_val):
+                self.service.reset_mock()
+                execute(
+                    context(
+                        {
+                            "credentialId": "credential",
+                            "gmIncludeBusyDetails": details_val,
+                            "gmIncludeBusyTitles": titles_val,
+                        }
+                    )
+                )
+                self.assertIs(
+                    self.service.read_availability.call_args.kwargs["include_busy_details"],
+                    expected,
+                )
+
+    def test_explicit_null_details_key_takes_precedence_over_legacy_true(self) -> None:
+        for titles_val in (True, "true"):
+            with self.subTest(titles_val=titles_val):
+                self.service.reset_mock()
+                execute(
+                    context(
+                        {
+                            "credentialId": "credential",
+                            "gmIncludeBusyDetails": None,
+                            "gmIncludeBusyTitles": titles_val,
+                        }
+                    )
+                )
+                self.assertIs(
+                    self.service.read_availability.call_args.kwargs["include_busy_details"],
+                    False,
+                )
+
+    def test_invalid_details_opt_in_never_silently_enables_reads(self) -> None:
+        for key in ("gmIncludeBusyDetails", "gmIncludeBusyTitles"):
+            for value in ("anything", "1", 1, [], {}):
+                with self.subTest(key=key, value=value), self.assertRaises(HTTPException) as cm:
+                    execute(context({"credentialId": "credential", key: value}))
+                self.assertEqual(cm.exception.status_code, 400)
+                self.assertEqual(
+                    cm.exception.detail,
+                    "Google Meet: Include Busy Event Details must be true or false",
+                )
         self.service.read_availability.assert_not_called()
 
     def test_create_invites_parameter_email_from_connected_owner_account(self) -> None:

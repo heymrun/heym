@@ -19,14 +19,17 @@ export const GOOGLE_MEET_OPERATIONS: { value: GoogleMeetOperation; label: string
   { value: "delete", label: "Delete Meeting & Notify Guests" },
 ];
 
-export const GOOGLE_MEET_BUSY_TITLES_OPTION = {
-  key: "gmIncludeBusyTitles",
-  label: "Include Busy Event Titles",
+export const GOOGLE_MEET_BUSY_DETAILS_OPTION = {
+  key: "gmIncludeBusyDetails",
+  label: "Include Busy Event Details",
   defaultValue: false,
   expressionCapable: false,
   agentAutofill: true,
-  help: "Off by default. Adds event titles to busy_slots when Google allows reading event details. Overlapping events appear separately; hidden titles are null.",
+  help: "Adds each busy event's title and attendees when Google shares event details.",
 } as const;
+
+/** @deprecated Use GOOGLE_MEET_BUSY_DETAILS_OPTION */
+export const GOOGLE_MEET_BUSY_TITLES_OPTION = GOOGLE_MEET_BUSY_DETAILS_OPTION;
 
 const fields: Record<GoogleMeetFieldKey, GoogleMeetField> = {
   gmCalendarId: { key: "gmCalendarId", label: "Calendar ID or Email", placeholder: "primary", help: "Use primary for your calendar, or a calendar email you have permission to access." },
