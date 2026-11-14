@@ -26,6 +26,9 @@ from app.services.trigger_run_dispatch import (
 
 logger = logging.getLogger("imap_trigger")
 
+# Seconds a socket operation may block. Without it one silent mailbox stalls the poller.
+IMAP_TIMEOUT_SECONDS = 30
+
 
 @dataclass(frozen=True)
 class ImapCursor:
@@ -214,7 +217,10 @@ def _open_mailbox(credential_config: dict[str, Any]) -> Iterator[tuple[Any, str 
     use_ssl = bool(credential_config.get("imap_use_ssl", True))
 
     client: imaplib.IMAP4 | imaplib.IMAP4_SSL
-    client = imaplib.IMAP4_SSL(host, port) if use_ssl else imaplib.IMAP4(host, port)
+    if use_ssl:
+        client = imaplib.IMAP4_SSL(host, port, timeout=IMAP_TIMEOUT_SECONDS)
+    else:
+        client = imaplib.IMAP4(host, port, timeout=IMAP_TIMEOUT_SECONDS)
 
     try:
         login_status, _ = client.login(username, password)

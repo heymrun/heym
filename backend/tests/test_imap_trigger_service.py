@@ -1,11 +1,15 @@
 """Unit tests for IMAP trigger polling and execution history."""
 
+import socket
+import threading
 import unittest
+import unittest.mock
 import uuid
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from app.services import imap_trigger_service
 from app.services.imap_trigger_service import (
     ImapCursor,
     ImapDispatchNotStartedError,
@@ -140,6 +144,55 @@ class ImapTriggerDelegationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["inputs"]["triggered_by"], "imap")
         self.assertEqual(kwargs["inputs"]["trigger_node_id"], "imap-node")
         self.assertEqual(kwargs["inputs"]["email"], {"uid": "7"})
+
+
+class ImapConnectTimeoutTests(unittest.TestCase):
+    """A mailbox that never answers must give up instead of stalling every IMAP trigger."""
+
+    def _open(self, config: dict) -> None:
+        with imap_trigger_service._open_mailbox(config):
+            pass
+
+    def test_both_clients_are_created_with_a_timeout(self) -> None:
+        for use_ssl, name in ((True, "IMAP4_SSL"), (False, "IMAP4")):
+            with self.subTest(name=name):
+                client_cls = unittest.mock.MagicMock()
+                client_cls.return_value.login.return_value = ("NO", [])
+                with patch.object(imap_trigger_service.imaplib, name, client_cls):
+                    with self.assertRaisesRegex(ValueError, "login failed"):
+                        self._open({"imap_host": "h", "imap_use_ssl": use_ssl})
+                self.assertEqual(
+                    client_cls.call_args.kwargs["timeout"],
+                    imap_trigger_service.IMAP_TIMEOUT_SECONDS,
+                )
+
+    def test_a_silent_server_raises_instead_of_blocking(self) -> None:
+        server = socket.socket()
+        server.bind(("127.0.0.1", 0))
+        server.listen(1)
+        self.addCleanup(server.close)
+        outcome: list[BaseException] = []
+
+        def attempt() -> None:
+            try:
+                self._open(
+                    {
+                        "imap_host": "127.0.0.1",
+                        "imap_port": server.getsockname()[1],
+                        "imap_use_ssl": False,
+                    }
+                )
+            except BaseException as exc:  # noqa: BLE001
+                outcome.append(exc)
+
+        with patch.object(imap_trigger_service, "IMAP_TIMEOUT_SECONDS", 0.2):
+            thread = threading.Thread(target=attempt, daemon=True)
+            thread.start()
+            thread.join(10)
+
+        self.assertFalse(thread.is_alive(), "the IMAP client blocked on a silent server")
+        self.assertEqual(len(outcome), 1)
+        self.assertIsInstance(outcome[0], OSError)
 
 
 if __name__ == "__main__":
