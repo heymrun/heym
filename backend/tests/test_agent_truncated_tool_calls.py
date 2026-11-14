@@ -20,7 +20,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from app.api import ai_assistant
 from app.db.models import CredentialType
 from app.services import chat_round_stream
-from app.services.llm_service import LLMService
+from app.services.llm_service import HumanReviewPause, LLMService
 from app.services.llm_trace import LLMTraceContext
 from app.services.llm_transport import ResponsesTransport
 from app.services.llm_transport_gemini import GeminiTransport
@@ -223,11 +223,186 @@ class ChatCompletionsAgentLoopTests(IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(executed, [])
-        self.assertIn("customer_id", json.dumps(result["tool_calls"]))
+        self.assertEqual(
+            result["tool_calls"][0]["arguments"], {"unparsed_arguments_chars": len(cut)}
+        )
         self.assertNotIn(secret, json.dumps(result["tool_calls"]))
         record_trace.assert_called()
         for call in record_trace.call_args_list:
             self.assertNotIn(secret, json.dumps(call.kwargs.get("response"), default=str))
+
+
+class PersistedTraces:
+    """Trace rows as `record_llm_trace` writes them, after its own sanitizer."""
+
+    def __init__(self) -> None:
+        self.rows: list[Any] = []
+        session = MagicMock()
+        session.add.side_effect = self.rows.append
+        factory = MagicMock()
+        factory.return_value.__enter__.return_value = session
+        self.patcher = patch("app.services.llm_trace.SessionLocal", factory)
+
+    def dump(self) -> str:
+        return json.dumps(
+            [{"request": row.request, "response": row.response} for row in self.rows],
+            default=str,
+        )
+
+
+class RefusedCallRedactionTests(IsolatedAsyncioTestCase):
+    """A refused call's arguments keep the key-based redaction that a call that runs gets."""
+
+    _run = ChatCompletionsAgentLoopTests._run
+
+    async def _run_traced(
+        self, responses: list[SimpleNamespace]
+    ) -> tuple[dict[str, Any], list[tuple[Any, ...]], PersistedTraces]:
+        traces = PersistedTraces()
+        trace_context = LLMTraceContext(
+            user_id=uuid.uuid4(), credential_id=uuid.uuid4(), node_label="Agent"
+        )
+        with traces.patcher:
+            result, executed, _sent = await self._run(responses, trace_context=trace_context)
+        self.assertTrue(traces.rows)
+        return result, executed, traces
+
+    async def test_complete_call_in_a_cut_turn_keeps_key_based_redaction(self) -> None:
+        arguments = json.dumps(
+            {"token": "opaque-credential", "service_token": "svc-cred-4711", "customer_id": "C-12"}
+        )
+        result, executed, traces = await self._run_traced(
+            [
+                _completion(
+                    calls=[_call("call-1", arguments), _call("call-2", CUT_ARGUMENTS)],
+                    finish_reason="length",
+                ),
+                _completion(content="Stopped.", calls=[], finish_reason="stop"),
+            ]
+        )
+
+        self.assertEqual(executed, [])
+        persisted = json.dumps(result["tool_calls"])
+        # Still structured, so the reader sees which call it was.
+        self.assertEqual(result["tool_calls"][0]["arguments"]["customer_id"], "C-12")
+        for value in ("opaque-credential", "svc-cred-4711"):
+            self.assertNotIn(value, persisted)
+            self.assertNotIn(value, traces.dump())
+
+    async def test_unparseable_cut_arguments_never_reach_the_record(self) -> None:
+        # Text-mode redaction has no pattern for `token` or `service_token`, so the raw
+        # string of a cut call must not be stored at all.
+        cut = '{"token": "opaque-credential", "service_token": "svc-cred-4711", "customer_id": "C-'
+        result, executed, traces = await self._run_traced(
+            [
+                _completion(calls=[_call("call-1", cut)], finish_reason="length"),
+                _completion(content="Stopped.", calls=[], finish_reason="stop"),
+            ]
+        )
+
+        self.assertEqual(executed, [])
+        persisted = json.dumps(result["tool_calls"])
+        response_traces = json.dumps([row.response for row in traces.rows], default=str)
+        for value in ("opaque-credential", "svc-cred-4711"):
+            self.assertNotIn(value, persisted)
+            self.assertNotIn(value, response_traces)
+
+
+PYTHON_TOOLS = [
+    {"name": "run_python", "parameters": {"type": "object"}, "_source": "python"},
+    {"name": "review", "parameters": {"type": "object"}, "_source": "hitl"},
+]
+
+
+class MalformedReviewCallTests(IsolatedAsyncioTestCase):
+    """A review request that does not parse approves nothing, so its siblings must wait."""
+
+    async def _run(
+        self, responses: list[SimpleNamespace], review_result: Any
+    ) -> tuple[dict[str, Any], list[str], list[dict[str, Any]]]:
+        sent: list[dict[str, Any]] = []
+
+        def create(**request: Any) -> SimpleNamespace:
+            sent.append(copy.deepcopy(request))
+            return responses.pop(0)
+
+        client = SimpleNamespace(
+            base_url="http://test",
+            chat=SimpleNamespace(completions=SimpleNamespace(create=create)),
+        )
+        executed: list[str] = []
+
+        def executor(tool_def: dict[str, Any], name: str, args: dict[str, Any], _t: float) -> Any:
+            executed.append(name)
+            if name == "review":
+                return review_result(args)
+            return {"ran": args}
+
+        service = LLMService(CredentialType.openai, "test-key")
+        with patch.object(service, "_get_client", return_value=(client, "Test")):
+            result = await service.execute_with_tools(
+                model="test-model",
+                system_instruction=None,
+                user_message="delete customer 77",
+                tools=PYTHON_TOOLS,
+                tool_executor=executor,
+            )
+        return result, executed, sent
+
+    async def test_malformed_review_call_defers_its_sibling_until_review_is_fixed(self) -> None:
+        result, executed, sent = await self._run(
+            [
+                _completion(
+                    calls=[
+                        _call("call-1", "{'review_markdown': 'delete C-77'}", name="review"),
+                        _call("call-2", '{"code": "delete_customer(77)"}', name="run_python"),
+                    ],
+                    finish_reason="tool_calls",
+                ),
+                _completion(
+                    calls=[_call("call-3", '{"review_markdown": "delete C-77"}', name="review")],
+                    finish_reason="tool_calls",
+                ),
+            ],
+            lambda args: HumanReviewPause(review_markdown=args["review_markdown"]),
+        )
+
+        self.assertNotIn("run_python", executed)
+        # The repaired review request pauses the run; nothing got past approval.
+        self.assertIn("_hitl_pending", result)
+        self.assertEqual(executed, ["review"])
+        tool_messages = [m for m in sent[1]["messages"] if m.get("role") == "tool"]
+        self.assertEqual([m["tool_call_id"] for m in tool_messages], ["call-1", "call-2"])
+        self.assertIn("not valid JSON", tool_messages[0]["content"])
+        self.assertIn("nothing has been approved", tool_messages[1]["content"])
+        statuses = {
+            e["tool_call_id"]: e["status"]
+            for e in result["_hitl_pending"]["agent_state"]["tool_calls"]
+        }
+        self.assertEqual(statuses["call-1"], "error")
+        self.assertEqual(statuses["call-2"], "error")
+
+    async def test_review_not_required_still_lets_its_sibling_run(self) -> None:
+        not_required = {"status": "not_required", "message": "Continue without pausing."}
+        result, executed, sent = await self._run(
+            [
+                _completion(
+                    calls=[
+                        _call("call-1", '{"review_markdown": "delete C-77"}', name="review"),
+                        _call("call-2", '{"code": "delete_customer(77)"}', name="run_python"),
+                    ],
+                    finish_reason="tool_calls",
+                ),
+                _completion(content="Deleted.", calls=[], finish_reason="stop"),
+            ],
+            lambda _args: not_required,
+        )
+
+        self.assertEqual(executed, ["review", "run_python"])
+        self.assertEqual(result["text"], "Deleted.")
+        tool_messages = [m for m in sent[1]["messages"] if m.get("role") == "tool"]
+        self.assertEqual([m["tool_call_id"] for m in tool_messages], ["call-1", "call-2"])
+        self.assertEqual(json.loads(tool_messages[0]["content"]), not_required)
 
 
 def _scripted(transport_cls: type, payloads: list[Any]) -> Any:
