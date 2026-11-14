@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 os.environ.setdefault("ENCRYPTION_KEY", "0" * 64)
 
-from app.services.file_storage import get_file_path, store_file
+from app.services.file_storage import get_file_path, store_file, store_file_sync
 
 
 class FileStoragePathSafetyTests(unittest.IsolatedAsyncioTestCase):
@@ -91,6 +91,68 @@ class FileStoragePathSafetyTests(unittest.IsolatedAsyncioTestCase):
             with patch("app.services.file_storage._storage_root", return_value=Path(storage_dir)):
                 with self.assertRaisesRegex(ValueError, "escapes storage root"):
                     get_file_path(escaped)
+
+
+class FileStorageFlushFailureTests(unittest.IsolatedAsyncioTestCase):
+    """A file whose row never reached the database must not stay on disk."""
+
+    @staticmethod
+    def _files(root: str) -> list[Path]:
+        return [p for p in Path(root).rglob("*") if p.is_file()]
+
+    @staticmethod
+    def _file_dirs(root: str) -> list[Path]:
+        return [
+            p for p in Path(root).rglob("*") if p.is_dir() and len(p.relative_to(root).parts) == 2
+        ]
+
+    async def test_store_file_removes_the_file_when_flush_fails(self) -> None:
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.flush.side_effect = RuntimeError("flush failed")
+
+        with tempfile.TemporaryDirectory() as storage_dir:
+            with patch("app.services.file_storage._storage_root", return_value=Path(storage_dir)):
+                with self.assertRaisesRegex(RuntimeError, "flush failed"):
+                    await store_file(db, owner_id=uuid.uuid4(), file_bytes=b"x", filename="a.txt")
+
+            self.assertEqual(self._files(storage_dir), [])
+            self.assertEqual(self._file_dirs(storage_dir), [])
+
+    def test_store_file_sync_removes_the_file_when_flush_fails(self) -> None:
+        db = MagicMock()
+        db.flush.side_effect = RuntimeError("flush failed")
+
+        with tempfile.TemporaryDirectory() as storage_dir:
+            with patch("app.services.file_storage._storage_root", return_value=Path(storage_dir)):
+                with self.assertRaisesRegex(RuntimeError, "flush failed"):
+                    store_file_sync(
+                        db,
+                        owner_id=uuid.uuid4(),
+                        file_bytes=b"x",
+                        filename="a.txt",
+                        mime_type="text/plain",
+                    )
+
+            self.assertEqual(self._files(storage_dir), [])
+            self.assertEqual(self._file_dirs(storage_dir), [])
+
+    def test_store_file_sync_keeps_the_file_when_the_row_is_flushed(self) -> None:
+        db = MagicMock()
+
+        with tempfile.TemporaryDirectory() as storage_dir:
+            with patch("app.services.file_storage._storage_root", return_value=Path(storage_dir)):
+                row, token = store_file_sync(
+                    db,
+                    owner_id=uuid.uuid4(),
+                    file_bytes=b"x",
+                    filename="a.txt",
+                    mime_type="text/plain",
+                )
+
+            self.assertEqual(len(self._files(storage_dir)), 1)
+            self.assertEqual(row.filename, "a.txt")
+            self.assertTrue(token)
 
 
 if __name__ == "__main__":
