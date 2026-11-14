@@ -50,6 +50,23 @@ def _safe_storage_path(relative_path: str) -> Path:
     return candidate
 
 
+def _discard_stored_file(absolute_path: Path) -> None:
+    """Remove a file written for a row that never reached the database, and its directory.
+
+    Only the per-file directory goes: the owner directory is shared with other writers.
+    Cleanup errors are swallowed so the caller re-raises the original failure.
+    """
+    try:
+        absolute_path.unlink(missing_ok=True)
+    except OSError:
+        # e.g. ENAMETOOLONG: the name that failed the write fails the unlink too.
+        pass
+    try:
+        absolute_path.parent.rmdir()
+    except OSError:
+        pass
+
+
 async def store_file(
     db: AsyncSession,
     *,
@@ -78,7 +95,11 @@ async def store_file(
     relative_path = f"{owner_id}/{file_uuid}/{filename}"
     absolute_path = _safe_storage_path(relative_path)
     absolute_path.parent.mkdir(parents=True, exist_ok=True)
-    absolute_path.write_bytes(file_bytes)
+    try:
+        absolute_path.write_bytes(file_bytes)
+    except BaseException:
+        _discard_stored_file(absolute_path)
+        raise
 
     row = GeneratedFile(
         id=file_uuid,
@@ -93,8 +114,12 @@ async def store_file(
         source_node_label=source_node_label,
         metadata_json=metadata or {},
     )
-    db.add(row)
-    await db.flush()
+    try:
+        db.add(row)
+        await db.flush()
+    except BaseException:
+        _discard_stored_file(absolute_path)
+        raise
     return row
 
 
@@ -168,7 +193,11 @@ def store_file_sync(
     relative_path = f"{owner_id}/{file_uuid}/{filename}"
     absolute_path = _safe_storage_path(relative_path)
     absolute_path.parent.mkdir(parents=True, exist_ok=True)
-    absolute_path.write_bytes(file_bytes)
+    try:
+        absolute_path.write_bytes(file_bytes)
+    except BaseException:
+        _discard_stored_file(absolute_path)
+        raise
 
     row = GeneratedFile(
         id=file_uuid,
@@ -182,11 +211,14 @@ def store_file_sync(
         source_node_label=source_node_label,
         metadata_json={},
     )
-    db.add(row)
-    db.flush()
-
     token = secrets.token_urlsafe(32)
-    db.add(FileAccessToken(file_id=file_uuid, token=token, created_by_id=owner_id))
+    try:
+        db.add(row)
+        db.flush()
+        db.add(FileAccessToken(file_id=file_uuid, token=token, created_by_id=owner_id))
+    except BaseException:
+        _discard_stored_file(absolute_path)
+        raise
     return row, token
 
 
