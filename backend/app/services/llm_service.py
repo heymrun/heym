@@ -39,7 +39,7 @@ from app.services.llm_transport import (
     parse_tool_arguments,
 )
 from app.services.llm_transport_gemini import GeminiTransport
-from app.services.llm_transport_messages import AnthropicMessagesTransport
+from app.services.llm_transport_messages import DEFAULT_MAX_TOKENS, AnthropicMessagesTransport
 from app.services.model_router import (
     ModelRouter,
     fit_tool_outputs_to_budget,
@@ -1890,11 +1890,17 @@ class LLMService:
                     ],
                 )
                 if truncated_tool_turns >= MAX_TRUNCATED_TOOL_TURNS:
-                    limit = max_tokens if max_tokens is not None else "the provider default"
+                    if max_tokens is not None:
+                        limit = f"the node's maxTokens ({max_tokens})"
+                    elif isinstance(transport, AnthropicMessagesTransport):
+                        limit = f"{DEFAULT_MAX_TOKENS} (the Messages transport default)"
+                    else:
+                        limit = "the model's own output limit"
                     return _build_error_result(
                         f"The model reached the output token limit in {truncated_tool_turns} "
                         "tool-calling turns in a row, so their tool calls were not run. "
-                        f"Raise maxTokens on this node (now {limit})."
+                        f"The limit in use is {limit}. Set maxTokens on this node in the "
+                        "workflow JSON, or ask the assistant to raise it."
                     )
                 continue
             truncated_tool_turns = 0
