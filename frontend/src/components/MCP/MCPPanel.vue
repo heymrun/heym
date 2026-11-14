@@ -22,9 +22,16 @@ import {
 import type { CredentialListItem } from "@/types/credential";
 
 import MCPChatToolControls from "@/components/MCP/MCPChatToolControls.vue";
+import {
+  buildDefaultCursorDeepLink,
+  buildDefaultMcpConfig,
+  buildNamedServerCursorDeepLink,
+  buildNamedServerMcpConfig,
+  defaultMcpEndpointUrl,
+  namedServerMcpEndpointUrl,
+} from "@/components/MCP/mcpLinks";
 import Button from "@/components/ui/Button.vue";
 import Card from "@/components/ui/Card.vue";
-import { joinOriginAndPath } from "@/lib/appUrl";
 import { cn } from "@/lib/utils";
 import {
   credentialsApi,
@@ -111,9 +118,9 @@ function pinWorkflowToTop(serverId: string, workflowId: string): void {
   });
 }
 
-// Use browser's URL for SSE endpoint instead of backend-provided URL
-const sseEndpointUrl = computed(() => {
-  return joinOriginAndPath(window.location.origin, "/api/mcp/sse");
+// Use browser's URL for MCP endpoint instead of backend-provided URL
+const mcpEndpointUrl = computed(() => {
+  return defaultMcpEndpointUrl(window.location.origin);
 });
 
 const maskedApiKey = computed(() => {
@@ -154,8 +161,8 @@ async function loadLLMCredentials(): Promise<void> {
   }
 }
 
-function serverSseUrl(serverId: string): string {
-  return joinOriginAndPath(window.location.origin, `/api/mcp/servers/${serverId}/sse`);
+function serverEndpointUrl(server: MCPServerItem): string {
+  return namedServerMcpEndpointUrl(window.location.origin, server);
 }
 
 async function loadNamedServers(): Promise<void> {
@@ -224,29 +231,19 @@ function toggleServerKeyVisibility(serverId: string): void {
 
 function serverMcpConfigJson(server: MCPServerItem): string {
   return JSON.stringify(
-    {
-      mcpServers: {
-        [server.name.toLowerCase().replace(/\s+/g, "_")]: {
-          url: serverSseUrl(server.id),
-          headers: {
-            "X-MCP-Key": serverKey(server) ?? "YOUR_API_KEY",
-          },
-        },
-      },
-    },
+    buildNamedServerMcpConfig(window.location.origin, server, serverKey(server) ?? "YOUR_API_KEY"),
     null,
     2,
   );
 }
 
 function addServerToCursor(server: MCPServerItem): void {
-  const mcpConfig = {
-    url: serverSseUrl(server.id),
-    headers: { "X-MCP-Key": serverKey(server) ?? "YOUR_API_KEY" },
-  };
-  const configBase64 = btoa(JSON.stringify(mcpConfig));
   window.open(
-    `cursor://anysphere.cursor-deeplink/mcp/install?name=${encodeURIComponent(server.name)}&config=${configBase64}`,
+    buildNamedServerCursorDeepLink(
+      window.location.origin,
+      server,
+      serverKey(server) ?? "YOUR_API_KEY",
+    ),
     "_self",
   );
 }
@@ -379,30 +376,17 @@ function openWorkflow(event: Event, workflowId: string): void {
 
 const mcpConfigJson = computed(() => {
   return JSON.stringify(
-    {
-      mcpServers: {
-        heym: {
-          url: sseEndpointUrl.value,
-          headers: {
-            "X-MCP-Key": revealedApiKey.value || "YOUR_API_KEY",
-          },
-        },
-      },
-    },
+    buildDefaultMcpConfig(window.location.origin, revealedApiKey.value || "YOUR_API_KEY"),
     null,
     2,
   );
 });
 
 const cursorDeepLink = computed(() => {
-  const mcpConfig = {
-    url: sseEndpointUrl.value,
-    headers: {
-      "X-MCP-Key": revealedApiKey.value || "YOUR_API_KEY",
-    },
-  };
-  const configBase64 = btoa(JSON.stringify(mcpConfig));
-  return `cursor://anysphere.cursor-deeplink/mcp/install?name=${encodeURIComponent("heym")}&config=${configBase64}`;
+  return buildDefaultCursorDeepLink(
+    window.location.origin,
+    revealedApiKey.value || "YOUR_API_KEY",
+  );
 });
 
 function addToCursor(): void {
@@ -500,16 +484,16 @@ function addToCursor(): void {
           >
             <div>
               <label class="text-sm font-medium text-muted-foreground block mb-1.5">
-                SSE Endpoint URL
+                MCP Endpoint URL
               </label>
               <div class="flex items-center gap-2">
                 <code class="flex-1 px-3 py-2 bg-muted rounded-md text-sm font-mono truncate">
-                  {{ sseEndpointUrl }}
+                  {{ mcpEndpointUrl }}
                 </code>
                 <Button
                   variant="outline"
                   size="sm"
-                  @click="copyToClipboard(sseEndpointUrl, 'Endpoint URL')"
+                  @click="copyToClipboard(mcpEndpointUrl, 'Endpoint URL')"
                 >
                   <Copy class="w-4 h-4" />
                 </Button>
@@ -593,12 +577,12 @@ function addToCursor(): void {
               </label>
               <div class="flex items-center gap-2">
                 <code class="flex-1 px-3 py-2 bg-muted rounded-md text-sm font-mono truncate">
-                  {{ sseEndpointUrl }}
+                  {{ mcpEndpointUrl }}
                 </code>
                 <Button
                   variant="outline"
                   size="sm"
-                  @click="copyToClipboard(sseEndpointUrl, 'MCP Server URL')"
+                  @click="copyToClipboard(mcpEndpointUrl, 'MCP Server URL')"
                 >
                   <Copy class="w-4 h-4" />
                 </Button>
@@ -635,12 +619,12 @@ function addToCursor(): void {
               </label>
               <div class="flex items-center gap-2">
                 <code class="flex-1 px-3 py-2 bg-muted rounded-md text-sm font-mono truncate">
-                  {{ sseEndpointUrl }}
+                  {{ mcpEndpointUrl }}
                 </code>
                 <Button
                   variant="outline"
                   size="sm"
-                  @click="copyToClipboard(sseEndpointUrl, 'MCP Server URL')"
+                  @click="copyToClipboard(mcpEndpointUrl, 'MCP Server URL')"
                 >
                   <Copy class="w-4 h-4" />
                 </Button>
@@ -677,12 +661,12 @@ function addToCursor(): void {
               </label>
               <div class="flex items-center gap-2">
                 <code class="flex-1 px-3 py-2 bg-muted rounded-md text-sm font-mono truncate">
-                  {{ sseEndpointUrl }}
+                  {{ mcpEndpointUrl }}
                 </code>
                 <Button
                   variant="outline"
                   size="sm"
-                  @click="copyToClipboard(sseEndpointUrl, 'MCP Server URL')"
+                  @click="copyToClipboard(mcpEndpointUrl, 'MCP Server URL')"
                 >
                   <Copy class="w-4 h-4" />
                 </Button>
@@ -968,15 +952,15 @@ function addToCursor(): void {
               class="border-t px-4 pb-4 pt-3 space-y-4"
             >
               <div>
-                <label class="text-xs font-medium text-muted-foreground block mb-1.5">SSE Endpoint</label>
+                <label class="text-xs font-medium text-muted-foreground block mb-1.5">MCP Endpoint</label>
                 <div class="flex items-center gap-2">
                   <code class="flex-1 px-3 py-2 bg-muted rounded-md text-xs font-mono truncate">
-                    {{ serverSseUrl(server.id) }}
+                    {{ serverEndpointUrl(server) }}
                   </code>
                   <Button
                     variant="outline"
                     size="sm"
-                    @click="copyToClipboard(serverSseUrl(server.id), 'Endpoint URL')"
+                    @click="copyToClipboard(serverEndpointUrl(server), 'Endpoint URL')"
                   >
                     <Copy class="w-4 h-4" />
                   </Button>

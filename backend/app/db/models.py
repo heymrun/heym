@@ -228,6 +228,10 @@ class MCPServer(Base):
     chat_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
     # Makes this server's Heym Agent reachable over A2A too. Needs chat_enabled.
     a2a_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Endpoint format: "sse" for legacy servers, "mcp" for new servers.
+    endpoint_path: Mapped[str] = mapped_column(
+        String(16), default="mcp", server_default="mcp", nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

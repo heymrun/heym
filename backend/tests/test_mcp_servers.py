@@ -12,6 +12,7 @@ from app.api.mcp_servers import (
     delete_mcp_server,
     list_mcp_servers,
     list_named_server_tools,
+    regenerate_server_key,
     toggle_server_workflow,
     update_server_chat_tool,
 )
@@ -23,13 +24,14 @@ from app.models.schemas import (
 from app.services.heym_agent.settings import AgentSettings
 
 
-def _make_server(user_id: uuid.UUID) -> SimpleNamespace:
+def _make_server(user_id: uuid.UUID, endpoint_path: str = "mcp") -> SimpleNamespace:
     return SimpleNamespace(
         id=uuid.uuid4(),
         user_id=user_id,
         name="Test Server",
         api_key=secrets.token_urlsafe(48),
         created_at=datetime.now(timezone.utc),
+        endpoint_path=endpoint_path,
         chat_enabled=False,
         chat_credential_id=None,
         chat_model=None,
@@ -73,6 +75,50 @@ class MCPServerCreateTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.api_key)
         self.assertEqual(result.id, server_id)
         self.assertEqual(len(result.workflow_ids), 0)
+        self.assertEqual(result.endpoint_path, "mcp")
+        self.assertEqual(added_server[0].endpoint_path, "mcp")
+        db.commit.assert_called_once()
+
+
+class MCPServerRegenerateKeyTests(unittest.IsolatedAsyncioTestCase):
+    async def test_regenerate_key_preserves_endpoint_path_for_legacy_server(self) -> None:
+        user = SimpleNamespace(id=uuid.uuid4())
+        server = _make_server(user.id, endpoint_path="sse")
+
+        db = AsyncMock()
+        db.commit = AsyncMock()
+        db.refresh = AsyncMock()
+        db.execute = AsyncMock(return_value=MagicMock(all=MagicMock(return_value=[])))
+
+        with patch("app.api.mcp_servers._fetch_server_for_user", AsyncMock(return_value=server)):
+            result = await regenerate_server_key(
+                server_id=server.id,
+                current_user=user,
+                db=db,
+            )
+
+        self.assertEqual(result.endpoint_path, "sse")
+        self.assertTrue(result.api_key)
+        db.commit.assert_called_once()
+
+    async def test_regenerate_key_preserves_endpoint_path_for_new_server(self) -> None:
+        user = SimpleNamespace(id=uuid.uuid4())
+        server = _make_server(user.id, endpoint_path="mcp")
+
+        db = AsyncMock()
+        db.commit = AsyncMock()
+        db.refresh = AsyncMock()
+        db.execute = AsyncMock(return_value=MagicMock(all=MagicMock(return_value=[])))
+
+        with patch("app.api.mcp_servers._fetch_server_for_user", AsyncMock(return_value=server)):
+            result = await regenerate_server_key(
+                server_id=server.id,
+                current_user=user,
+                db=db,
+            )
+
+        self.assertEqual(result.endpoint_path, "mcp")
+        self.assertTrue(result.api_key)
         db.commit.assert_called_once()
 
 

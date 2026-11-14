@@ -382,7 +382,7 @@ class MCPConfigURLTests(unittest.IsolatedAsyncioTestCase):
 
         result = await get_mcp_config(request=request, current_user=user, db=_make_empty_db())
 
-        self.assertEqual(result.mcp_endpoint_url, "https://aiwf.asuka.com.tr/api/mcp/sse")
+        self.assertEqual(result.mcp_endpoint_url, "https://aiwf.asuka.com.tr/api/mcp")
         self.assertNotIn("127.0.0.1", result.mcp_endpoint_url)
 
     @patch("app.api.mcp.get_all_user_workflows", new_callable=AsyncMock, return_value=[])
@@ -405,7 +405,7 @@ class MCPConfigURLTests(unittest.IsolatedAsyncioTestCase):
 
         result = await get_mcp_config(request=request, current_user=user, db=_make_empty_db())
 
-        self.assertEqual(result.mcp_endpoint_url, "http://localhost:10105/api/mcp/sse")
+        self.assertEqual(result.mcp_endpoint_url, "http://localhost:10105/api/mcp")
 
     @patch("app.api.mcp.get_all_user_workflows", new_callable=AsyncMock, return_value=[])
     async def test_config_forwarded_headers_take_priority_over_host_header(
@@ -433,7 +433,7 @@ class MCPConfigURLTests(unittest.IsolatedAsyncioTestCase):
 
         result = await get_mcp_config(request=request, current_user=user, db=_make_empty_db())
 
-        self.assertEqual(result.mcp_endpoint_url, "https://prod.example.com/api/mcp/sse")
+        self.assertEqual(result.mcp_endpoint_url, "https://prod.example.com/api/mcp")
 
     @patch("app.api.mcp.get_all_user_workflows", new_callable=AsyncMock, return_value=[])
     async def test_config_uses_host_header_when_x_forwarded_host_absent(self, _: AsyncMock) -> None:
@@ -459,4 +459,4 @@ class MCPConfigURLTests(unittest.IsolatedAsyncioTestCase):
 
         result = await get_mcp_config(request=request, current_user=user, db=_make_empty_db())
 
-        self.assertEqual(result.mcp_endpoint_url, "https://example.com/api/mcp/sse")
+        self.assertEqual(result.mcp_endpoint_url, "https://example.com/api/mcp")

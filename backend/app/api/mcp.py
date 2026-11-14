@@ -926,7 +926,7 @@ async def get_mcp_config(
         base_url = f"{forwarded_proto}://{forwarded_host}"
     else:
         base_url = str(request.base_url).rstrip("/")
-    mcp_endpoint_url = f"{base_url}/api/mcp/sse"
+    mcp_endpoint_url = f"{base_url}/api/mcp"
 
     return MCPConfigResponse(
         mcp_api_key=None,
@@ -1702,6 +1702,7 @@ async def handle_mcp_message(
     return sse_response or response
 
 
+@router.post("", response_model=None)
 @router.post("/sse", response_model=None)
 async def mcp_sse_post_endpoint(
     request: Request,

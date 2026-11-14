@@ -1430,6 +1430,7 @@ class MCPServerResponse(BaseModel):
     api_key_set: bool = False
     created_at: datetime
     workflow_ids: list[uuid.UUID] = Field(default_factory=list)
+    endpoint_path: str = "mcp"
     chat_tool: MCPChatToolConfig = Field(default_factory=MCPChatToolConfig)
 
 

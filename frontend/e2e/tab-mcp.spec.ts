@@ -56,9 +56,13 @@ test("creates a named MCP server, reveals its endpoint, and deletes it", async (
     const serverCard = page.getByText(serverName, { exact: true });
     await expect(serverCard).toBeVisible();
 
-    // Expanding the server reveals its dedicated SSE endpoint.
+    // Expanding the server reveals its dedicated MCP endpoint and generated configuration.
     await serverCard.click();
-    await expect(page.getByText("SSE Endpoint")).toBeVisible();
+    await expect(page.getByText("MCP Endpoint", { exact: true })).toBeVisible();
+    await expect(page.getByText(`/api/mcp/servers/${server.id}/mcp`)).toBeVisible();
+    await expect(page.locator("pre").filter({ hasText: server.id })).toContainText(
+      `/api/mcp/servers/${server.id}/mcp`,
+    );
 
     // Delete via the confirm dialog returns to the empty state.
     await acceptNextDialog(
@@ -70,6 +74,57 @@ test("creates a named MCP server, reveals its endpoint, and deletes it", async (
   } finally {
     await deleteMcpServer(page, server.id);
   }
+});
+
+test("shows the default MCP connection config at /api/mcp", async ({ page }) => {
+  await page.goto("/?tab=mcp");
+  const main = page.getByRole("main");
+  await expect(main.getByText("MCP Endpoint URL", { exact: true })).toBeVisible();
+  await expect(main.getByText("/api/mcp", { exact: true })).toBeVisible();
+  await expect(main.locator("pre").filter({ hasText: '"url":' })).toContainText("/api/mcp");
+});
+
+test("legacy named server with endpoint_path = 'sse' displays /sse URL and generated config", async ({ page }) => {
+  const legacyServerId = "00000000-0000-0000-0000-000000000001";
+  await page.route("**/api/mcp/servers", async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          servers: [
+            {
+              id: legacyServerId,
+              name: "Legacy Server",
+              api_key: null,
+              api_key_set: true,
+              created_at: new Date().toISOString(),
+              workflow_ids: [],
+              endpoint_path: "sse",
+              chat_tool: {
+                enabled: false,
+                credential_id: null,
+                model: null,
+                a2a_enabled: false,
+              },
+            },
+          ],
+        }),
+      });
+    } else {
+      await route.continue();
+    }
+  });
+
+  await page.goto("/?tab=mcp");
+  const serverCard = page.getByText("Legacy Server", { exact: true });
+  await expect(serverCard).toBeVisible();
+  await serverCard.click();
+  await expect(page.getByText("MCP Endpoint", { exact: true })).toBeVisible();
+  await expect(page.getByText(`/api/mcp/servers/${legacyServerId}/sse`)).toBeVisible();
+  await expect(page.locator("pre").filter({ hasText: legacyServerId })).toContainText(
+    `/api/mcp/servers/${legacyServerId}/sse`,
+  );
 });
 
 test("lays out the MCP connection card for a phone screen", async ({ page }) => {

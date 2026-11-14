@@ -79,7 +79,12 @@ Rotation protects backups taken afterwards. A leaked key together with a copy of
 
 ## MCP API Key
 
-The MCP API key is used to authenticate external MCP clients connecting to the `/api/mcp/sse` endpoint. When the SSE connection is established, a short-lived (1-hour) session token is issued and embedded in the message endpoint URL instead of the real API key, preventing the key from appearing in server access logs. See [MCP Tab](../tabs/mcp-tab.md) for setup.
+The MCP API key is used to authenticate external MCP clients connecting to the MCP endpoints (`/api/mcp`, `/api/mcp/servers/{server_id}/mcp`, or the legacy `/api/mcp/sse` and `/api/mcp/servers/{server_id}/sse` routes). Authentication and session handling differ by transport:
+
+- **Streamable HTTP (`/api/mcp`, `/api/mcp/servers/{server_id}/mcp`):** Clients authenticate POST requests via standard headers (`X-MCP-Key: <key>` or `Authorization: Bearer <key>`, or OAuth 2.0 bearer tokens). Session state is tracked using the standard `Mcp-Session-Id` header. Credentials and session tokens are kept strictly in request headers and are never placed in URL query parameters.
+- **Legacy SSE Transport (`/api/mcp/sse`, `/api/mcp/servers/{server_id}/sse`):** Clients perform an initial GET handshake authenticated with the API key or OAuth token. When the SSE connection is established, the server issues a short-lived (1-hour) HMAC session token embedded in the message endpoint URL (`/api/mcp/message?session=<token>`) instead of the real API key, preventing long-lived credentials from appearing in downstream access logs.
+
+See [MCP Tab](../tabs/mcp-tab.md) for setup.
 
 ## OAuth / PKCE
 

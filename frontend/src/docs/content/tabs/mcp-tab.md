@@ -11,7 +11,7 @@ Both modes can expose two kinds of tools: individual **workflows**, and the **He
 
 ## Default MCP Server
 
-The default server is always available at `{origin}/api/mcp/sse`. All workflows with MCP toggled on appear as tools here.
+The default server is available at `{origin}/api/mcp` (with backwards compatibility for existing connections at `{origin}/api/mcp/sse`). All workflows with MCP toggled on appear as tools here.
 
 ### MCP API Key
 
@@ -168,7 +168,7 @@ Each server card shows:
 
 | Setting | Description |
 |---------|-------------|
-| **SSE Endpoint** | Unique URL: `{origin}/api/mcp/servers/{uuid}/sse` |
+| **MCP Endpoint** | Unique URL: `{origin}/api/mcp/servers/{uuid}/mcp` (new servers) or `{origin}/api/mcp/servers/{uuid}/sse` (existing servers) |
 | **API Key** | Independent key, shown once when generated or regenerated. Copy it right away; it is stored hashed and cannot be revealed later |
 | **How to connect** | **Copy JSON** copies the ready-to-paste MCP config; **Add to Cursor** installs it in one click |
 | **Heym Capabilities** | Toggle the Heym Agent (`heym_chat`) for this server and pick its credential and model |
@@ -193,14 +193,15 @@ Named servers support the same authentication methods as the default server:
 
 Click the **X** icon on a server card header. Deletion removes the server and all its workflow assignments; workflows themselves are not affected.
 
-## SSE Endpoint
+## MCP Endpoints
 
 | Server | Endpoint |
 |--------|----------|
-| Default | `{origin}/api/mcp/sse` |
-| Named | `{origin}/api/mcp/servers/{server-uuid}/sse` |
+| Default | `{origin}/api/mcp` (legacy: `{origin}/api/mcp/sse`) |
+| Named (new) | `{origin}/api/mcp/servers/{server-uuid}/mcp` |
+| Named (existing) | `{origin}/api/mcp/servers/{server-uuid}/sse` |
 
-Both endpoints support the SSE transport (GET, MCP spec 2024-11-05) and Streamable HTTP transport (POST, MCP spec 2025-03-26). Claude, ChatGPT and Gemini use OAuth 2.1 / PKCE for secure sign-in on both.
+Both default and named `/mcp` endpoints support the modern Streamable HTTP transport (POST, MCP spec 2025-03-26). The legacy `/sse` endpoints also support the SSE transport (GET, MCP spec 2024-11-05). Claude, ChatGPT and Gemini use OAuth 2.1 / PKCE for secure sign-in across all endpoints.
 
 ## Related
 
