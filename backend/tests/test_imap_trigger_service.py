@@ -95,6 +95,42 @@ class ImapTriggerManagerPollingTests(unittest.IsolatedAsyncioTestCase):
         mock_execute.assert_not_awaited()
 
 
+class ImapTriggerPollIsolationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_a_failing_node_does_not_stop_the_other_nodes(self) -> None:
+        manager = ImapTriggerManager()
+        failing = SimpleNamespace(
+            id=uuid.uuid4(),
+            nodes=[{"id": "down", "type": "imapTrigger", "data": {"credentialId": "c1"}}],
+        )
+        healthy = SimpleNamespace(
+            id=uuid.uuid4(),
+            nodes=[{"id": "up", "type": "imapTrigger", "data": {"credentialId": "c2"}}],
+        )
+        polled: list[str] = []
+
+        async def poll(workflow: SimpleNamespace, node: dict) -> None:
+            polled.append(node["id"])
+            if node["id"] == "down":
+                raise TimeoutError("timed out")
+
+        session = AsyncMock()
+        session.__aenter__.return_value = session
+        with (
+            patch("app.services.imap_trigger_service.async_session_maker", return_value=session),
+            patch.object(
+                manager,
+                "_get_workflows_with_imap_trigger",
+                AsyncMock(return_value=[failing, healthy]),
+            ),
+            patch.object(manager, "_poll_workflow_node", side_effect=poll),
+            self.assertLogs("imap_trigger", level="ERROR") as logs,
+        ):
+            await manager._poll_workflows()
+
+        self.assertEqual(polled, ["down", "up"])
+        self.assertIn("down", "\n".join(logs.output))
+
+
 class ImapTriggerRetryTests(unittest.IsolatedAsyncioTestCase):
     async def test_process_email_retries_pre_dispatch_failure_then_succeeds(self) -> None:
         manager = ImapTriggerManager()

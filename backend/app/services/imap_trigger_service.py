@@ -369,7 +369,13 @@ class ImapTriggerManager:
                     continue
 
                 self._last_poll_at[key] = now
-                await self._poll_workflow_node(workflow, node)
+                try:
+                    await self._poll_workflow_node(workflow, node)
+                except Exception:
+                    # One unreachable mailbox must not keep the other triggers from polling.
+                    logger.exception(
+                        "IMAP trigger poll failed for workflow %s node %s", workflow.id, node_id
+                    )
 
         stale_keys = set(self._last_poll_at.keys()) - current_keys
         for key in stale_keys:
