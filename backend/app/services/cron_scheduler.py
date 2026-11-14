@@ -48,6 +48,13 @@ logger = logging.getLogger("cron_scheduler")
 EXECUTION_HISTORY_TOAST_RECLAIM_JOB = "execution_history_toast_reclaim"
 
 
+def _is_repeated_wall_time(moment: datetime) -> bool:
+    """Whether this is the second occurrence of a wall time repeated when clocks go back."""
+    if moment.tzinfo is None or moment.fold == 0:
+        return False
+    return moment.replace(fold=0).utcoffset() != moment.utcoffset()
+
+
 class CronScheduler:
     def __init__(self) -> None:
         self._running = False
@@ -182,16 +189,26 @@ class CronScheduler:
         dropped instead of being replayed hours late.
         """
         try:
-            prev_time = croniter(cron_expr, now).get_prev(datetime)
+            schedule = croniter(cron_expr, now)
+            prev_time = schedule.get_prev(datetime)
         except Exception as e:
             logger.error("Invalid cron expression '%s': %s", cron_expr, e)
             return None
 
-        slot = prev_time.replace(tzinfo=now.tzinfo)
+        local_slot = prev_time.replace(tzinfo=now.tzinfo)
+        if _is_repeated_wall_time(local_slot) and schedule.expanded[1] != ["*"]:
+            # Clocks went back: like cron, a job pinned to an hour runs once, at the first
+            # 02:30. Jobs with a wildcard hour keep running every real hour.
+            return None
+
+        # Compare real instants. Two datetimes sharing one ZoneInfo compare and subtract
+        # by wall clock, ignoring the UTC offset and fold, which loses the repeated hour
+        # when clocks go back and misjudges lateness when they go forward.
+        slot = local_slot.astimezone(timezone.utc)
         if self._last_check.get(node_key) == slot:
             return None
 
-        lateness = (now - slot).total_seconds()
+        lateness = (now.astimezone(timezone.utc) - slot).total_seconds()
         if lateness > settings.cron_misfire_grace_seconds:
             if self._last_check.get(node_key) is not None:
                 logger.info(
