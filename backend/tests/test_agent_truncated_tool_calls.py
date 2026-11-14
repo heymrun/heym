@@ -404,6 +404,31 @@ class MalformedReviewCallTests(IsolatedAsyncioTestCase):
         self.assertEqual([m["tool_call_id"] for m in tool_messages], ["call-1", "call-2"])
         self.assertEqual(json.loads(tool_messages[0]["content"]), not_required)
 
+    async def test_a_second_review_call_in_the_same_turn_still_gets_a_result(self) -> None:
+        # A plain review result: single review already consumed on a resume, an edited
+        # checkpoint, or a pre-approved MCP target.
+        not_required = {"status": "not_required", "message": "Continue without pausing."}
+        result, executed, sent = await self._run(
+            [
+                _completion(
+                    calls=[
+                        _call("call-1", '{"review_markdown": "delete C-77"}', name="review"),
+                        _call("call-2", '{"review_markdown": "delete C-78"}', name="review"),
+                        _call("call-3", '{"code": "delete_customer(77)"}', name="run_python"),
+                    ],
+                    finish_reason="tool_calls",
+                ),
+                _completion(content="Deleted.", calls=[], finish_reason="stop"),
+            ],
+            lambda _args: not_required,
+        )
+
+        self.assertEqual(executed, ["review", "run_python"])
+        self.assertEqual(result["text"], "Deleted.")
+        tool_messages = [m for m in sent[1]["messages"] if m.get("role") == "tool"]
+        self.assertEqual([m["tool_call_id"] for m in tool_messages], ["call-1", "call-2", "call-3"])
+        self.assertIn("only one human review request", tool_messages[1]["content"])
+
 
 def _scripted(transport_cls: type, payloads: list[Any]) -> Any:
     """A real transport whose provider answers come from `payloads`, parsed by its own to_turn."""
