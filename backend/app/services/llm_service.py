@@ -1849,9 +1849,7 @@ class LLMService:
                     if max_tokens is not None:
                         limit = f"the node's maxTokens ({max_tokens})"
                     elif isinstance(transport, AnthropicMessagesTransport):
-                        limit = (
-                            f"{DEFAULT_MAX_TOKENS} (the Messages transport default)"
-                        )
+                        limit = f"{DEFAULT_MAX_TOKENS} (the Messages transport default)"
                     else:
                         limit = "the model's own output limit"
                     return _build_error_result(
