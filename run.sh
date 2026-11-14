@@ -107,6 +107,17 @@ check_command "bun"
 check_command "uv"
 echo -e "${GREEN}All prerequisites found.${NC}"
 
+# kill_port needs lsof, which Arch's base install does not include. Best-effort.
+if ! command -v lsof >/dev/null 2>&1 && [ -f /etc/arch-release ] \
+    && command -v pacman >/dev/null 2>&1; then
+    echo -e "${YELLOW}Installing lsof (needed to free ports)...${NC}"
+    if [ "$(id -u)" -ne 0 ]; then
+        sudo pacman -S --needed --noconfirm lsof || true
+    else
+        pacman -S --needed --noconfirm lsof || true
+    fi
+fi
+
 # Codex CLI is only needed by the Codex node. Auto-install it (best-effort) when missing.
 if ! command -v codex &> /dev/null; then
     if command -v npm &> /dev/null; then
@@ -133,7 +144,20 @@ install_converter_dependencies() {
     [ ${#missing[@]} -eq 0 ] && return 0
 
     echo -e "${YELLOW}Installing Converter node dependencies (${missing[*]})...${NC}"
-    if command -v brew >/dev/null 2>&1; then
+    # Arch goes first: Arch's repos ship an `apt` package (for building .debs), so
+    # apt-get on PATH does not mean Debian. /etc/arch-release exists on Arch and its
+    # derivatives, but not on Debian even when Debian's pacman package is installed.
+    if [ -f /etc/arch-release ] && command -v pacman >/dev/null 2>&1; then
+        local sudo_cmd=""
+        [ "$(id -u)" -ne 0 ] && sudo_cmd="sudo"
+        # Arch ships no tesseract script models; ocr_service falls back to eng/rus for
+        # Latin/Cyrillic. tesseract-data-* must be in the same transaction so --noconfirm
+        # does not pick an arbitrary tessdata provider. Never -Sy: partial upgrades break Arch.
+        $sudo_cmd pacman -S --needed --noconfirm \
+            python-weasyprint poppler tesseract \
+            tesseract-data-osd tesseract-data-eng tesseract-data-tur tesseract-data-deu \
+            tesseract-data-fra tesseract-data-spa tesseract-data-rus || true
+    elif command -v brew >/dev/null 2>&1; then
         # tesseract-lang carries the non-English language data the "auto" setting relies on.
         brew install tesseract tesseract-lang poppler weasyprint >/dev/null 2>&1
     elif command -v apt-get >/dev/null 2>&1; then
@@ -146,10 +170,11 @@ install_converter_dependencies() {
                 tesseract-ocr-script-latn tesseract-ocr-script-cyrl >/dev/null 2>&1
     fi
 
-    if command -v tesseract >/dev/null 2>&1 && command -v pdftoppm >/dev/null 2>&1; then
+    if command -v tesseract >/dev/null 2>&1 && command -v pdftoppm >/dev/null 2>&1 \
+        && command -v weasyprint >/dev/null 2>&1; then
         echo -e "${GREEN}Converter dependencies installed.${NC}"
     else
-        echo -e "${YELLOW}Could not auto-install Converter dependencies. OCR and file conversions will fail until you install them: 'brew install tesseract tesseract-lang poppler weasyprint' or 'apt-get install tesseract-ocr poppler-utils weasyprint'.${NC}"
+        echo -e "${YELLOW}Could not auto-install Converter dependencies. OCR and file conversions will fail until you install them: 'brew install tesseract tesseract-lang poppler weasyprint', 'apt-get install tesseract-ocr poppler-utils weasyprint' or 'sudo pacman -S --needed python-weasyprint poppler tesseract tesseract-data-eng'.${NC}"
     fi
 }
 
