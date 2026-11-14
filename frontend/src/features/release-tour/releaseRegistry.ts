@@ -24,19 +24,32 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
       label: "New in Heym", introTitle: "New in this release",
       introDescription: "Undo an AI change to a dashboard widget in one click.",
       tourEnabled: false,
-      sectionOrder: ["chat-widget-revert"],
+      sectionOrder: ["chat-widget-revert", "mcp-endpoint"],
     },
-    sections: [{
-      id: "chat-widget-revert", title: "Revert a widget Chat changed",
-      publishedAt: new Date("2026-11-14T12:00:00Z"),
-      blocks: [{ type: "prose", markdown: "When Chat changes a dashboard widget, or you fine-tune one with AI, the card shows **Revert previous**. One click puts the widget back as it was before that change, together with any fix Chat made to its data in the same change: a change and its fixes are now one Edit History entry. The offer lasts until you reload or the widget changes again, and Heym never overwrites a save made since. Heym Work's pages offer the same button." }],
-      tour: {
-        description: "Undo the last AI change to a dashboard widget, from Chat or a fine-tune, in one click.",
-        useCases: ["Try another chart from Chat and go back if the old one was better", "Undo a fine-tune that left a widget empty", "Review AI edits to a page before keeping them"],
-        tourVisual: "chat-widget-revert",
-        docTarget: { categoryId: "tabs", slug: "dashboard-tab", title: "Dashboard" },
+    sections: [
+      {
+        id: "chat-widget-revert", title: "Revert a widget Chat changed",
+        publishedAt: new Date("2026-11-14T12:00:00Z"),
+        blocks: [{ type: "prose", markdown: "When Chat changes a dashboard widget, or you fine-tune one with AI, the card shows **Revert previous**. One click puts the widget back as it was before that change, together with any fix Chat made to its data in the same change: a change and its fixes are now one Edit History entry. The offer lasts until you reload or the widget changes again, and Heym never overwrites a save made since. Heym Work's pages offer the same button." }],
+        tour: {
+          description: "Undo the last AI change to a dashboard widget, from Chat or a fine-tune, in one click.",
+          useCases: ["Try another chart from Chat and go back if the old one was better", "Undo a fine-tune that left a widget empty", "Review AI edits to a page before keeping them"],
+          tourVisual: "chat-widget-revert",
+          docTarget: { categoryId: "tabs", slug: "dashboard-tab", title: "Dashboard" },
+        },
       },
-    }],
+      {
+        id: "mcp-endpoint", title: "Standardized /mcp endpoint for new MCP servers",
+        publishedAt: new Date("2026-11-14T14:00:00Z"),
+        blocks: [{ type: "prose", markdown: "New MCP connections now use the standardized `/api/mcp` and `/api/mcp/servers/{id}/mcp` Streamable HTTP endpoints. Existing named servers and client configurations continue working seamlessly at `/api/mcp/servers/{id}/sse` without manual migration or broken workflows. Generated configurations and Cursor deep links automatically point to the correct endpoint path." }],
+        tour: {
+          description: "New MCP connections use the standardized /mcp endpoint, while existing named servers continue working on /sse with zero disruption.",
+          useCases: ["Connect modern Streamable HTTP MCP clients to /api/mcp", "Create dedicated named servers with the new /mcp route", "Keep existing /sse clients and Cursor integrations working without changes"],
+          tourVisual: "mcp-endpoint",
+          docTarget: { categoryId: "tabs", slug: "mcp-tab", title: "MCP / A2A" },
+        },
+      },
+    ],
   },
 
   {
@@ -104,29 +117,6 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
         useCases: ["Summarize a customer call recording with an LLM node", "Route an uploaded voice note to the right team", "Keep timed transcripts of meetings searchable"],
         tourVisual: "voice-transcribe",
         docTarget: { categoryId: "nodes", slug: "converter-node", title: "Converter" },
-      },
-    }],
-  },
-
-  {
-    releaseId: "2026.27",
-    publishedAt: new Date("2026-11-08T12:00:00Z"),
-    headline: "Two-factor sign-in, account deactivation and data retention",
-    releaseTour: {
-      label: "New in Heym", introTitle: "New in this release",
-      introDescription: "Controls a security review asks for, on your own instance.",
-      tourEnabled: true,
-      sectionOrder: ["account-security"],
-    },
-    sections: [{
-      id: "account-security", title: "Two-factor sign-in and offboarding",
-      publishedAt: new Date("2026-11-08T12:00:00Z"),
-      blocks: [{ type: "prose", markdown: "Turn on **two-factor sign-in** and every password sign-in asks for a code from an authenticator app. Anyone without one scans a QR code first, before reaching anything, and gets ten single-use recovery codes. SSO sign-in stays with your identity provider. Administrators get a **Users** tab in Settings: **Deactivate** an account when someone leaves and their sessions end, their keys stop working and the automatic triggers of their workflows pause; **Reactivate** brings it all back. Anyone can **Sign out other sessions** from Settings → Security. Execution history and LLM traces now keep 90 days by default, which you can change or turn off." }],
-      tour: {
-        description: "Require an authenticator code at password sign-in, offboard leavers in one click, and keep history for a set time.",
-        useCases: ["Meet the MFA requirement of a security review", "Remove a departing employee's access and pause their automations", "Keep run history and prompts for 90 days only"],
-        tourVisual: "account-security",
-        docTarget: { categoryId: "reference", slug: "security", title: "Security" },
       },
     }],
   },

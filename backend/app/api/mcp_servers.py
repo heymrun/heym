@@ -125,6 +125,7 @@ def _server_response(
         api_key_set=bool(server.api_key),
         created_at=server.created_at,
         workflow_ids=workflow_ids,
+        endpoint_path=getattr(server, "endpoint_path", "mcp") or "mcp",
         chat_tool=MCPChatToolConfig(
             # `chat_enabled` is a column default, so it is still None before the
             # INSERT that a freshly created server has not yet had.
@@ -147,6 +148,7 @@ def _session_server_from_id(server_id: uuid.UUID, user_id: uuid.UUID) -> MCPServ
         user_id=user_id,
         name="",
         api_key="",
+        endpoint_path="mcp",
     )
 
 
@@ -291,6 +293,7 @@ async def create_mcp_server(
         user_id=current_user.id,
         name=body.name,
         api_key=hash_secret(api_key),
+        endpoint_path="mcp",
     )
     db.add(server)
     await db.commit()
@@ -454,6 +457,7 @@ async def named_server_sse(
     )
 
 
+@router.post("/{server_id}/mcp", response_model=None)
 @router.post("/{server_id}/sse", response_model=None)
 async def named_server_sse_post(
     server_id: uuid.UUID,
