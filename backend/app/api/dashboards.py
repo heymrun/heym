@@ -1591,24 +1591,30 @@ async def apply_refined_widget(
     workflow: Workflow,
     user: User,
     dsl: dict[str, Any],
+    *,
+    snapshot: bool = True,
 ) -> int | None:
     """Replace a widget's graph with a fine-tuned one; returns the Edit History version.
 
-    The pre-edit graph is stored first, so the fine-tune can be reverted. Raises
-    HTTPException when the new graph cannot be a widget.
+    The pre-edit graph is stored first, so the fine-tune can be reverted. A caller that
+    already stored the graph from before the same edit passes ``snapshot=False``: nothing
+    is stored and None comes back, so the earlier snapshot stays the newest one and still
+    reverts the whole edit. Raises HTTPException when the new graph cannot be a widget.
     """
     nodes = dsl.get("nodes", [])
     edges = dsl.get("edges", [])
     chart_node = await checked_widget_chart(db, user, workflow.nodes or [], nodes)
 
-    # Snapshot the pre-edit workflow so the AI fine-tune shows up in Edit History.
-    previous_version = await _record_chat_workflow_edit_version(
-        db=db,
-        workflow=workflow,
-        user_id=user.id,
-        old_nodes=workflow.nodes or [],
-        old_edges=workflow.edges or [],
-    )
+    previous_version: int | None = None
+    if snapshot:
+        # Snapshot the pre-edit workflow so the AI fine-tune shows up in Edit History.
+        previous_version = await _record_chat_workflow_edit_version(
+            db=db,
+            workflow=workflow,
+            user_id=user.id,
+            old_nodes=workflow.nodes or [],
+            old_edges=workflow.edges or [],
+        )
 
     workflow.nodes = nodes
     workflow.edges = edges

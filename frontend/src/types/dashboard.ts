@@ -179,6 +179,17 @@ export interface DashboardWidget {
   /** HITL widgets: the workflow (and step) whose reviews it shows; null shows every review. */
   hitl_filter?: HitlFilter | null;
   updated_at: string;
+  /** An AI fine-tune's answer only: the Edit History snapshot that reverts it. */
+  previous_version_number?: number | null;
+}
+
+/** A widget change a chat turn made, from its `dashboard` stream event. */
+export interface ChatWidgetChange {
+  action: string;
+  dashboardId: string;
+  widgetId: string | null;
+  /** The snapshot from before the change, when reverting to it undoes the change. */
+  previousVersion: number | null;
 }
 
 /** Which `?record=` values a dashboard accepts as a detail page. */

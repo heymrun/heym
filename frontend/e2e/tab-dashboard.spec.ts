@@ -162,3 +162,73 @@ test("narrows a HITL widget to one workflow's reviews from Settings", async ({ p
     await deleteWorkflow(page, hiring.id);
   }
 });
+
+test("offers Revert previous after an AI fine-tune and restores the widget", async ({ page }) => {
+  await clearDashboardWidgets(page);
+  const widgetTitle = `E2E Revert ${Date.now()}`;
+  const widget = (await createDashboardWidget(page, widgetTitle)) as unknown as Record<
+    string,
+    unknown
+  > & { id: string; workflow_id: string };
+  const credentialId = "00000000-0000-4000-8000-0000000e2e01";
+  const revertBodies: unknown[] = [];
+
+  // The fine-tune itself is mocked: it needs a model. The snapshot it names is what the card
+  // sends back to Heym's revert endpoint, which is mocked too so the test owns the answer.
+  await page.route("**/api/credentials/llm", (route) =>
+    route.fulfill({
+      json: [
+        {
+          id: credentialId,
+          name: "E2E model",
+          type: "openai",
+          masked_value: null,
+          header_key: null,
+          created_at: "2026-11-14T00:00:00Z",
+        },
+      ],
+    }),
+  );
+  await page.route(`**/api/credentials/${credentialId}/models`, (route) =>
+    route.fulfill({
+      json: [{ id: "e2e-model", name: "e2e-model", is_reasoning: false, supports_batch: false }],
+    }),
+  );
+  await page.route(`**/api/dashboards/widgets/${widget.id}/ai-refine`, (route) =>
+    route.fulfill({
+      json: {
+        ...widget,
+        chart_type: "line",
+        updated_at: new Date().toISOString(),
+        previous_version_number: 3,
+      },
+    }),
+  );
+  await page.route(`**/api/dashboards/widgets/${widget.id}/revert`, (route) => {
+    revertBodies.push(route.request().postDataJSON());
+    return route.fulfill({ json: { ...widget, updated_at: new Date().toISOString() } });
+  });
+
+  try {
+    await page.goto("/?tab=dashboard");
+    await expect(page.getByText(widgetTitle)).toBeVisible();
+    const revertButton = page.getByRole("button", { name: "Revert previous" });
+    await expect(revertButton).toHaveCount(0);
+
+    await page.getByRole("button", { name: "Fine-tune with AI" }).click();
+    await expect(page.getByRole("heading", { name: "Fine-tune widget with AI" })).toBeVisible();
+    await page.getByPlaceholder(/horizontal bar chart/).fill("Make it a line chart");
+    const apply = page.getByRole("button", { name: "Apply" });
+    await expect(apply).toBeEnabled();
+    await apply.click();
+
+    await expect(revertButton).toBeVisible();
+    await revertButton.click();
+    await expect(page.getByText(`Reverted ${widgetTitle}.`)).toBeVisible();
+    expect(revertBodies).toEqual([{ version_number: 3 }]);
+    await expect(revertButton).toHaveCount(0);
+  } finally {
+    await deleteDashboardWidget(page, widget.id);
+    await deleteWorkflow(page, widget.workflow_id);
+  }
+});

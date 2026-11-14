@@ -256,8 +256,13 @@ def dashboard_event(
     *,
     widget_id: object | None = None,
     title: str | None = None,
+    previous_version: int | None = None,
 ) -> dict[str, Any]:
-    """A ``dashboard`` stream event: what changed on which dashboard, for a client to redraw."""
+    """A ``dashboard`` stream event: what changed on which dashboard, for a client to redraw.
+
+    ``previous_version`` is the widget's Edit History snapshot from before the change, sent
+    when ``POST /dashboards/widgets/{id}/revert`` with it undoes the change.
+    """
     event: dict[str, Any] = {
         "type": "dashboard",
         "action": action,
@@ -267,6 +272,8 @@ def dashboard_event(
         event["widget_id"] = str(widget_id)
     if title is not None:
         event["title"] = title
+    if previous_version is not None:
+        event["previous_version"] = previous_version
     return event
 
 
