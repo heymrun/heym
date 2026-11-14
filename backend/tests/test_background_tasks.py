@@ -18,18 +18,21 @@ class SpawnBackgroundTaskTests(unittest.IsolatedAsyncioTestCase):
             # Nothing else references this future, like a run awaiting a callback.
             await asyncio.get_running_loop().create_future()
 
-        spawn_background_task(work())
+        task = spawn_background_task(work())
+        task_id = id(task)
+        del task
         await asyncio.sleep(0)
         gc.collect()
-        try:
-            self.assertEqual(len(refs), 1)
-            self.assertIsNotNone(refs[0]())
-        finally:
-            for task in list(background_tasks._BACKGROUND_TASKS):
-                task.cancel()
-            for _ in range(3):
-                await asyncio.sleep(0)
-        self.assertEqual(background_tasks._BACKGROUND_TASKS, set())
+        self.assertEqual(len(refs), 1)
+        own = refs[0]()
+        self.assertIsNotNone(own)
+        assert own is not None
+        self.assertEqual(id(own), task_id)
+        own.cancel()
+        for _ in range(3):
+            await asyncio.sleep(0)
+        # Only this test's task: other tests may leave patched tasks in the shared set.
+        self.assertNotIn(own, background_tasks._BACKGROUND_TASKS)
 
     async def test_the_returned_task_yields_the_coroutine_result(self) -> None:
         async def work() -> str:
