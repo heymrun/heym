@@ -3,7 +3,7 @@ import threading
 import unittest
 import uuid
 from concurrent.futures import Future
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from zoneinfo import ZoneInfo
@@ -403,6 +403,67 @@ class CronDueSlotTests(unittest.TestCase):
         scheduler = CronScheduler()
 
         self.assertIsNone(scheduler._due_slot("not a cron", self._at(9), self.NODE_KEY))
+
+
+class CronDueSlotDstTests(unittest.TestCase):
+    """Slots are real instants: a DST change must neither drop nor misjudge one."""
+
+    TZ = ZoneInfo("Europe/Berlin")
+
+    def _passes(self, expr: str, start_utc: datetime, hours: int) -> list[datetime]:
+        """Drive _due_slot like _check_and_execute: a pass every 30 s, settle each slot."""
+        scheduler = CronScheduler()
+        fired: list[datetime] = []
+        moment = start_utc
+        while moment < start_utc + timedelta(hours=hours):
+            slot = scheduler._due_slot(expr, moment.astimezone(self.TZ), "wf_n1")
+            if slot is not None:
+                scheduler.mark_slot_handled("wf_n1", slot)
+                # As UTC instants: a repeated local time never equals another zone's datetime.
+                fired.append(slot.astimezone(timezone.utc))
+            moment += timedelta(seconds=30)
+        return fired
+
+    def test_the_repeated_hour_runs_when_clocks_go_back(self) -> None:
+        # 2026-10-25: 03:00 CEST becomes 02:00 CET, so 02:30 local happens twice.
+        start = datetime(2026, 10, 24, 23, 0, 30, tzinfo=timezone.utc)
+
+        fired = self._passes("30 * * * *", start, hours=4)
+
+        self.assertEqual([slot.hour for slot in fired], [23, 0, 1, 2])
+
+    def test_a_job_pinned_to_the_repeated_hour_runs_once(self) -> None:
+        start = datetime(2026, 10, 24, 22, 0, 30, tzinfo=timezone.utc)
+
+        fired = self._passes("30 2 * * *", start, hours=6)
+
+        self.assertEqual(fired, [datetime(2026, 10, 25, 0, 30, tzinfo=timezone.utc)])
+
+    def test_a_wildcard_hour_job_keeps_every_real_slot(self) -> None:
+        start = datetime(2026, 10, 25, 0, 0, 30, tzinfo=timezone.utc)
+
+        fired = self._passes("*/20 * * * *", start, hours=2)
+
+        self.assertEqual(len(fired), 6)
+        self.assertEqual(len(set(fired)), 6)
+
+    def test_a_late_pass_across_the_spring_jump_measures_real_lateness(self) -> None:
+        # 2026-03-29: 02:00 CET becomes 03:00 CEST. The 01:59 slot is 70 s old at 03:00:10.
+        scheduler = CronScheduler()
+        now = datetime(2026, 3, 29, 1, 0, 10, tzinfo=timezone.utc).astimezone(self.TZ)
+
+        slot = scheduler._due_slot("59 1 * * *", now, "wf_n1")
+
+        self.assertEqual(slot, datetime(2026, 3, 29, 0, 59, tzinfo=timezone.utc))
+
+    def test_a_slot_already_handled_is_not_returned_again(self) -> None:
+        scheduler = CronScheduler()
+        now = datetime(2026, 8, 4, 9, 0, 12, tzinfo=self.TZ)
+        slot = scheduler._due_slot("0 9 * * *", now, "wf_n1")
+        assert slot is not None
+        scheduler.mark_slot_handled("wf_n1", slot)
+
+        self.assertIsNone(scheduler._due_slot("0 9 * * *", now + timedelta(seconds=30), "wf_n1"))
 
 
 class CronSlotClaimTests(unittest.IsolatedAsyncioTestCase):
