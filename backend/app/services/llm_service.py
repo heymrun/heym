@@ -1685,6 +1685,8 @@ class LLMService:
                     provider=provider,
                     error=str(exc),
                 )
+                # Earlier turns were billed already; this is the only trace the run writes.
+                spent = total_prompt_tokens + total_completion_tokens
                 self._record_trace(
                     request_type=transport.name,
                     provider=provider,
@@ -1693,6 +1695,9 @@ class LLMService:
                     response=None,
                     error=str(exc),
                     elapsed_ms=round(elapsed_ms, 2),
+                    prompt_tokens=total_prompt_tokens if spent else None,
+                    completion_tokens=total_completion_tokens if spent else None,
+                    total_tokens=spent if spent else None,
                     binding=binding,
                 )
                 raise
