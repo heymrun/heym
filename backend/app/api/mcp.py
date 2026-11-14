@@ -62,6 +62,7 @@ from app.services import (
     mcp_execution_status,
     workflow_concurrency,
 )
+from app.services.background_tasks import spawn_background_task
 from app.services.cluster.dispatch import dispatch_workflow
 from app.services.credential_access import get_accessible_credential
 from app.services.credential_context import CredentialsContext, credential_context_value
@@ -278,7 +279,7 @@ def _schedule_legacy_sse_jsonrpc_response(
     msg: MCPJSONRPCRequest,
     operation_factory: Callable[[AsyncSession, MCPClientChannel], Awaitable[dict[str, Any]]],
 ) -> None:
-    asyncio.create_task(
+    spawn_background_task(
         _send_legacy_sse_jsonrpc_response(
             session_token=session_token,
             msg=msg,

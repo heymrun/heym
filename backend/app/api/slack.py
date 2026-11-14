@@ -3,7 +3,6 @@
 Handles URL verification challenge and routes events to workflow execution.
 """
 
-import asyncio
 import hashlib
 import hmac
 import json
@@ -24,6 +23,7 @@ from app.api.workflows import (
 )
 from app.db.models import Credential, CredentialType, ExecutionHistory, Workflow
 from app.db.session import async_session_maker
+from app.services.background_tasks import spawn_background_task
 from app.services.cluster.dispatch import dispatch_workflow, log_offloaded_run
 from app.services.credential_access import get_accessible_credential
 from app.services.encryption import decrypt_config
@@ -494,7 +494,7 @@ async def slack_webhook(node_id: str, request: Request) -> dict[str, Any]:
     safe_headers = {k: v for k, v in request.headers.items() if k.lower() not in _SENSITIVE_HEADERS}
 
     # Fire workflow execution as background task — Slack requires 200 within 3s
-    asyncio.create_task(_execute_workflow_background(workflow, node_id, body, safe_headers))
+    spawn_background_task(_execute_workflow_background(workflow, node_id, body, safe_headers))
 
     return {"ok": True}
 
@@ -539,7 +539,9 @@ async def slack_events(credential_id: str, request: Request) -> dict[str, Any]:
     started = 0
     for workflow, node_id, node_data in targets:
         if _event_matches(node_data, body):
-            asyncio.create_task(_execute_workflow_background(workflow, node_id, body, safe_headers))
+            spawn_background_task(
+                _execute_workflow_background(workflow, node_id, body, safe_headers)
+            )
             started += 1
     logger.info("Slack event for credential %s started %d workflow(s)", credential_id, started)
     return {"ok": True}

@@ -105,6 +105,7 @@ from app.services.assistant_yolo import (
     stream_until_disconnect,
     stream_yolo_assistant_turn,
 )
+from app.services.background_tasks import spawn_background_task
 from app.services.chat_attachments import MAX_CHAT_ATTACHMENTS, run_attachment
 from app.services.chat_image_input import IMAGE_FIELD_KEYWORDS, image_input
 from app.services.chat_progress import ToolProgress, follow_tool, workflow_draft_message
@@ -2773,11 +2774,11 @@ async def resolve_hitl_review_tool(
     hitl_request.resolved_output = build_hitl_resolved_output(hitl_request)
     await db.commit()
 
-    asyncio.create_task(resume_hitl_request_in_background(hitl_request.id))
+    spawn_background_task(resume_hitl_request_in_background(hitl_request.id))
     if isinstance((hitl_request.original_agent_output or {}).get("_slack"), dict):
         from app.services.slack_interactions import sync_message_after_heym_decision
 
-        asyncio.create_task(sync_message_after_heym_decision(hitl_request.id))
+        spawn_background_task(sync_message_after_heym_decision(hitl_request.id))
     return json.dumps(
         {
             "status": "resolved",

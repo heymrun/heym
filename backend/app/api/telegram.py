@@ -1,6 +1,5 @@
 """Telegram Bot API webhook endpoint."""
 
-import asyncio
 import hmac
 import json
 import logging
@@ -20,6 +19,7 @@ from app.api.workflows import (
 )
 from app.db.models import Credential, CredentialType, ExecutionHistory, Workflow
 from app.db.session import async_session_maker
+from app.services.background_tasks import spawn_background_task
 from app.services.cluster.dispatch import dispatch_workflow, log_offloaded_run
 from app.services.encryption import decrypt_config
 from app.services.global_variables_service import get_global_variables_context
@@ -351,5 +351,5 @@ async def telegram_webhook(node_id: str, request: Request) -> dict[str, Any]:
         )
 
     safe_headers = _sanitize_headers(request.headers)
-    asyncio.create_task(_execute_workflow_background(workflow, node_id, body, safe_headers))
+    spawn_background_task(_execute_workflow_background(workflow, node_id, body, safe_headers))
     return {"ok": True}

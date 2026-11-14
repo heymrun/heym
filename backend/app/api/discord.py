@@ -4,7 +4,6 @@ Handles PING verification, Ed25519 signature validation, and routes
 interactions to workflow execution.
 """
 
-import asyncio
 import json
 import logging
 import time
@@ -27,6 +26,7 @@ from app.api.workflows import (
 )
 from app.db.models import Credential, CredentialType, ExecutionHistory, Workflow
 from app.db.session import async_session_maker
+from app.services.background_tasks import spawn_background_task
 from app.services.cluster.dispatch import dispatch_workflow, log_offloaded_run
 from app.services.encryption import decrypt_config
 from app.services.global_variables_service import get_global_variables_context
@@ -475,6 +475,6 @@ async def discord_webhook(node_id: str, request: Request) -> dict[str, Any]:
         if key.lower() not in _SENSITIVE_HEADERS
     }
 
-    asyncio.create_task(_execute_workflow_background(workflow, node_id, body, safe_headers))
+    spawn_background_task(_execute_workflow_background(workflow, node_id, body, safe_headers))
 
     return {"type": _RESPONSE_DEFERRED_CHANNEL_MESSAGE}
