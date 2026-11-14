@@ -23,7 +23,7 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
     releaseTour: {
       label: "New in Heym", introTitle: "New in this release",
       introDescription: "Work with the files an email brings, straight from the IMAP Trigger.",
-      tourEnabled: false,
+      tourEnabled: true,
       sectionOrder: ["imap-attachments"],
     },
     sections: [{
@@ -46,7 +46,7 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
     releaseTour: {
       label: "New in Heym", introTitle: "New in this release",
       introDescription: "Undo an AI change to a dashboard widget in one click.",
-      tourEnabled: false,
+      tourEnabled: true,
       sectionOrder: ["chat-widget-revert"],
     },
     sections: [{
