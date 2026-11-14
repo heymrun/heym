@@ -1557,6 +1557,7 @@ const yoloLoop = useAssistantYoloLoop<ChatMessage>({
   executionResult: () => workflowStore.executionResult,
   nodeResults: () => workflowStore.nodeResults,
   onVerified: playSuccessSound,
+  onAwaitingUser: playSuccessSound,
 });
 const yoloLoopActive = yoloLoop.isActive;
 
