@@ -165,6 +165,13 @@ BATCH_POLL_INTERVAL_SECONDS = 6.0
 _BATCH_TERMINAL_STATUSES = {"completed", "failed", "expired", "cancelled"}
 
 
+HITL_REVIEW_DEFERRED_ERROR = (
+    "Not run: the human review request in this turn has arguments that are not valid JSON, "
+    "so nothing has been approved. Send the review request again with its arguments as a "
+    "JSON object, then call this tool after the review."
+)
+
+
 @dataclass
 class HumanReviewPause:
     review_markdown: str
@@ -1794,12 +1801,20 @@ class LLMService:
                 """The error the model gets, and the trace entry, for a call that is not run."""
                 tool_result = {"error": reason, "status": "error"}
                 now_ms = int(time.time() * 1000)
+                parsed_args, parse_error = parse_tool_arguments(tc.arguments)
+                # Parsed arguments stay structured so credential keys are redacted by name.
+                # Text redaction cannot tell a credential in an unparsed fragment (`token`,
+                # `service_token`), so only its length is kept.
+                persisted_args = (
+                    parsed_args
+                    if parse_error is None
+                    else {"unparsed_arguments_chars": len(tc.arguments or "")}
+                )
                 entry = sanitize_persisted_tool_entry(
                     {
                         "tool_call_id": getattr(tc, "id", None),
                         "name": tc.name,
-                        # What the model wrote, redacted and bounded like any other arguments.
-                        "arguments": {"raw_arguments": tc.arguments or ""},
+                        "arguments": persisted_args,
                         "result": tool_result,
                         "elapsed_ms": 0.0,
                         "start_ms": self._offset_ms(),
@@ -2213,6 +2228,15 @@ class LLMService:
                 # A call that did not pause (unparseable arguments, for one) still owes the
                 # model its result.
                 _store_completed_tool_slot(tool_calls.index(paused_tc), hitl_result_str, entry)
+                if parse_tool_arguments(paused_tc.arguments)[1] is not None:
+                    # The review request never reached the reviewer, so nothing in this batch
+                    # is approved. Defer the rest until the model sends a review that parses.
+                    for slot, tc in enumerate(tool_calls):
+                        if tc is not paused_tc:
+                            slot_results[slot] = _refused_tool_call(tc, HITL_REVIEW_DEFERRED_ERROR)
+                    transport.append_turn(history, turn)
+                    _commit_completed_tool_slots()
+                    continue
 
             transport.append_turn(history, turn)
 
