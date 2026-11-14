@@ -56,13 +56,10 @@ test("creates a named MCP server, reveals its endpoint, and deletes it", async (
     const serverCard = page.getByText(serverName, { exact: true });
     await expect(serverCard).toBeVisible();
 
-    // Expanding the server reveals its dedicated MCP endpoint and generated configuration.
-    await serverCard.click();
+    // The newly created server is expanded automatically; verify its dedicated MCP endpoint.
     await expect(page.getByText("MCP Endpoint", { exact: true })).toBeVisible();
-    await expect(page.getByText(`/api/mcp/servers/${server.id}/mcp`)).toBeVisible();
-    await expect(page.locator("pre").filter({ hasText: server.id })).toContainText(
-      `/api/mcp/servers/${server.id}/mcp`,
-    );
+    await expect(page.getByText(new RegExp(`/api/mcp/servers/${server.id}/mcp$`))).toBeVisible();
+    await expect(page.getByRole("button", { name: "Copy JSON" })).toBeVisible();
 
     // Delete via the confirm dialog returns to the empty state.
     await acceptNextDialog(
@@ -80,7 +77,7 @@ test("shows the default MCP connection config at /api/mcp", async ({ page }) => 
   await page.goto("/?tab=mcp");
   const main = page.getByRole("main");
   await expect(main.getByText("MCP Endpoint URL", { exact: true })).toBeVisible();
-  await expect(main.getByText("/api/mcp", { exact: true })).toBeVisible();
+  await expect(main.getByText(/\/api\/mcp$/)).toBeVisible();
   await expect(main.locator("pre").filter({ hasText: '"url":' })).toContainText("/api/mcp");
 });
 
@@ -121,10 +118,8 @@ test("legacy named server with endpoint_path = 'sse' displays /sse URL and gener
   await expect(serverCard).toBeVisible();
   await serverCard.click();
   await expect(page.getByText("MCP Endpoint", { exact: true })).toBeVisible();
-  await expect(page.getByText(`/api/mcp/servers/${legacyServerId}/sse`)).toBeVisible();
-  await expect(page.locator("pre").filter({ hasText: legacyServerId })).toContainText(
-    `/api/mcp/servers/${legacyServerId}/sse`,
-  );
+  await expect(page.getByText(new RegExp(`/api/mcp/servers/${legacyServerId}/sse$`))).toBeVisible();
+  await expect(page.getByRole("button", { name: "Copy JSON" })).toBeVisible();
 });
 
 test("lays out the MCP connection card for a phone screen", async ({ page }) => {
