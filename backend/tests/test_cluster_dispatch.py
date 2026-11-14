@@ -1,10 +1,12 @@
 """When a run is kept in-process, and how an offloaded result comes back."""
 
 import asyncio
+import gc
 import logging
 import threading
 import unittest
 import uuid
+import weakref
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
 from types import SimpleNamespace
@@ -21,6 +23,7 @@ from opentelemetry.trace import NonRecordingSpan, SpanContext, TraceFlags, Trace
 from app.observability import tracing
 from app.services.cluster import run_result_bus as bus_module
 from app.services.cluster.dispatch import (
+    RunQueueWorker,
     resolve_placement,
     should_run_in_process,
     wait_for_result,
@@ -1422,3 +1425,72 @@ class QueueTraceContextTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(self.persist.await_args.kwargs["result"].status, "success")
             self.assertIn("finalizer_join", [phase for phase, _ in self.phases])
             self._assert_phases(sentinel.get_span_context())
+
+
+class _ParkedBus:
+    """Wakes the worker loop once, then parks it so only the claimed run is in play."""
+
+    def __init__(self) -> None:
+        self._woken = False
+
+    async def wait_for_work(self) -> None:
+        if not self._woken:
+            self._woken = True
+            return
+        await asyncio.get_running_loop().create_future()
+
+
+class ClaimedRunTaskReferenceTests(unittest.IsolatedAsyncioTestCase):
+    """The loop owns the tasks it starts; asyncio itself only holds them weakly."""
+
+    async def _start_claimed_run(self, worker: RunQueueWorker) -> tuple[Any, Any, Any, list[Any]]:
+        rows: list[object] = [object()]
+        refs: list[Any] = []
+        finish = asyncio.get_running_loop().create_future()
+
+        async def fake_claim(_instance_id: str) -> object | None:
+            return rows.pop() if rows else None
+
+        async def fake_execute(_row: object) -> None:
+            refs.append(weakref.ref(asyncio.current_task()))
+            await finish
+
+        worker._running = True
+        stack = ExitStack()
+        stack.enter_context(patch("app.services.cluster.dispatch.run_queue.claim_next", fake_claim))
+        stack.enter_context(
+            patch("app.services.cluster.dispatch.k8s_credential_store.ready", lambda: True)
+        )
+        stack.enter_context(patch.object(worker, "_execute_claimed", fake_execute))
+        loop_task = asyncio.create_task(worker._run_loop(_ParkedBus()))
+        for _ in range(5):
+            await asyncio.sleep(0)
+        return stack, loop_task, finish, refs
+
+    async def test_a_running_claimed_task_survives_garbage_collection(self) -> None:
+        worker = RunQueueWorker()
+        stack, loop_task, finish, refs = await self._start_claimed_run(worker)
+        try:
+            gc.collect()
+            self.assertEqual(len(refs), 1)
+            self.assertIsNotNone(refs[0]())
+            self.assertEqual(len(worker._claimed_tasks), 1)
+        finally:
+            finish.set_result(None)
+            await asyncio.sleep(0)
+            loop_task.cancel()
+            await asyncio.gather(loop_task, return_exceptions=True)
+            stack.close()
+
+    async def test_a_finished_claimed_task_is_forgotten(self) -> None:
+        worker = RunQueueWorker()
+        stack, loop_task, finish, _refs = await self._start_claimed_run(worker)
+        try:
+            finish.set_result(None)
+            for _ in range(3):
+                await asyncio.sleep(0)
+            self.assertEqual(worker._claimed_tasks, set())
+        finally:
+            loop_task.cancel()
+            await asyncio.gather(loop_task, return_exceptions=True)
+            stack.close()

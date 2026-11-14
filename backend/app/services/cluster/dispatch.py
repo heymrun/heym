@@ -474,6 +474,9 @@ class RunQueueWorker:
         self._task: asyncio.Task[None] | None = None
         self._bus: Any = None
         self._active_finalizers: set[asyncio.Task[Any]] = set()
+        # The event loop holds tasks weakly; a claimed run nobody references can be
+        # garbage collected mid-run and leave its row claimed.
+        self._claimed_tasks: set[asyncio.Task[None]] = set()
 
     async def start(self) -> None:
         # Always on: concurrency-queued runs reach this queue without a cluster too.
@@ -527,7 +530,9 @@ class RunQueueWorker:
                     row = await run_queue.claim_next(identity.instance_id())
                     if row is None:
                         break
-                    asyncio.create_task(self._execute_claimed(row))
+                    task = asyncio.create_task(self._execute_claimed(row))
+                    self._claimed_tasks.add(task)
+                    task.add_done_callback(self._claimed_tasks.discard)
             except asyncio.CancelledError:
                 raise
             except Exception:
