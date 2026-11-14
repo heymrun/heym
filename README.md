@@ -276,6 +276,12 @@ cp .env.example .env
 
 > Register your admin account first, then set `ALLOW_REGISTER=false` in `.env` and restart to close registration in production.
 
+### Deploy on Railway
+
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/heym-ai-workflows)
+
+One-click deploy of the prebuilt `ghcr.io/heymrun/heym` image with PostgreSQL and a persistent volume for files and plugins. `SECRET_KEY` and `ENCRYPTION_KEY` are generated per deployment. Features that need the Docker socket (sandbox containers, MCP `stdio`, coding-agent nodes) are not available on Railway.
+
 ### Prebuilt Docker Image
 
 The release image bundles the frontend and backend. The examples below connect it to an existing PostgreSQL database on the host; set `DATABASE_URL` to your database address and credentials. On Linux, add `--add-host=host.docker.internal:host-gateway` when using that hostname.
