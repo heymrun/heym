@@ -2432,6 +2432,12 @@ export interface VectorStore {
   backend?: string;
 }
 
+export interface VectorStoreDeleteResult {
+  collection_dropped: boolean;
+  reason: "dropped" | "missing" | "failed" | "skipped";
+  warning: string | null;
+}
+
 export interface VectorStoreShare {
   id: string;
   user_id: string;
@@ -2511,8 +2517,14 @@ export const vectorStoresApi = {
     return response.data;
   },
 
-  delete: async (id: string, deleteCollection: boolean = true): Promise<void> => {
-    await api.delete(`/vector-stores/${id}?delete_collection=${deleteCollection}`);
+  delete: async (
+    id: string,
+    deleteCollection: boolean = true,
+  ): Promise<VectorStoreDeleteResult> => {
+    const response = await api.delete<VectorStoreDeleteResult>(
+      `/vector-stores/${id}?delete_collection=${deleteCollection}`,
+    );
+    return response.data;
   },
 
   clone: async (id: string): Promise<VectorStore> => {
