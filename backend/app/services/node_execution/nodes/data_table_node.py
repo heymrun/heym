@@ -391,11 +391,18 @@ def execute(ctx: NodeExecutionContext) -> object:
 
             # Try to find existing row by filter
             existing_row = None
-            if filter_dict and isinstance(filter_dict, dict):
-                query = db.query(DataTableRow).filter(DataTableRow.table_id == data_table_id)
-                for col_name, col_value in filter_dict.items():
-                    query = query.filter(DataTableRow.data.op("->>")(col_name) == str(col_value))
-                existing_row = query.first()
+            if (
+                filter_dict
+                and isinstance(filter_dict, dict)
+                and not any(isinstance(v, dict) for v in filter_dict.values())
+            ):
+                clauses = _build_data_table_filter_clauses(filter_dict, columns)
+                if clauses:
+                    query = db.query(DataTableRow).filter(
+                        DataTableRow.table_id == data_table_id,
+                        *clauses,
+                    )
+                    existing_row = query.first()
 
             if existing_row:
                 merged = {
