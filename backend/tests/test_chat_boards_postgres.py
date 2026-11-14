@@ -3,7 +3,7 @@
 import json
 import unittest
 import uuid
-from datetime import date, timedelta
+from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
 from sqlalchemy import select
@@ -75,7 +75,7 @@ class ChatBoardToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("not found", denied["error"].lower())
 
     async def test_create_with_fields_then_filter(self) -> None:
-        yesterday = date.today() - timedelta(days=1)
+        yesterday = chat_boards._today() - timedelta(days=1)
         created = await self.add(
             self.writer,
             "NDA",
