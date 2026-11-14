@@ -187,7 +187,9 @@ class RabbitMQConsumerManager:
             # Stop first: a reconnect replaces a consumer on the same queue, and the old
             # one should not still be taking messages while the new one starts.
             for key in set(self._consumers) - set(wanted):
-                consumer = self._consumers.pop(key)
+                consumer = self._consumers.pop(key, None)
+                if consumer is None:
+                    continue  # its start failed meanwhile and unregistered it
                 await self._stop_consumer(consumer)
                 logger.info(
                     "Unregistered RabbitMQ consumer for workflow %s, queue %s",
@@ -296,7 +298,11 @@ class RabbitMQConsumerManager:
 
             await channel.set_qos(prefetch_count=1)
 
-            queue = await channel.get_queue(consumer_info.queue_name, ensure=False)
+            # A passive declare registers the queue with the robust channel, which then
+            # restores it and its consumer after a reconnect. get_queue(ensure=False)
+            # skips that registration: after a broker restart the connection came back
+            # with no consumer, and the key stayed registered, so nothing replaced it.
+            queue = await channel.declare_queue(consumer_info.queue_name, passive=True)
             consumer_info.queue = queue
 
             async def on_message(message: AbstractIncomingMessage) -> None:
@@ -319,6 +325,28 @@ class RabbitMQConsumerManager:
                 consumer_info.workflow_id,
                 e,
             )
+            await self._forget_failed_start(consumer_info)
+
+    async def _forget_failed_start(self, consumer_info: ConsumerInfo) -> None:
+        """Close what a failed start opened and unregister it, so the next sync retries.
+
+        A broker that is not accepting connections yet, or a queue its producer has not
+        declared yet, used to leave the consumer registered without a connection: every
+        later sync skipped its key and the trigger stayed dead until Heym restarted.
+        """
+        connection = consumer_info.connection
+        if connection is not None and not connection.is_closed:
+            try:
+                await connection.close()
+            except Exception as e:
+                logger.error(
+                    "Error closing failed consumer for workflow %s: %s",
+                    consumer_info.workflow_id,
+                    e,
+                )
+        for key, registered in list(self._consumers.items()):
+            if registered is consumer_info:
+                del self._consumers[key]
 
     async def _stop_consumer(self, consumer_info: ConsumerInfo) -> None:
         """Cancel the consumer, then close its channel and connection.
