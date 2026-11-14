@@ -216,12 +216,14 @@ def _build_data_table_filter_clauses(filter_dict: dict, columns: list) -> list:
     ``$eq``, ``$ne``, ``$gt``, ``$gte``, ``$lt``, ``$lte``, ``$contains`` (ILIKE
     substring) and ``$in`` (list membership).
 
-    User-defined schema columns live in the JSONB ``data`` blob and are matched as
-    text (numeric comparisons cast to ``NUMERIC`` when the column type is ``number``).
+    User-defined schema columns live in the JSON ``data`` blob and are matched as
+    text (numeric comparisons cast to ``NUMERIC`` when the column type is ``number``;
+    boolean values normalize to lowercase ``"true"`` / ``"false"`` when the column
+    type is ``boolean``).
     Row metadata (``id``, ``created_at``, ``updated_at``, ``created_by``,
     ``updated_by``, ``table_id``) are real table columns, so they are matched against
     the model attribute directly; ``$contains`` casts them to text. A schema column
-    that happens to share a metadata name still resolves against the JSONB blob.
+    that happens to share a metadata name still resolves against the JSON blob.
     Unknown operators are ignored.
     """
     from sqlalchemy import Numeric, String, cast
@@ -250,13 +252,19 @@ def _build_data_table_filter_clauses(filter_dict: dict, columns: list) -> list:
             is_json = False
             is_number = False
         else:
-            # User data lives in JSONB; ``->>`` yields text.
+            # User data lives in JSON; ``->>`` yields text.
             field = DataTableRow.data.op("->>")(col_name)
             is_json = True
             is_number = schema_cols.get(col_name, {}).get("type") == "number"
 
+        is_boolean = schema_cols.get(col_name, {}).get("type") == "boolean"
+
         def _coerce(value: object) -> object:
-            return str(value) if is_json else value
+            if not is_json:
+                return value
+            if is_boolean and isinstance(value, bool):
+                return "true" if value else "false"
+            return str(value)
 
         if isinstance(condition, dict):
             for op, raw_value in condition.items():
