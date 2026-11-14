@@ -196,9 +196,12 @@ class CronScheduler:
             return None
 
         local_slot = prev_time.replace(tzinfo=now.tzinfo)
-        if _is_repeated_wall_time(local_slot) and schedule.expanded[1] != ["*"]:
-            # Clocks went back: like cron, a job pinned to an hour runs once, at the first
-            # 02:30. Jobs with a wildcard hour keep running every real hour.
+        hour_pinned = schedule.expanded[1] != ["*"]
+        minute_wildcard = "*" in schedule.expressions[0]
+        if _is_repeated_wall_time(local_slot) and hour_pinned and not minute_wildcard:
+            # Clocks went back: like cron, a job at a fixed time runs once, at the first
+            # 02:30. Jobs with a wildcard or step in the hour or the minute (`*/5 2 * * *`)
+            # keep running in real time through the repeated hour.
             return None
 
         # Compare real instants. Two datetimes sharing one ZoneInfo compare and subtract

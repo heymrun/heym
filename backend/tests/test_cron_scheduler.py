@@ -439,6 +439,19 @@ class CronDueSlotDstTests(unittest.TestCase):
 
         self.assertEqual(fired, [datetime(2026, 10, 25, 0, 30, tzinfo=timezone.utc)])
 
+    def test_a_wildcard_minute_job_pinned_to_the_repeated_hour_keeps_every_real_slot(
+        self,
+    ) -> None:
+        # 01:00 CEST to 03:00 CET covers 02:00-02:55 twice: once in CEST, once in CET.
+        start = datetime(2026, 10, 24, 23, 0, 30, tzinfo=timezone.utc)
+
+        fired = self._passes("*/5 2 * * *", start, hours=4)
+
+        self.assertEqual(len(fired), 24)
+        self.assertEqual(len(set(fired)), 24)
+        self.assertEqual(fired[0], datetime(2026, 10, 25, 0, 0, tzinfo=timezone.utc))
+        self.assertEqual(fired[-1], datetime(2026, 10, 25, 1, 55, tzinfo=timezone.utc))
+
     def test_a_wildcard_hour_job_keeps_every_real_slot(self) -> None:
         start = datetime(2026, 10, 25, 0, 0, 30, tzinfo=timezone.utc)
 
