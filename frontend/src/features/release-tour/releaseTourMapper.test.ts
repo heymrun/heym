@@ -384,7 +384,6 @@ describe("shipped release registry", () => {
       "rag-media-upload",
       "decision-reranker",
       "voice-transcribe",
-      "account-security",
     ]);
   });
 
@@ -401,6 +400,7 @@ describe("shipped release registry", () => {
     expect(tours.map((tour) => tour.tourVisual)).toContain("voice-transcribe");
     expect(tours.map((tour) => tour.tourVisual)).toContain("chat-widget-revert");
     expect(tours.map((tour) => tour.tourVisual)).toContain("rag-media-upload");
+    expect(tours.map((tour) => tour.tourVisual)).toContain("mcp-endpoint");
     for (const tour of tours) {
       expect(TOUR_VISUALS[tour.tourVisual], `missing visual for "${tour.tourVisual}"`)
         .toBeDefined();

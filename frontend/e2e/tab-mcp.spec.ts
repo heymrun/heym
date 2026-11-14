@@ -59,7 +59,7 @@ test("creates a named MCP server, reveals its endpoint, and deletes it", async (
     // The newly created server is expanded automatically; verify its dedicated MCP endpoint.
     await expect(page.getByText("MCP Endpoint", { exact: true })).toBeVisible();
     await expect(page.getByText(new RegExp(`/api/mcp/servers/${server.id}/mcp$`))).toBeVisible();
-    await expect(page.getByRole("button", { name: "Copy JSON" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Copy JSON" }).last()).toBeVisible();
 
     // Delete via the confirm dialog returns to the empty state.
     await acceptNextDialog(
@@ -119,7 +119,7 @@ test("legacy named server with endpoint_path = 'sse' displays /sse URL and gener
   await serverCard.click();
   await expect(page.getByText("MCP Endpoint", { exact: true })).toBeVisible();
   await expect(page.getByText(new RegExp(`/api/mcp/servers/${legacyServerId}/sse$`))).toBeVisible();
-  await expect(page.getByRole("button", { name: "Copy JSON" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Copy JSON" }).last()).toBeVisible();
 });
 
 test("lays out the MCP connection card for a phone screen", async ({ page }) => {
