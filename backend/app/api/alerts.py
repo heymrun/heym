@@ -204,6 +204,7 @@ async def observe_config(
         window_start=window_start,
         window_end=window_end,
         config=parsed,
+        system_scope=scope != "workflow",
     )
     handler = get_alert_handler(alert_type)
     return await handler(ctx)

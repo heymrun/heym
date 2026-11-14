@@ -4,6 +4,8 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from sqlalchemy.dialects import postgresql
+
 from app.models.alert_schemas import parse_alert_config
 from app.services.alerts.context import AlertEvaluationContext
 from app.services.alerts.types import (
@@ -294,3 +296,34 @@ class TestTokenCostHandler(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(observation.observed_value, 20.0)
         db.execute.assert_awaited_once()
+
+
+class TestTokenCostScopeFilter(unittest.IsolatedAsyncioTestCase):
+    """System scope counts LLM calls made outside any workflow, as the Traces tab does.
+
+    Dashboard Chat and the AI Assistant write their traces with workflow_id NULL. An
+    owner with even one workflow used to lose all of that spend from the alert.
+    """
+
+    async def _where_sql(self, *, system_scope: bool) -> str:
+        db = MagicMock()
+        db.execute = AsyncMock(side_effect=[_rows_result([])])
+        config = parse_alert_config(
+            "token_cost",
+            {"window_minutes": 60, "metric": "total_tokens", "threshold": 1},
+        )
+        ctx = _ctx(db, config, workflow_ids=[WF_A], window_minutes=60)
+        ctx.system_scope = system_scope
+        await token_cost.evaluate(ctx)
+        stmt = db.execute.await_args.args[0]
+        return str(stmt.whereclause.compile(dialect=postgresql.dialect()))
+
+    async def test_system_scope_with_workflows_counts_calls_outside_any_workflow(self):
+        sql = await self._where_sql(system_scope=True)
+        self.assertIn("llm_traces.workflow_id IN", sql)
+        self.assertIn("llm_traces.workflow_id IS NULL", sql)
+
+    async def test_workflow_scope_counts_only_its_workflow(self):
+        sql = await self._where_sql(system_scope=False)
+        self.assertIn("llm_traces.workflow_id IN", sql)
+        self.assertNotIn("IS NULL", sql)

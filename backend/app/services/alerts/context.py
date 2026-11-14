@@ -16,7 +16,8 @@ class AlertEvaluationContext:
 
     ``workflow_ids`` is already resolved: a single-element list for workflow scope,
     every workflow the owner can access for system scope. Handlers must not
-    re-derive scope.
+    re-derive scope; ``system_scope`` tells them which of the two it is, for metrics
+    that also have activity outside any workflow.
     """
 
     db: AsyncSession
@@ -25,6 +26,7 @@ class AlertEvaluationContext:
     window_start: datetime
     window_end: datetime
     config: Any
+    system_scope: bool = False
 
 
 @dataclass

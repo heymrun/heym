@@ -75,6 +75,18 @@ class TestObserve(unittest.IsolatedAsyncioTestCase):
         ctx = handler.await_args.args[0]
         self.assertEqual(ctx.owner_id, alert.owner_id)
         self.assertEqual(ctx.workflow_ids, [alert.workflow_id])
+        self.assertFalse(ctx.system_scope)
+
+    async def test_observe_tells_the_handler_it_runs_under_system_scope(self):
+        alert = _alert(scope="system", workflow_id=None)
+        fake = SimpleNamespace(observed_value=0.0, threshold_value=5.0, context={})
+        handler = AsyncMock(return_value=fake)
+        with (
+            patch(f"{MODULE}.get_alert_handler", return_value=handler),
+            patch(f"{MODULE}.get_accessible_workflow_ids", new=AsyncMock(return_value=[])),
+        ):
+            await evaluator.observe(MagicMock(), alert, now=NOW)
+        self.assertTrue(handler.await_args.args[0].system_scope)
 
 
 class TestShouldFire(unittest.TestCase):

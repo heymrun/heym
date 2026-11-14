@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from app.db.models import LLMTrace
 from app.services.alerts.context import AlertEvaluationContext, AlertObservation
@@ -27,11 +27,15 @@ async def evaluate(ctx: AlertEvaluationContext) -> AlertObservation:
         LLMTrace.created_at >= ctx.window_start,
         LLMTrace.created_at <= ctx.window_end,
     ]
-    # An empty workflow_ids list means system scope with no workflow filter: LLM
-    # calls made outside a workflow (Dashboard Chat, AI Assistant) carry
-    # workflow_id NULL and are still this user's spend.
+    # LLM calls made outside a workflow (Dashboard Chat, AI Assistant) carry
+    # workflow_id NULL and are still this user's spend, so system scope counts them
+    # next to the owner's workflows, as the Traces tab does. An empty workflow_ids
+    # list (an owner with no workflows yet) needs no workflow filter at all.
     if ctx.workflow_ids:
-        filters.append(LLMTrace.workflow_id.in_(ctx.workflow_ids))
+        in_scope = LLMTrace.workflow_id.in_(ctx.workflow_ids)
+        if ctx.system_scope:
+            in_scope = or_(in_scope, LLMTrace.workflow_id.is_(None))
+        filters.append(in_scope)
 
     result = await ctx.db.execute(
         select(

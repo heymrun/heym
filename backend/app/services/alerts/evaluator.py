@@ -59,6 +59,7 @@ async def observe(
         window_start=window_start,
         window_end=window_end,
         config=config,
+        system_scope=alert.scope != "workflow",
     )
     handler = get_alert_handler(alert.alert_type)
     observation = await handler(ctx)
