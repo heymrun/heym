@@ -17,6 +17,29 @@ import type { ReleaseEntry } from "@/features/release-tour/releaseTour.types";
  */
 export const RELEASE_REGISTRY: ReleaseEntry[] = [
   {
+    releaseId: "2026.31",
+    publishedAt: new Date("2026-11-14T12:00:00Z"),
+    headline: "Revert a widget Chat changed",
+    releaseTour: {
+      label: "New in Heym", introTitle: "New in this release",
+      introDescription: "Undo an AI change to a dashboard widget in one click.",
+      tourEnabled: false,
+      sectionOrder: ["chat-widget-revert"],
+    },
+    sections: [{
+      id: "chat-widget-revert", title: "Revert a widget Chat changed",
+      publishedAt: new Date("2026-11-14T12:00:00Z"),
+      blocks: [{ type: "prose", markdown: "When Chat changes a dashboard widget, or you fine-tune one with AI, the card shows **Revert previous**. One click puts the widget back as it was before that change, together with any fix Chat made to its data in the same change: a change and its fixes are now one Edit History entry. The offer lasts until you reload or the widget changes again, and Heym never overwrites a save made since. Heym Work's pages offer the same button." }],
+      tour: {
+        description: "Undo the last AI change to a dashboard widget, from Chat or a fine-tune, in one click.",
+        useCases: ["Try another chart from Chat and go back if the old one was better", "Undo a fine-tune that left a widget empty", "Review AI edits to a page before keeping them"],
+        tourVisual: "chat-widget-revert",
+        docTarget: { categoryId: "tabs", slug: "dashboard-tab", title: "Dashboard" },
+      },
+    }],
+  },
+
+  {
     releaseId: "2026.30",
     publishedAt: new Date("2026-11-10T22:00:00Z"),
     headline: "Images, audio and any text file in vector stores",
@@ -104,28 +127,6 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
         useCases: ["Meet the MFA requirement of a security review", "Remove a departing employee's access and pause their automations", "Keep run history and prompts for 90 days only"],
         tourVisual: "account-security",
         docTarget: { categoryId: "reference", slug: "security", title: "Security" },
-      },
-    }],
-  },
-
-  {
-    releaseId: "2026.26",
-    publishedAt: new Date("2026-11-06T12:00:00Z"),
-    headline: "Find free times and send Google Meet calendar invitations",
-    releaseTour: {
-      label: "New in Heym", introTitle: "New in this release",
-      introDescription: "Turn your Google Calendar into a booking workflow.",
-      tourEnabled: true,
-      sectionOrder: ["google-meet"],
-    },
-    sections: [{
-      id: "google-meet", title: "Book time with Google Meet",
-      blocks: [{ type: "prose", markdown: "Connect a **Google Meet (OAuth2)** credential with Google login, then add a **Google Meet** node to read available calendar times or create, update and delete invitations. Reads default from now through the first day of next month; optional dates support shorter ranges or up to 60 days. Title, description, attendee emails, time zone and meeting times accept expressions and Agent autofill. For **Book a calendar with me**, show your free times, accept the visitor's selected time and email, and send the invitation from your connected account. The website includes **Available Time Slots** and **Book a Calendar with Me** templates." }],
-      tour: {
-        description: "Find available calendar times and send Meet invitations from your Google account.",
-        useCases: ["Show when customers can book a call", "Invite a visitor using the email and time from your form", "Reschedule or cancel meetings and notify guests"],
-        tourVisual: "google-meet",
-        docTarget: { categoryId: "nodes", slug: "google-meet-node", title: "Google Meet" },
       },
     }],
   },

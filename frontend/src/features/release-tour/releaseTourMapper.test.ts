@@ -385,7 +385,6 @@ describe("shipped release registry", () => {
       "decision-reranker",
       "voice-transcribe",
       "account-security",
-      "google-meet",
     ]);
   });
 
@@ -400,7 +399,7 @@ describe("shipped release registry", () => {
 
     expect(tours.map((tour) => tour.tourVisual)).toContain("decision-reranker");
     expect(tours.map((tour) => tour.tourVisual)).toContain("voice-transcribe");
-    expect(tours.map((tour) => tour.tourVisual)).toContain("google-meet");
+    expect(tours.map((tour) => tour.tourVisual)).toContain("chat-widget-revert");
     expect(tours.map((tour) => tour.tourVisual)).toContain("rag-media-upload");
     for (const tour of tours) {
       expect(TOUR_VISUALS[tour.tourVisual], `missing visual for "${tour.tourVisual}"`)

@@ -14,6 +14,7 @@ import DashboardSettingsDialog from "@/components/Dashboards/DashboardSettingsDi
 import WidgetSettingsDialog from "@/components/Dashboards/WidgetSettingsDialog.vue";
 import type { DashboardPage } from "@/components/Dashboards/dashboardRoute";
 import { useDashboardRoute } from "@/components/Dashboards/useDashboardRoute";
+import { useWidgetRevert } from "@/components/Dashboards/useWidgetRevert";
 import Button from "@/components/ui/Button.vue";
 import { tidyLayouts } from "@/lib/dashboardTidy";
 import { dashboardApi } from "@/services/api";
@@ -29,6 +30,7 @@ const router = useRouter();
 const dashboardStore = useDashboardStore();
 const { page, loadError, loadDashboards, openDashboard, openRecord, clearRecord } =
   useDashboardRoute();
+const { revertibleIds, revertingId, offerFromRefine, revert: revertWidget } = useWidgetRevert();
 
 const editMode = ref(false);
 const showAdd = ref(false);
@@ -126,6 +128,7 @@ async function handleRefine(payload: {
       payload.model,
     );
     dashboardStore.replaceWidget(updated);
+    offerFromRefine(updated);
     refineWidget.value = null;
     playSuccessSound();
   } catch {
@@ -242,11 +245,14 @@ onMounted(() => {
         :cloning-widget-id="cloningWidgetId"
         :can-write="dashboardStore.canWrite"
         :record="page?.record ?? null"
+        :revertible-ids="revertibleIds"
+        :reverting-id="revertingId"
         @open-record="onOpenRecord"
         @edit="openEditor"
         @delete="handleDelete"
         @clone="handleClone"
         @refine="refineWidget = $event"
+        @revert="revertWidget"
         @settings="settingsWidget = $event"
         @title-change="handleTitleChange"
         @layout-change="handleLayoutChange"

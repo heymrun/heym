@@ -154,6 +154,14 @@ class TestDashboardChangeEvents(unittest.TestCase):
             [{"type": "dashboard", "action": "arranged", "dashboard_id": "d1"}],
         )
 
+    def test_a_revertible_change_names_the_snapshot_before_it(self):
+        event = chat_dashboards.dashboard_event(
+            "widget_updated", "d1", widget_id="w1", title="Open cases", previous_version=7
+        )
+        self.assertEqual(event["previous_version"], 7)
+        plain = chat_dashboards.dashboard_event("widget_updated", "d1", widget_id="w1")
+        self.assertNotIn("previous_version", plain)
+
     def test_reads_and_errors_change_nothing(self):
         events = chat_dashboards.dashboard_change_events
         self.assertEqual(events("list_dashboards", {"count": 0, "dashboards": []}), [])
@@ -236,6 +244,7 @@ class _BuildHarness:
         self.dashboard = dashboard
         self.saved = []
         self.applied = []
+        self.snapshots = []
         self.generate = generate
         self.data = data or {}
 
@@ -259,9 +268,10 @@ class _BuildHarness:
                 return _data({"type": "bar", "series": [{"data": [1]}]})
             return answers.pop(0) if len(answers) > 1 else answers[0]
 
-        async def _apply(_db, widget, workflow, _user, dsl):
+        async def _apply(_db, widget, workflow, _user, dsl, *, snapshot=True):
             self.applied.append((widget.title, dsl))
-            return 3
+            self.snapshots.append(snapshot)
+            return 3 if snapshot else None
 
         self.patches = [
             patch.object(
@@ -411,7 +421,10 @@ class TestBuildDashboardWidgetsForChat(unittest.IsolatedAsyncioTestCase):
         self.assertIn("The widget should show: Widget title: Weekly volume.", fix_call.args[0])
         self.assertIn("Every value in the widget's chart is 0.", fix_call.args[0])
         self.assertIsNotNone(fix_call.kwargs["current_workflow"])
-        self.assertEqual([event["action"] for event in progress.drain()].count("widget_updated"), 1)
+        events = progress.drain()
+        self.assertEqual([event["action"] for event in events].count("widget_updated"), 1)
+        # A widget the call built has nothing to go back to.
+        self.assertTrue(all("previous_version" not in event for event in events))
 
     async def test_a_widget_that_stays_broken_is_fixed_twice_then_reported(self):
         async def generate(prompt, **kwargs):
@@ -429,6 +442,7 @@ class TestBuildDashboardWidgetsForChat(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(len(harness.applied), chat_dashboard_builds.MAX_DATA_FIXES)
+        self.assertEqual(harness.snapshots, [True, False])
         fix_prompts = [
             call.args[0]
             for call in harness.mocks[7].await_args_list
@@ -612,10 +626,12 @@ class TestRefineDashboardWidgetsForChat(unittest.IsolatedAsyncioTestCase):
             return self.widgets[widget_id], self.dashboard, "owner"
 
         applied = []
+        self.snapshots = []
 
-        async def _apply(_db, widget, _workflow, _user, dsl):
+        async def _apply(_db, widget, _workflow, _user, dsl, *, snapshot=True):
             applied.append((widget.title, dsl["name"]))
-            return 7
+            self.snapshots.append(snapshot)
+            return 7 if snapshot else None
 
         with (
             patch.object(
@@ -686,23 +702,32 @@ class TestRefineDashboardWidgetsForChat(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([entry["previous_version"] for entry in result["changed"]], [7, 7])
         self.assertEqual(result["failed"], [])
         self.assertEqual(result["dashboards"][0]["id"], str(self.dashboard.id))
-        self.assertEqual(
-            sorted(event["title"] for event in progress.drain()), ["Backlog", "Open tickets"]
-        )
+        events = progress.drain()
+        self.assertEqual(sorted(event["title"] for event in events), ["Backlog", "Open tickets"])
+        self.assertEqual([event["previous_version"] for event in events], [7, 7])
 
     async def test_a_change_that_breaks_a_widget_is_fixed_and_checked_again(self):
         async def generate(prompt, **kwargs):
             return _dsl(kwargs["current_workflow"]["name"])
 
         broken = _data(error="Workflow produced no chartOutput: sumByDay failed: no column day")
+        progress = ToolProgress()
         result, applied, gen = await self._refine(
             [{"widget_id": str(self.chart.id), "instruction": "Group it by day"}],
             generate=generate,
             data={"Open tickets": [broken, _data({"type": "bar", "series": [{"data": [3]}]})]},
+            progress=progress,
         )
 
         self.assertEqual(
             applied, [("Open tickets", "Open tickets"), ("Open tickets", "Open tickets")]
+        )
+        # The fix is part of the change: only the change stores a snapshot, so reverting to it
+        # undoes both, and both events offer that snapshot.
+        self.assertEqual(self.snapshots, [True, False])
+        self.assertEqual(
+            [(event["action"], event["previous_version"]) for event in progress.drain()],
+            [("widget_updated", 7), ("widget_updated", 7)],
         )
         fix_prompt = gen.await_args_list[1].args[0]
         self.assertTrue(fix_prompt.startswith("CTX The widget should show: Group it by day"))

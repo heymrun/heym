@@ -7,6 +7,8 @@ nothing goes back to the generator once with the reason, as the page wizard does
 
 ``refine_dashboard_widgets`` applies change requests to several widgets at once, as each widget's
 AI fine-tune does: the generator edits the widget's graph, and Edit History keeps the one before.
+A change and the fixes after it are one edit with one snapshot, and its ``widget_updated`` events
+carry that snapshot as ``previous_version``, so a client can offer to revert the whole change.
 Heym Work sends the notes a user left on a page's widgets this way.
 
 The turn streams a ``dashboard`` event for every saved widget, so a client shows the dashboard
@@ -212,7 +214,10 @@ class _Slot:
     # Why the widget's data still shows nothing, after the fixes it had; None when it shows data.
     problem: str | None = None
     fixes: int = 0
+    # The Edit History snapshot from before this call's first change to the widget.
     version: int | None = None
+    # A widget that existed before the call, so reverting to ``version`` undoes the change.
+    revertible: bool = False
     # Where a new widget goes: its grid layout and position on the dashboard.
     layout: dict[str, int] | None = None
     position: int | None = None
@@ -461,7 +466,11 @@ class _Batch:
         if widget is not None:
             self.progress.emit(
                 dashboard_event(
-                    action, widget.dashboard_id, widget_id=widget.id, title=widget.title
+                    action,
+                    widget.dashboard_id,
+                    widget_id=widget.id,
+                    title=widget.title,
+                    previous_version=slot.version if slot.revertible else None,
                 )
             )
 
@@ -530,8 +539,10 @@ class _Batch:
 
     async def _apply(self, slot: _Slot, dsl: dict[str, Any], *, record_error: bool) -> bool:
         try:
+            # One snapshot per widget per call: a fix belongs to the change it fixes, so the
+            # newest snapshot stays the graph from before the change and reverts all of it.
             version = await _api().apply_refined_widget(
-                self.db, slot.widget, slot.workflow, self.user, dsl
+                self.db, slot.widget, slot.workflow, self.user, dsl, snapshot=slot.version is None
             )
         except HTTPException as exc:
             if record_error:
@@ -748,6 +759,7 @@ async def refine_dashboard_widgets_for_chat(
             label=str(change.widget_id),
             goal=change.instruction,
             data_table_ids=change.data_table_ids,
+            revertible=True,
         )
         slots.append(slot)
         try:

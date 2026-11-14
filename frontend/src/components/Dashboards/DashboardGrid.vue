@@ -17,6 +17,9 @@ const props = defineProps<{
   canWrite: boolean;
   /** The detail page's record, passed to every widget. */
   record: string | null;
+  /** Widgets whose last AI change can be undone. */
+  revertibleIds?: readonly string[];
+  revertingId?: string | null;
 }>();
 
 const emit = defineEmits<{
@@ -24,6 +27,7 @@ const emit = defineEmits<{
   (e: "delete", widgetId: string): void;
   (e: "clone", widgetId: string): void;
   (e: "refine", widget: DashboardWidget): void;
+  (e: "revert", widgetId: string): void;
   (e: "settings", widget: DashboardWidget): void;
   (e: "title-change", payload: { id: string; title: string }): void;
   (e: "layout-change", payload: { id: string; layout: WidgetLayout }): void;
@@ -80,11 +84,14 @@ function emitItemLayout(id: string): void {
         :cloning="cloningWidgetId === item.i"
         :can-write="canWrite"
         :record="record"
+        :revertible="revertibleIds?.includes(item.i) ?? false"
+        :reverting="revertingId === item.i"
         :class="editMode ? 'widget-drag-handle cursor-move' : ''"
         @edit="emit('edit', $event)"
         @delete="emit('delete', $event)"
         @clone="emit('clone', $event)"
         @refine="emit('refine', $event)"
+        @revert="emit('revert', $event)"
         @settings="emit('settings', $event)"
         @title-change="emit('title-change', $event)"
         @open-record="(dashboardId, page) => emit('open-record', dashboardId, page)"

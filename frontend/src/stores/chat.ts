@@ -10,6 +10,7 @@ import { applyChatLiveEvent, visibleDraft } from "@/lib/chatLive";
 import { mergeEvalSuite } from "@/lib/evalSuitePreview";
 import { chatApi } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
+import { useWidgetRevertsStore } from "@/stores/widgetReverts";
 import { randomUUID } from "@/lib/uuid";
 
 const DEFAULT_CONVERSATION_TITLE = "New Chat";
@@ -41,6 +42,8 @@ function getInitialSidebarOpen(): boolean {
 
 export const useChatStore = defineStore("chat", () => {
   const authStore = useAuthStore();
+  // A turn that changes dashboard widgets offers to revert them on the Dashboard tab.
+  const widgetReverts = useWidgetRevertsStore();
   const conversations = ref<Conversation[]>([]);
   const activeConversation = ref<ConversationDetail | null>(null);
   const isSidebarOpen = ref(getInitialSidebarOpen());
@@ -195,6 +198,10 @@ export const useChatStore = defineStore("chat", () => {
         undefined, // onQueuedMessageStarted
         undefined, // onEvalSuiteSaved
         controller.signal,
+        undefined, // onLive
+        (change) => {
+          widgetReverts.receive(change);
+        },
       );
     } catch {
       backgroundSubscribedConvIds.delete(conversationId);
@@ -663,6 +670,9 @@ export const useChatStore = defineStore("chat", () => {
             progress: next.progress,
             toolCalls: next.toolCalls,
           });
+        },
+        (change) => {
+          widgetReverts.receive(change);
         },
       );
     } catch {

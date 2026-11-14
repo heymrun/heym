@@ -256,6 +256,42 @@ class TestRefineAnswersWithThePreviousVersion(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(generate.await_args.args[0], "line it\n\nPAGE KIND")
 
 
+class TestApplyRefinedWidgetSnapshot(unittest.IsolatedAsyncioTestCase):
+    async def _apply(self, snapshot: bool) -> tuple[int | None, AsyncMock, MagicMock]:
+        user = _User()
+        widget = _widget("bar")
+        workflow = MagicMock(nodes=_chart("bar"), edges=[])
+        db = MagicMock(commit=AsyncMock(), refresh=AsyncMock(side_effect=_refresh))
+        record = AsyncMock(return_value=7)
+        with (
+            patch.object(
+                dash_api, "checked_widget_chart", AsyncMock(return_value=_chart("line")[0])
+            ),
+            patch.object(dash_api, "_record_chat_workflow_edit_version", record),
+        ):
+            version = await dash_api.apply_refined_widget(
+                db,
+                widget,
+                workflow,
+                user,
+                {"nodes": _chart("line"), "edges": []},
+                snapshot=snapshot,
+            )
+        return version, record, workflow
+
+    async def test_stores_the_graph_from_before_the_change(self) -> None:
+        version, record, workflow = await self._apply(snapshot=True)
+        self.assertEqual(version, 7)
+        self.assertEqual(record.await_args.kwargs["old_nodes"], _chart("bar"))
+        self.assertEqual(workflow.nodes, _chart("line"))
+
+    async def test_a_follow_up_fix_keeps_the_earlier_snapshot_newest(self) -> None:
+        version, record, workflow = await self._apply(snapshot=False)
+        self.assertIsNone(version)
+        record.assert_not_awaited()
+        self.assertEqual(workflow.nodes, _chart("line"))
+
+
 class TestRefinePageContext(unittest.IsolatedAsyncioTestCase):
     async def _context(self, detail: str, page_kind: str | None, prompt: str) -> str:
         user = _User()

@@ -159,6 +159,7 @@ import type {
 } from "@/types/agentMemory";
 import type { ExpressionGenerateRequest, ExpressionGenerateResponse } from "@/types/expression";
 import type {
+  ChatWidgetChange,
   DashboardData,
   DashboardShare,
   DashboardSharePermission,
@@ -209,6 +210,7 @@ import type {
   ToolCallTerminalStatus,
   WorkflowPreview,
 } from "@/types/chat";
+import { parseChatWidgetChange } from "@/lib/chatWidgetChange";
 import { parseEvalSuiteSaved } from "@/lib/evalSuitePreview";
 
 const API_URL = import.meta.env.VITE_API_URL || "";
@@ -1934,6 +1936,14 @@ export const dashboardApi = {
       },
       { timeout: AI_REQUEST_TIMEOUT_MS },
     );
+    return response.data;
+  },
+
+  /** Undo an AI change: Heym restores the snapshot it stored before it, if nothing changed since. */
+  revertWidget: async (id: string, versionNumber: number): Promise<DashboardWidget> => {
+    const response = await api.post<DashboardWidget>(`/dashboards/widgets/${id}/revert`, {
+      version_number: versionNumber,
+    });
     return response.data;
   },
 
@@ -4068,6 +4078,7 @@ export const chatApi = {
     onEvalSuiteSaved?: (suite: EvalSuitePreview, messageId?: string) => void,
     signal?: AbortSignal,
     onLive?: (event: ChatLiveEvent) => void,
+    onWidgetChange?: (change: ChatWidgetChange) => void,
   ): Promise<void> => {
     const base = import.meta.env.VITE_API_URL || "";
     const url = `${base}/api/chats/${id}/stream`;
@@ -4205,6 +4216,9 @@ export const chatApi = {
           } else if (parsed.type === "eval_suite_saved") {
             const suite = parseEvalSuiteSaved(parsed);
             if (suite) onEvalSuiteSaved?.(suite, messageId);
+          } else if (parsed.type === "dashboard") {
+            const change = parseChatWidgetChange(parsed);
+            if (change) onWidgetChange?.(change);
           } else if (parsed.type === "queued_message_created" && parsed.queued_message) {
             onQueuedMessageCreated?.(parsed.queued_message as QueuedMessage);
           } else if (parsed.type === "queued_message_updated" && parsed.queued_message) {
