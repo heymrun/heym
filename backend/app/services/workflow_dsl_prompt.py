@@ -1438,7 +1438,7 @@ Do NOT use downstream nodes that depend on `$notifyWorkflow.outputs` when `execu
   - `statusCode`: HTTP status for the response (default `200`)
   - `contentType`: Response content type (default `text/html; charset=utf-8`)
 
-**When to use**: Serving a page straight to a browser - a status dashboard, a generated report, a confirmation screen. Use `jsonOutputMapper` instead when the caller is an API client.
+**When to use**: Serving a page straight to a browser - a status dashboard, a generated report, a confirmation screen. Use `jsonOutputMapper` instead when the caller is an API client. For HTML inside a dashboard widget, use `chartOutput` with `chartType: "html"` and the same `html` template instead; a widget workflow ends in `chartOutput`.
 
 **Example**:
 ```json
@@ -3932,7 +3932,7 @@ Access the saved file downstream: `$saveAudio.id`, `$saveAudio.download_url`
   `[{"month": "Jan", "revenue": 120}, ...]`).
 - **Data fields**:
   - `label`: Node identifier (camelCase)
-  - `chartType`: `"pie"` | `"bar"` | `"line"` | `"area"` | `"table"` | `"numeric"` | `"gauge"` | `"scatter"` | `"proportion"` | `"barGauge"` | `"gantt"` | `"erDiagram"` | `"text"` | `"hitl"` (required)
+  - `chartType`: `"pie"` | `"bar"` | `"line"` | `"area"` | `"table"` | `"numeric"` | `"gauge"` | `"scatter"` | `"proportion"` | `"barGauge"` | `"gantt"` | `"erDiagram"` | `"text"` | `"html"` | `"hitl"` (required)
   - `gantt`: `dataPath` selects task rows (no labelField/valueField mapping). Each row has
     `id`, `label`, `start`, `end` (ISO dates or datetimes; timezone-free values mean UTC),
     optional `progress` (0-100) and `dependencies` (existing predecessor task ids).
@@ -3971,6 +3971,12 @@ Access the saved file downstream: `$saveAudio.id`, `$saveAudio.download_url`
   - `unit`: optional unit string for `numeric`/`gauge`
   - `text`: markdown string for the `text` chart type (a static message; supports markdown). For a
     dynamic message, leave `text` empty and set `valueField` to a row key holding the string.
+  - `html`: HTML template for the `html` chart type, filled in exactly like an `htmlOutputMapper`
+    node's `html` (`$nodeLabel.field` expressions are interpolated). Write one self-contained
+    document with inline `<style>` and `<script>`. For HTML built upstream, leave `html` empty and
+    set `valueField` to the row key holding it. The dashboard runs it in a sandboxed frame without
+    network access: no `fetch`, no forms, no cookies or storage, no calls to the Heym API and no
+    popups, so the template must carry every value it shows. Links still open in a new tab.
   - `title`: optional chart title
   - `hitlWorkflowId` / `hitlNodeId`: `hitl` only. The workflow, and optionally the step, whose
     reviews the widget shows. Use only ids from the review sources you are given; leave both out
@@ -4094,6 +4100,12 @@ syntax (`- [ ]` / `- [x]`) in `text` — do not use plain bullets for checkbox i
 Text checklist (three items, one checked — put markdown in `text` so dashboard toggles persist):
 ```json
 {"type": "chartOutput", "data": {"label": "todoList", "chartType": "text", "text": "- [x] Option 1\\n- [ ] Option 2\\n- [ ] Option 3", "title": "Tasks"}}
+```
+
+HTML (a custom card the other types do not draw; values come from upstream expressions, as in
+`htmlOutputMapper`, e.g. `$stats.open` reads the `open` mapping of a `set` node labelled `stats`):
+```json
+{"type": "chartOutput", "data": {"label": "summaryCard", "chartType": "html", "html": "<style>body{font-family:system-ui;margin:0;padding:12px}.n{font-size:32px;font-weight:600}</style><div class=\"n\">$stats.open</div><div>open tickets</div>", "title": "Summary"}}
 ```
 
 **HITL inbox (`chartType: "hitl"`):** a dashboard carousel of the signed-in user's pending human

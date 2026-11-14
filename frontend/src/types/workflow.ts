@@ -565,7 +565,7 @@ export interface NodeData {
   outputSchema?: OutputSchemaField[];
   inputCount?: number;
   mappings?: MappingField[];
-  /** htmlOutputMapper: the page template, with $node.field spans interpolated in place. */
+  /** htmlOutputMapper page, or a chartOutput `html` widget: a template with $node.field spans filled in. */
   html?: string;
   statusCode?: number;
   contentType?: string;
@@ -1150,6 +1150,7 @@ export interface NodeData {
     | "erDiagram"
     | "barGauge"
     | "text"
+    | "html"
     | "hitl";
   orientation?: "horizontal" | "vertical";
   dataPath?: string;

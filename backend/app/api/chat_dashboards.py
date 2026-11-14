@@ -146,7 +146,7 @@ DASHBOARD_TOOL_SCHEMAS: list[dict[str, Any]] = [
                     "chart_type": {
                         "type": "string",
                         "enum": list(WIDGET_CHART_TYPES),
-                        "description": "For an empty widget: the chart it will draw. hitl lists pending reviews and needs no graph. Default bar.",
+                        "description": "For an empty widget: the chart it will draw. hitl lists pending reviews and needs no graph. html shows the HTML in the chartOutput html field, in a sandboxed frame. Default bar.",
                     },
                     "title": {
                         "type": "string",

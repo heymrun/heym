@@ -1277,6 +1277,7 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
         | "erDiagram"
         | "barGauge"
         | "text"
+        | "html"
         | "hitl",
       orientation: "vertical" as "horizontal" | "vertical",
       dataPath: "",

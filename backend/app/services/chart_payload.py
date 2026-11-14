@@ -96,6 +96,24 @@ def resolve_text_payload(config: dict, data: Any) -> dict[str, Any]:
     }
 
 
+def resolve_html(config: dict, data: Any) -> str:
+    """The HTML an ``html`` chart shows: its ``html`` template, else upstream HTML.
+
+    The chartOutput node fills the template's expressions before this runs. With the template
+    empty, ``valueField`` names the first row's key that holds HTML built upstream.
+    """
+    template = config.get("html")
+    if isinstance(template, str) and template.strip():
+        return template
+    value_field = config.get("valueField")
+    rows = _resolve_rows(data, config.get("dataPath"))
+    if value_field and rows and isinstance(rows[0], dict):
+        upstream = rows[0].get(value_field)
+        if upstream is not None:
+            return str(upstream)
+    return data if isinstance(data, str) else ""
+
+
 def _coerce_number(value: Any) -> Any:
     if isinstance(value, bool):
         return value
@@ -138,6 +156,10 @@ def build_chart_payload(config: dict, data: Any) -> dict:
         text_meta = resolve_text_payload(config, data)
         payload["text"] = text_meta["text"]
         payload["text_interactive"] = text_meta["text_interactive"]
+        return payload
+
+    if chart_type == "html":
+        payload["html"] = resolve_html(config, data)
         return payload
 
     if chart_type == "gantt":

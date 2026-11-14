@@ -3,6 +3,7 @@ from __future__ import annotations
 from importlib import import_module
 
 from app.services.node_execution.base import NodeExecutionContext
+from app.services.node_execution.nodes.html_output_mapper_node import render_html_template
 
 
 def execute(ctx: NodeExecutionContext) -> object:
@@ -24,5 +25,7 @@ def execute(ctx: NodeExecutionContext) -> object:
         source_data = merged
     else:
         source_data = {}
+    if node_data.get("chartType") == "html":
+        node_data = {**node_data, "html": render_html_template(ctx)}
     output = build_chart_payload(node_data, source_data)
     return output
