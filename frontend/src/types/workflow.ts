@@ -537,6 +537,8 @@ export interface NodeData {
   duration?: number;
   cronExpression?: string;
   pollIntervalMinutes?: number;
+  /** imapTrigger: save each attachment of the email to the owner's Heym Drive during the run. */
+  imapDownloadAttachments?: boolean;
   /** heymTrigger: platform events to subscribe to; empty means every event. */
   eventNames?: string[];
   /** heym: which Heym read to perform. */

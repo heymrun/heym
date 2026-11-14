@@ -53,9 +53,36 @@ const {
         </p>
       </div>
 
+      <div
+        class="space-y-2"
+        data-testid="imap-download-attachments-field"
+      >
+        <div class="flex items-center gap-2">
+          <input
+            id="imap-download-attachments"
+            type="checkbox"
+            class="h-4 w-4 rounded border-input bg-background"
+            :checked="selectedNode.data.imapDownloadAttachments === true"
+            @change="updateNodeData('imapDownloadAttachments', ($event.target as HTMLInputElement).checked)"
+          >
+          <Label
+            for="imap-download-attachments"
+            class="text-sm font-normal"
+          >
+            Download attachments to Drive
+          </Label>
+        </div>
+        <p class="text-xs text-muted-foreground">
+          Saves each attachment to your Heym Drive and adds its link to the output.
+        </p>
+      </div>
+
       <div class="space-y-2 pt-2 border-t">
         <Label class="text-xs text-muted-foreground">Available output fields</Label>
-        <div class="text-xs text-muted-foreground space-y-1 font-mono">
+        <div
+          class="text-xs text-muted-foreground space-y-1 font-mono"
+          data-testid="imap-output-fields"
+        >
           <div>${{ selectedNode.data.label }}.email.subject — decoded email subject</div>
           <div>${{ selectedNode.data.label }}.email.from — raw from header</div>
           <div>${{ selectedNode.data.label }}.email.text — plain-text body</div>
@@ -63,6 +90,8 @@ const {
           <div>${{ selectedNode.data.label }}.email.attachments — attachment metadata array</div>
           <div>${{ selectedNode.data.label }}.email.headers — decoded header map</div>
           <div>${{ selectedNode.data.label }}.email.uid — IMAP UID for deduping</div>
+          <div>${{ selectedNode.data.label }}.attachments — each attachment, with its Drive link when saved</div>
+          <div>${{ selectedNode.data.label }}.file_ids — Drive ids of the saved attachments</div>
         </div>
       </div>
     </div>

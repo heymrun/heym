@@ -31,6 +31,7 @@ Placement is decided from the workflow's nodes before the run starts. A run stay
 | Plugin nodes | A plugin is installed on one instance's disk |
 | Code node reading Drive files | The files are read from Heym Drive on main's disk |
 | Slack file operations | Downloaded and sent files live in Heym Drive |
+| IMAP Trigger with **Download attachments to Drive** on | The attachments are saved to Heym Drive during the run |
 
 **Everything else is distributed** — including the Code node, Playwright and Agent Python tools. Every instance runs the same image with its own sandbox backend (a Docker socket, or Kubernetes API access), so a sandbox is not a reason to keep a run on main, and those are the most CPU-hungry nodes in the product.
 

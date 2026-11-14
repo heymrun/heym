@@ -506,6 +506,7 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
       label: "imapTrigger",
       credentialId: "",
       pollIntervalMinutes: 5,
+      imapDownloadAttachments: false,
     },
   },
   googleDriveTrigger: {

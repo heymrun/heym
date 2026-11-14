@@ -54,7 +54,7 @@ NODE_PLACEMENT: dict[str, Placement] = {
     "heymTrigger": _ANY,
     "htmlOutputMapper": _ANY,
     "http": _ANY,
-    "imapTrigger": _ANY,
+    "imapTrigger": _ANY,  # narrowed to MAIN_ONLY by _imap_placement when it saves attachments
     "jira": _ANY,
     "jsonOutputMapper": _ANY,
     "linear": _ANY,
@@ -100,7 +100,8 @@ def _agent_placement(data: dict) -> Placement:
     sub-workflow tools have no local file dependency. The file sandbox turns on
     only for a Drive file whose content is on this instance, and the nodes that
     put Drive files into a run (upload trigger, drive, googleDrive, converter,
-    code with codeFiles, slack downloadFile) already pin it to the main instance.
+    code with codeFiles, slack downloadFile, imapTrigger saving attachments) already
+    pin it to the main instance.
     """
     if data.get("skills"):
         return _MAIN
@@ -124,9 +125,19 @@ def _slack_placement(data: dict) -> Placement:
     return _MAIN if data.get("slackOperation") in _SLACK_FILE_OPERATIONS else _ANY
 
 
+def _imap_placement(data: dict) -> Placement:
+    """An IMAP Trigger pins the run only when it saves the email's attachments to Drive.
+
+    The handler checks the same ``is True`` (see nodes/imap_trigger_node.py), so a run that saves
+    files can never be placed on an instance without Drive storage.
+    """
+    return _MAIN if data.get("imapDownloadAttachments") is True else _ANY
+
+
 _CONDITIONAL: dict[str, Callable[[dict], Placement]] = {
     "agent": _agent_placement,
     "code": _code_placement,
+    "imapTrigger": _imap_placement,
     "slack": _slack_placement,
 }
 

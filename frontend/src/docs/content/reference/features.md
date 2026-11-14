@@ -62,7 +62,7 @@ See also [Triggers](./triggers.md), [Wait](../nodes/wait-node.md), and [Executio
 
 #### [IMAP Trigger](../nodes/imap-trigger-node.md)
 
-The IMAP Trigger node polls an inbox on a configurable minute interval and starts a workflow for each newly detected email. It outputs parsed headers, sender and recipient lists, plain-text and HTML bodies, attachment metadata, and a trigger timestamp. Use it for support inbox triage, mailbox-to-[Slack](../nodes/slack-node.md) routing, or email-driven approval flows with [Human-in-the-Loop](./human-in-the-loop.md).
+The IMAP Trigger node polls an inbox on a configurable minute interval and starts a workflow for each newly detected email. It outputs parsed headers, sender and recipient lists, plain-text and HTML bodies, attachment metadata, and a trigger timestamp. With **Download attachments to Drive** on, it also saves each attachment to the workflow owner's [Heym Drive](../tabs/drive-tab.md) and outputs `attachments` (with Drive links) and `file_ids`, so an [Agent](../nodes/agent-node.md), [Converter](../nodes/converter-node.md) or [Drive](../nodes/drive-node.md) node can read invoices, contracts or scans straight from the email. Use it for support inbox triage, mailbox-to-[Slack](../nodes/slack-node.md) routing, invoice and document intake, or email-driven approval flows with [Human-in-the-Loop](./human-in-the-loop.md).
 
 Pairs with [Send Email](../nodes/send-email-node.md), [LLM](../nodes/llm-node.md), and [Slack](../nodes/slack-node.md) for inbound triage and response workflows.
 

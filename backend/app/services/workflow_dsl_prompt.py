@@ -277,6 +277,7 @@ In workflow expressions:
   - `label`: Node identifier (e.g., "supportInbox")
   - `credentialId`: UUID of an `imap` credential containing host, username, password, mailbox, and SSL settings
   - `pollIntervalMinutes`: Integer polling interval in minutes (minimum `1`, common values `1`, `5`, `15`)
+  - `imapDownloadAttachments`: Boolean, default `false`. When `true`, every attachment of the email is saved to the workflow owner's Heym Drive during the run (at most 10 per email, each within the Drive size limit). Set it whenever a later node must read the attached files (invoice PDF, contract, scan); leave it off when only the subject or body matters
 - **Output fields available downstream**:
   - `$<label>.email` — full parsed email payload
   - `$<label>.email.subject` — decoded email subject
@@ -288,12 +289,20 @@ In workflow expressions:
   - `$<label>.email.attachments` — attachment metadata array
   - `$<label>.email.headers` — decoded header map
   - `$<label>.email.uid` — IMAP UID for the message
+  - `$<label>.attachments` — one item per attachment, in email order. With `imapDownloadAttachments` on: `id` (Drive file id), `filename`, `content_type`, `size_bytes`, `download_url`, `skipped_reason` (`null` when saved, otherwise `"too_large"`, `"too_many"` or `"unavailable"`). With it off: the same metadata as `email.attachments`
+  - `$<label>.file_ids` — Drive file ids of the saved attachments only (`[]` when the toggle is off). Same shape as the Slack node's `file_ids`: put `$<label>.file_ids` in an Agent's user message for file analysis, or pass it to a Drive or Converter node
   - `$<label>.triggered_at` — ISO timestamp for the workflow run
 
 **Example node JSON:**
 ```json
 {"id": "n1", "type": "imapTrigger", "position": {"x": 100, "y": 100}, "data": {"label": "supportInbox", "credentialId": "imap-credential-uuid", "pollIntervalMinutes": 5}}
 ```
+
+**Example with attachments saved to Drive (invoice inbox → Agent reads the PDFs):**
+```json
+{"id": "n1", "type": "imapTrigger", "position": {"x": 100, "y": 100}, "data": {"label": "invoiceInbox", "credentialId": "imap-credential-uuid", "pollIntervalMinutes": 5, "imapDownloadAttachments": true}}
+```
+Then an Agent user message such as `"Extract vendor, total and due date from these invoices: $invoiceInbox.file_ids"`.
 
 ### 3b. telegramTrigger (Telegram Bot Webhook Trigger)
 - **Purpose**: Receive Telegram Bot API webhook updates and start the workflow automatically
