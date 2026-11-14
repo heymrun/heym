@@ -137,6 +137,38 @@ class FileStorageFlushFailureTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(self._files(storage_dir), [])
             self.assertEqual(self._file_dirs(storage_dir), [])
 
+    async def test_store_file_removes_the_directory_when_the_write_fails(self) -> None:
+        db = AsyncMock()
+        db.add = MagicMock()
+        long_name = "a" * 300 + ".txt"  # over NAME_MAX: the write raises ENAMETOOLONG
+
+        with tempfile.TemporaryDirectory() as storage_dir:
+            with patch("app.services.file_storage._storage_root", return_value=Path(storage_dir)):
+                with self.assertRaises(OSError):
+                    await store_file(db, owner_id=uuid.uuid4(), file_bytes=b"x", filename=long_name)
+
+            self.assertEqual(self._files(storage_dir), [])
+            self.assertEqual(self._file_dirs(storage_dir), [])
+            db.add.assert_not_called()
+
+    def test_store_file_sync_removes_the_directory_when_the_write_fails(self) -> None:
+        db = MagicMock()
+        long_name = "a" * 300 + ".txt"
+
+        with tempfile.TemporaryDirectory() as storage_dir:
+            with patch("app.services.file_storage._storage_root", return_value=Path(storage_dir)):
+                with self.assertRaises(OSError):
+                    store_file_sync(
+                        db,
+                        owner_id=uuid.uuid4(),
+                        file_bytes=b"x",
+                        filename=long_name,
+                        mime_type="text/plain",
+                    )
+
+            self.assertEqual(self._file_dirs(storage_dir), [])
+            db.add.assert_not_called()
+
     def test_store_file_sync_keeps_the_file_when_the_row_is_flushed(self) -> None:
         db = MagicMock()
 

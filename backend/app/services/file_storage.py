@@ -54,8 +54,13 @@ def _discard_stored_file(absolute_path: Path) -> None:
     """Remove a file written for a row that never reached the database, and its directory.
 
     Only the per-file directory goes: the owner directory is shared with other writers.
+    Cleanup errors are swallowed so the caller re-raises the original failure.
     """
-    absolute_path.unlink(missing_ok=True)
+    try:
+        absolute_path.unlink(missing_ok=True)
+    except OSError:
+        # e.g. ENAMETOOLONG: the name that failed the write fails the unlink too.
+        pass
     try:
         absolute_path.parent.rmdir()
     except OSError:
@@ -90,7 +95,11 @@ async def store_file(
     relative_path = f"{owner_id}/{file_uuid}/{filename}"
     absolute_path = _safe_storage_path(relative_path)
     absolute_path.parent.mkdir(parents=True, exist_ok=True)
-    absolute_path.write_bytes(file_bytes)
+    try:
+        absolute_path.write_bytes(file_bytes)
+    except BaseException:
+        _discard_stored_file(absolute_path)
+        raise
 
     row = GeneratedFile(
         id=file_uuid,
@@ -184,7 +193,11 @@ def store_file_sync(
     relative_path = f"{owner_id}/{file_uuid}/{filename}"
     absolute_path = _safe_storage_path(relative_path)
     absolute_path.parent.mkdir(parents=True, exist_ok=True)
-    absolute_path.write_bytes(file_bytes)
+    try:
+        absolute_path.write_bytes(file_bytes)
+    except BaseException:
+        _discard_stored_file(absolute_path)
+        raise
 
     row = GeneratedFile(
         id=file_uuid,
