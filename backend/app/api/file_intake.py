@@ -7,6 +7,7 @@ stores the file, runs the workflow synchronously, and returns its output.
 """
 
 import asyncio
+import mimetypes
 import uuid
 from datetime import datetime, timezone
 
@@ -143,6 +144,10 @@ async def upload_to_slot(
         raise
 
     mime = file.content_type or "application/octet-stream"
+    if mime == "application/octet-stream":
+        # curl and many other clients send a type they cannot name as octet-stream
+        # (curl names only images, text, HTML, PDF and XML), so judge it by its extension.
+        mime = mimetypes.guess_type(file.filename or "")[0] or mime
     if not file_intake_service.is_mime_allowed(slot.allowed_mime, mime, file.filename or ""):
         await reject(
             "rejected_mime",

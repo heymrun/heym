@@ -148,6 +148,36 @@ class UploadGuardTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("rejected_mime", _added_events(db))
         self.assertEqual(db.execute.call_count, 1)
 
+    async def _type_check(self, filename: str, content_type: str) -> tuple[int, list[str]]:
+        """Upload to an audio/* slot whose consume loses the race: 409 means the type passed."""
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.execute.side_effect = [
+            _select_result(_make_slot(allowed_mime=["audio/*"])),
+            _update_result(0),
+        ]
+        with self.assertRaises(HTTPException) as ctx:
+            await upload_to_slot(
+                token="t",
+                request=_make_request(),
+                file=_make_upload(b"ID3", filename, content_type),
+                db=db,
+            )
+        return ctx.exception.status_code, _added_events(db)
+
+    async def test_a_curl_upload_sent_as_octet_stream_is_typed_by_its_extension(self) -> None:
+        # curl -F 'file=@voice-note.mp3' sends application/octet-stream.
+        status_code, events = await self._type_check("voice-note.mp3", "application/octet-stream")
+        self.assertEqual(status_code, 409)
+        self.assertNotIn("rejected_mime", events)
+
+    async def test_an_octet_stream_file_of_another_type_is_still_refused(self) -> None:
+        for filename in ("clip.mp4", "schedule.xer", "noextension"):
+            with self.subTest(filename=filename):
+                status_code, events = await self._type_check(filename, "application/octet-stream")
+                self.assertEqual(status_code, 415)
+                self.assertIn("rejected_mime", events)
+
 
 class UploadHappyPathTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
