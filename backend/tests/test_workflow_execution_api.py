@@ -1712,6 +1712,27 @@ class DataTableFilterClauseTests(unittest.TestCase):
         self.assertIn("ILIKE", sql)
         self.assertIn("%JOHN%", sql)
 
+    def test_contains_matches_like_characters_literally(self) -> None:
+        from sqlalchemy.dialects import postgresql
+
+        from app.services.workflow_executor import _build_data_table_filter_clauses
+
+        cases = {
+            "100%": "%100/%%",
+            "A_1": "%A/_1%",
+            "C:\\Users": "%C:\\Users%",
+            "a/b": "%a//b%",
+        }
+        for value, pattern in cases.items():
+            with self.subTest(value=value):
+                clauses = _build_data_table_filter_clauses(
+                    {"name": {"$contains": value}}, [{"name": "name", "type": "string"}]
+                )
+                compiled = clauses[0].compile(dialect=postgresql.dialect())
+                self.assertIn("ILIKE", str(compiled))
+                self.assertIn("ESCAPE '/'", str(compiled))
+                self.assertEqual(list(compiled.params.values())[-1], pattern)
+
     def test_in_uses_in_clause(self) -> None:
         from app.services.workflow_executor import _build_data_table_filter_clauses
 

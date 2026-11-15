@@ -273,7 +273,8 @@ def _build_data_table_filter_clauses(filter_dict: dict, columns: list) -> list:
                         clauses.append(left <= right)
                 elif op == "$contains":
                     target = field if is_json else cast(field, String)
-                    clauses.append(target.ilike(f"%{raw_value}%"))
+                    text = str(raw_value).replace("/", "//").replace("%", "/%").replace("_", "/_")
+                    clauses.append(target.ilike(f"%{text}%", escape="/"))
                 elif op == "$in" and isinstance(raw_value, list):
                     clauses.append(field.in_([_coerce(v) for v in raw_value]))
                 # Unknown operators are ignored.
