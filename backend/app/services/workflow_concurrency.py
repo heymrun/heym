@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 
-from sqlalchemy import and_, delete, exists, func, select, text
+from sqlalchemy import and_, delete, exists, func, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import StatementError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -49,6 +49,9 @@ CANCELLED_MESSAGE = "Execution was cancelled"
 RUN_TOKEN_HEADER = "X-Heym-Run-Token"
 # Same grace as a stranded claim: registration reaches the database asynchronously.
 STALE_SLOT_GRACE_SECONDS = 120
+# How often a slot held for allowDownstream branches is marked as still in use; well
+# inside the grace, so a missed refresh or two never lets the sweep reclaim it.
+SLOT_REFRESH_SECONDS = STALE_SLOT_GRACE_SECONDS / 4
 SEQUENCE_NAME = "workflow_concurrency_seq"
 IN_FLIGHT_STATUSES = (
     run_queue.STATUS_QUEUED,
@@ -465,6 +468,21 @@ async def release(execution_id: uuid.UUID) -> None:
             )
         )
         await _promote_locked(db, workflow_id)
+        await db.commit()
+
+
+async def refresh_slot(execution_id: uuid.UUID) -> None:
+    """Mark this run's slot as still in use, so the stale-slot sweep leaves it alone.
+
+    For a run that holds its slot with no active-execution row: an in-process run
+    whose allowDownstream branches are still working after its early answer.
+    """
+    async with async_session_maker() as db:
+        await db.execute(
+            update(WorkflowConcurrencySlot)
+            .where(WorkflowConcurrencySlot.execution_id == execution_id)
+            .values(acquired_at=datetime.now(timezone.utc))
+        )
         await db.commit()
 
 

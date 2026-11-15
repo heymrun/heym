@@ -92,6 +92,26 @@ class StaleSlotTests(ConcurrencyPostgresCase):
         row = await self.queue_row(held.execution_id)
         self.assertEqual(row.status, run_queue.STATUS_QUEUED)
 
+    async def test_a_refreshed_slot_is_left_alone(self) -> None:
+        """An allowDownstream run's slot has no active row; its refresh keeps it."""
+        busy = await workflow_concurrency.admit(self.held_run())
+        held = await workflow_concurrency.admit(self.held_run())
+        async with async_session_maker() as db:
+            await db.execute(
+                update(WorkflowConcurrencySlot)
+                .where(WorkflowConcurrencySlot.execution_id == busy.execution_id)
+                .values(acquired_at=datetime.now(timezone.utc) - timedelta(minutes=10))
+            )
+            await db.commit()
+
+        await workflow_concurrency.refresh_slot(busy.execution_id)
+        with patch.object(workflow_concurrency.settings, "cluster_enabled", False):
+            await workflow_concurrency.maintain()
+
+        row = await self.queue_row(held.execution_id)
+        self.assertEqual(row.status, run_queue.STATUS_HELD)
+        self.assertEqual(await self.slot_count(), 1)
+
     async def test_a_young_slot_is_left_alone(self) -> None:
         await workflow_concurrency.admit(self.held_run())
         held = await workflow_concurrency.admit(self.held_run())
