@@ -1048,6 +1048,7 @@ async def export_csv(
     table = await _get_data_table_with_access(table_id, current_user.id, db)
     columns = table.columns or []
     col_names = [col["name"] for col in sorted(columns, key=lambda c: c.get("order", 0))]
+    json_cols = {col["name"] for col in columns if col.get("type") == "json"}
 
     result = await db.execute(
         select(DataTableRow)
@@ -1060,7 +1061,12 @@ async def export_csv(
     writer = csv.DictWriter(output, fieldnames=col_names, extrasaction="ignore")
     writer.writeheader()
     for row in rows:
-        writer.writerow(row.data or {})
+        data = dict(row.data or {})
+        for name in json_cols:
+            # Write JSON cells as JSON, the format import_csv reads back; str() gives Python repr.
+            if data.get(name) is not None:
+                data[name] = json.dumps(data[name], ensure_ascii=False)
+        writer.writerow(data)
 
     output.seek(0)
     filename = f"{table.name}.csv".replace(" ", "_")
