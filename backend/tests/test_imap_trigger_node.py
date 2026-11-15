@@ -41,9 +41,10 @@ class _FakeImap:
     uidvalidity = "42"
     connections: list["_FakeImap"] = []
 
-    def __init__(self, host: str, port: int) -> None:
+    def __init__(self, host: str, port: int, timeout: float | None = None) -> None:
         self.host = host
         self.port = port
+        self.timeout = timeout
         self.selected: tuple[str, bool] | None = None
         self.commands: list[tuple[str, ...]] = []
         self.closed = False

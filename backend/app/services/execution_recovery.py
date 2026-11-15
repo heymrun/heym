@@ -7,6 +7,7 @@ import uuid
 from typing import Literal
 
 from app.config import settings
+from app.services.background_tasks import spawn_background_task
 from app.services.cluster import identity
 from app.services.distributed_lock import lock_service
 from app.services.execution_cancellation import (
@@ -163,7 +164,7 @@ class ExecutionRecoveryService:
             await cleanup_completed_active_executions()
         orphans = await claim_orphaned_executions(workflow_filter=_scope_filter(scope))
         for orphan in orphans:
-            asyncio.create_task(self._recover_one(orphan))
+            spawn_background_task(self._recover_one(orphan))
 
     async def _recover_one(self, orphan: ClaimedOrphan) -> None:
         workflow = await self._load_workflow(orphan.workflow_id)
