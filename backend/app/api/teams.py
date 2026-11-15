@@ -36,6 +36,7 @@ from app.models.schemas import (
 )
 from app.services.audit_log import OUTCOME_DENIED, audit
 from app.services.dashboard_access import team_writable_widget_workflow_ids
+from app.services.user_lookup import find_user_by_email
 from app.services.workflow_access import (
     disable_alerts_without_access,
     revoke_execution_tokens_without_access,
@@ -481,8 +482,7 @@ async def add_team_member(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
     _require_team_creator(team, current_user.id)
 
-    user_result = await db.execute(select(User).where(User.email == payload.email))
-    user = user_result.scalar_one_or_none()
+    user = await find_user_by_email(db, payload.email)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

@@ -33,6 +33,7 @@ from app.services.global_variable_access import (
     get_global_variable_with_grant,
     team_shared_variable_clause,
 )
+from app.services.user_lookup import find_user_by_email
 
 router = APIRouter()
 
@@ -482,8 +483,7 @@ async def create_global_variable_share(
             detail="Variable not found",
         )
 
-    user_result = await db.execute(select(User).where(User.email == share_data.email))
-    target_user = user_result.scalar_one_or_none()
+    target_user = await find_user_by_email(db, share_data.email)
 
     if target_user is None:
         raise HTTPException(

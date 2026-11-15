@@ -52,6 +52,7 @@ from app.services.llm_service import execute_llm
 from app.services.llm_trace import LLMTraceContext
 from app.services.model_router import build_router_for_credential
 from app.services.upload_limits import read_upload_file_limited
+from app.services.user_lookup import find_user_by_email
 
 router = APIRouter()
 
@@ -1124,8 +1125,7 @@ async def create_share(
     if result.scalar_one_or_none() is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Data table not found")
 
-    user_result = await db.execute(select(User).where(User.email == share_data.email))
-    target_user = user_result.scalar_one_or_none()
+    target_user = await find_user_by_email(db, share_data.email)
     if target_user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     if target_user.id == current_user.id:

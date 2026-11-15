@@ -58,6 +58,7 @@ from app.services.alerts.evaluator import observe
 from app.services.alerts.registry import get_alert_handler
 from app.services.audit_log import audit
 from app.services.llm_trace import LLMTraceContext, record_llm_trace
+from app.services.user_lookup import find_user_by_email
 
 router = APIRouter()
 
@@ -788,8 +789,7 @@ async def create_alert_share(
     if alert is None:
         raise HTTPException(status_code=404, detail="Alert not found")
 
-    user_result = await db.execute(select(User).where(User.email == payload.user_email))
-    target = user_result.scalar_one_or_none()
+    target = await find_user_by_email(db, payload.user_email)
     if target is None:
         raise HTTPException(status_code=404, detail="User not found")
     if target.id == current_user.id:
