@@ -200,7 +200,7 @@ class ParameterResolutionTest(unittest.TestCase):
     def test_dictionary_index_expression_with_spaces_keeps_its_type(self) -> None:
         expr = "$data['key with spaces']"
         params = self._params_for(
-            '{\"selected\": \"$data[\'key with spaces\']\"}',
+            '{"selected": "$data[\'key with spaces\']"}',
             {expr: {"id": 7}},
         )
         self.assertEqual(params, {"selected": {"id": 7}})
