@@ -267,9 +267,9 @@ class RabbitMQStartConsumerTests(unittest.IsolatedAsyncioTestCase):
     async def test_connects_with_the_given_config_without_reading_the_credential(self) -> None:
         queue = MagicMock()
         queue.consume = AsyncMock(return_value="ctag-1")
-        channel = MagicMock()
+        channel = MagicMock(spec=RobustChannel)
         channel.set_qos = AsyncMock()
-        channel.get_queue = AsyncMock(return_value=queue)
+        channel.declare_queue = AsyncMock(return_value=queue)
         connection = MagicMock()
         connection.channel = AsyncMock(return_value=channel)
         consumer_info = self._consumer_info()
@@ -294,6 +294,31 @@ class RabbitMQStartConsumerTests(unittest.IsolatedAsyncioTestCase):
             virtualhost="/",
         )
         self.assertEqual(consumer_info.consumer_tag, "ctag-1")
+
+    async def test_takes_the_queue_so_the_robust_channel_restores_it(self) -> None:
+        """get_queue(ensure=False) is not registered with a RobustChannel.
+
+        After a broker restart the robust connection then came back without the queue or
+        its consumer, and the trigger never received another message.
+        """
+        queue = MagicMock()
+        queue.consume = AsyncMock(return_value="ctag-1")
+        channel = MagicMock(spec=RobustChannel)
+        channel.set_qos = AsyncMock()
+        channel.declare_queue = AsyncMock(return_value=queue)
+        connection = MagicMock()
+        connection.channel = AsyncMock(return_value=channel)
+
+        with patch(
+            "app.services.rabbitmq_consumer.aio_pika.connect_robust",
+            new=AsyncMock(return_value=connection),
+        ):
+            await RabbitMQConsumerManager()._start_consumer(
+                self._consumer_info(), _rabbitmq_config()
+            )
+
+        channel.declare_queue.assert_awaited_once_with("orders_queue", passive=True)
+        channel.get_queue.assert_not_called()
 
     async def test_missing_config_logs_and_does_not_connect(self) -> None:
         with (
@@ -375,3 +400,98 @@ class RabbitMQStopConsumerTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RabbitMQFailedStartTests(unittest.IsolatedAsyncioTestCase):
+    """A consumer whose start fails is retried by the next sync, not left dead."""
+
+    def setUp(self) -> None:
+        self.manager = RabbitMQConsumerManager()
+        self.credential_id = uuid.uuid4()
+        self.workflow = _workflow(self.credential_id)
+        encrypted = encrypt_config(_rabbitmq_config())
+        rows = MagicMock()
+        rows.all.return_value = [(self.credential_id, encrypted)]
+        db = AsyncMock()
+        db.execute = AsyncMock(return_value=rows)
+        self.session_ctx = MagicMock()
+        self.session_ctx.__aenter__ = AsyncMock(return_value=db)
+        self.session_ctx.__aexit__ = AsyncMock(return_value=None)
+
+    def _connection(self, *, declare_error: Exception | None = None) -> MagicMock:
+        queue = MagicMock()
+        queue.consume = AsyncMock(return_value="ctag-1")
+        channel = MagicMock(spec=RobustChannel)
+        channel.set_qos = AsyncMock()
+        channel.declare_queue = AsyncMock(side_effect=declare_error, return_value=queue)
+        connection = MagicMock(spec=RobustConnection)
+        connection.is_closed = False
+        connection.channel = AsyncMock(return_value=channel)
+        connection.close = AsyncMock()
+        return connection
+
+    async def _sync(self, connect: AsyncMock) -> None:
+        with (
+            patch(
+                "app.services.rabbitmq_consumer.async_session_maker",
+                return_value=self.session_ctx,
+            ),
+            patch.object(
+                self.manager,
+                "_get_workflows_with_rabbitmq_receive",
+                new=AsyncMock(return_value=[self.workflow]),
+            ),
+            patch("app.services.rabbitmq_consumer.aio_pika.connect_robust", new=connect),
+            self.assertLogs("rabbitmq_consumer", level="INFO"),
+        ):
+            await self.manager._sync_consumers()
+            await asyncio.gather(
+                *(c.start_task for c in self.manager._consumers.values() if c.start_task)
+            )
+            # A failed start unregisters itself after its task is gathered above.
+            for _ in range(3):
+                await asyncio.sleep(0)
+
+    async def test_broker_not_up_at_the_first_sync_is_retried(self) -> None:
+        connect = AsyncMock(
+            side_effect=[ConnectionRefusedError(111, "refused"), self._connection()]
+        )
+
+        await self._sync(connect)
+        self.assertEqual(self.manager._consumers, {})
+        await self._sync(connect)
+
+        self.assertEqual(connect.await_count, 2)
+        (consumer_info,) = self.manager._consumers.values()
+        self.assertEqual(consumer_info.consumer_tag, "ctag-1")
+
+    async def test_queue_missing_at_start_closes_its_connection_and_is_retried(self) -> None:
+        missing = self._connection(declare_error=RuntimeError("NOT_FOUND - no queue"))
+        connect = AsyncMock(side_effect=[missing, self._connection()])
+
+        await self._sync(connect)
+        missing.close.assert_awaited_once()
+        self.assertEqual(self.manager._consumers, {})
+        await self._sync(connect)
+
+        (consumer_info,) = self.manager._consumers.values()
+        self.assertEqual(consumer_info.consumer_tag, "ctag-1")
+
+    async def test_a_failed_start_leaves_a_replacement_consumer_alone(self) -> None:
+        failed = ConsumerInfo(
+            workflow_id=self.workflow.id,
+            credential_id=str(self.credential_id),
+            queue_name="orders_queue",
+            node_id="rmq-node-1",
+        )
+        replacement = ConsumerInfo(
+            workflow_id=self.workflow.id,
+            credential_id=str(self.credential_id),
+            queue_name="orders_queue",
+            node_id="rmq-node-1",
+        )
+        self.manager._consumers["key"] = replacement
+
+        await self.manager._forget_failed_start(failed)
+
+        self.assertIs(self.manager._consumers["key"], replacement)
