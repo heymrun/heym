@@ -3,6 +3,18 @@ from __future__ import annotations
 from app.services.node_execution.base import NodeExecutionContext
 
 
+def _value_texts(value: object) -> set[str]:
+    """How a switch value may be written as a case.
+
+    A boolean reads as ``true``/``false``, as in the input JSON, the expression dialog and
+    this node's own output; ``str()`` alone gives ``True``/``False``, which no case typed
+    from that matches. ``str(value)`` is kept so existing ``True`` cases still match.
+    """
+    if isinstance(value, bool):
+        return {"true" if value else "false", str(value)}
+    return {str(value)}
+
+
 def execute(ctx: NodeExecutionContext) -> object:
     """Execute the switch node."""
     self = ctx.executor
@@ -22,8 +34,9 @@ def execute(ctx: NodeExecutionContext) -> object:
         cases = []
     selected_handle = "default"
 
+    value_texts = _value_texts(value)
     for index, case_value in enumerate(cases):
-        if str(value) == str(case_value):
+        if str(case_value) in value_texts:
             selected_handle = f"case-{index}"
             break
 
