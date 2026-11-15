@@ -42,6 +42,7 @@ def parse_curl(
     url = ""
     follow_redirects = False
     basic_user: str | None = None
+    json_option = False
     i = 0
     while i < len(tokens):
         token = tokens[i]
@@ -66,7 +67,9 @@ def parse_curl(
             "--data-raw",
             "--data-binary",
             "--data-urlencode",
+            "--json",
         ) and i + 1 < len(tokens):
+            json_option = json_option or token == "--json"
             i += 1
             data = tokens[i]
             if method == "GET":
@@ -89,6 +92,11 @@ def parse_curl(
                 url = candidate
                 break
 
+    if json_option:
+        # curl 7.82+ `--json <data>`: a JSON body, and JSON headers unless the command sets them.
+        for name in ("Content-Type", "Accept"):
+            if not any(k.lower() == name.lower() for k in headers):
+                headers[name] = "application/json"
     if basic_user is not None and not any(k.lower() == "authorization" for k in headers):
         # As curl does: an explicit Authorization header wins, and `-u user` means no password.
         user_pass = basic_user if ":" in basic_user else f"{basic_user}:"

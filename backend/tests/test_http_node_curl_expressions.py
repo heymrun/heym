@@ -172,3 +172,30 @@ class HttpNodeCurlUserTests(unittest.TestCase):
         ):
             with self.subTest(curl=curl):
                 self.assertEqual(_run_curl(curl).headers["authorization"], "Bearer t1")
+
+
+class HttpNodeCurlJsonOptionTests(unittest.TestCase):
+    """curl 7.82+ `--json <data>`: a JSON POST with JSON Content-Type and Accept."""
+
+    def test_json_option_posts_a_json_body(self) -> None:
+        import json
+
+        request = _run_curl(
+            """curl https://api.example.com/users --json '{"name": "$source.name"}'""",
+            inputs={"source": {"name": 'Ann "A" Lee'}},
+        )
+
+        self.assertEqual(request.method, "POST")
+        self.assertEqual(json.loads(request.content), {"name": 'Ann "A" Lee'})
+        self.assertEqual(request.headers["content-type"], "application/json")
+        self.assertEqual(request.headers["accept"], "application/json")
+
+    def test_headers_the_command_sets_win(self) -> None:
+        request = _run_curl(
+            "curl -X PUT https://api.example.com/u/1 -H 'Accept: application/vnd.api+json' "
+            """--json '{"a": 1}'"""
+        )
+
+        self.assertEqual(request.method, "PUT")
+        self.assertEqual(request.headers["accept"], "application/vnd.api+json")
+        self.assertEqual(request.headers["content-type"], "application/json")

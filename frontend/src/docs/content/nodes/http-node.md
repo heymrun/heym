@@ -53,6 +53,13 @@ Use cURL syntax with `-H` for headers, `-d` for POST body, etc. Expressions can 
 curl -X GET "https://api.example.com/search?q=$query.body.text.urlEncode()" -H "$credentials.MyApiKey"
 ```
 
+`-u user:password` (as Stripe, Twilio and Mailgun document their APIs) sends HTTP Basic auth; an explicit `-H "Authorization: ..."` takes precedence, and the output shows a Basic header as `Basic **`. `--json '{...}'` posts a JSON body and sets `Content-Type` and `Accept` to `application/json` unless the command sets them. A JSON body (`application/json` or any `application/*+json` type) renders expressions JSON-safely, so a value with quotes or line breaks stays valid JSON:
+
+```
+curl https://api.stripe.com/v1/customers -u "$credentials.Stripe:"
+curl https://api.example.com/users --json '{"name": "$input.body.name"}'
+```
+
 Quotes and spaces inside an expression belong to the expression, not to the cURL command, so methods that take string arguments work inline:
 
 ```
