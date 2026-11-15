@@ -171,6 +171,11 @@ HITL_REVIEW_DEFERRED_ERROR = (
     "JSON object, then call this tool after the review."
 )
 
+HITL_DUPLICATE_REVIEW_ERROR = (
+    "Not sent: only one human review request is handled per turn, and another one in this "
+    "turn was already answered. If a review is still needed, request it again in a new turn."
+)
+
 
 @dataclass
 class HumanReviewPause:
@@ -1802,7 +1807,8 @@ class LLMService:
             ) -> tuple[str, dict[str, Any]]:
                 """The error the model gets, and the trace entry, for a call that is not run.
 
-                ``refusal`` (``truncated``, ``invalid_arguments`` or ``review_deferred``) is
+                ``refusal`` (``truncated``, ``invalid_arguments``, ``review_deferred`` or
+                ``duplicate_review``) is
                 the span's ``heym.agent.tool.refused`` value. No raw arguments go on the span.
                 """
                 tool_result = {"error": reason, "status": "error"}
@@ -2274,6 +2280,12 @@ class LLMService:
                     transport.append_turn(history, turn)
                     _commit_completed_tool_slots()
                     continue
+                # Only the first review request runs; every other one in this turn still owes
+                # the model a result, or the next request has a tool call with no tool message.
+                for extra_tc in hitl_tcs[1:]:
+                    slot_results[tool_calls.index(extra_tc)] = _refused_tool_call(
+                        extra_tc, HITL_DUPLICATE_REVIEW_ERROR, "duplicate_review"
+                    )
 
             transport.append_turn(history, turn)
 
