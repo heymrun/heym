@@ -614,6 +614,11 @@ def _trailing_user_text(messages: list[dict[str, Any]]) -> str | None:
     return None
 
 
+# Tools whose result is Heym's own run report, so a "cancelled" status in it means the
+# child run was stopped. Any other tool's status field is the tool's data.
+_CANCEL_SIGNAL_SOURCES = frozenset({"sub_workflow", "sub_agent"})
+
+
 class LLMService:
     def __init__(
         self,
@@ -1571,15 +1576,18 @@ class LLMService:
             )
             return self._attach_routing_summary(result)
 
-        def _abort_reason_from_tool_result(tool_result: Any) -> str | None:
+        def _abort_reason_from_tool_result(tool_result: Any, *, trusted: bool) -> str | None:
             """Return an abort reason only for explicit cancelled tool outcomes.
 
             Free-form error text (including MCP/server-controlled strings) must
             not stop the agent loop. Only ``status: cancelled`` is a trusted
             cancel signal from a returned tool payload; parent Stop uses
-            ``should_abort()``.
+            ``should_abort()``. It is trusted only from Heym's own payloads: a
+            cancelled sub-workflow or sub-agent, or a tool cancelled while running.
+            Any other tool's ``status`` is its data (a Stripe subscription, a
+            calendar event or an order can be "canceled").
             """
-            if not isinstance(tool_result, dict):
+            if not trusted or not isinstance(tool_result, dict):
                 return None
             status = tool_result.get("status")
             if isinstance(status, str) and normalize_tool_call_status(status) == "cancelled":
@@ -2065,6 +2073,7 @@ class LLMService:
                 pending_entry: dict[str, Any] | None = None
                 result_str = ""
                 tool_result: Any = None
+                tool_raised = False
                 abort_reason: str | None = None
                 completed_tool_abort_reason: str | None = None
                 tool_status = "success"
@@ -2133,6 +2142,7 @@ class LLMService:
                                         tool_trace_id = candidate
                                 result_str = json.dumps(tool_result, default=str)
                         except Exception as exc:
+                            tool_raised = True
                             tracing.record_agent_tool_exception(tool_span, exc)
                             failure_status = classify_tool_failure_status(exc)
                             result_str = json.dumps(
@@ -2141,7 +2151,10 @@ class LLMService:
                             )
                             tool_result = {"error": str(exc), "status": failure_status}
                     if pending_pause is None:
-                        abort_reason = _abort_reason_from_tool_result(tool_result)
+                        abort_reason = _abort_reason_from_tool_result(
+                            tool_result,
+                            trusted=tool_raised or tool_source in _CANCEL_SIGNAL_SOURCES,
+                        )
                     if (
                         abort_reason is None
                         and pending_pause is not None
