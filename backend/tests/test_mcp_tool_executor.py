@@ -86,6 +86,30 @@ class ExtractToolResultTests(unittest.TestCase):
         extracted = _extract_tool_result(result)
         self.assertEqual(extracted, "plain text")
 
+    def test_every_json_block_is_kept(self) -> None:
+        """FastMCP sends one text block per item for a list returned without a type."""
+        result = types.CallToolResult(
+            content=[
+                types.TextContent(type="text", text='{"id": 1}'),
+                types.TextContent(type="text", text='{"id": 2}'),
+                types.TextContent(type="text", text='{"id": 3}'),
+            ],
+            isError=False,
+        )
+        extracted = _extract_tool_result(result)
+        self.assertEqual(extracted, [{"id": 1}, {"id": 2}, {"id": 3}])
+
+    def test_blocks_that_are_not_all_json_are_joined_as_text(self) -> None:
+        result = types.CallToolResult(
+            content=[
+                types.TextContent(type="text", text='{"id": 1}'),
+                types.TextContent(type="text", text="and one more line"),
+            ],
+            isError=False,
+        )
+        extracted = _extract_tool_result(result)
+        self.assertEqual(extracted, '{"id": 1}\nand one more line')
+
     def test_error_result_returns_error_dict(self) -> None:
         result = self._text_result("something broke", is_error=True)
         extracted = _extract_tool_result(result)

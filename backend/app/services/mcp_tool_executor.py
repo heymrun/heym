@@ -409,10 +409,13 @@ def _extract_tool_result(call_result: types.CallToolResult) -> object:
     if call_result.structuredContent is not None:
         return call_result.structuredContent
     if parts:
+        # A server may send one text block per item (FastMCP does for an untyped
+        # list return); parsing only the first would silently drop the rest.
         try:
-            return json.loads(parts[0])
+            parsed = [json.loads(part) for part in parts]
         except json.JSONDecodeError:
             return "\n".join(parts)
+        return parsed[0] if len(parsed) == 1 else parsed
     return None
 
 
