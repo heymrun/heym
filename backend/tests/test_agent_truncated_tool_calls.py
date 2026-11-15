@@ -232,6 +232,57 @@ class ChatCompletionsAgentLoopTests(IsolatedAsyncioTestCase):
             self.assertNotIn(secret, json.dumps(call.kwargs.get("response"), default=str))
 
 
+class FailedTurnUsageTests(IsolatedAsyncioTestCase):
+    """A turn that raises must not erase the usage the earlier turns were billed for."""
+
+    async def _error_trace(self, responses: list[Any]) -> dict[str, Any]:
+        def create(**_request: Any) -> SimpleNamespace:
+            item = responses.pop(0)
+            if isinstance(item, Exception):
+                raise item
+            return item
+
+        client = SimpleNamespace(
+            base_url="http://test",
+            chat=SimpleNamespace(completions=SimpleNamespace(create=create)),
+        )
+        trace_context = LLMTraceContext(user_id=uuid.uuid4(), credential_id=uuid.uuid4())
+        service = LLMService(CredentialType.openai, "test-key", trace_context=trace_context)
+        with (
+            patch.object(service, "_get_client", return_value=(client, "Test")),
+            patch("app.services.llm_service.record_llm_trace") as record_trace,
+            self.assertRaisesRegex(RuntimeError, "rate limited"),
+        ):
+            await service.execute_with_tools(
+                model="test-model",
+                system_instruction=None,
+                user_message="close tickets for C-77",
+                tools=TOOLS,
+                tool_executor=lambda *_args: {"closed": True},
+            )
+        errors = [c.kwargs for c in record_trace.call_args_list if c.kwargs.get("error")]
+        self.assertEqual(len(errors), 1)
+        return errors[0]
+
+    async def test_a_failed_later_turn_records_the_usage_already_spent(self) -> None:
+        trace = await self._error_trace(
+            [
+                _completion(calls=[_call("call-1", "{}")], finish_reason="tool_calls"),
+                RuntimeError("429 rate limited"),
+            ]
+        )
+
+        self.assertEqual(trace["prompt_tokens"], 1)
+        self.assertEqual(trace["completion_tokens"], 1)
+        self.assertEqual(trace["total_tokens"], 2)
+
+    async def test_a_failed_first_turn_records_no_usage(self) -> None:
+        trace = await self._error_trace([RuntimeError("429 rate limited")])
+
+        self.assertIsNone(trace["prompt_tokens"])
+        self.assertIsNone(trace["total_tokens"])
+
+
 class PersistedTraces:
     """Trace rows as `record_llm_trace` writes them, after its own sanitizer."""
 
