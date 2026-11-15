@@ -238,11 +238,18 @@ class TestNamedMCPEndpoints(unittest.TestCase):
         db.execute.assert_awaited_once()
 
     def test_named_mcp_endpoint_rejects_another_servers_api_key(self) -> None:
-        """A different named server's key cannot authenticate against this server ID."""
+        """The lookup must match both the supplied key and the URL's server ID."""
         response, db = self._post_named_endpoint_with_key("another-servers-api-key")
 
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
         db.execute.assert_awaited_once()
+
+        statement = db.execute.await_args.args[0]
+        compiled = statement.compile()
+        self.assertIn("mcp_servers.api_key =", str(statement))
+        self.assertIn("mcp_servers.id =", str(statement))
+        self.assertIn(hash_secret("another-servers-api-key"), compiled.params.values())
+        self.assertIn(self.server.id, compiled.params.values())
 
     def test_get_named_mcp_endpoint_returns_405(self) -> None:
         """GET /api/mcp/servers/{id}/mcp returns 405 Method Not Allowed."""
