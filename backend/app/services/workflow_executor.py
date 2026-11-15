@@ -4979,7 +4979,7 @@ class WorkflowExecutor:
         schemas: list[dict] = []
         for tool in node_tools_for_agent(self.nodes, self.edges, agent_node_id):
             node_data = self.nodes[tool.node_id].get("data", {})
-            agent_provided = list(dict.fromkeys(node_data.get("agentProvidedFields") or []))
+            agent_provided: list[str] = node_data.get("agentProvidedFields") or []
             properties = {
                 field: {"type": "string", "description": f"Value for {field}"}
                 for field in agent_provided
