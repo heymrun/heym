@@ -1,5 +1,6 @@
 """LLM-as-Judge scoring in Evals with a separate judge: a model or a Decision Model."""
 
+import json
 import unittest
 import uuid
 from datetime import datetime, timezone
@@ -163,6 +164,12 @@ class ReadLlmJudgeScoreTests(unittest.TestCase):
         self.assertEqual(read_llm_judge_score('{"score": 140}'), ("100", None))
         self.assertEqual(read_llm_judge_score('{"score": -5}'), ("0", None))
 
+    def test_a_code_fence_in_the_explanation_keeps_the_verdict(self) -> None:
+        text = '{"score": 40, "explanation": "Uses ```for``` loops instead of slicing."}'
+        self.assertEqual(
+            read_llm_judge_score(text), ("40", "Uses ```for``` loops instead of slicing.")
+        )
+
     def test_an_unreadable_verdict_is_an_error_not_a_zero(self) -> None:
         for text in ("I think it matches.", '{"explanation": "no score"}', '{"score": "high"}'):
             with self.subTest(text=text), self.assertRaises(EvalJudgeError):
@@ -175,6 +182,34 @@ class CombinedJudgeParserTests(unittest.TestCase):
     def test_fenced_nested_answer(self) -> None:
         text = '```json\n{"output": {"answer": "Paris", "score": 91.7, "explanation": "ok"}}\n```'
         self.assertEqual(_parse_combined_judge_response(text), ("Paris", "91", "ok"))
+
+    def test_a_code_fence_in_the_answer_keeps_the_answer_and_score(self) -> None:
+        answer = "Use slicing:\n```python\nreversed_list = my_list[::-1]\n```\nIt returns a copy."
+        text = json.dumps({"actual_answer": answer, "score": 95, "explanation": "Correct."})
+        self.assertEqual(_parse_combined_judge_response(text), (answer, "95", "Correct."))
+
+    def test_a_lone_brace_in_the_answer_keeps_the_answer_and_score(self) -> None:
+        answer = "A JSON object ends with the } character."
+        text = json.dumps({"actual_answer": answer, "score": 88})
+        self.assertEqual(_parse_combined_judge_response(text), (answer, "88", None))
+
+    def test_prose_around_a_fenced_verdict_is_ignored(self) -> None:
+        text = 'Here is my verdict {see below}:\n```json\n{"answer": "Paris", "score": 90}\n```'
+        self.assertEqual(_parse_combined_judge_response(text), ("Paris", "90", None))
+
+    def test_a_verdict_after_another_object_still_wins(self) -> None:
+        text = 'Config used: {"model": "gpt", "temperature": 0}\n{"answer": "Paris", "score": 88}'
+        self.assertEqual(_parse_combined_judge_response(text), ("Paris", "88", None))
+
+    def test_a_long_cut_off_code_answer_is_scanned_quickly(self) -> None:
+        """An answer cut off by max_tokens: ~500 KB of code with many braces, no closing."""
+        import time
+
+        code = "def f():\n    return {k: {v: {}} for k, v in items}\n" * 10000
+        started = time.monotonic()
+        result = _parse_combined_judge_response('{"actual_answer": "' + code)
+        self.assertEqual(result, ("", "0", None))
+        self.assertLess(time.monotonic() - started, 0.25)
 
     def test_unreadable_text_scores_zero(self) -> None:
         self.assertEqual(_parse_combined_judge_response("no json here"), ("", "0", None))

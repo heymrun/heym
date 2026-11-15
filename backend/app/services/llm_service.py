@@ -1495,6 +1495,12 @@ class LLMService:
                 req["skills_included"] = skills_included
             return req
 
+        def _invocation_token_usage() -> tuple[int, int, int]:
+            invocation_prompt_tokens = total_prompt_tokens - initial_prompt_tokens
+            invocation_completion_tokens = total_completion_tokens - initial_completion_tokens
+            invocation_total_tokens = invocation_prompt_tokens + invocation_completion_tokens
+            return invocation_prompt_tokens, invocation_completion_tokens, invocation_total_tokens
+
         def _build_error_result(
             error_text: str,
             extra_tool_entry: dict[str, Any] | None = None,
@@ -1532,6 +1538,7 @@ class LLMService:
             if combined_tool_calls:
                 result["tool_calls"] = combined_tool_calls
             _attach_tool_metrics(result)
+            inv_prompt, inv_completion, inv_total = _invocation_token_usage()
             self._record_trace(
                 request_type=transport.name,
                 provider=provider,
@@ -1540,9 +1547,9 @@ class LLMService:
                 response=result,
                 error=error_text,
                 elapsed_ms=round(total_elapsed_ms, 2),
-                prompt_tokens=total_prompt_tokens,
-                completion_tokens=total_completion_tokens,
-                total_tokens=total_prompt_tokens + total_completion_tokens,
+                prompt_tokens=inv_prompt,
+                completion_tokens=inv_completion,
+                total_tokens=inv_total,
                 binding=binding,
             )
             return self._attach_routing_summary(result)
@@ -1685,8 +1692,8 @@ class LLMService:
                     provider=provider,
                     error=str(exc),
                 )
-                # Earlier turns were billed already; this is the only trace the run writes.
-                spent = total_prompt_tokens + total_completion_tokens
+                # Earlier turns were billed already; record only this invocation's usage.
+                inv_prompt, inv_completion, inv_total = _invocation_token_usage()
                 self._record_trace(
                     request_type=transport.name,
                     provider=provider,
@@ -1695,9 +1702,9 @@ class LLMService:
                     response=None,
                     error=str(exc),
                     elapsed_ms=round(elapsed_ms, 2),
-                    prompt_tokens=total_prompt_tokens if spent else None,
-                    completion_tokens=total_completion_tokens if spent else None,
-                    total_tokens=spent if spent else None,
+                    prompt_tokens=inv_prompt if inv_total else None,
+                    completion_tokens=inv_completion if inv_total else None,
+                    total_tokens=inv_total if inv_total else None,
                     binding=binding,
                 )
                 raise
@@ -1738,6 +1745,7 @@ class LLMService:
                 if tool_calls_collected:
                     result["tool_calls"] = tool_calls_collected
                 _attach_tool_metrics(result)
+                inv_prompt, inv_completion, inv_total = _invocation_token_usage()
                 self._record_trace(
                     request_type=transport.name,
                     provider=provider,
@@ -1746,9 +1754,9 @@ class LLMService:
                     response=result,
                     error=None,
                     elapsed_ms=round(total_elapsed_ms, 2),
-                    prompt_tokens=total_prompt_tokens,
-                    completion_tokens=total_completion_tokens,
-                    total_tokens=total_prompt_tokens + total_completion_tokens,
+                    prompt_tokens=inv_prompt,
+                    completion_tokens=inv_completion,
+                    total_tokens=inv_total,
                     binding=binding,
                 )
                 return self._attach_routing_summary(result)
@@ -1787,6 +1795,7 @@ class LLMService:
                 if repair_errors:
                     result["json_repairs"] = repair_errors
                 _attach_tool_metrics(result)
+                inv_prompt, inv_completion, inv_total = _invocation_token_usage()
                 self._record_trace(
                     request_type=transport.name,
                     provider=provider,
@@ -1795,9 +1804,9 @@ class LLMService:
                     response=result,
                     error=None,
                     elapsed_ms=round(total_elapsed_ms, 2),
-                    prompt_tokens=total_prompt_tokens,
-                    completion_tokens=total_completion_tokens,
-                    total_tokens=total_prompt_tokens + total_completion_tokens,
+                    prompt_tokens=inv_prompt,
+                    completion_tokens=inv_completion,
+                    total_tokens=inv_total,
                     binding=binding,
                 )
                 return self._attach_routing_summary(result)
@@ -1979,6 +1988,7 @@ class LLMService:
                 if pending_tool_calls:
                     result["tool_calls"] = pending_tool_calls
                 _attach_tool_metrics(result)
+                inv_prompt, inv_completion, inv_total = _invocation_token_usage()
                 self._record_trace(
                     request_type=transport.name,
                     provider=provider,
@@ -1987,9 +1997,9 @@ class LLMService:
                     response=result,
                     error=None,
                     elapsed_ms=round(total_elapsed_ms, 2),
-                    prompt_tokens=total_prompt_tokens,
-                    completion_tokens=total_completion_tokens,
-                    total_tokens=total_prompt_tokens + total_completion_tokens,
+                    prompt_tokens=inv_prompt,
+                    completion_tokens=inv_completion,
+                    total_tokens=inv_total,
                     binding=binding,
                 )
                 return self._attach_routing_summary(result)
@@ -2415,6 +2425,7 @@ class LLMService:
                         if tool_calls_collected:
                             result["tool_calls"] = tool_calls_collected
                         _attach_tool_metrics(result)
+                        inv_prompt, inv_completion, inv_total = _invocation_token_usage()
                         self._record_trace(
                             request_type=transport.name,
                             provider=provider,
@@ -2423,9 +2434,9 @@ class LLMService:
                             response=result,
                             error=None,
                             elapsed_ms=round(total_elapsed_ms, 2),
-                            prompt_tokens=total_prompt_tokens,
-                            completion_tokens=total_completion_tokens,
-                            total_tokens=total_prompt_tokens + total_completion_tokens,
+                            prompt_tokens=inv_prompt,
+                            completion_tokens=inv_completion,
+                            total_tokens=inv_total,
                             binding=binding,
                         )
                         return self._attach_routing_summary(result)
@@ -2443,7 +2454,22 @@ class LLMService:
         }
         if tool_calls_collected:
             result["tool_calls"] = tool_calls_collected
-        return _attach_tool_metrics(result)
+        _attach_tool_metrics(result)
+        inv_prompt, inv_completion, inv_total = _invocation_token_usage()
+        self._record_trace(
+            request_type=transport.name,
+            provider=provider,
+            model=model,
+            request=_trace_request(),
+            response=result,
+            error=None,
+            elapsed_ms=round(total_elapsed_ms, 2),
+            prompt_tokens=inv_prompt,
+            completion_tokens=inv_completion,
+            total_tokens=inv_total,
+            binding=binding,
+        )
+        return self._attach_routing_summary(result)
 
     async def execute_image_generation(
         self,
