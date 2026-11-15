@@ -71,6 +71,34 @@ class DataTableCsvRoundTripTests(unittest.IsolatedAsyncioTestCase):
         csv_text = await self._export([{"name": "Ada", "score": 1, "meta": None}, {"name": "Bob"}])
         self.assertEqual(csv_text.splitlines()[1:], ["Ada,1,", "Bob,,"])
 
+    async def test_numbers_in_exponent_notation_are_imported_as_numbers(self) -> None:
+        stored, errors = await self._import("name,score\nA,1e-05\nB,1E+15\nC,2e3\nD,42\nE,1.5\n")
+        self.assertEqual(errors, [])
+        self.assertEqual([row["score"] for row in stored], [1e-05, 1e15, 2000.0, 42, 1.5])
+        self.assertIsInstance(stored[3]["score"], int)
+
+
+class NumberCellTests(unittest.TestCase):
+    COLUMNS = [{"name": "n", "type": "number"}]
+
+    def test_exponent_notation_is_a_number(self) -> None:
+        for text, number in (("1e-05", 1e-05), ("1E+15", 1e15), ("-2.5e3", -2500.0)):
+            with self.subTest(text=text):
+                self.assertEqual(
+                    data_tables._coerce_row_data({"n": text}, self.COLUMNS), ({"n": number}, [])
+                )
+
+    def test_integers_stay_integers(self) -> None:
+        data, errors = data_tables._coerce_row_data({"n": " 42 "}, self.COLUMNS)
+        self.assertEqual((data, errors), ({"n": 42}, []))
+        self.assertIsInstance(data["n"], int)
+
+    def test_text_and_non_finite_values_are_rejected(self) -> None:
+        for text in ("abc", "1,5", "nan", "inf", "1e999", "1.5e999"):
+            with self.subTest(text=text):
+                _, errors = data_tables._coerce_row_data({"n": text}, self.COLUMNS)
+                self.assertEqual(len(errors), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
