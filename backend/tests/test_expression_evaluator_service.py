@@ -2532,6 +2532,15 @@ class TestLeadingDollarTextTemplates(unittest.TestCase):
         self.assertEqual(child["pro"], 5)
         self.assertEqual(logged, 5)
 
+    def test_a_ternary_whose_branch_is_null_stays_null(self) -> None:
+        child, logged = self._run(
+            [{"key": "lang", "value": "$userInput.body.lang ? $userInput.body.lang : null"}],
+            "$userInput.body.lang ? $userInput.body.lang : null",
+        )
+
+        self.assertIsNone(child["lang"])
+        self.assertIsNone(logged)
+
     def test_a_condition_is_not_turned_into_text(self) -> None:
         from app.services.node_execution.leading_dollar import resolve_leading_dollar_value
 
