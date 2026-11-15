@@ -120,6 +120,16 @@ def _remove_written(paths: list[Path]) -> None:
             pass
 
 
+def _storable_name(filename: str) -> str:
+    """An attachment name usable as a file name.
+
+    Senders put "/" in names ("Rechnung 2024/0815.pdf"), and storage refuses path
+    components, which would fail the whole step and save none of the attachments.
+    """
+    name = filename.replace("/", "_").replace("\\", "_").replace("\x00", "").strip()
+    return name or "attachment"
+
+
 def _store(
     ctx: NodeExecutionContext, planned: list[_Planned], email: dict[str, Any]
 ) -> list[dict[str, Any]]:
@@ -157,7 +167,7 @@ def _store(
                     db,
                     owner_id=owner_id,
                     file_bytes=item.content,
-                    filename=item.filename,
+                    filename=_storable_name(item.filename),
                     mime_type=item.content_type or "application/octet-stream",
                     workflow_id=workflow_id,
                     source_node_id=ctx.node_id,
