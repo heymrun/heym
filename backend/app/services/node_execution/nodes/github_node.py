@@ -4,6 +4,7 @@ from collections.abc import Callable
 from importlib import import_module
 
 from app.services.node_execution.base import NodeExecutionContext
+from app.services.node_execution.json_fields import render_json_template
 
 # Issue objects are about 6 KB each, so ~1,000 items keeps one node output near 6 MB.
 RETURN_ALL_MAX_ITEMS = 1000
@@ -65,7 +66,7 @@ def execute(ctx: NodeExecutionContext) -> object:
     if operation not in repo_optional_operations and not repo:
         raise ValueError("GitHub node requires owner and repository")
 
-    def _resolve_optional_template(field_name: str) -> tuple[bool, str]:
+    def _resolve_optional_template(field_name: str, json_field: bool = False) -> tuple[bool, str]:
         if field_name not in node_data:
             return False, ""
         raw_value = node_data.get(field_name)
@@ -73,6 +74,9 @@ def execute(ctx: NodeExecutionContext) -> object:
             return True, ""
         if isinstance(raw_value, str) and raw_value == "":
             return True, ""
+        if json_field:
+            # Per value, so a quote or a line break in a value stays inside its string.
+            return True, render_json_template(self, str(raw_value), inputs, node_id)
         resolved = self.evaluate_message_template(str(raw_value), inputs, node_id)
         return True, resolved
 
@@ -80,7 +84,7 @@ def execute(ctx: NodeExecutionContext) -> object:
         field_name: str,
         label: str,
     ) -> tuple[bool, list[str] | None]:
-        provided, raw = _resolve_optional_template(field_name)
+        provided, raw = _resolve_optional_template(field_name, json_field=True)
         if not provided:
             return False, None
         stripped = raw.strip()
@@ -100,7 +104,7 @@ def execute(ctx: NodeExecutionContext) -> object:
         field_name: str,
         label: str,
     ) -> tuple[bool, dict | None]:
-        provided, raw = _resolve_optional_template(field_name)
+        provided, raw = _resolve_optional_template(field_name, json_field=True)
         if not provided:
             return False, None
         stripped = raw.strip()

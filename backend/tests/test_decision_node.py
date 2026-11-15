@@ -30,6 +30,9 @@ class _FakeExecutor:
     def _resolve_template(self, template, inputs, node_id):
         return str(template).replace("$input.text", "payouts failing")
 
+    def evaluate_message_template(self, template, inputs, node_id):
+        return self._resolve_template(template, inputs, node_id)
+
     def _build_llm_trace_context(self, credential_id, node_id):
         return self._trace_context
 

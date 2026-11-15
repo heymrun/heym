@@ -7,6 +7,7 @@ from app.db.models import CredentialType
 from app.db.session import SessionLocal
 from app.services.encryption import decrypt_config
 from app.services.node_execution.base import NodeExecutionContext
+from app.services.node_execution.json_fields import render_json_template
 from app.services.sentry_service import SentryService
 
 
@@ -60,7 +61,7 @@ def execute(ctx: NodeExecutionContext) -> object:
             if not isinstance(resolved, list):
                 raise ValueError(f"{field_name} must resolve to a JSON array")
             return resolved
-        evaluated = self.evaluate_message_template(raw_value, inputs, node_id)
+        evaluated = render_json_template(self, raw_value, inputs, node_id)
         try:
             parsed = json.loads(evaluated or "[]")
         except json.JSONDecodeError as exc:
@@ -81,7 +82,7 @@ def execute(ctx: NodeExecutionContext) -> object:
             if not isinstance(resolved, dict):
                 raise ValueError(f"{field_name} must resolve to a JSON object")
             return resolved
-        evaluated = self.evaluate_message_template(raw_value, inputs, node_id)
+        evaluated = render_json_template(self, raw_value, inputs, node_id)
         try:
             parsed = json.loads(evaluated or "{}")
         except json.JSONDecodeError as exc:
