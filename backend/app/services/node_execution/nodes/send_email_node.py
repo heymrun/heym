@@ -16,6 +16,39 @@ def _envelope(group: str) -> list[str]:
     return parsed or [addr.strip() for addr in group.split(",") if addr.strip()]
 
 
+_BLOCK_TAGS = (
+    *("p", "div", "br", "li", "tr", "table", "ul", "ol", "blockquote", "hr"),
+    *("h1", "h2", "h3", "h4", "h5", "h6", "section", "article", "header", "footer"),
+)
+
+
+def _html_to_text(html: str) -> str:
+    """The text/plain alternative of an HTML body, as a text-only client should show it.
+
+    Style, script and head content are dropped, entities are decoded, every block element
+    starts a new line, table cells are spaced, and a link keeps its URL so a call to action
+    still works.
+    """
+    import re
+
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(html, "html.parser")
+    for tag in soup(["style", "script", "head"]):
+        tag.decompose()
+    for link in soup.find_all("a", href=True):
+        href = str(link["href"]).strip()
+        if href.startswith(("http://", "https://")) and href != link.get_text().strip():
+            link.append(f" ({href})")
+    for tag in soup.find_all(_BLOCK_TAGS):
+        tag.insert_before("\n")
+        tag.insert_after("\n")
+    for cell in soup.find_all(("td", "th")):
+        cell.insert_after(" ")
+    lines = (re.sub(r"\s+", " ", line).strip() for line in soup.get_text().splitlines())
+    return "\n".join(line for line in lines if line)
+
+
 def execute(ctx: NodeExecutionContext) -> object:
     """Execute the sendEmail node."""
     self = ctx.executor
@@ -110,11 +143,7 @@ def execute(ctx: NodeExecutionContext) -> object:
 
     body_part = MIMEMultipart("alternative")
     if is_html:
-        import re
-
-        plain_text = re.sub(r"<[^>]+>", "", body)
-        plain_text = re.sub(r"\s+", " ", plain_text).strip()
-        body_part.attach(MIMEText(plain_text, "plain"))
+        body_part.attach(MIMEText(_html_to_text(body), "plain"))
         body_part.attach(MIMEText(body, "html"))
     else:
         body_part.attach(MIMEText(body, "plain"))

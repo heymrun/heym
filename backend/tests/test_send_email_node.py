@@ -347,6 +347,34 @@ class SendEmailBodyRenderingTests(unittest.TestCase):
         self.assertIn("text/html", content_types)
         self.assertIn("text/plain", content_types)
 
+    def test_the_plain_part_of_an_html_body_reads_as_text(self) -> None:
+        html = (
+            "<html><head><style>body { font-family: Arial }</style></head><body>"
+            "<p>Hi Tom &amp; Jerry,</p><p>Your order #42 shipped.</p>"
+            "<ul><li>Item A &times; 2</li><li>Item B</li></ul>"
+            "<table><tr><td>Total</td><td>&euro;30</td></tr></table>"
+            '<p><a href="https://acme.test/t/42">Track it</a></p></body></html>'
+        )
+        nr, server = _run_send_email(
+            {
+                "label": "sendEmail",
+                "credentialId": str(uuid.uuid4()),
+                "to": "a@x.com",
+                "subject": "Hi",
+                "emailBody": html,
+            },
+            uuid.uuid4(),
+            _make_db_mock([]),
+        )
+        self.assertEqual(nr["status"], "success")
+        _, msg = _sent_message(server)
+        plain = next(p for p in msg.walk() if p.get_content_type() == "text/plain")
+        self.assertEqual(
+            plain.get_payload(decode=True).decode(plain.get_content_charset()),
+            "Hi Tom & Jerry,\nYour order #42 shipped.\nItem A \u00d7 2\nItem B\n"
+            "Total \u20ac30\nTrack it (https://acme.test/t/42)",
+        )
+
 
 class SendEmailAgentToolTests(unittest.TestCase):
     """sendEmail as an agent tool: cc/bcc/attachments are agent-fillable."""
