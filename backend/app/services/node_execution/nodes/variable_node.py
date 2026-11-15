@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 from app.services.node_execution.base import NodeExecutionContext
 
 
@@ -56,12 +58,16 @@ def execute(ctx: NodeExecutionContext) -> object:
             try:
                 if isinstance(resolved_value, str):
                     try:
-                        resolved_value = int(resolved_value)
+                        parsed = int(resolved_value)
                     except ValueError:
-                        resolved_value = float(resolved_value)
+                        parsed = float(resolved_value)
+                    if not isinstance(parsed, float) or math.isfinite(parsed):
+                        resolved_value = parsed
                 elif isinstance(resolved_value, bool) or not isinstance(resolved_value, int):
                     # A whole number stays an int, as it does when typed as text: 6, not 6.0.
-                    resolved_value = float(resolved_value)
+                    val = float(resolved_value)
+                    if math.isfinite(val):
+                        resolved_value = val
             except (ValueError, TypeError):
                 pass
         elif var_type == "boolean":

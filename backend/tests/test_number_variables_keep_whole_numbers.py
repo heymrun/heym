@@ -66,6 +66,11 @@ class VariableNodeNumberTests(unittest.TestCase):
         self.assertEqual(_render_page("number", "2.5e-3", 0), f"{URL}0.0025")
         self.assertEqual(_render_page("number", "1E3", 0), f"{URL}1000.0")
 
+    def test_non_finite_values_stay_as_text(self) -> None:
+        for val in ("NaN", "inf", "-Infinity", "1e999", "1.0e999"):
+            with self.subTest(val=val):
+                self.assertEqual(_render_page("number", val, 0), f"{URL}{val}")
+
 
 if __name__ == "__main__":
     unittest.main()
