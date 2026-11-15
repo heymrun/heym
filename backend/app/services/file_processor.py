@@ -13,12 +13,20 @@ def _is_struck_glyph(token: str) -> bool:
     return token.isalpha() and (len(token) == 1 or (len(token) == 2 and token[0] == token[1]))
 
 
+# A well-formed UTF-8 multi-byte sequence; a single-byte code page rarely produces one.
+_UTF8_MULTIBYTE = re.compile(
+    rb"[\xc2-\xdf][\x80-\xbf]|[\xe0-\xef][\x80-\xbf]{2}|[\xf0-\xf4][\x80-\xbf]{3}"
+)
+
+
 def _decode_text(raw: bytes) -> str:
     """Uploaded text as a string, whatever common encoding it was saved in.
 
     UTF-8 with or without a BOM (Excel's "CSV UTF-8", Notepad "UTF-8 with BOM"), UTF-16
     with a BOM (Notepad "Unicode", PowerShell 5 output), else cp1254 as the file
     inspector does (Excel's default "CSV" and Notepad "ANSI" are single-byte), else latin-1.
+    UTF-8 with a stray single-byte character (a pasted row, a mixed log) stays UTF-8 and
+    loses only that byte.
     """
     if raw.startswith(codecs.BOM_UTF8):
         return raw.decode("utf-8-sig", errors="replace")
@@ -28,6 +36,8 @@ def _decode_text(raw: bytes) -> str:
         return raw.decode("utf-8")
     except UnicodeDecodeError:
         pass
+    if _UTF8_MULTIBYTE.search(raw):
+        return raw.decode("utf-8", errors="replace")
     try:
         return raw.decode("cp1254")
     except UnicodeDecodeError:

@@ -1404,6 +1404,15 @@ class DriveNodeDownloadUrlTests(unittest.TestCase):
         name = self._download_name("https://example.com/files/Annual%20Report%202024.pdf")
         self.assertEqual(name, "Annual Report 2024.pdf")
 
+    def test_download_url_keeps_the_name_after_an_encoded_slash(self) -> None:
+        # Cloud Storage / Firebase object URLs encode the object path into one segment.
+        for url in (
+            "https://storage.googleapis.com/v0/b/acme/o/invoices%2F2024%2Fjan.pdf?alt=media",
+            "https://example.com/files/invoices%5C2024%5Cjan.pdf",
+        ):
+            with self.subTest(url=url):
+                self.assertEqual(self._download_name(url), "jan.pdf")
+
     def test_download_url_rejects_unsafe_content_disposition_filename(self) -> None:
         """Remote filenames cannot escape the generated-file directory."""
         owner_id = uuid.uuid4()

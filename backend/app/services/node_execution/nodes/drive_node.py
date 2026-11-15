@@ -245,6 +245,8 @@ def execute(ctx: NodeExecutionContext) -> object:
                 _parsed = _urllib_parse.urlparse(source_url)
                 _url_path = _parsed.path.rstrip("/")
                 filename = _urllib_parse.unquote(_url_path.split("/")[-1]) if _url_path else ""
+                # An encoded slash (Cloud Storage `o/invoices%2F2024%2Fjan.pdf`) is a path.
+                filename = filename.replace("\\", "/").rsplit("/", 1)[-1]
             if not filename:
                 filename = "downloaded_file"
             filename = _normalize_storage_filename(filename)

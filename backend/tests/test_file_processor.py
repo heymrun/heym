@@ -276,6 +276,14 @@ class TextEncodingTests(unittest.TestCase):
                 chunks = FileProcessor().process_csv(raw, "people.csv")
                 self.assertEqual([c.text for c in chunks], self.EXPECTED)
 
+    def test_utf8_with_one_stray_single_byte_character_stays_utf8(self) -> None:
+        # A row pasted from a cp1252 tool into a UTF-8 file: only that byte is lost.
+        raw = self.ROWS.encode("utf-8") + "Zoë,Köln\n".encode("utf-8").replace(
+            "ë".encode("utf-8"), "ë".encode("cp1252")
+        )
+        chunks = FileProcessor().process_csv(raw, "people.csv")
+        self.assertEqual([c.text for c in chunks], [*self.EXPECTED, "name: Zo\ufffd | city: Köln"])
+
     def test_json_with_a_utf8_bom(self) -> None:
         raw = b"\xef\xbb\xbf" + json.dumps([{"name": "Kaffeemühle"}], ensure_ascii=False).encode()
         chunks = FileProcessor().process_json(raw, "products.json")
