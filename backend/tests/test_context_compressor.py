@@ -320,6 +320,74 @@ class TestMaybeCompressMessages(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Context hard-compressed", result[1]["content"])
 
 
+class TestCompressionKeepsToolResultsWithTheirCall(unittest.IsolatedAsyncioTestCase):
+    """The kept tail must never open on a tool result separated from its tool_calls."""
+
+    @staticmethod
+    def _client() -> MagicMock:
+        choice = MagicMock()
+        choice.message.content = "summary"
+        client = MagicMock()
+        client.chat.completions.create.return_value = MagicMock(choices=[choice])
+        return client
+
+    @staticmethod
+    def _assistant(*ids: str) -> dict[str, Any]:
+        return {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {"id": i, "type": "function", "function": {"name": "f", "arguments": "{}"}}
+                for i in ids
+            ],
+        }
+
+    @staticmethod
+    def _tool(i: str) -> dict[str, Any]:
+        return {"role": "tool", "tool_call_id": i, "content": "x" * 4000}
+
+    @staticmethod
+    def _orphans(messages: list[dict[str, Any]]) -> list[str]:
+        declared: set[str] = set()
+        orphans: list[str] = []
+        for m in messages:
+            if m.get("role") == "assistant":
+                declared.update(tc["id"] for tc in m.get("tool_calls") or [])
+            elif m.get("role") == "tool" and m.get("tool_call_id") not in declared:
+                orphans.append(m["tool_call_id"])
+        return orphans
+
+    async def _compress(self, history: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        from app.services.context_compressor import maybe_compress_messages
+
+        msgs = [{"role": "system", "content": "s"}, {"role": "user", "content": "u"}, *history]
+        result, info = await maybe_compress_messages(
+            msgs, model="gpt-4o", client=self._client(), context_limit_tokens=1000
+        )
+        self.assertIsNotNone(info)
+        return result
+
+    async def test_a_cut_among_parallel_results_moves_to_the_next_call(self) -> None:
+        a, t = self._assistant, self._tool
+        result = await self._compress([a("a", "b"), t("a"), t("b"), a("c", "d"), t("c"), t("d")])
+        self.assertEqual(self._orphans(result), [])
+        self.assertEqual(result[3]["tool_calls"][0]["id"], "c")
+
+    async def test_results_running_to_the_end_keep_their_calling_message(self) -> None:
+        a, t = self._assistant, self._tool
+        result = await self._compress(
+            [a("a"), t("a"), a("b", "c", "d", "e"), t("b"), t("c"), t("d"), t("e")]
+        )
+        self.assertEqual(self._orphans(result), [])
+        self.assertEqual(result[3]["tool_calls"][0]["id"], "b")
+
+    async def test_one_call_per_turn_keeps_the_last_four_messages(self) -> None:
+        a, t = self._assistant, self._tool
+        history = [a("a"), t("a"), a("b"), t("b"), a("c"), t("c")]
+        result = await self._compress(history)
+        self.assertEqual(result[3:], history[-4:])
+
+
 class TestFitTextToTokenBudget(unittest.TestCase):
     def test_the_compressor_output_is_unchanged(self) -> None:
         from app.services.context_compressor import _fit_text_to_token_budget
