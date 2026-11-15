@@ -74,3 +74,20 @@ class SharedRateLimiter:
             s = self._mem.get(key)
             if s is not None and s["count"] > 0:
                 s["count"] -= 1
+
+    def attempts(self, identifier: str) -> int:
+        """Attempts the current window holds for this identifier, without counting one.
+
+        0 once the window or the ban has lapsed, the same point at which the next
+        is_allowed() starts counting afresh.
+        """
+        now = time.time()
+        key = f"{self._ns}:{identifier}"
+        with self._lock:
+            s = self._mem.get(key)
+            if s is None:
+                return 0
+            ban_until = s.get("ban_until")
+            if ban_until:
+                return s["count"] if ban_until > now else 0
+            return s["count"] if now - s["window_start"] < self._window else 0
