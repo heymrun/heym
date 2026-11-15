@@ -57,6 +57,14 @@ class DotBoolCoercionTests(unittest.TestCase):
         )
         self.assertEqual(res, [1, 0, 1])
 
+    def test_preview_service_coercion_on_dotbool(self) -> None:
+        from app.services.expression_evaluator import ExpressionEvaluatorService
+
+        response = ExpressionEvaluatorService().evaluate(
+            "$flags.map('int(item)')", {"flags": [True, False, True]}
+        )
+        self.assertEqual(response.result, [1, 0, 1])
+
 
 if __name__ == "__main__":
     unittest.main()
