@@ -2379,3 +2379,72 @@ class TestReservedAttributeNames(unittest.TestCase):
             alias_reserved_context_names('data.from.replace("data.class", "from")'),
             'data.__heymKeyword_from.replace("data.class", "from")',
         )
+
+
+class TestTextTemplatesWithOperatorCharacters(unittest.TestCase):
+    """A text template with "-", "*" or "/" after a $ref renders the same in a run and
+    in the dialog, without Python quotes around string values."""
+
+    BODY = {"name": "Alice", "email": "alice@example.com", "role": "admin", "count": 5}
+    CASES = {
+        "dash": (
+            "New signup: $userInput.body.name - $userInput.body.email",
+            "New signup: Alice - alice@example.com",
+        ),
+        "bullets": (
+            "Summary:\n- $userInput.body.name\n- $userInput.body.role",
+            "Summary:\n- Alice\n- admin",
+        ),
+        "separator": ("$userInput.body.name\n---\nSent by Heym", "Alice\n---\nSent by Heym"),
+        "refs": ("$userInput.body.name - $userInput.body.email", "Alice - alice@example.com"),
+        "numbers": ("Order $userInput.body.count - shipped", "Order 5 - shipped"),
+    }
+
+    def test_run_and_dialog_render_plain_text(self) -> None:
+        nodes = [
+            {"id": "in", "type": "textInput", "data": {"label": "userInput"}},
+            {
+                "id": "set1",
+                "type": "set",
+                "data": {
+                    "label": "compose",
+                    "mappings": [
+                        {"key": key, "value": template} for key, (template, _) in self.CASES.items()
+                    ],
+                },
+            },
+        ]
+        edges = [{"id": "e1", "source": "in", "target": "set1"}]
+        result = execute_workflow(
+            workflow_id=uuid.uuid4(),
+            nodes=nodes,
+            edges=edges,
+            inputs={"body": self.BODY},
+            test_run=True,
+        )
+        canvas = [
+            {"node_id": r["node_id"], "label": r["node_label"], "output": r["output"]}
+            for r in result.node_results
+        ]
+        run_output = next(r["output"] for r in result.node_results if r["node_id"] == "set1")
+        context = build_eval_context(
+            nodes,
+            canvas,
+            workflow_edges=edges,
+            current_node_id="set1",
+            initial_inputs={"body": self.BODY},
+        )
+        service = ExpressionEvaluatorService(
+            workflow_nodes=nodes,
+            workflow_edges=edges,
+            vars_context=build_vars_context(
+                nodes, canvas, workflow_edges=edges, current_node_id="set1"
+            ),
+            workflow_id=uuid.uuid4(),
+        )
+
+        for key, (template, expected) in self.CASES.items():
+            with self.subTest(key=key):
+                self.assertEqual(run_output[key], expected)
+                dialog = service.evaluate(template, context, current_node_id="set1").result
+                self.assertEqual(dialog, expected)
