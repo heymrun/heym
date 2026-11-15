@@ -8,10 +8,17 @@ from app.services.node_execution.base import NodeExecutionContext
 
 
 def _is_json_content_type(headers: dict[str, str]) -> bool:
-    """Return whether headers declare a JSON request body."""
+    """Return whether headers declare a JSON request body.
+
+    That is `application/json` and the RFC 6839 `+json` types (`application/vnd.api+json`,
+    `application/merge-patch+json`, ...), which carry the same JSON.
+    """
     for key, value in headers.items():
         if key.lower() == "content-type":
-            return value.split(";", 1)[0].strip().lower() == "application/json"
+            media_type = value.split(";", 1)[0].strip().lower()
+            return media_type == "application/json" or (
+                media_type.startswith("application/") and media_type.endswith("+json")
+            )
     return False
 
 
