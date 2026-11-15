@@ -107,7 +107,10 @@ class DispatchGateTests(unittest.IsolatedAsyncioTestCase):
         # has to stay active until the branch finishes.
         branch: Future = Future()
         release = AsyncMock()
-        with patch("app.services.cluster.dispatch.workflow_concurrency.release", release):
+        with (
+            patch("app.services.cluster.dispatch.workflow_concurrency.release", release),
+            patch("app.services.cluster.dispatch.workflow_concurrency.refresh_slot", AsyncMock()),
+        ):
             await dispatch.release_slot_when_done(_result(futures=(branch,)), self.execution_id)
             await asyncio.sleep(0.05)
             release.assert_not_awaited()
@@ -149,6 +152,28 @@ class DispatchGateTests(unittest.IsolatedAsyncioTestCase):
             refreshed = refresh.await_count
             await asyncio.sleep(0.05)
             self.assertEqual(refresh.await_count, refreshed)
+
+    async def test_the_first_refresh_does_not_wait_for_the_refresh_interval(self) -> None:
+        """The slot's age counts from admission. A run that answers late is already near
+        the grace when its branches start, so a refresh one interval later comes too late."""
+        from concurrent.futures import Future
+
+        branch: Future = Future()
+        refresh = AsyncMock()
+        with (
+            patch("app.services.cluster.dispatch.workflow_concurrency.release", AsyncMock()),
+            patch("app.services.cluster.dispatch.workflow_concurrency.refresh_slot", refresh),
+        ):
+            await dispatch.release_slot_when_done(_result(futures=(branch,)), self.execution_id)
+            try:
+                for _ in range(100):
+                    if refresh.await_count:
+                        break
+                    await asyncio.sleep(0.01)
+                refresh.assert_awaited_once_with(self.execution_id)
+            finally:
+                branch.set_result(None)
+                await asyncio.sleep(0.05)
 
     async def test_a_failed_refresh_keeps_waiting_for_the_branches(self) -> None:
         from concurrent.futures import Future
