@@ -832,3 +832,96 @@ class TestGuardedItemExpressionHelpers(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NestedLoopTests(unittest.TestCase):
+    """An inner Loop starts over for every item of the outer Loop."""
+
+    ROWS = [[1, 2], [3, 4, 5], [6]]
+
+    def _workflow(self) -> tuple[list[dict], list[dict]]:
+        def edge(source: str, target: str, sh: str | None = None, th: str | None = None) -> dict:
+            row = {"id": f"{source}-{target}-{sh}-{th}", "source": source, "target": target}
+            if sh:
+                row["sourceHandle"] = sh
+            if th:
+                row["targetHandle"] = th
+            return row
+
+        nodes = [
+            {"id": "in", "type": "textInput", "data": {"label": "userInput"}},
+            {
+                "id": "outer",
+                "type": "loop",
+                "data": {"label": "outer", "arrayExpression": "$userInput.body.rows"},
+            },
+            {
+                "id": "inner",
+                "type": "loop",
+                "data": {"label": "inner", "arrayExpression": "$outer.item"},
+            },
+            {
+                "id": "collect",
+                "type": "set",
+                "data": {"label": "collect", "mappings": [{"key": "item", "value": "$inner.item"}]},
+            },
+            {
+                "id": "rowDone",
+                "type": "set",
+                "data": {"label": "rowDone", "mappings": [{"key": "row", "value": "$outer.index"}]},
+            },
+            {"id": "o", "type": "output", "data": {"label": "out", "message": "done"}},
+        ]
+        edges = [
+            edge("in", "outer"),
+            edge("outer", "inner", "loop"),
+            edge("inner", "collect", "loop"),
+            edge("collect", "inner", None, "loop"),
+            edge("inner", "rowDone", "done"),
+            edge("rowDone", "outer", None, "loop"),
+            edge("outer", "o", "done"),
+        ]
+        return nodes, edges
+
+    @staticmethod
+    def _collected(node_results: list[dict]) -> list[object]:
+        return [
+            row["output"]["item"]
+            for row in node_results
+            if row["node_label"] == "collect" and row["status"] == "success"
+        ]
+
+    def test_every_inner_item_of_every_row_runs_once(self) -> None:
+        nodes, edges = self._workflow()
+        result = WorkflowExecutor(nodes=nodes, edges=edges).execute(
+            workflow_id=uuid.uuid4(),
+            initial_inputs={"headers": {}, "query": {}, "body": {"rows": self.ROWS}},
+        )
+
+        self.assertEqual(result.status, "success")
+        self.assertEqual(self._collected(result.node_results), [1, 2, 3, 4, 5, 6])
+        row_done = [
+            r
+            for r in result.node_results
+            if r["node_label"] == "rowDone" and r["status"] == "success"
+        ]
+        self.assertEqual([r["output"]["row"] for r in row_done], [0, 1, 2])
+
+    def test_the_streaming_run_restarts_the_inner_loop_too(self) -> None:
+        from app.services.workflow_executor import execute_workflow_streaming
+
+        nodes, edges = self._workflow()
+        collected = [
+            (event.get("output") or {}).get("item")
+            for event in execute_workflow_streaming(
+                workflow_id=uuid.uuid4(),
+                nodes=nodes,
+                edges=edges,
+                inputs={"headers": {}, "query": {}, "body": {"rows": self.ROWS}},
+            )
+            if event.get("type") == "node_complete"
+            and event.get("node_label") == "collect"
+            and event.get("status") == "success"
+        ]
+
+        self.assertEqual(collected, [1, 2, 3, 4, 5, 6])
