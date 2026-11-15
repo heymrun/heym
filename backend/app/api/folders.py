@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import get_current_user, get_db
+from app.api.download_headers import attachment_disposition
 from app.db.models import Folder, TeamMember, User, Workflow, WorkflowShare, WorkflowTeamShare
 from app.models.schemas import (
     FolderCreate,
@@ -319,7 +320,7 @@ async def export_folder_as_zip(
     return StreamingResponse(
         iter([zip_bytes]),
         media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{safe_filename}.zip"'},
+        headers={"Content-Disposition": attachment_disposition(f"{safe_filename}.zip")},
     )
 
 
