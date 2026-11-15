@@ -1200,8 +1200,8 @@ async def get_execution_history_entry(
 async def list_all_execution_history(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    limit: int = 50,
-    offset: int = 0,
+    limit: Annotated[int, Query(ge=0)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
     search: str | None = None,
     execution_status: str | None = Query(default=None, alias="status"),
     trigger_source: str | None = Query(default=None),
@@ -2218,8 +2218,8 @@ async def list_workflow_versions(
     workflow_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    limit: int = 50,
-    offset: int = 0,
+    limit: Annotated[int, Query(ge=0)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[WorkflowVersionResponse]:
     workflow = await get_workflow_for_user(db, workflow_id, current_user.id)
 
@@ -3922,8 +3922,8 @@ async def get_execution_history(
     workflow_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    limit: int = 50,
-    offset: int = 0,
+    limit: Annotated[int, Query(ge=0)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
     search: str | None = None,
     trigger_source: str | None = Query(default=None),
     instance_id: str | None = Query(default=None),

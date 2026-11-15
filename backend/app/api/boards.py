@@ -2,12 +2,14 @@
 
 import hashlib
 import uuid
+from typing import Annotated
 
 from fastapi import (
     APIRouter,
     Depends,
     File,
     HTTPException,
+    Query,
     Request,
     UploadFile,
     status,
@@ -878,8 +880,8 @@ async def create_card(
 async def get_card_detail(
     board_id: uuid.UUID,
     card_id: uuid.UUID,
-    limit: int = 100,
-    offset: int = 0,
+    limit: Annotated[int, Query(ge=0)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> CardDetailResponse:
