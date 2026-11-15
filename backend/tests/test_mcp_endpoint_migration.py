@@ -84,6 +84,65 @@ class TestDefaultMCPEndpoints(unittest.TestCase):
         self.assertEqual(data.get("jsonrpc"), "2.0")
         self.assertIn("capabilities", data.get("result", {}))
 
+
+    def test_tools_list_on_new_default_endpoint(self) -> None:
+        """POST /api/mcp dispatches tools/list over the new Streamable HTTP endpoint."""
+        self.app.dependency_overrides[mcp.get_mcp_user_for_sse] = lambda: self.user
+        db = AsyncMock()
+        session = MagicMock()
+        session.__aenter__ = AsyncMock(return_value=db)
+        session.__aexit__ = AsyncMock(return_value=None)
+
+        with (
+            patch("app.api.mcp.async_session_maker", return_value=session),
+            patch("app.api.mcp.get_user_mcp_workflows", AsyncMock(return_value=[])),
+            patch(
+                "app.api.mcp.agent_settings.get_global_agent_settings",
+                AsyncMock(return_value=MagicMock(enabled=False)),
+            ),
+            patch("app.api.mcp.global_mcp_tools", AsyncMock(return_value=[])),
+        ):
+            response = self.client.post(
+                "/api/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/list",
+                    "params": {},
+                },
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+        self.assertEqual(data["id"], 2)
+        self.assertEqual(data["result"]["tools"], [])
+
+    def test_tools_call_on_new_default_endpoint(self) -> None:
+        """POST /api/mcp dispatches tools/call and returns the JSON-RPC tool-not-found result."""
+        self.app.dependency_overrides[mcp.get_mcp_user_for_sse] = lambda: self.user
+        db = AsyncMock()
+        session = MagicMock()
+        session.__aenter__ = AsyncMock(return_value=db)
+        session.__aexit__ = AsyncMock(return_value=None)
+
+        with (
+            patch("app.api.mcp.async_session_maker", return_value=session),
+            patch("app.api.mcp.get_user_mcp_workflows", AsyncMock(return_value=[])),
+        ):
+            response = self.client.post(
+                "/api/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "tools/call",
+                    "params": {"name": "missing_tool", "arguments": {}},
+                },
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn("text/event-stream", response.headers.get("content-type", ""))
+        self.assertIn("Tool not found: missing_tool", response.text)
+
     def test_get_legacy_sse_endpoint_route_returns_streaming(self) -> None:
         """GET /api/mcp/sse continues serving the legacy SSE handshake stream."""
         self.app.dependency_overrides[mcp.get_mcp_user_for_sse] = lambda: self.user
@@ -146,6 +205,46 @@ class TestNamedMCPEndpoints(unittest.TestCase):
             endpoint_path="sse",
         )
         self.client = TestClient(self.app)
+
+
+    def _post_named_endpoint_with_key(self, api_key: str | None):
+        db = AsyncMock()
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = None
+        db.execute = AsyncMock(return_value=result)
+        session = MagicMock()
+        session.__aenter__ = AsyncMock(return_value=db)
+        session.__aexit__ = AsyncMock(return_value=None)
+        headers = {"X-MCP-Key": api_key} if api_key is not None else {}
+
+        with patch("app.api.mcp_servers.async_session_maker", return_value=session):
+            response = self.client.post(
+                f"/api/mcp/servers/{self.server.id}/mcp",
+                json=_init_request(),
+                headers=headers,
+            )
+        return response, db
+
+    def test_named_mcp_endpoint_rejects_missing_api_key(self) -> None:
+        """The new named /mcp route requires its X-MCP-Key header."""
+        response, db = self._post_named_endpoint_with_key(None)
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        db.execute.assert_not_called()
+
+    def test_named_mcp_endpoint_rejects_wrong_api_key(self) -> None:
+        """The new named /mcp route rejects an incorrect X-MCP-Key."""
+        response, db = self._post_named_endpoint_with_key("wrong-api-key")
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        db.execute.assert_awaited_once()
+
+    def test_named_mcp_endpoint_rejects_another_servers_api_key(self) -> None:
+        """A different named server's key cannot authenticate against this server ID."""
+        response, db = self._post_named_endpoint_with_key("another-servers-api-key")
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        db.execute.assert_awaited_once()
 
     def test_get_named_mcp_endpoint_returns_405(self) -> None:
         """GET /api/mcp/servers/{id}/mcp returns 405 Method Not Allowed."""
