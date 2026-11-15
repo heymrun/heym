@@ -84,7 +84,6 @@ class TestDefaultMCPEndpoints(unittest.TestCase):
         self.assertEqual(data.get("jsonrpc"), "2.0")
         self.assertIn("capabilities", data.get("result", {}))
 
-
     def test_tools_list_on_new_default_endpoint(self) -> None:
         """POST /api/mcp dispatches tools/list over the new Streamable HTTP endpoint."""
         self.app.dependency_overrides[mcp.get_mcp_user_for_sse] = lambda: self.user
@@ -205,7 +204,6 @@ class TestNamedMCPEndpoints(unittest.TestCase):
             endpoint_path="sse",
         )
         self.client = TestClient(self.app)
-
 
     def _post_named_endpoint_with_key(self, api_key: str | None) -> tuple[object, AsyncMock]:
         db = AsyncMock()
