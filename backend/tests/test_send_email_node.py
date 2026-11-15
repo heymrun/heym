@@ -147,6 +147,38 @@ class SendEmailFromHeaderTests(unittest.TestCase):
         self._assert_signs_in_as_username(server)
 
 
+class SendEmailRecipientListTests(unittest.TestCase):
+    """To/Cc/Bcc are address lists: a quoted display name may hold a comma."""
+
+    def _envelope(self, **fields: str) -> tuple[list[str], object]:
+        nr, server = _run_send_email(
+            {
+                "label": "sendEmail",
+                "credentialId": str(uuid.uuid4()),
+                "subject": "Hi",
+                "emailBody": "Body text",
+                **fields,
+            },
+            uuid.uuid4(),
+            _make_db_mock([]),
+        )
+        self.assertEqual(nr["status"], "success")
+        return _sent_message(server)
+
+    def test_a_display_name_with_a_comma_is_one_recipient(self) -> None:
+        envelope, msg = self._envelope(
+            to='"Doe, John" <john@x.com>, Jane Roe <jane@x.com>',
+            cc='"M\u00fcller, Hans" <hans@y.de>',
+            bcc="audit@x.com",
+        )
+        self.assertEqual(envelope, ["john@x.com", "jane@x.com", "hans@y.de", "audit@x.com"])
+        self.assertEqual(msg["To"], '"Doe, John" <john@x.com>, Jane Roe <jane@x.com>')
+
+    def test_plain_comma_separated_addresses_are_unchanged(self) -> None:
+        envelope, _ = self._envelope(to="a@x.com, b@x.com,c@x.com,", cc=" ")
+        self.assertEqual(envelope, ["a@x.com", "b@x.com", "c@x.com"])
+
+
 class SendEmailCcBccTests(unittest.TestCase):
     def test_cc_appears_in_header_and_envelope(self) -> None:
         owner = uuid.uuid4()

@@ -1,6 +1,19 @@
 from __future__ import annotations
 
+from email.utils import getaddresses
+
 from app.services.node_execution.base import NodeExecutionContext
+
+
+def _envelope(group: str) -> list[str]:
+    """The addresses in one To/Cc/Bcc field, read as an RFC 5322 address list.
+
+    A quoted display name may hold a comma ("Doe, John" <john@x.com>), so the field is not
+    split on commas. What the parser rejects (it returns nothing for the whole field) is
+    split on commas as before.
+    """
+    parsed = [addr for _name, addr in getaddresses([group]) if addr]
+    return parsed or [addr.strip() for addr in group.split(",") if addr.strip()]
 
 
 def execute(ctx: NodeExecutionContext) -> object:
@@ -133,10 +146,7 @@ def execute(ctx: NodeExecutionContext) -> object:
                 attachment_count += 1
 
     all_recipients = [
-        addr.strip()
-        for group in (to_address, cc_address, bcc_address)
-        for addr in group.split(",")
-        if addr.strip()
+        addr for group in (to_address, cc_address, bcc_address) for addr in _envelope(group)
     ]
 
     try:
