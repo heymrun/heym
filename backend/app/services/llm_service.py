@@ -605,6 +605,15 @@ class _RoutedHistoryView:
         return self.working(self._last_limit)
 
 
+def _trailing_user_text(messages: list[dict[str, Any]]) -> str | None:
+    """The text of a last message shaped exactly {"role": "user", "content": str}."""
+    last = messages[-1] if messages else None
+    if isinstance(last, dict) and set(last) == {"role", "content"}:
+        if last.get("role") == "user" and isinstance(last.get("content"), str):
+            return last["content"]
+    return None
+
+
 class LLMService:
     def __init__(
         self,
@@ -1427,7 +1436,15 @@ class LLMService:
 
         transport = self._get_transport(model)
         if initial_messages is not None:
+            # A resume ends with the approval text as a plain {"role": "user", "content"}
+            # dict. Re-append it through the transport, so it takes the provider's own
+            # shape: a Gemini history is contents/parts, and Google refuses "content".
+            resume_text = _trailing_user_text(initial_messages)
+            if resume_text is not None:
+                initial_messages = initial_messages[:-1]
             history = transport.load(initial_messages, system_instruction)
+            if resume_text is not None:
+                transport.append_user(history, resume_text)
             if system_instruction or user_message:
                 logger.debug(
                     "execute_with_tools resumed from initial_messages; refreshed system prompt"
