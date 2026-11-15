@@ -1236,6 +1236,10 @@ class _FakeDataTableSession:
     def refresh(self, _row: DataTableRow) -> None:
         return None
 
+    def execute(self, *_args: object, **_kwargs: object) -> None:
+        """The per-table advisory lock an upsert takes; nothing to lock here."""
+        return None
+
 
 class WorkflowExecutorDataTableNodeTests(unittest.TestCase):
     def test_resource_lookup_requires_actor_user_id(self) -> None:

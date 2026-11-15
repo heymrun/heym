@@ -391,6 +391,15 @@ def execute(ctx: NodeExecutionContext) -> object:
 
             # Try to find existing row by filter
             existing_row = None
+            # Serialise lookup and write per table, like the unique check (same re-entrant
+            # lock, released on commit). Otherwise concurrent upserts of one key all see
+            # "no row" and all insert, or fail the unique check instead of updating.
+            from sqlalchemy import text
+
+            from app.api.data_tables import _unique_lock_statement
+
+            lock_sql, lock_params = _unique_lock_statement(data_table_id)
+            db.execute(text(lock_sql), lock_params)
             if (
                 filter_dict
                 and isinstance(filter_dict, dict)
