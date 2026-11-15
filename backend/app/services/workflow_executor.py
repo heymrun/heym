@@ -6573,7 +6573,10 @@ class WorkflowExecutor:
         except Exception as e:
             if isinstance(e, ExpressionFunctionError):
                 raise
-            return processed
+            # Not arithmetic after all: text such as "$a.name - $a.email" or a "- $x"
+            # bullet list. `processed` holds repr()-quoted values ('Alice'), so render
+            # it as the text template it is, as the expression dialog does.
+            return self.evaluate_message_template(expression, inputs, current_node_id)
 
     def _fallback_after_eval_error(self, exc: BaseException, expr: str, combined: dict) -> object:
         """Use the simple-expression fallback only when the sandbox did not reject private access."""
