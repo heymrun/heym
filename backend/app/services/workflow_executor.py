@@ -1126,10 +1126,7 @@ class DotList(list):
             return DotList(self)
 
     def take(self, count: int) -> "DotList":
-        if count >= 0:
-            return DotList(self[:count])
-        else:
-            return DotList(self[count:])
+        return DotList(self[:count] if count >= 0 else self[count:])
 
 
 class DotInt(int):
@@ -1162,29 +1159,33 @@ class DotBool:
         return str(self._value).lower()
 
     def __eq__(self, other: object) -> bool:
-        if isinstance(other, DotBool):
-            return self._value == other._value
-        return self._value == other
+        val = other._value if isinstance(other, DotBool) else other
+        return self._value == val
 
     def __lt__(self, other: object) -> bool:
-        if isinstance(other, DotBool):
-            return self._value < other._value
-        return self._value < other  # type: ignore[operator]
+        val = other._value if isinstance(other, DotBool) else other
+        return self._value < val  # type: ignore[operator]
 
     def __le__(self, other: object) -> bool:
-        if isinstance(other, DotBool):
-            return self._value <= other._value
-        return self._value <= other  # type: ignore[operator]
+        val = other._value if isinstance(other, DotBool) else other
+        return self._value <= val  # type: ignore[operator]
 
     def __gt__(self, other: object) -> bool:
-        if isinstance(other, DotBool):
-            return self._value > other._value
-        return self._value > other  # type: ignore[operator]
+        val = other._value if isinstance(other, DotBool) else other
+        return self._value > val  # type: ignore[operator]
 
     def __ge__(self, other: object) -> bool:
-        if isinstance(other, DotBool):
-            return self._value >= other._value
-        return self._value >= other  # type: ignore[operator]
+        val = other._value if isinstance(other, DotBool) else other
+        return self._value >= val  # type: ignore[operator]
+
+    def __int__(self) -> int:
+        return int(self._value)
+
+    def __float__(self) -> float:
+        return float(self._value)
+
+    def __hash__(self) -> int:
+        return hash(self._value)
 
     def toString(self) -> "DotStr":  # noqa: N802
         return DotStr(str(self._value).lower())
