@@ -416,6 +416,7 @@ async def portal_execute(
                 conversation_history_dicts if conversation_history_dicts else None
             ),
             cancel_event=cancel_event,
+            timeout_seconds=getattr(workflow, "workflow_timeout_seconds", None),
             execution_id=str(execution_id),
             llm_session_id=str(execute_data.conversation_id)
             if execute_data.conversation_id
@@ -656,6 +657,7 @@ async def portal_execute_stream(
                 else None,
                 cancel_event=cancel_event,
                 public_base_url=public_base_url,
+                timeout_seconds=getattr(workflow, "workflow_timeout_seconds", None),
                 execution_id=str(execution_id),
                 llm_session_id=str(execute_data.conversation_id)
                 if execute_data.conversation_id
