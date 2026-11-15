@@ -194,6 +194,7 @@ class GenerateDecisionQuestionsImageTests(unittest.IsolatedAsyncioTestCase):
                 current_user=mock.MagicMock(id=uuid.uuid4()),
                 db=mock.AsyncMock(),
             )
+        self.assertEqual(llm.call_args.kwargs.get("extra_body"), {"disable_reasoning": True})
         return result, llm.call_args.kwargs["system_instruction"]
 
     async def test_image_names_reach_the_prompt_and_allow_a_box(self) -> None:
@@ -215,6 +216,63 @@ class GenerateDecisionQuestionsImageTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertNotIn('"box"', prompt)
         self.assertEqual([question.id for question in result.questions], ["is_dog"])
+
+    async def test_generate_questions_recovers_from_disable_reasoning_400(self) -> None:
+        from types import SimpleNamespace
+
+        credential = mock.MagicMock()
+        credential.id = uuid.uuid4()
+        credential.name = "llm"
+        credential.type = CredentialType.openai
+        credential.encrypted_config = "x"
+
+        questions = [{"id": "is_dog", "type": "noul", "instructions": "Is it a dog?"}]
+        content = json.dumps({"questions": questions})
+        calls: list[dict] = []
+        exc_400 = Exception("Error code: 400 - Unsupported parameter: disable_reasoning")
+        exc_400.status_code = 400
+
+        def create(**kwargs: object) -> SimpleNamespace:
+            calls.append(dict(kwargs))
+            if len(calls) == 1:
+                raise exc_400
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content=content, tool_calls=[]))],
+                usage=SimpleNamespace(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+            )
+
+        client = SimpleNamespace(
+            base_url="http://test",
+            chat=SimpleNamespace(completions=SimpleNamespace(create=create)),
+        )
+
+        with (
+            mock.patch(
+                "app.api.ai_assistant.get_credential_for_user",
+                mock.AsyncMock(return_value=credential),
+            ),
+            mock.patch("app.api.decisions.decrypt_config", return_value={"api_key": "k"}),
+            mock.patch("app.api.decisions.build_router_for_credential", return_value=None),
+            mock.patch(
+                "app.services.llm_service.LLMService._get_client",
+                return_value=(client, "OpenAI"),
+            ),
+        ):
+            result = await generate_decision_questions(
+                DecisionQuestionsGenerateRequest(
+                    credential_id=uuid.uuid4(),
+                    model="gpt-test",
+                    prompt="Is it a dog?",
+                ),
+                current_user=mock.MagicMock(id=uuid.uuid4()),
+                db=mock.AsyncMock(),
+            )
+
+        self.assertEqual(len(result.questions), 1)
+        self.assertEqual(result.questions[0].id, "is_dog")
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0]["extra_body"], {"disable_reasoning": True})
+        self.assertNotIn("extra_body", calls[1])
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 import unittest
 import uuid
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi import HTTPException
@@ -142,10 +143,53 @@ class GenerateDataTableSchemaEndpointTests(unittest.IsolatedAsyncioTestCase):
         kwargs = execute_llm.await_args.kwargs
         trace_context = kwargs["trace_context"]
         self.assertEqual(kwargs["model"], "gpt-4o-mini")
+        self.assertEqual(kwargs["extra_body"], {"disable_reasoning": True})
         self.assertEqual(trace_context.user_id, user.id)
         self.assertEqual(trace_context.credential_id, credential.id)
         self.assertEqual(trace_context.source, "data_table_ai")
         self.assertEqual(trace_context.node_label, "AI DataTable Create")
+
+    async def test_generate_schema_recovers_from_disable_reasoning_400(self) -> None:
+        content = '```json\n{"name": "Books", "columns": [{"name": "title"}]}\n```'
+        calls: list[dict] = []
+        exc_400 = Exception("Error code: 400 - Unsupported parameter: disable_reasoning")
+        exc_400.status_code = 400
+
+        def create(**kwargs: object) -> SimpleNamespace:
+            calls.append(dict(kwargs))
+            if len(calls) == 1:
+                raise exc_400
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content=content, tool_calls=[]))],
+                usage=SimpleNamespace(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+            )
+
+        client = SimpleNamespace(
+            base_url="http://test",
+            chat=SimpleNamespace(completions=SimpleNamespace(create=create)),
+        )
+
+        with (
+            patch(
+                "app.api.ai_assistant.get_credential_for_user",
+                AsyncMock(return_value=self._credential()),
+            ),
+            patch("app.api.data_tables.decrypt_config", return_value={"api_key": "x"}),
+            patch(
+                "app.services.llm_service.LLMService._get_client",
+                return_value=(client, "OpenAI"),
+            ),
+        ):
+            result = await generate_data_table_schema(
+                request=_make_request(),
+                current_user=MagicMock(id=uuid.uuid4()),
+                db=AsyncMock(),
+            )
+
+        self.assertEqual(result.name, "Books")
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0]["extra_body"], {"disable_reasoning": True})
+        self.assertNotIn("extra_body", calls[1])
 
     async def test_dedupes_against_existing_columns_in_extend_mode(self) -> None:
         existing = [DataTableColumnDef(name="title", type="string", order=0)]
