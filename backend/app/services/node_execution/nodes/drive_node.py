@@ -220,6 +220,7 @@ def execute(ctx: NodeExecutionContext) -> object:
         import mimetypes as _mimetypes
         import secrets as _secrets
         import urllib.parse as _urllib_parse
+        from email.message import Message as _EmailMessage
 
         from app.config import settings as _settings
 
@@ -235,15 +236,15 @@ def execute(ctx: NodeExecutionContext) -> object:
             cd = _resp.headers.get("content-disposition", "")
             filename = ""
             if cd:
-                for _part in cd.split(";"):
-                    _part = _part.strip()
-                    if _part.lower().startswith("filename="):
-                        filename = _part[len("filename=") :].strip().strip("\"'")
-                        break
+                # Reads filename*=utf-8''… (RFC 6266), which servers send for non-ASCII
+                # names, as well as plain and quoted filename=.
+                _disposition = _EmailMessage()
+                _disposition["content-disposition"] = cd
+                filename = (_disposition.get_filename() or "").strip()
             if not filename:
                 _parsed = _urllib_parse.urlparse(source_url)
                 _url_path = _parsed.path.rstrip("/")
-                filename = _url_path.split("/")[-1] if _url_path else ""
+                filename = _urllib_parse.unquote(_url_path.split("/")[-1]) if _url_path else ""
             if not filename:
                 filename = "downloaded_file"
             filename = _normalize_storage_filename(filename)

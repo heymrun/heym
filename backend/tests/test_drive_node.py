@@ -1376,6 +1376,34 @@ class DriveNodeDownloadUrlTests(unittest.TestCase):
         self.assertEqual(nr["status"], "success")
         self.assertEqual(nr["output"]["filename"], "data.csv")
 
+    def _download_name(self, url: str, content_disposition: str = "") -> str:
+        db = MagicMock()
+        db.__enter__ = MagicMock(return_value=db)
+        db.__exit__ = MagicMock(return_value=False)
+        nr = self._run_download_workflow(
+            {"label": "dl", "driveOperation": "downloadUrl", "driveSourceUrl": url},
+            uuid.uuid4(),
+            db,
+            self._make_http_response(
+                b"%PDF", content_type="application/pdf", content_disposition=content_disposition
+            ),
+            self._make_storage_path(),
+        )
+        self.assertEqual(nr["status"], "success", nr.get("error"))
+        return nr["output"]["filename"]
+
+    def test_download_url_reads_an_rfc_6266_utf8_filename(self) -> None:
+        # What Starlette's FileResponse (and Django) send for a non-ASCII name.
+        name = self._download_name(
+            "https://example.com/download/42",
+            "attachment; filename*=utf-8''M%C3%BCller%20Angebot.pdf",
+        )
+        self.assertEqual(name, "Müller Angebot.pdf")
+
+    def test_download_url_decodes_a_percent_encoded_url_name(self) -> None:
+        name = self._download_name("https://example.com/files/Annual%20Report%202024.pdf")
+        self.assertEqual(name, "Annual Report 2024.pdf")
+
     def test_download_url_rejects_unsafe_content_disposition_filename(self) -> None:
         """Remote filenames cannot escape the generated-file directory."""
         owner_id = uuid.uuid4()
