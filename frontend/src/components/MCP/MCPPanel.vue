@@ -22,16 +22,9 @@ import {
 import type { CredentialListItem } from "@/types/credential";
 
 import MCPChatToolControls from "@/components/MCP/MCPChatToolControls.vue";
-import {
-  buildDefaultCursorDeepLink,
-  buildDefaultMcpConfig,
-  buildNamedServerCursorDeepLink,
-  buildNamedServerMcpConfig,
-  defaultMcpEndpointUrl,
-  namedServerMcpEndpointUrl,
-} from "@/components/MCP/mcpLinks";
 import Button from "@/components/ui/Button.vue";
 import Card from "@/components/ui/Card.vue";
+import { joinOriginAndPath } from "@/lib/appUrl";
 import { cn } from "@/lib/utils";
 import {
   credentialsApi,
@@ -120,7 +113,7 @@ function pinWorkflowToTop(serverId: string, workflowId: string): void {
 
 // Use browser's URL for MCP endpoint instead of backend-provided URL
 const mcpEndpointUrl = computed(() => {
-  return defaultMcpEndpointUrl(window.location.origin);
+  return joinOriginAndPath(window.location.origin, "/api/mcp");
 });
 
 const maskedApiKey = computed(() => {
@@ -162,7 +155,8 @@ async function loadLLMCredentials(): Promise<void> {
 }
 
 function serverEndpointUrl(server: MCPServerItem): string {
-  return namedServerMcpEndpointUrl(window.location.origin, server);
+  const endpoint = server.endpoint_path === "sse" ? "sse" : "mcp";
+  return joinOriginAndPath(window.location.origin, `/api/mcp/servers/${server.id}/${endpoint}`);
 }
 
 async function loadNamedServers(): Promise<void> {
@@ -231,19 +225,29 @@ function toggleServerKeyVisibility(serverId: string): void {
 
 function serverMcpConfigJson(server: MCPServerItem): string {
   return JSON.stringify(
-    buildNamedServerMcpConfig(window.location.origin, server, serverKey(server) ?? "YOUR_API_KEY"),
+    {
+      mcpServers: {
+        [server.name.toLowerCase().replace(/\s+/g, "_")]: {
+          url: serverEndpointUrl(server),
+          headers: {
+            "X-MCP-Key": serverKey(server) ?? "YOUR_API_KEY",
+          },
+        },
+      },
+    },
     null,
     2,
   );
 }
 
 function addServerToCursor(server: MCPServerItem): void {
+  const mcpConfig = {
+    url: serverEndpointUrl(server),
+    headers: { "X-MCP-Key": serverKey(server) ?? "YOUR_API_KEY" },
+  };
+  const configBase64 = btoa(JSON.stringify(mcpConfig));
   window.open(
-    buildNamedServerCursorDeepLink(
-      window.location.origin,
-      server,
-      serverKey(server) ?? "YOUR_API_KEY",
-    ),
+    `cursor://anysphere.cursor-deeplink/mcp/install?name=${encodeURIComponent(server.name)}&config=${configBase64}`,
     "_self",
   );
 }
@@ -376,17 +380,30 @@ function openWorkflow(event: Event, workflowId: string): void {
 
 const mcpConfigJson = computed(() => {
   return JSON.stringify(
-    buildDefaultMcpConfig(window.location.origin, revealedApiKey.value || "YOUR_API_KEY"),
+    {
+      mcpServers: {
+        heym: {
+          url: mcpEndpointUrl.value,
+          headers: {
+            "X-MCP-Key": revealedApiKey.value || "YOUR_API_KEY",
+          },
+        },
+      },
+    },
     null,
     2,
   );
 });
 
 const cursorDeepLink = computed(() => {
-  return buildDefaultCursorDeepLink(
-    window.location.origin,
-    revealedApiKey.value || "YOUR_API_KEY",
-  );
+  const mcpConfig = {
+    url: mcpEndpointUrl.value,
+    headers: {
+      "X-MCP-Key": revealedApiKey.value || "YOUR_API_KEY",
+    },
+  };
+  const configBase64 = btoa(JSON.stringify(mcpConfig));
+  return `cursor://anysphere.cursor-deeplink/mcp/install?name=${encodeURIComponent("heym")}&config=${configBase64}`;
 });
 
 function addToCursor(): void {

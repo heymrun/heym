@@ -458,6 +458,7 @@ async def named_server_sse(
 
 
 @router.post("/{server_id}/mcp", response_model=None)
+@router.post("/{server_id}/mcp/", response_model=None, include_in_schema=False)
 @router.post("/{server_id}/sse", response_model=None)
 async def named_server_sse_post(
     server_id: uuid.UUID,

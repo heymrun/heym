@@ -19,11 +19,11 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
   {
     releaseId: "2026.31",
     publishedAt: new Date("2026-11-14T12:00:00Z"),
-    headline: "Revert a widget Chat changed",
+    headline: "Revert AI widget changes, and standardized /mcp server endpoints",
     releaseTour: {
       label: "New in Heym", introTitle: "New in this release",
-      introDescription: "Undo an AI change to a dashboard widget in one click.",
-      tourEnabled: false,
+      introDescription: "Undo an AI change to a dashboard widget in one click, and connect new MCP clients through /mcp.",
+      tourEnabled: true,
       sectionOrder: ["chat-widget-revert", "mcp-endpoint"],
     },
     sections: [
@@ -41,10 +41,10 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
       {
         id: "mcp-endpoint", title: "Standardized /mcp endpoint for new MCP servers",
         publishedAt: new Date("2026-11-14T14:00:00Z"),
-        blocks: [{ type: "prose", markdown: "New MCP connections now use the standardized `/api/mcp` and `/api/mcp/servers/{id}/mcp` Streamable HTTP endpoints. Existing named servers and client configurations continue working seamlessly at `/api/mcp/servers/{id}/sse` without manual migration or broken workflows. Generated configurations and Cursor deep links automatically point to the correct endpoint path." }],
+        blocks: [{ type: "prose", markdown: "New MCP servers get an address ending in `/mcp`. Servers you already have keep their `/sse` address, so connected clients keep working. Copy JSON and Add to Cursor always use the right address." }],
         tour: {
-          description: "New MCP connections use the standardized /mcp endpoint, while existing named servers continue working on /sse with zero disruption.",
-          useCases: ["Connect modern Streamable HTTP MCP clients to /api/mcp", "Create dedicated named servers with the new /mcp route", "Keep existing /sse clients and Cursor integrations working without changes"],
+          description: "New MCP servers get an address ending in /mcp. Servers you already have keep their /sse address, so connected clients keep working. Copy JSON and Add to Cursor always use the right address.",
+          useCases: ["Connect MCP clients to /api/mcp", "Create named servers with the new /mcp route", "Keep existing /sse clients and Cursor integrations working as before"],
           tourVisual: "mcp-endpoint",
           docTarget: { categoryId: "tabs", slug: "mcp-tab", title: "MCP / A2A" },
         },

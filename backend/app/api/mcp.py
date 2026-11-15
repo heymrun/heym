@@ -1703,6 +1703,7 @@ async def handle_mcp_message(
 
 
 @router.post("", response_model=None)
+@router.post("/", response_model=None, include_in_schema=False)
 @router.post("/sse", response_model=None)
 async def mcp_sse_post_endpoint(
     request: Request,

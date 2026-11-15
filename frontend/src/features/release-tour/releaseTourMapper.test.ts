@@ -381,6 +381,8 @@ describe("shipped release registry", () => {
     const catalog = buildReleaseTourCatalog(RELEASE_REGISTRY);
 
     expect(catalog?.slides.map((slide) => slide.id)).toEqual([
+      "mcp-endpoint",
+      "chat-widget-revert",
       "rag-media-upload",
       "decision-reranker",
       "voice-transcribe",
