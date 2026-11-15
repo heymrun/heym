@@ -125,15 +125,24 @@ class UploadRouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(raised.exception.status_code, 409)
         self.enqueue.assert_not_awaited()
 
-    async def test_override_deletes_the_old_source_after_reading_the_new_one(self) -> None:
+    async def test_override_deletes_the_old_source_after_writing_the_new_one(self) -> None:
         order: list[str] = []
         self.service.delete_by_source.side_effect = lambda *_: order.append("delete")
         self.service.insert_batch.side_effect = lambda *_: order.append("insert") or ["p"]
 
         await self._upload("faq.md", b"# FAQ", override=True)
 
-        self.assertEqual(order, ["delete", "insert"])
-        self.service.delete_by_source.assert_called_once_with("docs", "faq.md")
+        self.assertEqual(order, ["insert", "delete"])
+        self.service.delete_by_source.assert_called_once_with("docs", "faq.md", ["p"])
+
+    async def test_a_failed_embed_keeps_the_old_source(self) -> None:
+        self.service.insert_batch.side_effect = RuntimeError("Rate limit reached")
+
+        with self.assertRaises(HTTPException) as raised:
+            await self._upload("faq.md", b"# FAQ", override=True)
+
+        self.assertEqual(raised.exception.status_code, 500)
+        self.service.delete_by_source.assert_not_called()
 
     async def test_a_read_error_keeps_the_old_source(self) -> None:
         with self.assertRaises(HTTPException) as raised:

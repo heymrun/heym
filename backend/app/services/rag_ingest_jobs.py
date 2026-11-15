@@ -180,14 +180,16 @@ async def _process(job_id: uuid.UUID) -> None:
 def _write_chunks(target: _Target, filename: str, chunks: list[TextChunk], override: bool) -> None:
     """Replace a same-named source only now, so the old one stayed searchable meanwhile."""
     service = create_vector_store_service_for_credential(target.credential_type, target.config)
-    if override:
-        service.delete_by_source(target.collection, filename)
+    point_ids: list[str] = []
     if chunks:
-        service.insert_batch(
+        point_ids = service.insert_batch(
             target.collection,
             [chunk.text for chunk in chunks],
             [chunk.metadata for chunk in chunks],
         )
+    # After the write, so a failed embed keeps the old version.
+    if override:
+        service.delete_by_source(target.collection, filename, point_ids)
 
 
 async def _mark_failed(job_id: uuid.UUID, message: str) -> None:

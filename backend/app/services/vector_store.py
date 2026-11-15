@@ -174,7 +174,9 @@ class VectorStoreBackend(Protocol):
         collection_name: str,
         files: list[tuple[str, int]],
     ) -> list[ExistingFile]: ...
-    def delete_by_source(self, collection_name: str, source: str) -> int: ...
+    def delete_by_source(
+        self, collection_name: str, source: str, keep_ids: list[str] | None = None
+    ) -> int: ...
     def clone_collection(
         self,
         source_collection: str,
@@ -616,7 +618,10 @@ class QdrantVectorStoreService:
 
         return existing
 
-    def delete_by_source(self, collection_name: str, source: str) -> int:
+    def delete_by_source(
+        self, collection_name: str, source: str, keep_ids: list[str] | None = None
+    ) -> int:
+        """Delete the source's points, except ``keep_ids`` (a replacement just written)."""
         if not self.collection_exists(collection_name):
             return 0
 
@@ -628,7 +633,10 @@ class QdrantVectorStoreService:
             if not source
             else FieldCondition(key="source", match=MatchValue(value=source))
         )
-        delete_filter = Filter(must=[condition])
+        delete_filter = Filter(
+            must=[condition],
+            must_not=[HasIdCondition(has_id=list(keep_ids))] if keep_ids else None,
+        )
 
         self.client.delete(
             collection_name=collection_name,
