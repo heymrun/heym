@@ -338,6 +338,51 @@ class TestMrkdwn(unittest.TestCase):
         self.assertEqual(slack.to_slack_mrkdwn(text), text)
 
 
+class TestLongMessages(unittest.TestCase):
+    """Slack shows a message's blocks, not its text: a long message must not lose its end."""
+
+    CLAUSES = "\n".join(f"{n}. Batch {n} ships within 10 working days." for n in range(1, 121))
+    MESSAGE = f"{CLAUSES}\nTotal: 98,400 EUR"
+
+    @staticmethod
+    def _shown(blocks: list[dict]) -> str:
+        return "\n".join(b["text"]["text"] for b in blocks if b["type"] == "section")
+
+    def test_a_long_message_is_split_at_line_breaks_into_full_sections(self) -> None:
+        blocks = slack.sections(self.MESSAGE)
+
+        self.assertGreater(len(blocks), 1)
+        self.assertTrue(all(len(b["text"]["text"]) <= 3000 for b in blocks))
+        self.assertEqual(self._shown(blocks), self.MESSAGE)
+
+    def test_a_short_message_stays_one_section(self) -> None:
+        self.assertEqual(slack.sections("Ship it?"), [slack.section("Ship it?")])
+        self.assertEqual(slack.sections(""), [slack.section(" ")])
+
+    def test_one_line_longer_than_a_section_is_cut_into_pieces(self) -> None:
+        line = "x" * 7000
+        blocks = slack.sections(f"intro\n{line}")
+
+        self.assertEqual("".join(b["text"]["text"] for b in blocks), f"intro{line}")
+        self.assertTrue(all(len(b["text"]["text"]) <= 3000 for b in blocks))
+
+    def test_a_huge_message_stays_under_slacks_block_limit(self) -> None:
+        self.assertLessEqual(len(slack.sections("y" * 300_000)), 45)
+
+    def test_every_block_message_shows_the_whole_text_before_its_controls(self) -> None:
+        buttons = [{"label": "Sign", "value": "sign", "style": ""}]
+        for blocks in (
+            slack.approval_blocks(self.MESSAGE, "k"),
+            slack.button_blocks(self.MESSAGE, "k", buttons),
+            slack.form_blocks(self.MESSAGE, "k", "Open form"),
+            slack.answered_blocks(self.MESSAGE, "Approved by Ann"),
+            slack.outcome_attachment("success", "", self.MESSAGE)["blocks"],
+        ):
+            with self.subTest(last=blocks[-1]["type"]):
+                self.assertTrue(self._shown(blocks).endswith("Total: 98,400 EUR"))
+                self.assertIn(blocks[-1]["type"], ("actions", "context", "section"))
+
+
 class TestFormsAndOutputs(unittest.TestCase):
     def test_form_modal_and_submitted_values(self) -> None:
         fields = slack.normalize_form_fields(
