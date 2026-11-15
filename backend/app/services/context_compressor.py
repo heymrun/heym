@@ -287,6 +287,12 @@ def _tail_start(messages: list[dict[str, Any]], cut: int) -> int:
     return cut
 
 
+def _usage_count(usage: Any, field: str) -> int:
+    """One token count from a provider's usage object, or 0 when it reports none."""
+    value = getattr(usage, field, None)
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
 async def maybe_compress_messages(
     messages: list[dict[str, Any]],
     model: str,
@@ -384,6 +390,10 @@ async def maybe_compress_messages(
         logger.warning("Context compression LLM call failed: %s", exc)
         return messages, None
     compress_elapsed_ms = round((time.time() - compress_start) * 1000, 2)
+    # The summary is a billed model call on the run's credential: report what it used.
+    usage = getattr(response, "usage", None)
+    prompt_tokens = _usage_count(usage, "prompt_tokens")
+    completion_tokens = _usage_count(usage, "completion_tokens")
 
     compressed_msg: dict[str, Any] = {
         "role": "assistant",
@@ -414,6 +424,8 @@ async def maybe_compress_messages(
         "tokens_before": tokens_before,
         "tokens_after": tokens_after,
         "elapsed_ms": compress_elapsed_ms,
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
     }
     return result_messages, info
 

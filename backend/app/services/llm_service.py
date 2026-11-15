@@ -1636,6 +1636,10 @@ class LLMService:
                 )
                 turn_history = history
             if _compression_info is not None:
+                # The summary call is billed like any turn: count it in the run's usage, and
+                # so in the invocation's trace row (this row stays token-free: no double count).
+                total_prompt_tokens += int(_compression_info.get("prompt_tokens") or 0)
+                total_completion_tokens += int(_compression_info.get("completion_tokens") or 0)
                 _comp_entry: dict[str, Any] = {
                     "name": "_context_compression",
                     "arguments": {

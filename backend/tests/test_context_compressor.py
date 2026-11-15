@@ -406,3 +406,83 @@ class TestFitTextToTokenBudget(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CompressionUsageTests(unittest.IsolatedAsyncioTestCase):
+    """The summary call is a billed model call: its tokens count in the run's usage."""
+
+    async def test_info_reports_the_summary_calls_usage(self) -> None:
+        from app.services.context_compressor import maybe_compress_messages
+
+        choice = MagicMock()
+        choice.message.content = "Summary."
+        client = MagicMock()
+        client.chat.completions.create.return_value = MagicMock(
+            choices=[choice], usage=MagicMock(prompt_tokens=900, completion_tokens=40)
+        )
+
+        _, info = await maybe_compress_messages(
+            _make_messages(n_middle=3), model="gpt-4o", client=client, context_limit_tokens=1
+        )
+
+        assert info is not None
+        self.assertEqual((info["prompt_tokens"], info["completion_tokens"]), (900, 40))
+
+    async def test_the_agents_usage_includes_compression(self) -> None:
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        from app.db.models import CredentialType
+        from app.services.llm_service import LLMService
+
+        def turn(content: str | None, call_id: str | None) -> SimpleNamespace:
+            tool_calls = (
+                [
+                    SimpleNamespace(
+                        id=call_id,
+                        type="function",
+                        function=SimpleNamespace(name="lookup", arguments='{"q":"x"}'),
+                    )
+                ]
+                if call_id
+                else None
+            )
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(message=SimpleNamespace(content=content, tool_calls=tool_calls))
+                ],
+                usage=SimpleNamespace(prompt_tokens=100, completion_tokens=10),
+            )
+
+        turns = [turn(None, f"call-{i}") for i in range(4)] + [turn("done", None)]
+        summaries: list[int] = []
+
+        def create(**kwargs: object) -> SimpleNamespace:
+            if kwargs.get("max_tokens") == 1024 and not kwargs.get("tools"):
+                summaries.append(1)
+                return SimpleNamespace(
+                    choices=[SimpleNamespace(message=SimpleNamespace(content="Summary."))],
+                    usage=SimpleNamespace(prompt_tokens=900, completion_tokens=40),
+                )
+            return turns.pop(0)
+
+        client = SimpleNamespace(
+            base_url="http://test",
+            chat=SimpleNamespace(completions=SimpleNamespace(create=create)),
+        )
+        service = LLMService(CredentialType.openai, "test-key")
+        with (
+            patch.object(service, "_get_client", return_value=(client, "Test")),
+            patch("app.services.context_compressor.get_context_limit", return_value=1),
+        ):
+            result = await service.execute_with_tools(
+                model="gpt-4o",
+                system_instruction="sys",
+                user_message="go",
+                tools=[{"name": "lookup", "parameters": {"type": "object"}}],
+                tool_executor=lambda *_args: {"rows": "x" * 400},
+            )
+
+        self.assertTrue(summaries)
+        self.assertEqual(result["usage"]["prompt_tokens"], 5 * 100 + 900 * len(summaries))
+        self.assertEqual(result["usage"]["completion_tokens"], 5 * 10 + 40 * len(summaries))
