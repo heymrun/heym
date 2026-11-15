@@ -65,9 +65,7 @@ def execute(ctx: NodeExecutionContext) -> object:
                         resolved_value = parsed
                 elif isinstance(resolved_value, bool) or not isinstance(resolved_value, int):
                     # A whole number stays an int, as it does when typed as text: 6, not 6.0.
-                    val = float(resolved_value)
-                    if math.isfinite(val):
-                        resolved_value = val
+                    resolved_value = float(resolved_value)
             except (ValueError, TypeError):
                 pass
         elif var_type == "boolean":
