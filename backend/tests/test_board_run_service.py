@@ -1,4 +1,5 @@
 import json
+import threading
 import unittest
 import uuid
 from datetime import datetime, timezone
@@ -356,6 +357,38 @@ class TestRunCardChain(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([r.status for r in runs], ["failed", "skipped"])
         self.assertIn("boom", runs[0].error)
         self.assertEqual(card.run_status, "failed")
+
+    async def test_allow_downstream_is_joined_off_the_event_loop(self):
+        """Joining waits for the whole branch; on the loop it would stall the whole process."""
+        card, board, session, factory, links, context = _chain_env()
+        join_threads: list[str] = []
+
+        def fake_execute(**_kwargs):
+            result = _success_result({"text": "early"})
+            result.allow_downstream_pending = True
+            result.join_allow_downstream = lambda: join_threads.append(
+                threading.current_thread().name
+            )
+            return result
+
+        patches = _runner_patches(context, fake_execute)
+        for patcher in patches:
+            patcher.start()
+        self.addCleanup(lambda: [p.stop() for p in reversed(patches)])
+
+        with patch.object(board_run_service, "_auto_advance", AsyncMock()):
+            await board_run_service._run_chain(
+                card_id=card.id,
+                board_id=board.id,
+                column_id=card.column_id,
+                links=links,
+                move=None,
+                rerun=False,
+                session_factory=factory,
+            )
+
+        self.assertEqual(len(join_threads), len(links))
+        self.assertNotIn(threading.current_thread().name, join_threads)
 
     async def test_allow_downstream_failure_updates_history_analytics_and_chain(self):
         card, board, session, factory, links, context = _chain_env()

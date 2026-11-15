@@ -330,7 +330,8 @@ class CronScheduler:
                 return
             if result.allow_downstream_pending:
                 try:
-                    result.join_allow_downstream()
+                    # Off the loop too: joining blocks until the branch finishes.
+                    await asyncio.to_thread(result.join_allow_downstream)
                 except WorkflowTimeoutError as exc:
                     logger.warning("Cron run %s allowDownstream timed out: %s", execution_id, exc)
                     result.status = "error"
