@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import math
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -113,44 +114,40 @@ def _score_contains(actual: str, expected: str) -> str:
     return "100" if e in a else "0"
 
 
+# Keys of a verdict, in self-scoring and in a separate judge's answer.
+_VERDICT_KEYS = frozenset({"score", "actual_answer", "answer", "explanation"})
+# Where a JSON object can start: "{" before a key or "}". Trying only these keeps the scan
+# fast on long, cut-off code answers full of braces.
+_OBJECT_START = re.compile(r'\{\s*["}]')
+
+
 def _find_judge_payload(text: str) -> dict | None:
     """Find the JSON object a judge answered with.
 
     Handles what models actually send back: plain JSON, JSON fenced in markdown, and
-    the object nested under a "response" or "output" key.
+    the object nested under a "response" or "output" key. Each "{" is decoded as JSON in
+    place, so a code fence or a brace inside the answer's own strings cannot cut the
+    object short. The first object that carries a verdict key wins, else the first object.
     """
     t = (text or "").strip()
-    # Strip markdown code blocks (```json ... ``` or ``` ... ```)
-    if "```" in t:
-        for marker in ("```json", "```"):
-            if marker in t:
-                parts = t.split(marker, 2)
-                if len(parts) >= 2:
-                    # Content between marker and next ```
-                    block = parts[1].split("```")[0].strip()
-                    if block:
-                        t = block
-                    break
-
-    start = t.find("{")
-    if start < 0:
-        return None
-    depth = 0
-    for i, c in enumerate(t[start:], start):
-        if c == "{":
-            depth += 1
-        elif c == "}":
-            depth -= 1
-            if depth == 0:
-                try:
-                    data = json.loads(t[start : i + 1])
-                except (json.JSONDecodeError, ValueError, TypeError):
-                    continue
-                if isinstance(data, dict):
-                    inner = data.get("response") or data.get("output") or data
-                    if isinstance(inner, dict):
-                        return inner
-    return None
+    decoder = json.JSONDecoder()
+    first: dict | None = None
+    match = _OBJECT_START.search(t)
+    while match:
+        try:
+            data, end = decoder.raw_decode(t, match.start())
+        except ValueError:
+            match = _OBJECT_START.search(t, match.start() + 1)
+            continue
+        if isinstance(data, dict):
+            inner = data.get("response") or data.get("output") or data
+            if isinstance(inner, dict):
+                if _VERDICT_KEYS & inner.keys():
+                    return inner
+                if first is None:
+                    first = inner
+        match = _OBJECT_START.search(t, end)
+    return first
 
 
 def _parse_combined_judge_response(text: str) -> tuple[str, str, str | None]:
