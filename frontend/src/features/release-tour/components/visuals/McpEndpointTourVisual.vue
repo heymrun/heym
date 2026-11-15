@@ -100,7 +100,7 @@ const caption = computed<string>(() =>
           <span>Config JSON</span>
         </div>
         <div class="break-all text-[9.5px] leading-snug text-foreground">
-          "url": "http://localhost:4017{{ currentState.path }}"
+          "url": "https://heym.example.com{{ currentState.path }}"
         </div>
       </div>
     </div>
