@@ -94,6 +94,8 @@ def _check_unique_sync(
 
 def execute(ctx: NodeExecutionContext) -> object:
     """Execute the dataTable node."""
+    from app.api.data_tables import _parse_number_text
+
     _workflow_executor = import_module("app.services.workflow_executor")
     _build_data_table_filter_clauses = _workflow_executor._build_data_table_filter_clauses
     _coerce_row_data = _workflow_executor._coerce_row_data
@@ -133,7 +135,7 @@ def execute(ctx: NodeExecutionContext) -> object:
                 col_type = col.get("type", "string")
                 try:
                     if col_type == "number" and isinstance(value, str):
-                        result[key] = float(value) if "." in value else int(value)
+                        result[key] = _parse_number_text(value)
                     elif col_type == "boolean":
                         if isinstance(value, str):
                             result[key] = value.lower() in ("true", "1", "yes")
