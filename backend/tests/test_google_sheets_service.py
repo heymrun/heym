@@ -134,6 +134,27 @@ class TestReadRange(unittest.TestCase):
         )
         self.assertEqual(result["total"], 2)
 
+    def test_read_range_with_header_returns_max_rows_from_any_start_row(self) -> None:
+        """Max Rows counts data rows whether Start Row is 1 (the default) or 2 or later."""
+        sheet = [["Name"]] + [[f"User{i}"] for i in range(1, 8)]  # rows 2-8 hold User1-7
+
+        def get(url: str, headers: dict) -> MagicMock:
+            end_row = int(url.rsplit(":Z", 1)[1])
+            response = MagicMock()
+            response.json.return_value = {"values": sheet[:end_row]}
+            response.raise_for_status = MagicMock()
+            return response
+
+        svc = self._make_service()
+        cases = {1: ["User1", "User2", "User3"], 2: ["User1", "User2", "User3"]}
+        cases[4] = ["User3", "User4", "User5"]
+        for start_row, expected in cases.items():
+            with self.subTest(start_row=start_row), patch("httpx.get", side_effect=get):
+                result = svc.read_range(
+                    "spreadsheet-id", "Sheet1", start_row=start_row, max_rows=3, has_header=True
+                )
+            self.assertEqual([row["Name"] for row in result["rows"]], expected)
+
     def test_read_range_max_rows_zero_fetches_all(self) -> None:
         """max_rows=0 means fetch all rows — no end row in A1 notation."""
         svc = self._make_service()
