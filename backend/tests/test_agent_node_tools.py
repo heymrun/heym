@@ -151,7 +151,7 @@ class TestBuildNodeToolSchemas(unittest.TestCase):
         for node_id, fields in fields_by_node.items():
             self.assertEqual(fields_by_tool[node_id], set(fields))
 
-    def test_legacy_google_meet_busy_titles_aliased_in_schema(self) -> None:
+    def test_legacy_google_meet_busy_titles_remain_in_schema(self) -> None:
         agent_id = "agent-1"
         meet_id = "meet-1"
         nodes = {
@@ -169,9 +169,9 @@ class TestBuildNodeToolSchemas(unittest.TestCase):
 
         schemas = ex._build_node_tool_schemas(agent_id)
         self.assertEqual(len(schemas), 1)
-        self.assertIn("gmIncludeBusyDetails", schemas[0]["parameters"]["properties"])
-        self.assertNotIn("gmIncludeBusyTitles", schemas[0]["parameters"]["properties"])
-        self.assertEqual(schemas[0]["parameters"]["required"], ["gmIncludeBusyDetails"])
+        self.assertIn("gmIncludeBusyTitles", schemas[0]["parameters"]["properties"])
+        self.assertNotIn("gmIncludeBusyDetails", schemas[0]["parameters"]["properties"])
+        self.assertEqual(schemas[0]["parameters"]["required"], ["gmIncludeBusyTitles"])
 
 
 class TestExecuteNodeTool(unittest.TestCase):
@@ -223,7 +223,7 @@ class TestExecuteNodeTool(unittest.TestCase):
         # Original data restored after execution
         self.assertEqual(ex.nodes[http_id]["data"]["curl"], "curl https://fixed.com")
 
-    def test_legacy_google_meet_busy_titles_aliased_in_execution(self) -> None:
+    def test_legacy_google_meet_busy_titles_are_passed_to_node(self) -> None:
         from app.services.workflow_executor import NodeResult
 
         meet_id = "meet-1"
@@ -253,9 +253,10 @@ class TestExecuteNodeTool(unittest.TestCase):
 
         ex.execute_node = fake_execute_node  # type: ignore[assignment]
         tool_def = {"_source": "node_tool", "_node_id": meet_id}
-        ex._execute_node_tool(tool_def, {"gmIncludeBusyDetails": True})
+        ex._execute_node_tool(tool_def, {"gmIncludeBusyTitles": True})
 
-        self.assertIs(captured_data[0]["gmIncludeBusyDetails"], True)
+        self.assertIs(captured_data[0]["gmIncludeBusyTitles"], True)
+        self.assertNotIn("gmIncludeBusyDetails", captured_data[0])
 
     def test_returns_error_dict_on_node_failure(self) -> None:
         from app.services.workflow_executor import NodeResult
