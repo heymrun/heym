@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from zoneinfo import ZoneInfo
 
+from app.config import settings as cron_settings
 from app.db.models import ExecutionHistory
 from app.services.cron_scheduler import CronScheduler
 from app.services.workflow_executor import (
@@ -571,12 +572,15 @@ class CronLongRunTests(unittest.IsolatedAsyncioTestCase):
 
     DAY = datetime(2026, 11, 16, tzinfo=timezone.utc)
 
-    def _workflow(self, expr: str) -> SimpleNamespace:
+    def _workflow(self, *exprs: str) -> SimpleNamespace:
         return SimpleNamespace(
             id=uuid.uuid4(),
             owner_id=uuid.uuid4(),
             name="Cron workflow",
-            nodes=[{"id": "n1", "type": "cron", "data": {"cronExpression": expr}}],
+            nodes=[
+                {"id": f"n{i}", "type": "cron", "data": {"cronExpression": expr}}
+                for i, expr in enumerate(exprs, start=1)
+            ],
             edges=[],
             concurrency_limit=None,
         )
@@ -585,6 +589,7 @@ class CronLongRunTests(unittest.IsolatedAsyncioTestCase):
         """Run `script(pass_at, release)` with a fake clock; return (workflow, start) pairs."""
         clock = {"now": self.DAY}
         started: list[tuple[uuid.UUID, datetime]] = []
+        self.started = started
         gates = {workflow.id: asyncio.Event() for workflow in workflows}
 
         class _Clock(datetime):
@@ -666,6 +671,51 @@ class CronLongRunTests(unittest.IsolatedAsyncioTestCase):
                 self.DAY.replace(hour=9, minute=1, second=40),
             ],
         )
+
+    async def test_two_cron_nodes_due_in_one_pass_both_run_in_order(self) -> None:
+        """The second node's slot is claimed in the same pass, not left to expire."""
+        two_triggers = self._workflow("0 9 * * *", "0 9 * * *")
+
+        async def script(scheduler, pass_at, release) -> None:
+            await pass_at(9, 0, 10)
+            self.assertEqual(len(self.started), 1)  # in order: the second waits
+            await pass_at(9, 20, 0)  # first run outlasts the grace window
+            await release(two_triggers)
+            await pass_at(9, 20, 30)
+
+        started = await self._run([two_triggers], script)
+
+        self.assertEqual(
+            started,
+            [
+                (two_triggers.id, self.DAY.replace(hour=9, minute=0, second=10)),
+                (two_triggers.id, self.DAY.replace(hour=9, minute=20, second=0)),
+            ],
+        )
+
+    async def test_parallel_runs_are_capped(self) -> None:
+        workflows = [self._workflow("0 9 * * *") for _ in range(3)]
+
+        async def script(_scheduler, pass_at, release) -> None:
+            await pass_at(9, 0, 10)
+            self.assertEqual([w for w, _ in self.started], [w.id for w in workflows[:2]])
+            await release(workflows[0])
+            self.assertEqual([w for w, _ in self.started], [w.id for w in workflows])
+
+        with patch.object(cron_settings, "cron_max_parallel_runs", 2):
+            await self._run(workflows, script)
+
+    async def test_one_parallel_run_behaves_like_one_at_a_time(self) -> None:
+        workflows = [self._workflow("0 9 * * *") for _ in range(2)]
+
+        async def script(_scheduler, pass_at, release) -> None:
+            await pass_at(9, 0, 10)
+            self.assertEqual([w for w, _ in self.started], [workflows[0].id])
+            await release(workflows[0])
+            self.assertEqual([w for w, _ in self.started], [w.id for w in workflows])
+
+        with patch.object(cron_settings, "cron_max_parallel_runs", 1):
+            await self._run(workflows, script)
 
     async def test_stop_cancels_a_run_in_progress(self) -> None:
         long_run = self._workflow("0 9 * * *")

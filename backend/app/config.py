@@ -63,6 +63,8 @@ class Settings(BaseSettings):
     # How late a cron slot may still run. Protects against a scheduler that was
     # paused (leadership handoff, restart, host suspend) firing a whole backlog.
     cron_misfire_grace_seconds: int = 600
+    # How many cron runs may be in flight at once; each holds a database connection.
+    cron_max_parallel_runs: int = 4
     oauth_access_token_expire_seconds: int = 3600
     oauth_refresh_token_expire_days: int = 30
     oauth_auth_code_expire_minutes: int = 10
