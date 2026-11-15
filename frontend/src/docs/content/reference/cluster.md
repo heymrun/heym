@@ -133,7 +133,7 @@ Nothing about this appears on a single-instance install: the fields are empty, n
 
 **If a worker dies mid-run**, its heartbeat goes stale and the leader's existing recovery sweep re-runs the execution on a live instance. The queue row it had claimed is retired separately: once no active execution exists for it and a two-minute grace has passed, the leader fails the row and wakes whoever was waiting on the result. Age alone is never the trigger, so a legitimately long run is left alone; and the row is failed rather than requeued, because recovery already owns the rerun and requeueing would run the same workflow twice.
 
-**If main goes down**, cron keeps firing from a worker and distributable runs keep executing. Runs that need main queue up and wait, and drain when it returns — but only within the misfire grace window (`HEYM_CRON_MISFIRE_GRACE_SECONDS`, 600 seconds by default). Anything older is closed as skipped, with the reason recorded, rather than replaying hours of backlog at once.
+**If main goes down**, cron keeps firing from a worker and distributable runs keep executing. Runs that need main queue up and wait, and drain when it returns — but only within the misfire grace window (`CRON_MISFIRE_GRACE_SECONDS`, 600 seconds by default). Anything older is closed as skipped, with the reason recorded, rather than replaying hours of backlog at once.
 
 The UI, the API, MCP and the editor are unavailable while main is down, because ingress points there.
 

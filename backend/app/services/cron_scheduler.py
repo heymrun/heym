@@ -60,6 +60,11 @@ class CronScheduler:
         self._running = False
         self._task: asyncio.Task | None = None
         self._last_check: dict[str, datetime] = {}
+        # Claimed slots run as tasks so one long run never holds up the pass: other
+        # workflows' slots, alerts and queue maintenance are checked meanwhile.
+        self._slot_runs: dict[uuid.UUID, asyncio.Task] = {}
+        # Each run in flight holds a database connection on the leader, so cap them.
+        self._parallel_runs = asyncio.Semaphore(max(1, settings.cron_max_parallel_runs))
         self._last_cleanup_date: str | None = None
         self._last_portal_session_cleanup_date: str | None = None
         self._last_workflow_version_cleanup_date: str | None = None
@@ -86,6 +91,10 @@ class CronScheduler:
                 await self._task
             except asyncio.CancelledError:
                 pass
+        slot_runs = list(self._slot_runs.values())
+        for run in slot_runs:
+            run.cancel()
+        await asyncio.gather(*slot_runs, return_exceptions=True)
         logger.info("Cron scheduler stopped")
 
     async def _run_loop(self) -> None:
@@ -121,6 +130,11 @@ class CronScheduler:
             now = datetime.now(tz)
 
             for workflow in workflows:
+                if workflow.id in self._slot_runs:
+                    # One run per workflow at a time, as when the pass waited for it:
+                    # its next slots stay due until this run ends.
+                    continue
+                claimed_runs = 0
                 cron_nodes = self._find_cron_nodes(workflow.nodes)
                 for node in cron_nodes:
                     cron_expr = node.get("data", {}).get("cronExpression", "")
@@ -147,7 +161,7 @@ class CronScheduler:
                             # risk a duplicate.
                             self.mark_slot_handled(node_key, slot)
                             if claimed:
-                                await self._execute_workflow(db, workflow)
+                                claimed_runs += 1
                             else:
                                 logger.debug(
                                     "Cron slot %s for %s already claimed by another worker",
@@ -161,6 +175,10 @@ class CronScheduler:
                             node.get("id"),
                             e,
                         )
+                if claimed_runs:
+                    # Cron nodes of one workflow due in the same pass run one after
+                    # another in a single task, as the pass used to run them.
+                    self._start_slot_run(workflow, claimed_runs)
 
     async def _get_workflows_with_cron(self, db: AsyncSession) -> list[Workflow]:
         result = await db.execute(select(Workflow))
@@ -229,6 +247,31 @@ class CronScheduler:
     def mark_slot_handled(self, node_key: str, slot: datetime) -> None:
         """Record a slot as settled for this process so later passes skip it."""
         self._last_check[node_key] = slot
+
+    def _start_slot_run(self, workflow: Workflow, runs: int = 1) -> None:
+        """Run claimed slots without making the scheduler pass wait for them."""
+        task = asyncio.create_task(self._run_slot(workflow, runs))
+        self._slot_runs[workflow.id] = task
+
+        def _forget(done: asyncio.Task, workflow_id: uuid.UUID = workflow.id) -> None:
+            if self._slot_runs.get(workflow_id) is done:
+                del self._slot_runs[workflow_id]
+
+        task.add_done_callback(_forget)
+
+    async def _run_slot(self, workflow: Workflow, runs: int = 1) -> None:
+        """Execute claimed slots in order, each in its own session.
+
+        The pass's session closes first. Waits for a free place under
+        ``cron_max_parallel_runs`` before opening a session.
+        """
+        async with self._parallel_runs:
+            for _ in range(runs):
+                try:
+                    async with async_session_maker() as db:
+                        await self._execute_workflow(db, workflow)
+                except Exception:
+                    logger.exception("Cron run for workflow %s failed", workflow.id)
 
     async def _execute_workflow(self, db: AsyncSession, workflow: Workflow) -> None:
         logger.info("Executing workflow %s via cron trigger", workflow.id)
