@@ -38,13 +38,24 @@ class ConvertImageTests(unittest.TestCase):
         self.assertIsInstance(out_bytes, bytes)
         self.assertEqual(img.save.call_args.kwargs["format"], "JPEG")
 
-    def test_rgba_is_flattened_before_jpeg(self) -> None:
-        img = MagicMock()
-        img.mode = "RGBA"
-        with patch("PIL.Image.open", return_value=img):
-            fcs.convert_image(b"png-rgba-bytes", "jpg")
+    def test_rgba_is_flattened_onto_white_before_jpeg(self) -> None:
+        import io
 
-        img.convert.assert_called_once_with("RGB")
+        from PIL import Image
+
+        # A signature-pad export: black ink on transparent pixels stored as (0, 0, 0, 0).
+        png = Image.new("RGBA", (20, 20), (0, 0, 0, 0))
+        for x in range(5, 15):
+            png.putpixel((x, 10), (0, 0, 0, 255))
+        buffer = io.BytesIO()
+        png.save(buffer, format="PNG")
+
+        content, mime = fcs.convert_image(buffer.getvalue(), "jpg")
+
+        jpeg = Image.open(io.BytesIO(content)).convert("RGB")
+        self.assertEqual(mime, "image/jpeg")
+        self.assertTrue(all(channel > 240 for channel in jpeg.getpixel((1, 1))))
+        self.assertTrue(all(channel < 60 for channel in jpeg.getpixel((10, 10))))
 
     def test_unsupported_image_format_raises(self) -> None:
         with self.assertRaises(ValueError) as ctx:
@@ -192,6 +203,20 @@ class ConvertFileTests(unittest.TestCase):
         self.assertEqual(
             result.content.decode().replace("\r\n", "\n").strip(),
             "name,age\nAda,36\nGrace,45",
+        )
+
+    def test_json_to_csv_keeps_columns_that_only_later_objects_have(self) -> None:
+        result = fcs.convert_file(
+            src_bytes=b'[{"id": 1, "name": "Ada"}, {"id": 2, "name": "Grace", "email": "g@x"},'
+            b' {"id": 3, "name": "Alan", "phone": "555"}]',
+            src_mime="application/json",
+            src_filename="people.json",
+            target_format="csv",
+        )
+
+        self.assertEqual(
+            result.content.decode().replace("\r\n", "\n").strip(),
+            "id,name,email,phone\n1,Ada,,\n2,Grace,g@x,\n3,Alan,,555",
         )
 
     def test_csv_output_from_a_non_json_input_is_rejected(self) -> None:
