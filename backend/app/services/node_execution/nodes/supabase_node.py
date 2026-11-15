@@ -3,6 +3,7 @@ from __future__ import annotations
 from importlib import import_module
 
 from app.services.node_execution.base import NodeExecutionContext
+from app.services.node_execution.json_fields import render_json_template
 
 
 def execute(ctx: NodeExecutionContext) -> object:
@@ -86,7 +87,8 @@ def execute(ctx: NodeExecutionContext) -> object:
             ).strip()
             or "*"
         )
-        raw_filters = self.evaluate_message_template(
+        raw_filters = render_json_template(
+            self,
             str(node_data.get("supabaseFilter", "{}") or "{}"),
             inputs,
             node_id,
@@ -131,7 +133,8 @@ def execute(ctx: NodeExecutionContext) -> object:
                 ignored_fields=_parse_ignored_fields("supabaseIgnoredInputFields"),
             )
         else:
-            raw_rows = self.evaluate_message_template(
+            raw_rows = render_json_template(
+                self,
                 str(node_data.get("supabaseRows", "[]") or "[]"),
                 inputs,
                 node_id,
@@ -146,7 +149,8 @@ def execute(ctx: NodeExecutionContext) -> object:
                 ignored_fields=_parse_ignored_fields("supabaseIgnoredInputFields"),
             )
         else:
-            raw_rows = self.evaluate_message_template(
+            raw_rows = render_json_template(
+                self,
                 str(node_data.get("supabaseRows", "[]") or "[]"),
                 inputs,
                 node_id,
@@ -170,7 +174,8 @@ def execute(ctx: NodeExecutionContext) -> object:
             on_conflict=raw_on_conflict,
         )
     elif operation == "update":
-        raw_filters = self.evaluate_message_template(
+        raw_filters = render_json_template(
+            self,
             str(node_data.get("supabaseFilter", "{}") or "{}"),
             inputs,
             node_id,
@@ -182,7 +187,8 @@ def execute(ctx: NodeExecutionContext) -> object:
                 ignored_fields=_parse_ignored_fields("supabaseIgnoredInputFields"),
             )
         else:
-            raw_data = self.evaluate_message_template(
+            raw_data = render_json_template(
+                self,
                 str(node_data.get("supabaseData", "{}") or "{}"),
                 inputs,
                 node_id,
@@ -191,7 +197,8 @@ def execute(ctx: NodeExecutionContext) -> object:
         filters = SupabaseService.parse_json_object(raw_filters, "supabaseFilter")
         output = service.update_rows(table, data, schema=schema, filters=filters)
     elif operation == "delete":
-        raw_filters = self.evaluate_message_template(
+        raw_filters = render_json_template(
+            self,
             str(node_data.get("supabaseFilter", "{}") or "{}"),
             inputs,
             node_id,

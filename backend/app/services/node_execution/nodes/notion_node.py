@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.services.node_execution.base import NodeExecutionContext
+from app.services.node_execution.json_fields import render_json_template
 
 
 def execute(ctx: NodeExecutionContext) -> object:
@@ -57,7 +58,7 @@ def execute(ctx: NodeExecutionContext) -> object:
             if not isinstance(resolved, dict):
                 raise ValueError(f"{field_name} must resolve to a JSON object")
             return resolved
-        evaluated = self.evaluate_message_template(raw_value, inputs, node_id)
+        evaluated = render_json_template(self, raw_value, inputs, node_id)
         return NotionService.parse_json_object(evaluated, field_name)
 
     def _notion_array(field_name: str, default: str = "[]") -> list[Any]:
@@ -72,7 +73,7 @@ def execute(ctx: NodeExecutionContext) -> object:
             if not isinstance(resolved, list):
                 raise ValueError(f"{field_name} must resolve to a JSON array")
             return resolved
-        evaluated = self.evaluate_message_template(raw_value, inputs, node_id)
+        evaluated = render_json_template(self, raw_value, inputs, node_id)
         return NotionService.parse_json_array(evaluated, field_name)
 
     def _required_notion_text(field_name: str, label: str) -> str:
