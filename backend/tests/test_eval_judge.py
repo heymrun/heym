@@ -731,6 +731,7 @@ class RunEvalsIntoRunTests(unittest.IsolatedAsyncioTestCase):
         llm_kwargs = self.execute_llm.await_args.kwargs
         self.assertIn("EXPECTED", llm_kwargs["user_message"])
         self.assertEqual(llm_kwargs["response_format"], {"type": "json_object"})
+        self.assertEqual(llm_kwargs["extra_body"], {"disable_reasoning": True})
         self.assertEqual(self.execute_llm.await_count, 1)
         self.call_decision_model.assert_not_called()
         self.assertEqual(rows[0].score, "90")

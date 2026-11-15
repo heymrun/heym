@@ -37,6 +37,7 @@ from app.services.llm_transport import (
     ToolResult,
     is_truncated_turn,
     parse_tool_arguments,
+    rejects_disable_reasoning,
 )
 from app.services.llm_transport_gemini import GeminiTransport
 from app.services.llm_transport_messages import DEFAULT_MAX_TOKENS, AnthropicMessagesTransport
@@ -1014,21 +1015,15 @@ class LLMService:
                 break
             except Exception as exc:
                 elapsed_ms = (time.time() - start_time) * 1000
-                err_msg = str(exc).lower()
-                is_422 = getattr(exc, "status_code", None) == 422 or "422" in err_msg
-                has_disable_reasoning = extra_body is not None and "disable_reasoning" in (
-                    extra_body or {}
-                )
-                if (
-                    attempt == 0
-                    and is_422
-                    and has_disable_reasoning
-                    and ("disable_reasoning" in err_msg or "disabling reasoning" in err_msg)
-                ):
+                if attempt == 0 and rejects_disable_reasoning(exc, opts.extra_body):
                     opts.extra_body = None
                     kwargs = transport.build_kwargs(
                         model=model, history=history, tools=None, opts=opts
                     )
+                    trace_request = {**kwargs, **transport.trace_request(history, None)}
+                    if skills_included:
+                        trace_request["skills_included"] = skills_included
+                    _log_request(provider, str(base_url), kwargs)
                     logger.info(
                         "Retrying without extra_body (disable_reasoning not supported by model %s)",
                         model,
