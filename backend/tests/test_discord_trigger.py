@@ -248,6 +248,43 @@ class TestDiscordValidSignature(unittest.IsolatedAsyncioTestCase):
         self.assertIn("triggered_at", history.inputs)
 
 
+class TestDiscordFollowUpForRunsElsewhere(unittest.IsolatedAsyncioTestCase):
+    """A run another instance (or the concurrency queue) ran still answers the interaction."""
+
+    async def test_an_offloaded_run_sends_its_output_as_the_follow_up(self) -> None:
+        from app.api.discord import _execute_workflow_background
+        from app.services.cluster.run_history import OffloadedRun
+
+        workflow = SimpleNamespace(
+            id=uuid.uuid4(), owner_id=uuid.uuid4(), name="Bot", nodes=[], edges=[]
+        )
+        workflow.concurrency_limit = 1
+        db = SimpleNamespace(
+            execute=AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: workflow))
+        )
+        offloaded = OffloadedRun(
+            status="success", outputs={"reply": {"result": "Pong"}}, history_written=True
+        )
+        interaction = {"type": 2, "application_id": "1111", "token": "itok"}
+
+        with (
+            patch("app.api.discord.async_session_maker") as mock_session_maker,
+            patch("app.api.discord.collect_referenced_workflows", AsyncMock(return_value={})),
+            patch("app.api.discord.get_credentials_context", AsyncMock(return_value={})),
+            patch("app.api.discord.get_global_variables_context", AsyncMock(return_value={})),
+            patch("app.api.discord.dispatch_workflow", AsyncMock(return_value=offloaded)),
+            patch("app.api.discord._send_discord_followup_message", AsyncMock()) as follow_up,
+        ):
+            mock_session = AsyncMock()
+            mock_session.__aenter__.return_value = db
+            mock_session.__aexit__.return_value = None
+            mock_session_maker.return_value = mock_session
+
+            await _execute_workflow_background(workflow, "discord-node", interaction, {})
+
+        follow_up.assert_awaited_once_with(interaction, {"reply": {"result": "Pong"}})
+
+
 class TestDiscordInvalidSignature(unittest.IsolatedAsyncioTestCase):
     async def test_invalid_signature_returns_401(self) -> None:
         from app.api.discord import discord_webhook

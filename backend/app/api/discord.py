@@ -303,6 +303,11 @@ async def _execute_workflow_background(
                 log_offloaded_run(
                     logger, workflow_id=workflow.id, trigger="Discord trigger", result=result
                 )
+                # Queued, rejected (queue full) or run on another instance: the user still
+                # waits on the deferred interaction for this answer.
+                await _send_discord_followup_message(
+                    interaction_body, getattr(result, "outputs", None) or {}
+                )
                 return
 
             if needs_local_pending_persist(result):
