@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from email.utils import getaddresses
+from email.utils import formatdate, getaddresses, make_msgid, parseaddr
 
 from app.services.node_execution.base import NodeExecutionContext
 
@@ -86,6 +86,10 @@ def execute(ctx: NodeExecutionContext) -> object:
 
     msg = MIMEMultipart("mixed")
     msg["From"] = smtp_from or smtp_email
+    # RFC 5322 requires Date; Gmail refuses mail without a Message-ID. Relays that do not add
+    # missing headers for remote clients (Postfix's default) pass the message on as built.
+    msg["Date"] = formatdate(localtime=True)
+    msg["Message-ID"] = make_msgid(domain=parseaddr(msg["From"])[1].rpartition("@")[2] or None)
     msg["To"] = to_address
     if cc_address:
         msg["Cc"] = cc_address

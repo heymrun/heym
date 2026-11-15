@@ -146,6 +146,18 @@ class SendEmailFromHeaderTests(unittest.TestCase):
         self.assertEqual(msg["From"], "team@test.com")
         self._assert_signs_in_as_username(server)
 
+    def test_every_message_has_a_date_and_its_own_message_id(self) -> None:
+        from email.utils import parsedate_to_datetime
+
+        _, first = self._send({})
+        _, second = self._send({"smtp_from": "Acme Support <support@acme.test>"})
+
+        for msg in (first, second):
+            self.assertIsNotNone(parsedate_to_datetime(msg["Date"]).tzinfo)
+        self.assertTrue(first["Message-ID"].endswith("@test.com>"))
+        self.assertTrue(second["Message-ID"].endswith("@acme.test>"))
+        self.assertNotEqual(first["Message-ID"], second["Message-ID"])
+
 
 class SendEmailRecipientListTests(unittest.TestCase):
     """To/Cc/Bcc are address lists: a quoted display name may hold a comma."""
