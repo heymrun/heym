@@ -2448,3 +2448,107 @@ class TestTextTemplatesWithOperatorCharacters(unittest.TestCase):
                 self.assertEqual(run_output[key], expected)
                 dialog = service.evaluate(template, context, current_node_id="set1").result
                 self.assertEqual(dialog, expected)
+
+
+class TestLeadingDollarTextTemplates(unittest.TestCase):
+    """Text that starts with a $ref, in an Execute input mapping or a Console Log message,
+    renders like the dialog shows it instead of resolving to None."""
+
+    BODY = {"name": "Alice", "plan": "pro", "count": 5, "other": 2}
+    TEXT = ("$userInput.body.name signed up for $userInput.body.plan", "Alice signed up for pro")
+
+    def _run(self, mappings: list[dict], log_message: str) -> tuple[dict, object]:
+        child_id = str(uuid.uuid4())
+        child_nodes = [
+            {"id": "c1", "type": "textInput", "data": {"label": "childInput"}},
+            {
+                "id": "c2",
+                "type": "output",
+                "data": {
+                    "label": "childOutput",
+                    "outputSchema": [
+                        {"key": m["key"], "value": f"$childInput.body.{m['key']}"} for m in mappings
+                    ],
+                },
+            },
+        ]
+        nodes = [
+            {"id": "in", "type": "textInput", "data": {"label": "userInput"}},
+            {
+                "id": "call",
+                "type": "execute",
+                "data": {
+                    "label": "notify",
+                    "executeWorkflowId": child_id,
+                    "executeInputMappings": mappings,
+                },
+            },
+            {
+                "id": "log",
+                "type": "consoleLog",
+                "data": {"label": "audit", "logMessage": log_message},
+            },
+        ]
+        edges = [
+            {"id": "e1", "source": "in", "target": "call"},
+            {"id": "e2", "source": "in", "target": "log"},
+        ]
+        workflow_id = uuid.uuid4()
+        executor = WorkflowExecutor(
+            nodes=nodes,
+            edges=edges,
+            workflow_cache={
+                child_id: {
+                    "nodes": child_nodes,
+                    "edges": [{"id": "ce1", "source": "c1", "target": "c2"}],
+                    "name": "Child",
+                }
+            },
+            workflow_id=workflow_id,
+        )
+        result = executor.execute(workflow_id, {"body": self.BODY})
+        outputs = {r["node_label"]: r["output"] for r in result.node_results}
+        child = outputs["notify"]["outputs"]["childOutput"]["result"]
+        return child, outputs["audit"]["logMessage"]
+
+    def test_text_starting_with_a_ref_renders_as_text(self) -> None:
+        child, logged = self._run([{"key": "subject", "value": self.TEXT[0]}], self.TEXT[0])
+
+        self.assertEqual(child["subject"], self.TEXT[1])
+        self.assertEqual(logged, self.TEXT[1])
+
+    def test_expressions_keep_their_type(self) -> None:
+        child, logged = self._run(
+            [
+                {"key": "count", "value": "$userInput.body.count"},
+                {"key": "difference", "value": "$userInput.body.count - $userInput.body.other"},
+                {"key": "pro", "value": "$userInput.body.plan == 'pro' and $userInput.body.count"},
+            ],
+            "$userInput.body.count",
+        )
+
+        self.assertEqual(child["count"], 5)
+        self.assertEqual(child["difference"], 3)
+        self.assertEqual(child["pro"], 5)
+        self.assertEqual(logged, 5)
+
+    def test_a_ternary_whose_branch_is_null_stays_null(self) -> None:
+        child, logged = self._run(
+            [{"key": "lang", "value": "$userInput.body.lang ? $userInput.body.lang : null"}],
+            "$userInput.body.lang ? $userInput.body.lang : null",
+        )
+
+        self.assertIsNone(child["lang"])
+        self.assertIsNone(logged)
+
+    def test_a_condition_is_not_turned_into_text(self) -> None:
+        from app.services.node_execution.leading_dollar import resolve_leading_dollar_value
+
+        condition = "$userInput.body.count > 3 && $userInput.body.other < 3"
+        executor = WorkflowExecutor(nodes=[], edges=[], workflow_id=uuid.uuid4())
+        inputs = {"userInput": {"body": self.BODY}}
+
+        self.assertEqual(
+            resolve_leading_dollar_value(executor, condition, inputs, "n1"),
+            executor.resolve_expression(condition, inputs, "n1", preserve_type=True),
+        )
