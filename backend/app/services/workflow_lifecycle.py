@@ -4,7 +4,7 @@ import copy
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select, union_all
+from sqlalchemy import func, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.selectable import CompoundSelect
 
@@ -36,14 +36,18 @@ def _unfinished_execution_query(workflow_id: UUID) -> CompoundSelect:
                 [STATUS_HELD, STATUS_QUEUED, STATUS_WAITING_FOR_MAIN, STATUS_CLAIMED]
             ),
         ),
+        # Only a review that can still be answered can still resume the run. Past
+        # expires_at every answer path refuses it, so it would block deletion forever.
         select(HITLRequest.execution_history_id).where(
             HITLRequest.workflow_id == workflow_id,
             HITLRequest.status == "pending",
+            HITLRequest.expires_at > func.now(),
             HITLRequest.execution_history_id.is_not(None),
         ),
         select(CodexFollowupRequest.execution_history_id).where(
             CodexFollowupRequest.workflow_id == workflow_id,
             CodexFollowupRequest.status == "pending",
+            CodexFollowupRequest.expires_at > func.now(),
             CodexFollowupRequest.execution_history_id.is_not(None),
         ),
     )
