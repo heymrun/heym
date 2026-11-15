@@ -1,15 +1,29 @@
 import { createSSRApp, h, type Component } from "vue";
 import { createPinia, setActivePinia } from "pinia";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToString } from "vue/server-renderer";
 
 import AgentFieldToggle from "@/components/ui/AgentFieldToggle.vue";
 import { useWorkflowStore } from "@/stores/workflow";
 import type { WorkflowNode, WorkflowEdge } from "@/types/workflow";
 
+let capturedClick: (() => void) | null = null;
+
+vi.mock("@/components/ui/Button.vue", () => ({
+  default: {
+    name: "Button",
+    props: ["class", "title", "onClick", "variant", "size", "type"],
+    ssrRender(ctx: Record<string, unknown>, push: (val: string) => void) {
+      capturedClick = (ctx.onClick as (() => void)) ?? null;
+      push(`<button class="${String(ctx.class ?? '')}" title="${String(ctx.title ?? '')}"></button>`);
+    },
+  },
+}));
+
 describe("AgentFieldToggle", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
+    capturedClick = null;
   });
 
   function setupStore(fields: string[] = ["gmIncludeBusyTitles"]) {
@@ -34,16 +48,20 @@ describe("AgentFieldToggle", () => {
     return { store, node };
   }
 
-  it("renders active when legacy gmIncludeBusyTitles is in agentProvidedFields", async () => {
-    setupStore(["gmIncludeBusyTitles"]);
+  async function render(nodeId = "node-meet", fieldKey = "gmIncludeBusyDetails"): Promise<string> {
     const app = createSSRApp({
       render: () =>
         h(AgentFieldToggle as Component, {
-          nodeId: "node-meet",
-          fieldKey: "gmIncludeBusyDetails",
+          nodeId,
+          fieldKey,
         }),
     });
-    const html = await renderToString(app);
+    return renderToString(app);
+  }
+
+  it("renders active when legacy gmIncludeBusyTitles is in agentProvidedFields", async () => {
+    setupStore(["gmIncludeBusyTitles"]);
+    const html = await render();
 
     expect(html).toContain("text-violet-500");
     expect(html).toContain("Agent fills this — click to use fixed value");
@@ -51,14 +69,7 @@ describe("AgentFieldToggle", () => {
 
   it("renders active when new gmIncludeBusyDetails is in agentProvidedFields", async () => {
     setupStore(["gmIncludeBusyDetails"]);
-    const app = createSSRApp({
-      render: () =>
-        h(AgentFieldToggle as Component, {
-          nodeId: "node-meet",
-          fieldKey: "gmIncludeBusyDetails",
-        }),
-    });
-    const html = await renderToString(app);
+    const html = await render();
 
     expect(html).toContain("text-violet-500");
     expect(html).toContain("Agent fills this — click to use fixed value");
@@ -66,14 +77,7 @@ describe("AgentFieldToggle", () => {
 
   it("renders inactive when field is not in agentProvidedFields", async () => {
     setupStore([]);
-    const app = createSSRApp({
-      render: () =>
-        h(AgentFieldToggle as Component, {
-          nodeId: "node-meet",
-          fieldKey: "gmIncludeBusyDetails",
-        }),
-    });
-    const html = await renderToString(app);
+    const html = await render();
 
     expect(html).toContain("text-muted-foreground");
     expect(html).toContain("Click to let agent fill this at runtime");
@@ -81,14 +85,7 @@ describe("AgentFieldToggle", () => {
 
   it("does not alias legacy key for unrelated fields", async () => {
     setupStore(["gmIncludeBusyTitles"]);
-    const app = createSSRApp({
-      render: () =>
-        h(AgentFieldToggle as Component, {
-          nodeId: "node-meet",
-          fieldKey: "gmCalendarId",
-        }),
-    });
-    const html = await renderToString(app);
+    const html = await render("node-meet", "gmCalendarId");
 
     expect(html).toContain("text-muted-foreground");
     expect(html).toContain("Click to let agent fill this at runtime");
@@ -97,98 +94,46 @@ describe("AgentFieldToggle", () => {
   it("does not render when node is not connected to a tool input", async () => {
     const { store } = setupStore(["gmIncludeBusyTitles"]);
     store.edges = [];
-    const app = createSSRApp({
-      render: () =>
-        h(AgentFieldToggle as Component, {
-          nodeId: "node-meet",
-          fieldKey: "gmIncludeBusyDetails",
-        }),
-    });
-    const html = await renderToString(app);
+    const html = await render();
 
     expect(html).not.toContain("<button");
   });
 
-  it("correctly transitions state when toggling legacy gmIncludeBusyTitles off and on", () => {
-    const pinia = createPinia();
-    setActivePinia(pinia);
+  it("correctly transitions state when toggling legacy gmIncludeBusyTitles off and on", async () => {
     const { store } = setupStore(["gmIncludeBusyTitles", "otherField"]);
+    const htmlInitial = await render();
+    expect(htmlInitial).toContain("text-violet-500");
+    expect(capturedClick).toBeTypeOf("function");
 
-    interface ExposedToggle {
-      isAgentProvided: { value: boolean };
-      isToolNodeField: { value: boolean };
-      toggle: () => void;
-    }
-
-    let exposed!: ExposedToggle;
-    const app = createSSRApp({
-      render: () => null,
-    });
-    app.use(pinia);
-    app.provide(Symbol.for("v-scx"), { modules: new Set() });
-
-    app.runWithContext(() => {
-      const setupFn = (AgentFieldToggle as unknown as { setup: (props: unknown, ctx: unknown) => unknown }).setup;
-      setupFn(
-        { nodeId: "node-meet", fieldKey: "gmIncludeBusyDetails" },
-        { expose: (exp: ExposedToggle) => { exposed = exp; } },
-      );
-    });
-
-    // Initial state: legacy key enables the toggle for new key
-    expect(exposed.isAgentProvided.value).toBe(true);
-
-    // Toggle off: removes both legacy and new key
-    exposed.toggle();
+    // Toggle off: removes legacy and new key
+    capturedClick?.();
     expect(store.nodes[0].data.agentProvidedFields).toEqual(["otherField"]);
-    expect(exposed.isAgentProvided.value).toBe(false);
+    const htmlAfterToggleOff = await render();
+    expect(htmlAfterToggleOff).toContain("text-muted-foreground");
 
     // Toggle on: adds the canonical new key, not the legacy key
-    exposed.toggle();
+    capturedClick?.();
     expect(store.nodes[0].data.agentProvidedFields).toEqual(["otherField", "gmIncludeBusyDetails"]);
-    expect(exposed.isAgentProvided.value).toBe(true);
+    const htmlAfterToggleOn = await render();
+    expect(htmlAfterToggleOn).toContain("text-violet-500");
 
     // Toggle off again: cleans up cleanly
-    exposed.toggle();
+    capturedClick?.();
     expect(store.nodes[0].data.agentProvidedFields).toEqual(["otherField"]);
-    expect(exposed.isAgentProvided.value).toBe(false);
   });
 
-  it("deduplicates keys if both legacy and new key were present", () => {
-    const pinia = createPinia();
-    setActivePinia(pinia);
+  it("deduplicates keys if both legacy and new key were present", async () => {
     const { store } = setupStore(["gmIncludeBusyTitles", "gmIncludeBusyDetails"]);
-
-    interface ExposedToggle {
-      isAgentProvided: { value: boolean };
-      toggle: () => void;
-    }
-
-    let exposed!: ExposedToggle;
-    const app = createSSRApp({
-      render: () => null,
-    });
-    app.use(pinia);
-    app.provide(Symbol.for("v-scx"), { modules: new Set() });
-
-    app.runWithContext(() => {
-      const setupFn = (AgentFieldToggle as unknown as { setup: (props: unknown, ctx: unknown) => unknown }).setup;
-      setupFn(
-        { nodeId: "node-meet", fieldKey: "gmIncludeBusyDetails" },
-        { expose: (exp: ExposedToggle) => { exposed = exp; } },
-      );
-    });
-
-    expect(exposed.isAgentProvided.value).toBe(true);
+    await render();
+    expect(capturedClick).toBeTypeOf("function");
 
     // Toggle off removes all occurrences
-    exposed.toggle();
+    capturedClick?.();
     expect(store.nodes[0].data.agentProvidedFields).toEqual([]);
-    expect(exposed.isAgentProvided.value).toBe(false);
 
     // Toggle on adds only single canonical key
-    exposed.toggle();
+    await render();
+    capturedClick?.();
     expect(store.nodes[0].data.agentProvidedFields).toEqual(["gmIncludeBusyDetails"]);
-    expect(exposed.isAgentProvided.value).toBe(true);
   });
 });

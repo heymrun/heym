@@ -44,8 +44,6 @@ function toggle(): void {
     : [...current.filter((f) => !keysToRemove.has(f)), props.fieldKey];
   workflowStore.updateNode(props.nodeId, { agentProvidedFields: updated });
 }
-
-defineExpose({ isAgentProvided, isToolNodeField, toggle });
 </script>
 
 <template>

@@ -17,6 +17,29 @@ import type { ReleaseEntry } from "@/features/release-tour/releaseTour.types";
  */
 export const RELEASE_REGISTRY: ReleaseEntry[] = [
   {
+    releaseId: "2026.33",
+    publishedAt: new Date("2026-11-15T12:00:00Z"),
+    headline: "Google Meet busy event details and attendees",
+    releaseTour: {
+      label: "New in Heym", introTitle: "New in this release",
+      introDescription: "See meeting titles and guests alongside busy availability slots.",
+      tourEnabled: false,
+      sectionOrder: ["google-meet-busy-details"],
+    },
+    sections: [{
+      id: "google-meet-busy-details", title: "Google Meet busy event details and attendees",
+      publishedAt: new Date("2026-11-15T12:00:00Z"),
+      blocks: [{ type: "prose", markdown: "Turn on **Include Busy Event Details** in the **Google Meet** node's availability check to receive event titles and attendee emails in `busy_slots`. When Google Calendar shares details for a busy interval, the slot includes `title` and `attendees`; private events, omitted attendee lists and external calendars fail closed with null values while preserving the busy time window. Works with Agent autofill and preserves backward compatibility with existing workflows." }],
+      tour: {
+        description: "Enrich Google Meet busy availability intervals with event titles and attendee guest lists.",
+        useCases: ["Let an Agent reschedule around important meetings with specific attendees", "Avoid double-booking internal team reviews", "Display calendar context alongside open booking slots"],
+        tourVisual: "google-meet-busy-details",
+        docTarget: { categoryId: "nodes", slug: "google-meet-node", title: "Google Meet" },
+      },
+    }],
+  },
+
+  {
     releaseId: "2026.32",
     publishedAt: new Date("2026-11-14T21:00:00Z"),
     headline: "Email attachments in Heym Drive",
@@ -104,29 +127,6 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
         useCases: ["Feed an Agent only the passages that answer the question", "Rerank support articles before drafting a reply", "Use one decision model for routing, judging and reranking"],
         tourVisual: "decision-reranker",
         docTarget: { categoryId: "nodes", slug: "rag-node", title: "RAG / Vector Store" },
-      },
-    }],
-  },
-
-  {
-    releaseId: "2026.28",
-    publishedAt: new Date("2026-11-10T12:00:00Z"),
-    headline: "Transcribe voice notes and recordings in the Converter node",
-    releaseTour: {
-      label: "New in Heym", introTitle: "New in this release",
-      introDescription: "Speech becomes text inside your workflow, on your own instance.",
-      tourEnabled: true,
-      sectionOrder: ["voice-transcribe"],
-    },
-    sections: [{
-      id: "voice-transcribe", title: "Voice transcribe in the Converter node",
-      publishedAt: new Date("2026-11-10T12:00:00Z"),
-      blocks: [{ type: "prose", markdown: "Pick **Audio → Text (Voice Transcribe)** in a **Converter** node and point it at an mp3, wav or ogg file in Drive. The node returns what was said as text, together with the language it heard and timed segments. Recognition runs on your own Heym instance with one multilingual model that covers about a hundred languages and detects the spoken one, the same way on Docker and Kubernetes. Recordings can be up to 30 minutes long. Pass the transcript to an LLM or Agent node to summarize a call, route a voice note or fill in a ticket." }],
-      tour: {
-        description: "Turn a voice note or call recording into text inside a workflow, in any language, on your own instance.",
-        useCases: ["Summarize a customer call recording with an LLM node", "Route an uploaded voice note to the right team", "Keep timed transcripts of meetings searchable"],
-        tourVisual: "voice-transcribe",
-        docTarget: { categoryId: "nodes", slug: "converter-node", title: "Converter" },
       },
     }],
   },
