@@ -11,7 +11,7 @@ import httpx
 from app.config import settings
 from app.db.models import CredentialType
 from app.services.encryption import encrypt_config
-from app.services.node_execution.json_fields import render_json_template
+from app.services.node_execution.json_fields import render_json_template, resolve_json_field
 from app.services.notion_service import NotionService
 from app.services.workflow_executor import WorkflowExecutor
 
@@ -67,6 +67,25 @@ class RenderJsonTemplateTests(unittest.TestCase):
             self.executor, '{"age": {"$gt": 18}, "tags": ["a", 1, true]}', self.inputs, "n1"
         )
         self.assertEqual(json.loads(rendered), {"age": {"$gt": 18}, "tags": ["a", 1, True]})
+
+    def test_a_line_break_escape_inside_an_expression_still_resolves(self) -> None:
+        # Parsing decodes the `\n` escape into a line break the expression cannot parse; the
+        # field goes back to substitution, which reads it as written.
+        template = '{"notes": "$input.notes.replace(\'\\n\', \' \')", "status": "new"}'
+        inputs = {"input": {"notes": "line one\nline two"}}
+        want = {"notes": "line one line two", "status": "new"}
+
+        rendered = render_json_template(self.executor, template, inputs, "n1")
+        self.assertEqual(json.loads(rendered), want)
+        self.assertEqual(resolve_json_field(self.executor, template, inputs, "n1"), want)
+
+    def test_a_value_with_a_line_break_that_resolves_is_still_parsed_first(self) -> None:
+        template = '{"body": "Hi $input.name,\\nthanks for signing up"}'
+        want = {"body": f"Hi {TRICKY},\nthanks for signing up"}
+
+        rendered = render_json_template(self.executor, template, self.inputs, "n1")
+        self.assertEqual(json.loads(rendered), want)
+        self.assertEqual(resolve_json_field(self.executor, template, self.inputs, "n1"), want)
 
 
 class NodeJsonFieldTests(unittest.TestCase):
