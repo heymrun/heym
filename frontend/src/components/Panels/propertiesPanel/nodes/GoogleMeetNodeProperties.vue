@@ -136,6 +136,7 @@ onMounted(async (): Promise<void> => {
         <AgentFieldToggle
           :node-id="selectedNode.id"
           :field-key="GOOGLE_MEET_BUSY_DETAILS_OPTION.key"
+          :aliases="['gmIncludeBusyTitles']"
         />
       </div>
       <p class="text-xs text-muted-foreground">
