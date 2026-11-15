@@ -118,7 +118,8 @@ class GoogleSheetsService:
             # Fetch A1:Z{last_data_row} — end is open when max_rows=0.
             data_offset = max(start_row - 1, 1)  # index into raw[] where data begins (skip header)
             if max_rows > 0:
-                last_data_row = start_row + max_rows - 1
+                # Data starts at sheet row data_offset + 1, so this is its max_rows-th row.
+                last_data_row = data_offset + max_rows
                 range_a1 = f"A1:Z{last_data_row}"
             else:
                 range_a1 = "A1:Z"
