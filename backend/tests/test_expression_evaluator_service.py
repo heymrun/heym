@@ -2632,3 +2632,25 @@ class TestOutputNodeTemplatesRenderJson(unittest.TestCase):
                 dialog = service.evaluate(template, context, current_node_id="out1").result
                 self.assertEqual(dialog, expected)
         self.assertEqual(outputs["out2"]["result"], self.TAGS[1])
+
+    def test_a_value_json_cannot_hold_keeps_the_old_text(self) -> None:
+        meta = {"plan": "pro", "at": datetime(2026, 11, 15, 9, 30)}
+        nodes = [
+            {"id": "in", "type": "textInput", "data": {"label": "userInput"}},
+            {
+                "id": "o",
+                "type": "output",
+                "data": {"label": "note", "message": "At $userInput.body.meta"},
+            },
+        ]
+        result = execute_workflow(
+            workflow_id=uuid.uuid4(),
+            nodes=nodes,
+            edges=[{"id": "e", "source": "in", "target": "o"}],
+            inputs={"body": {"meta": meta}},
+            test_run=True,
+        )
+        out = next(r for r in result.node_results if r["node_id"] == "o")
+
+        self.assertEqual(out["status"], "success")
+        self.assertEqual(out["output"]["result"], f"At {meta}")
