@@ -278,7 +278,7 @@ Workflows are callable over HTTP at `/api/workflows/{workflow_id}/execute`, whic
 Heym has native [MCP](../tabs/mcp-tab.md) support on both sides:
 
 - **As a client**: Agent nodes connect to external MCP servers (Filesystem, Browserbase, custom tools) via stdio or SSE and consume their tools automatically
-- **As a server**: Workflows with MCP turned on become tools on the default server at `/api/mcp/sse`, or on named servers with their own URL and API key, so Claude Desktop, Cursor, and other MCP clients can call your Heym workflows directly
+- **As a server**: Workflows with MCP turned on become tools on the default server at `/api/mcp` (or `/api/mcp/sse` for legacy connections), or on named servers with their own URL and API key, so Claude Desktop, Cursor, and other MCP clients can call your Heym workflows directly
 
 Agents can consume several MCP servers at once, and any workflow can become a tool for an external MCP client.
 

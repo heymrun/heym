@@ -387,7 +387,7 @@ See the [node reference](frontend/src/docs/content/reference/node-types.md) and 
 
 **As a client:** Agent nodes discover and call tools from configured MCP servers over SSE, Streamable HTTP, or `stdio`. The MCP Call node invokes a selected tool directly when the workflow defines the call.
 
-**As a server:** Publish Heym workflows as tools at `/api/mcp/sse` for Claude Desktop, Cursor, and other MCP clients. See [MCP configuration](frontend/src/docs/content/tabs/mcp-tab.md).
+**As a server:** Publish Heym workflows as tools at `/api/mcp` (or `/api/mcp/sse` for legacy connections) for Claude Desktop, Cursor, and other MCP clients. See [MCP configuration](frontend/src/docs/content/tabs/mcp-tab.md).
 
 ### Skills System
 
@@ -543,7 +543,7 @@ The same runtime can serve people, backend services, and external agents. Choose
 |-----------|---------------------|-----|
 | **REST** | `POST /api/workflows/{workflow_id}/execute` | Invoke a workflow from an application or HTTP webhook. |
 | **SSE** | `POST /api/workflows/{workflow_id}/execute/stream` | Stream execution progress and node events to a client. |
-| **MCP server** | `/api/mcp/sse` | Publish workflows as tools for MCP clients. |
+| **MCP server** | `/api/mcp` (legacy: `/api/mcp/sse`) | Publish workflows as tools for MCP clients. |
 | **Portal** | `/chat/{slug}` | Provide a workflow-backed chat interface for people. |
 | **Dashboard** | Dashboard tab | Run workflow-backed widgets to produce charts and operational views. |
 | **Board** | Board tab | Run workflow chains as persistent jobs with card context and history. |

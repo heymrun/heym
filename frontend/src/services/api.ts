@@ -2696,6 +2696,7 @@ export interface MCPServerItem {
   api_key_set: boolean;
   created_at: string;
   workflow_ids: string[];
+  endpoint_path?: string;
   chat_tool: MCPChatToolConfig;
 }
 

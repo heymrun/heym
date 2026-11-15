@@ -79,7 +79,7 @@ Rotation protects backups taken afterwards. A leaked key together with a copy of
 
 ## MCP API Key
 
-The MCP API key is used to authenticate external MCP clients connecting to the `/api/mcp/sse` endpoint. When the SSE connection is established, a short-lived (1-hour) session token is issued and embedded in the message endpoint URL instead of the real API key, preventing the key from appearing in server access logs. See [MCP Tab](../tabs/mcp-tab.md) for setup.
+The MCP API key is used to authenticate external MCP clients connecting to the `/api/mcp` endpoint. Clients send the MCP API key in the `X-MCP-Key` header, or an OAuth 2.0 access token as `Authorization: Bearer <token>`. When the SSE connection is established, a short-lived (1-hour) session token is issued and embedded in the message endpoint URL instead of the real API key, preventing the key from appearing in server access logs. See [MCP Tab](../tabs/mcp-tab.md) for setup.
 
 ## OAuth / PKCE
 
