@@ -57,6 +57,8 @@ class ImapTriggerManagerPollingTests(unittest.IsolatedAsyncioTestCase):
                 AsyncMock(return_value=(ImapCursor(uidvalidity="1", last_uid=102), emails)),
             ),
             patch.object(manager, "_execute_workflow_for_email", AsyncMock()) as mock_execute,
+            patch.object(manager, "_load_cursor", AsyncMock(return_value=ImapCursor())),
+            patch.object(manager, "_save_cursor", AsyncMock()),
         ):
             await manager._poll_workflow_node(workflow, node)
 
@@ -89,6 +91,8 @@ class ImapTriggerManagerPollingTests(unittest.IsolatedAsyncioTestCase):
                 AsyncMock(return_value=(ImapCursor(uidvalidity="7", last_uid=55), [])),
             ),
             patch.object(manager, "_execute_workflow_for_email", AsyncMock()) as mock_execute,
+            patch.object(manager, "_load_cursor", AsyncMock(return_value=ImapCursor())),
+            patch.object(manager, "_save_cursor", AsyncMock()),
         ):
             await manager._poll_workflow_node(workflow, node)
 
@@ -125,6 +129,7 @@ class ImapTriggerPollIsolationTests(unittest.IsolatedAsyncioTestCase):
                 AsyncMock(return_value=[failing, healthy]),
             ),
             patch.object(manager, "_poll_workflow_node", side_effect=poll),
+            patch.object(manager, "_forget_inactive_cursors", AsyncMock()),
             self.assertLogs("imap_trigger", level="ERROR") as logs,
         ):
             await manager._poll_workflows()
