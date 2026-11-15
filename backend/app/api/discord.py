@@ -15,7 +15,7 @@ import httpx
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from fastapi import APIRouter, HTTPException, Request, status
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.analytics import upsert_workflow_analytics_snapshot
@@ -35,6 +35,7 @@ from app.services.pending_execution import (
     needs_local_pending_persist,
     persist_pending_execution,
 )
+from app.services.trigger_webhook_lookup import RequestVerifier, find_trigger_workflow
 
 logger = logging.getLogger("discord_webhook")
 
@@ -166,16 +167,10 @@ def _verify_discord_signature(
 async def _find_workflow_by_node_id(
     db: AsyncSession,
     node_id: str,
+    verifies: RequestVerifier,
 ) -> Workflow | None:
-    """Use JSONB containment to find the workflow containing this node_id."""
-    result = await db.execute(
-        select(Workflow).where(
-            text("nodes::jsonb @> (:node_filter)::jsonb").bindparams(
-                node_filter=json.dumps([{"id": node_id}])
-            )
-        )
-    )
-    return result.scalar_one_or_none()
+    """The workflow whose Discord Trigger has this node id (see find_trigger_workflow)."""
+    return await find_trigger_workflow(db, node_id, "discordTrigger", verifies)
 
 
 async def _get_public_key(db: AsyncSession, credential_id: str) -> str | None:
@@ -414,8 +409,17 @@ async def discord_webhook(node_id: str, request: Request) -> dict[str, Any]:
     except (UnicodeDecodeError, json.JSONDecodeError):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON body")
 
+    signature = request.headers.get("x-signature-ed25519", "")
+    timestamp = request.headers.get("x-signature-timestamp", "")
+
+    async def signature_matches(db: AsyncSession, credential_id: str) -> bool:
+        public_key = await _get_public_key(db, credential_id)
+        return bool(public_key) and _verify_discord_signature(
+            public_key, signature, timestamp, raw_body
+        )
+
     async with async_session_maker() as db:
-        workflow = await _find_workflow_by_node_id(db, node_id)
+        workflow = await _find_workflow_by_node_id(db, node_id, signature_matches)
 
     if not workflow:
         logger.warning("No workflow found for Discord trigger node_id=%s", node_id)
@@ -456,8 +460,6 @@ async def discord_webhook(node_id: str, request: Request) -> dict[str, Any]:
             detail="Discord trigger credential is invalid or missing a public key",
         )
 
-    signature = request.headers.get("x-signature-ed25519", "")
-    timestamp = request.headers.get("x-signature-timestamp", "")
     if not _verify_discord_signature(public_key, signature, timestamp, raw_body):
         logger.warning("Invalid Discord signature for node_id=%s", node_id)
         raise HTTPException(

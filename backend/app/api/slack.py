@@ -39,6 +39,7 @@ from app.services.pending_execution import (
     persist_pending_execution,
 )
 from app.services.slack_event_claims import claim_slack_event
+from app.services.trigger_webhook_lookup import RequestVerifier, find_trigger_workflow
 
 logger = logging.getLogger("slack_webhook")
 
@@ -89,16 +90,10 @@ def _verify_slack_signature(
 async def _find_workflow_by_node_id(
     db: AsyncSession,
     node_id: str,
+    verifies: RequestVerifier,
 ) -> Workflow | None:
-    """Use JSONB containment to find the workflow containing this node_id."""
-    result = await db.execute(
-        select(Workflow).where(
-            text("nodes::jsonb @> (:node_filter)::jsonb").bindparams(
-                node_filter=json.dumps([{"id": node_id}])
-            )
-        )
-    )
-    return result.scalar_one_or_none()
+    """The workflow whose Slack Trigger has this node id (see find_trigger_workflow)."""
+    return await find_trigger_workflow(db, node_id, "slackTrigger", verifies)
 
 
 _ECHO_SUBTYPES = frozenset({"bot_message", "message_changed", "message_deleted"})
@@ -409,8 +404,17 @@ async def slack_webhook(node_id: str, request: Request) -> dict[str, Any]:
         logger.info("Slack URL verification challenge received for node %s", node_id)
         return {"challenge": challenge}
 
+    timestamp = request.headers.get("x-slack-request-timestamp", "")
+    signature = request.headers.get("x-slack-signature", "")
+
+    async def signature_matches(db: AsyncSession, credential_id: str) -> bool:
+        signing_secret = await _get_signing_secret(db, credential_id)
+        return bool(signing_secret) and _verify_slack_signature(
+            signing_secret, raw_body, timestamp, signature
+        )
+
     async with async_session_maker() as db:
-        workflow = await _find_workflow_by_node_id(db, node_id)
+        workflow = await _find_workflow_by_node_id(db, node_id, signature_matches)
 
     if not workflow:
         logger.warning("No workflow found for Slack trigger node_id=%s", node_id)
@@ -461,8 +465,6 @@ async def slack_webhook(node_id: str, request: Request) -> dict[str, Any]:
             detail="invalid webhook credential configuration",
         )
 
-    timestamp = request.headers.get("x-slack-request-timestamp", "")
-    signature = request.headers.get("x-slack-signature", "")
     if not _verify_slack_signature(signing_secret, raw_body, timestamp, signature):
         logger.warning("Invalid Slack signature for node_id=%s", node_id)
         raise HTTPException(

@@ -1,14 +1,13 @@
 """Telegram Bot API webhook endpoint."""
 
 import hmac
-import json
 import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, status
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.analytics import upsert_workflow_analytics_snapshot
@@ -28,6 +27,7 @@ from app.services.pending_execution import (
     needs_local_pending_persist,
     persist_pending_execution,
 )
+from app.services.trigger_webhook_lookup import RequestVerifier, find_trigger_workflow
 
 logger = logging.getLogger("telegram_webhook")
 
@@ -78,16 +78,10 @@ def _sanitize_headers(headers: Any) -> dict[str, str]:
 async def _find_workflow_by_node_id(
     db: AsyncSession,
     node_id: str,
+    verifies: RequestVerifier,
 ) -> Workflow | None:
-    """Use JSONB containment to find the workflow containing this node_id."""
-    result = await db.execute(
-        select(Workflow).where(
-            text("nodes::jsonb @> (:node_filter)::jsonb").bindparams(
-                node_filter=json.dumps([{"id": node_id}])
-            )
-        )
-    )
-    return result.scalar_one_or_none()
+    """The workflow whose Telegram Trigger has this node id (see find_trigger_workflow)."""
+    return await find_trigger_workflow(db, node_id, "telegramTrigger", verifies)
 
 
 async def _get_telegram_config(db: AsyncSession, credential_id: str) -> dict[str, Any] | None:
@@ -284,8 +278,15 @@ async def telegram_webhook(node_id: str, request: Request) -> dict[str, Any]:
     except Exception:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON body")
 
+    incoming_secret = request.headers.get("x-telegram-bot-api-secret-token", "")
+
+    async def secret_matches(db: AsyncSession, credential_id: str) -> bool:
+        config = await _get_telegram_config(db, credential_id) or {}
+        secret = str(config.get("secret_token") or "").strip()
+        return bool(secret and incoming_secret and hmac.compare_digest(secret, incoming_secret))
+
     async with async_session_maker() as db:
-        workflow = await _find_workflow_by_node_id(db, node_id)
+        workflow = await _find_workflow_by_node_id(db, node_id, secret_matches)
 
     if not workflow:
         logger.warning("No workflow found for Telegram trigger node_id=%s", node_id)
@@ -344,7 +345,6 @@ async def telegram_webhook(node_id: str, request: Request) -> dict[str, Any]:
             detail="invalid webhook credential configuration",
         )
 
-    incoming_secret = request.headers.get("x-telegram-bot-api-secret-token", "")
     if not incoming_secret or not hmac.compare_digest(secret_token, incoming_secret):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
