@@ -116,6 +116,7 @@ from app.services.page_params import (
     is_valid_record,
 )
 from app.services.result_stream import stream_result
+from app.services.user_lookup import find_user_by_email
 from app.services.widget_page_record import (
     detail_page_context,
     example_record,
@@ -1784,9 +1785,7 @@ async def create_dashboard_share(
 ) -> DashboardShareResponse:
     """Share with a user, or change the permission of an existing share."""
     dashboard = await _get_owned_dashboard(db, dashboard_id, current_user)
-    target = (
-        await db.execute(select(User).where(User.email == body.email.strip()))
-    ).scalar_one_or_none()
+    target = await find_user_by_email(db, body.email)
     if target is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     if target.id == current_user.id:

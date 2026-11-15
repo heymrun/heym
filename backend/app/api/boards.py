@@ -88,6 +88,7 @@ from app.services.file_storage import (
 from app.services.hitl_service import build_public_base_url
 from app.services.pending_review_cancel import cancel_pending_review_execution
 from app.services.upload_limits import read_upload_file_limited
+from app.services.user_lookup import find_user_by_email
 from app.services.workflow_access import get_accessible_workflow
 
 router = APIRouter()
@@ -1366,9 +1367,7 @@ async def create_board_share(
 ) -> BoardShareResponse:
     board = await _get_owned_board(db, board_id, current_user)
     permission = _validate_permission(request.permission)
-    target = (
-        await db.execute(select(User).where(User.email == request.email))
-    ).scalar_one_or_none()
+    target = await find_user_by_email(db, request.email)
     if target is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     if target.id == current_user.id:

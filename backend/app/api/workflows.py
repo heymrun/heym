@@ -150,6 +150,7 @@ from app.services.run_history_list import (
     run_history_rows,
 )
 from app.services.run_history_list import filters_to_workflow_runs as filters_to_workflow_runs
+from app.services.user_lookup import find_user_by_email
 from app.services.workflow_access import (
     PERMISSION_WRITE,
     disable_alerts_without_access,
@@ -2538,8 +2539,7 @@ async def create_workflow_share(
             detail="Only owner can add shares",
         )
 
-    result = await db.execute(select(User).where(User.email == share_data.email))
-    target_user = result.scalar_one_or_none()
+    target_user = await find_user_by_email(db, share_data.email)
     if target_user is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

@@ -58,6 +58,7 @@ from app.services.encryption import decrypt_config, encrypt_config, mask_api_key
 from app.services.k8s_credentials.store import CredentialUnavailableError
 from app.services.model_router import ModelRouterConfigError, parse_router_config
 from app.services.opencode_usage_service import fetch_opencode_usage
+from app.services.user_lookup import find_user_by_email
 from app.services.vector_store import VECTOR_STORE_BACKENDS
 from app.services.vector_store_pg import pgvector_dimension_message
 
@@ -2626,8 +2627,7 @@ async def create_credential_share(
         )
     refuse_secret_backed(credential)
 
-    user_result = await db.execute(select(User).where(User.email == share_data.email))
-    target_user = user_result.scalar_one_or_none()
+    target_user = await find_user_by_email(db, share_data.email)
 
     if target_user is None:
         raise HTTPException(
