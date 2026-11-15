@@ -1,3 +1,4 @@
+import codecs
 import csv
 import io
 import json
@@ -5,6 +6,27 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
+
+
+def _decode_text(raw: bytes) -> str:
+    """Uploaded text as a string, whatever common encoding it was saved in.
+
+    UTF-8 with or without a BOM (Excel's "CSV UTF-8", Notepad "UTF-8 with BOM"), UTF-16
+    with a BOM (Notepad "Unicode", PowerShell 5 output), else cp1254 as the file
+    inspector does (Excel's default "CSV" and Notepad "ANSI" are single-byte), else latin-1.
+    """
+    if raw.startswith(codecs.BOM_UTF8):
+        return raw.decode("utf-8-sig", errors="replace")
+    if raw.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+        return raw.decode("utf-16", errors="replace")
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
+    try:
+        return raw.decode("cp1254")
+    except UnicodeDecodeError:
+        return raw.decode("latin-1")
 
 
 @dataclass
@@ -294,7 +316,7 @@ class FileProcessor:
         self, file_content: bytes, filename: str, file_size: int | None = None
     ) -> list[TextChunk]:
         actual_size = file_size if file_size is not None else len(file_content)
-        text = file_content.decode("utf-8", errors="ignore")
+        text = _decode_text(file_content)
         chunks = self._chunk_text(
             text,
             base_metadata={
@@ -309,7 +331,7 @@ class FileProcessor:
         self, file_content: bytes, filename: str, file_size: int | None = None
     ) -> list[TextChunk]:
         actual_size = file_size if file_size is not None else len(file_content)
-        text = file_content.decode("utf-8", errors="ignore")
+        text = _decode_text(file_content)
         chunks = self._chunk_text(
             text,
             base_metadata={
@@ -398,7 +420,7 @@ class FileProcessor:
         self, file_content: bytes, filename: str, file_size: int | None = None
     ) -> list[TextChunk]:
         actual_size = file_size if file_size is not None else len(file_content)
-        text = file_content.decode("utf-8", errors="ignore")
+        text = _decode_text(file_content)
         reader = csv.DictReader(io.StringIO(text))
         chunks = []
 
@@ -425,7 +447,7 @@ class FileProcessor:
         self, file_content: bytes, filename: str, file_size: int | None = None
     ) -> list[TextChunk]:
         actual_size = file_size if file_size is not None else len(file_content)
-        text = file_content.decode("utf-8", errors="ignore")
+        text = _decode_text(file_content)
         data = json.loads(text)
         chunks = []
 

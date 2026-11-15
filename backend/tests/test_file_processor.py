@@ -244,6 +244,36 @@ class ProcessJsonTests(unittest.TestCase):
         self.assertEqual(chunks[0].text, "42")
 
 
+class TextEncodingTests(unittest.TestCase):
+    """Text files saved by Excel, Notepad or PowerShell keep every character."""
+
+    ROWS = "name,city\nJürgen Müller,München\nJoão,São Paulo\n"
+    EXPECTED = ["name: Jürgen Müller | city: München", "name: João | city: São Paulo"]
+
+    def test_csv_from_excel_in_every_save_format(self) -> None:
+        formats = {
+            "CSV UTF-8 (BOM)": b"\xef\xbb\xbf" + self.ROWS.encode("utf-8"),
+            "CSV (Comma delimited)": self.ROWS.encode("cp1252"),
+            "plain UTF-8": self.ROWS.encode("utf-8"),
+        }
+        for label, raw in formats.items():
+            with self.subTest(format=label):
+                chunks = FileProcessor().process_csv(raw, "people.csv")
+                self.assertEqual([c.text for c in chunks], self.EXPECTED)
+
+    def test_json_with_a_utf8_bom(self) -> None:
+        raw = b"\xef\xbb\xbf" + json.dumps([{"name": "Kaffeemühle"}], ensure_ascii=False).encode()
+        chunks = FileProcessor().process_json(raw, "products.json")
+        self.assertEqual([c.text for c in chunks], ["name: Kaffeemühle"])
+
+    def test_utf16_text_from_notepad(self) -> None:
+        raw = "Meeting notes\nBudget approved: 12.000 €".encode("utf-16")  # BOM included
+        chunks = FileProcessor().process_text(raw, "notes.txt")
+        self.assertEqual(
+            " ".join(c.text for c in chunks), "Meeting notes Budget approved: 12.000 €"
+        )
+
+
 class ProcessFileTests(unittest.TestCase):
     def _assert_dispatches_to(self, filename: str, method_name: str) -> None:
         fp = FileProcessor()
