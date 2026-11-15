@@ -420,8 +420,8 @@ class TestTabNamesWithReservedCharacters(unittest.TestCase):
             quoted = "'" + name.replace("'", "''") + "'"
             with self.subTest(name=name):
                 with patch("httpx.get", return_value=self._response({"values": []})) as get:
-                    svc.read_range("sid", name, start_row=1, max_rows=5)
-                self.assertEqual(self._range_of(get.call_args[0][0]), f"{quoted}!A1:Z5")
+                    svc.read_range("sid", name, start_row=1, max_rows=0)
+                self.assertEqual(self._range_of(get.call_args[0][0]), f"{quoted}!A1:Z")
 
                 with patch("httpx.post", return_value=self._response({})) as post:
                     svc.append_rows("sid", name, [["a"]])
@@ -439,8 +439,8 @@ class TestTabNamesWithReservedCharacters(unittest.TestCase):
     def test_a_plain_tab_name_is_sent_as_before(self) -> None:
         svc = self._service()
         with patch("httpx.get", return_value=self._response({"values": []})) as get:
-            svc.read_range("sid", "Sheet 1", start_row=1, max_rows=5)
-        self.assertEqual(self._range_of(get.call_args[0][0]), "Sheet 1!A1:Z5")
+            svc.read_range("sid", "Sheet 1", start_row=1, max_rows=0)
+        self.assertEqual(self._range_of(get.call_args[0][0]), "Sheet 1!A1:Z")
 
     def test_the_column_picker_reads_the_header_of_the_whole_tab(self) -> None:
         from app.api import google_sheets as sheets_api

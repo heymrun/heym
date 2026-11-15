@@ -2926,9 +2926,16 @@ class WorkflowExecutor:
         completed_nodes: set[str],
         pending_count: dict[str, int],
     ) -> None:
+        # Not across loop-back edges: that would un-skip a nested loop's body from its done.
+        loop_ids = {nid for nid, node in self.nodes.items() if node.get("type") == "loop"}
+        forward_edges = [
+            e
+            for e in active_edges
+            if not (e.get("targetHandle") == "loop" and e["target"] in loop_ids)
+        ]
         branch_nodes: set[str] = set()
         for start_node_id in start_node_ids:
-            branch_nodes.update(self.get_branch_node_ids(start_node_id, active_edges))
+            branch_nodes.update(self.get_branch_node_ids(start_node_id, forward_edges))
         self.reset_nodes_for_execution(branch_nodes, active_edges, completed_nodes, pending_count)
 
     def prepare_loop_for_reexecution(
@@ -2947,12 +2954,12 @@ class WorkflowExecutor:
         completed_nodes.discard(loop_node_id)
         with self.lock:
             self.skipped_nodes.discard(loop_node_id)
-        self.reset_nodes_for_execution(
-            self.get_loop_body_node_ids(loop_node_id, active_edges),
-            active_edges,
-            completed_nodes,
-            pending_count,
-        )
+        body_node_ids = self.get_loop_body_node_ids(loop_node_id, active_edges)
+        self.reset_nodes_for_execution(body_node_ids, active_edges, completed_nodes, pending_count)
+        # A loop nested in this body starts over on the next item, not where it left off.
+        for body_node_id in body_node_ids:
+            if self.nodes.get(body_node_id, {}).get("type") == "loop":
+                self.loop_states.pop(body_node_id, None)
         return True
 
     def get_execution_order(self) -> list[str]:
