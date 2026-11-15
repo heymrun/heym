@@ -207,7 +207,7 @@ class TestNamedMCPEndpoints(unittest.TestCase):
         self.client = TestClient(self.app)
 
 
-    def _post_named_endpoint_with_key(self, api_key: str | None):
+    def _post_named_endpoint_with_key(self, api_key: str | None) -> tuple[object, AsyncMock]:
         db = AsyncMock()
         result = MagicMock()
         result.scalar_one_or_none.return_value = None
