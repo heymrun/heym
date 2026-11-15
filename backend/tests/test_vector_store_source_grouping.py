@@ -76,6 +76,19 @@ class TestQdrantSourceGrouping(unittest.TestCase):
         selector = client.delete.call_args.kwargs["points_selector"]
         self.assertIsInstance(selector.filter.must[0], FieldCondition)
         self.assertEqual(selector.filter.must[0].match.value, "guide.pdf")
+        self.assertIsNone(selector.filter.must_not)
+
+    def test_a_replacement_just_written_is_kept(self) -> None:
+        from qdrant_client.http.models import HasIdCondition
+
+        svc, client = _qdrant_service()
+
+        svc.delete_by_source("col1", "guide.pdf", ["new-1", "new-2"])
+
+        selector = client.delete.call_args.kwargs["points_selector"]
+        self.assertEqual(selector.filter.must[0].match.value, "guide.pdf")
+        self.assertIsInstance(selector.filter.must_not[0], HasIdCondition)
+        self.assertEqual(selector.filter.must_not[0].has_id, ["new-1", "new-2"])
 
 
 class TestPgVectorSourceGrouping(unittest.TestCase):
@@ -123,7 +136,20 @@ class TestPgVectorSourceGrouping(unittest.TestCase):
         conn = engine.begin.return_value.__enter__.return_value
         sql = str(conn.execute.call_args.args[0])
         self.assertIn("source = :s", sql)
-        self.assertEqual(conn.execute.call_args.args[1]["s"], "guide.pdf")
+        self.assertEqual(conn.execute.call_args.args[1], {"c": "col1", "s": "guide.pdf"})
+        self.assertNotIn(":keep", sql)
+
+    def test_a_replacement_just_written_is_kept(self) -> None:
+        svc, engine = self._service()
+
+        svc.delete_by_source("col1", "guide.pdf", ["11111111-1111-1111-1111-111111111111"])
+
+        conn = engine.begin.return_value.__enter__.return_value
+        sql = str(conn.execute.call_args.args[0])
+        self.assertIn("AND NOT (id::text = ANY(:keep))", sql)
+        self.assertEqual(
+            conn.execute.call_args.args[1]["keep"], ["11111111-1111-1111-1111-111111111111"]
+        )
 
 
 if __name__ == "__main__":

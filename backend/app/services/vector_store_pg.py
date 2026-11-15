@@ -376,7 +376,10 @@ class PgVectorStoreService:
     def delete_point(self, collection_name: str, point_id: str) -> bool:
         return self.delete_points(collection_name, [point_id])
 
-    def delete_by_source(self, collection_name: str, source: str) -> int:
+    def delete_by_source(
+        self, collection_name: str, source: str, keep_ids: list[str] | None = None
+    ) -> int:
+        """Delete the source's rows, except ``keep_ids`` (a replacement just written)."""
         if not self._table_exists():
             return 0
         # An empty source addresses the points that carry no source at all — the group
@@ -387,9 +390,13 @@ class PgVectorStoreService:
             params["s"] = source
         else:
             where = "source IS NULL OR source = ''"
+        keep = ""
+        if keep_ids:
+            keep = " AND NOT (id::text = ANY(:keep))"
+            params["keep"] = [str(point_id) for point_id in keep_ids]
         with self.engine.begin() as conn:
             conn.execute(
-                text(f"DELETE FROM {TABLE} WHERE collection_name = :c AND ({where})"),
+                text(f"DELETE FROM {TABLE} WHERE collection_name = :c AND ({where}){keep}"),
                 params,
             )
         return 1

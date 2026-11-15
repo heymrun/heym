@@ -85,7 +85,9 @@ class RunJobTests(unittest.IsolatedAsyncioTestCase):
             await rag_ingest_jobs.run_job(self.job.id)
 
         extract.assert_called_once_with(RagFileKind.AUDIO, b"mp3", "call.mp3", 3)
-        self.service.delete_by_source.assert_called_once_with("calls", "call.mp3")
+        self.service.delete_by_source.assert_called_once_with(
+            "calls", "call.mp3", self.service.insert_batch.return_value
+        )
         self.service.insert_batch.assert_called_once_with(
             "calls", ["Hello"], [{"source": "call.mp3"}]
         )
@@ -109,6 +111,18 @@ class RunJobTests(unittest.IsolatedAsyncioTestCase):
         self.service.delete_by_source.assert_not_called()
         self.service.insert_batch.assert_not_called()
         self.assertFalse(rag_ingest_jobs.job_file_path(self.job.id).exists())
+
+    async def test_a_failed_embed_keeps_the_old_source(self) -> None:
+        chunks = [TextChunk(text="Hello", metadata={"source": "call.mp3"})]
+        self.service.insert_batch.side_effect = RuntimeError("Rate limit reached")
+        with (
+            patch("app.services.rag_ingest.extract_chunks", return_value=chunks),
+            patch.object(rag_ingest_jobs, "_mark_failed", new=AsyncMock()),
+            self.assertLogs("app.services.rag_ingest_jobs", level="ERROR"),
+        ):
+            await rag_ingest_jobs.run_job(self.job.id)
+
+        self.service.delete_by_source.assert_not_called()
 
     async def test_an_unexpected_error_records_a_generic_message(self) -> None:
         with (

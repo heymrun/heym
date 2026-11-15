@@ -737,10 +737,9 @@ async def upload_file_to_vector_store(
     config = decrypt_config(credential.encrypted_config)
     service = get_vector_store_service_from_config(config, credential.type)
 
-    if override_duplicates:
-        await asyncio.to_thread(service.delete_by_source, store.collection_name, filename)
-
     if not chunks:
+        if override_duplicates:
+            await asyncio.to_thread(service.delete_by_source, store.collection_name, filename)
         return VectorStoreUploadResponse(chunks_processed=0, points_inserted=0)
 
     texts = [chunk.text for chunk in chunks]
@@ -759,6 +758,12 @@ async def upload_file_to_vector_store(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to insert vectors: {e!s}",
+        )
+
+    # Drop the old version only once the new one is written, so a failed embed keeps it.
+    if override_duplicates:
+        await asyncio.to_thread(
+            service.delete_by_source, store.collection_name, filename, point_ids
         )
 
     audit(
