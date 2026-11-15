@@ -77,8 +77,25 @@ def queue_full_result() -> OffloadedRun:
 
 
 async def _release_after_branches(futures: tuple[Any, ...], execution_id: uuid.UUID) -> None:
+    """Hold the slot while the branches run, then give it back.
+
+    The run's active-execution row is cleared when its early answer returns, so to the
+    leader's stale-slot sweep this slot looks unused. Refresh it until the branches join,
+    or after STALE_SLOT_GRACE_SECONDS the sweep frees it and the next run starts while
+    this one is still working.
+    """
+    branches = asyncio.ensure_future(asyncio.to_thread(concurrent.futures.wait, futures))
     try:
-        await asyncio.to_thread(concurrent.futures.wait, futures)
+        while True:
+            done, _ = await asyncio.wait(
+                {branches}, timeout=workflow_concurrency.SLOT_REFRESH_SECONDS
+            )
+            if done:
+                break
+            try:
+                await workflow_concurrency.refresh_slot(execution_id)
+            except Exception:
+                logger.exception("Could not refresh the concurrency slot of run %s", execution_id)
     finally:
         await workflow_concurrency.release(execution_id)
 

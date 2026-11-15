@@ -118,6 +118,63 @@ class DispatchGateTests(unittest.IsolatedAsyncioTestCase):
                 await asyncio.sleep(0.01)
         release.assert_awaited_once_with(self.execution_id)
 
+    async def test_a_slot_held_for_branches_is_refreshed_until_they_join(self) -> None:
+        """The early answer clears the run's active row; without a refresh the leader's
+        stale-slot sweep frees the slot after 120 s and the next run starts alongside."""
+        from concurrent.futures import Future
+
+        branch: Future = Future()
+        release = AsyncMock()
+        refresh = AsyncMock()
+        with (
+            patch("app.services.cluster.dispatch.workflow_concurrency.release", release),
+            patch("app.services.cluster.dispatch.workflow_concurrency.refresh_slot", refresh),
+            patch("app.services.cluster.dispatch.workflow_concurrency.SLOT_REFRESH_SECONDS", 0.01),
+        ):
+            await dispatch.release_slot_when_done(_result(futures=(branch,)), self.execution_id)
+            for _ in range(200):
+                if refresh.await_count >= 2:
+                    break
+                await asyncio.sleep(0.01)
+            self.assertGreaterEqual(refresh.await_count, 2)
+            refresh.assert_awaited_with(self.execution_id)
+            release.assert_not_awaited()
+
+            branch.set_result(None)
+            for _ in range(100):
+                if release.await_count:
+                    break
+                await asyncio.sleep(0.01)
+            release.assert_awaited_once_with(self.execution_id)
+            refreshed = refresh.await_count
+            await asyncio.sleep(0.05)
+            self.assertEqual(refresh.await_count, refreshed)
+
+    async def test_a_failed_refresh_keeps_waiting_for_the_branches(self) -> None:
+        from concurrent.futures import Future
+
+        branch: Future = Future()
+        release = AsyncMock()
+        refresh = AsyncMock(side_effect=RuntimeError("database unavailable"))
+        with (
+            patch("app.services.cluster.dispatch.workflow_concurrency.release", release),
+            patch("app.services.cluster.dispatch.workflow_concurrency.refresh_slot", refresh),
+            patch("app.services.cluster.dispatch.workflow_concurrency.SLOT_REFRESH_SECONDS", 0.01),
+            self.assertLogs("cluster", level="ERROR"),
+        ):
+            await dispatch.release_slot_when_done(_result(futures=(branch,)), self.execution_id)
+            for _ in range(200):
+                if refresh.await_count >= 2:
+                    break
+                await asyncio.sleep(0.01)
+            release.assert_not_awaited()
+            branch.set_result(None)
+            for _ in range(100):
+                if release.await_count:
+                    break
+                await asyncio.sleep(0.01)
+        release.assert_awaited_once_with(self.execution_id)
+
     async def test_a_queued_run_returns_the_admission_when_asked(self) -> None:
         admission = Admission(
             kind="queued", execution_id=self.execution_id, queue=QueueInfo(1, 1, 1, 1)
