@@ -441,6 +441,90 @@ class RerunCompletionTests(unittest.IsolatedAsyncioTestCase):
         session.commit.assert_awaited_once()
         sync_board.assert_awaited_once_with(orphan.execution_id)
 
+    async def _rerun_for_real(self, branch: dict) -> SimpleNamespace:
+        """Re-run input -> Output(allowDownstream) -> branch through the real executor."""
+        import threading
+
+        from app.db.models import ExecutionHistory
+        from app.services.execution_recovery import ExecutionRecoveryService
+
+        svc = ExecutionRecoveryService()
+        orphan = _orphan()
+        workflow = SimpleNamespace(
+            id=orphan.workflow_id,
+            owner_id=uuid.uuid4(),
+            name="Early answer",
+            nodes=[
+                {
+                    "id": "in1",
+                    "type": "textInput",
+                    "data": {"label": "userInput", "inputFields": [{"key": "text"}]},
+                },
+                {
+                    "id": "out1",
+                    "type": "output",
+                    "data": {"label": "early", "message": "accepted", "allowDownstream": True},
+                },
+                branch,
+            ],
+            edges=[
+                {"id": "e1", "source": "in1", "target": "out1"},
+                {"id": "e2", "source": "out1", "target": branch["id"]},
+            ],
+        )
+        session = AsyncMock()
+        session.execute = AsyncMock(return_value=MagicMock())
+        session.add = MagicMock()
+        session.commit = AsyncMock()
+        session_context = MagicMock()
+        session_context.__aenter__ = AsyncMock(return_value=session)
+        session_context.__aexit__ = AsyncMock(return_value=False)
+        release = AsyncMock()
+
+        with (
+            patch("app.db.session.async_session_maker", return_value=session_context),
+            patch("app.api.workflows.collect_referenced_workflows", AsyncMock(return_value={})),
+            patch("app.api.workflows.get_credentials_context", AsyncMock(return_value={})),
+            patch(
+                "app.services.global_variables_service.get_global_variables_context",
+                AsyncMock(return_value={}),
+            ),
+            patch(
+                "app.services.execution_cancellation.register_execution",
+                MagicMock(return_value=threading.Event()),
+            ),
+            patch("app.services.execution_cancellation.clear_execution", MagicMock()),
+            patch("app.api.analytics.upsert_workflow_analytics_snapshot", AsyncMock()),
+            patch("app.api.workflows._persist_global_variables_from_execution", AsyncMock()),
+            patch("app.services.workflow_concurrency.release", release),
+        ):
+            with patch.object(svc, "_load_workflow", AsyncMock(return_value=workflow)):
+                await svc._recover_one(orphan)
+
+        [history] = [
+            call.args[0]
+            for call in session.add.call_args_list
+            if isinstance(call.args[0], ExecutionHistory)
+        ]
+        release.assert_awaited_once_with(orphan.execution_id)
+        return history
+
+    async def test_an_allow_downstream_branch_is_recorded(self) -> None:
+        history = await self._rerun_for_real(
+            {"id": "wait1", "type": "wait", "data": {"label": "slowStep", "duration": 200}}
+        )
+        self.assertEqual(
+            sorted(row["node_id"] for row in history.node_results), ["in1", "out1", "wait1"]
+        )
+        self.assertEqual(history.status, "success")
+
+    async def test_a_failing_allow_downstream_branch_fails_the_run(self) -> None:
+        history = await self._rerun_for_real(
+            {"id": "boom", "type": "throwError", "data": {"label": "boom", "errorMessage": "x"}}
+        )
+        self.assertIn("boom", [row["node_id"] for row in history.node_results])
+        self.assertEqual(history.status, "error")
+
 
 class RealPostgresExecutionRecoveryOwnershipTests(unittest.IsolatedAsyncioTestCase):
     """Deterministic PostgreSQL-backed behavioral tests for recovery ownership lifecycle.

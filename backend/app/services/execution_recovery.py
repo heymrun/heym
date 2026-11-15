@@ -113,6 +113,27 @@ def decide_recovery_action(
     return "rerun"
 
 
+async def _join_allow_downstream(result, execution_id: uuid.UUID) -> None:
+    """Wait for a re-run's allowDownstream branch and fold its outcome into the result."""
+    from concurrent.futures import CancelledError
+
+    from app.services.workflow_executor import WorkflowCancelledError, WorkflowTimeoutError
+
+    try:
+        await asyncio.to_thread(result.join_allow_downstream)
+    except WorkflowTimeoutError as exc:
+        logger.warning("Recovered run %s allowDownstream timed out: %s", execution_id, exc)
+        result.status = "error"
+        result.outputs.setdefault("error", str(exc) or "Workflow execution timed out")
+    except (WorkflowCancelledError, CancelledError):
+        logger.info("Recovered run %s allowDownstream cancelled", execution_id)
+        result.status = "cancelled"
+    except Exception as exc:
+        logger.exception("Recovered run %s allowDownstream failed unexpectedly", execution_id)
+        result.status = "error"
+        result.outputs.setdefault("error", str(exc))
+
+
 class ExecutionRecoveryService:
     def __init__(self) -> None:
         self._running = False
@@ -396,6 +417,10 @@ class ExecutionRecoveryService:
                 cancel_event=cancel_event,
                 execution_id=str(orphan.execution_id),
             )
+            # Nobody is waiting for an early answer here, so the run is only over once
+            # its allowDownstream branch is: write history, and give the slot back, after.
+            if getattr(result, "allow_downstream_pending", False):
+                await _join_allow_downstream(result, orphan.execution_id)
 
             committed = False
             async with async_session_maker() as session:
