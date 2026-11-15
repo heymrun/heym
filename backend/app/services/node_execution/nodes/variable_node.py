@@ -59,7 +59,8 @@ def execute(ctx: NodeExecutionContext) -> object:
                         resolved_value = float(resolved_value)
                     else:
                         resolved_value = int(resolved_value)
-                else:
+                elif isinstance(resolved_value, bool) or not isinstance(resolved_value, int):
+                    # A whole number stays an int, as it does when typed as text: 6, not 6.0.
                     resolved_value = float(resolved_value)
             except (ValueError, TypeError):
                 pass
