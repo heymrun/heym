@@ -23,7 +23,7 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
     releaseTour: {
       label: "New in Heym", introTitle: "New in this release",
       introDescription: "Connect new MCP clients through /mcp, with existing /sse servers preserved.",
-      tourEnabled: false,
+      tourEnabled: true,
       sectionOrder: ["mcp-endpoint"],
     },
     sections: [
