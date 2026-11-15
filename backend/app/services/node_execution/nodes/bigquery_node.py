@@ -15,6 +15,7 @@ def execute(ctx: NodeExecutionContext) -> object:
     from app.db.session import SessionLocal
     from app.services.bigquery_service import BigQueryService
     from app.services.encryption import decrypt_config
+    from app.services.node_execution.json_fields import render_json_template
 
     credential_id = node_data.get("credentialId")
     if not credential_id:
@@ -73,8 +74,8 @@ def execute(ctx: NodeExecutionContext) -> object:
                         row[key] = val
                 rows = [row]
             else:
-                raw_rows = self.evaluate_message_template(
-                    node_data.get("bqRows", "[]"), inputs, node_id
+                raw_rows = render_json_template(
+                    self, node_data.get("bqRows", "[]"), inputs, node_id
                 )
                 rows = _json.loads(raw_rows)
 

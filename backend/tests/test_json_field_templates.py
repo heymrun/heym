@@ -4,7 +4,7 @@ import json
 import unittest
 import uuid
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 
@@ -175,6 +175,240 @@ class NodeJsonFieldTests(unittest.TestCase):
 
         self.assertEqual(result.status, "success", result.error)
         self.assertEqual(sent, [[{"id": "u-1", "display_name": TRICKY}]])
+
+
+def _credential(credential_type: CredentialType, config: dict) -> SimpleNamespace:
+    return SimpleNamespace(type=credential_type, encrypted_config=encrypt_config(config))
+
+
+class MoreNodeJsonFieldTests(unittest.TestCase):
+    """ClickHouse, BigQuery, RabbitMQ, Sentry, GitHub, WebSocket and Decision do it too."""
+
+    def test_clickhouse_insert_and_filter_keep_the_value(self) -> None:
+        service = MagicMock()
+        service.insert.return_value = {"inserted": 1}
+        service.remove.return_value = {"removed": 1}
+        data = {"label": "ch", "credentialId": "cred-1", "clickhouseTable": "leads"}
+        insert = {
+            "id": "c1",
+            "type": "clickhouse",
+            "data": {
+                **data,
+                "clickhouseOperation": "insert",
+                "clickhouseData": '[{"name": "$input.name", "source": "form"}]',
+            },
+        }
+        remove = {
+            "id": "c2",
+            "type": "clickhouse",
+            "data": {
+                **data,
+                "clickhouseOperation": "remove",
+                "clickhouseFilter": '{"name": "$input.name"}',
+            },
+        }
+        credential = _credential(CredentialType.clickhouse, {"host": "ch"})
+        with patch("app.services.clickhouse_service.ClickHouseService", return_value=service):
+            inserted = _run(insert, {"input": {"name": TRICKY}}, credential)
+            removed = _run(remove, {"input": {"name": TRICKY}}, credential)
+
+        self.assertEqual((inserted.status, removed.status), ("success", "success"))
+        service.insert.assert_called_once_with("leads", [{"name": TRICKY, "source": "form"}])
+        service.remove.assert_called_once_with("leads", filters={"name": TRICKY})
+
+    def test_clickhouse_filter_that_resolves_empty_still_means_no_filter(self) -> None:
+        service = MagicMock()
+        service.count.return_value = {"count": 3}
+        node = {
+            "id": "c1",
+            "type": "clickhouse",
+            "data": {
+                "label": "ch",
+                "credentialId": "cred-1",
+                "clickhouseOperation": "count",
+                "clickhouseTable": "leads",
+                "clickhouseFilter": "$input.filter",
+            },
+        }
+        with patch("app.services.clickhouse_service.ClickHouseService", return_value=service):
+            result = _run(
+                node, {"input": {"filter": ""}}, _credential(CredentialType.clickhouse, {"h": 1})
+            )
+
+        self.assertEqual(result.status, "success")
+        service.count.assert_called_once_with("leads", filters={})
+
+    def test_bigquery_insert_rows_keeps_the_value(self) -> None:
+        service = MagicMock()
+        service.insert_rows.return_value = {"inserted": 1}
+        node = {
+            "id": "b1",
+            "type": "bigquery",
+            "data": {
+                "label": "bq",
+                "credentialId": "cred-1",
+                "bqOperation": "insertRows",
+                "bqProjectId": "p",
+                "bqDatasetId": "d",
+                "bqTableId": "t",
+                "bqRows": '[{"name": "$input.name"}]',
+            },
+        }
+        with patch("app.services.bigquery_service.BigQueryService", return_value=service):
+            result = _run(
+                node, {"input": {"name": TRICKY}}, _credential(CredentialType.bigquery, {"k": 1})
+            )
+
+        self.assertEqual(result.status, "success")
+        service.insert_rows.assert_called_once_with("p", "d", "t", [{"name": TRICKY}])
+
+    def _rabbitmq_body(self, template: str, inputs: dict) -> object:
+        publish = AsyncMock(return_value={"published": True})
+        node = {
+            "id": "r1",
+            "type": "rabbitmq",
+            "data": {
+                "label": "mq",
+                "credentialId": "cred-1",
+                "rabbitmqOperation": "send",
+                "rabbitmqQueueName": "leads",
+                "rabbitmqMessageBody": template,
+            },
+        }
+        with patch("app.services.rabbitmq_pool.publish_message_direct", publish):
+            result = _run(
+                node, inputs, _credential(CredentialType.rabbitmq, {"rabbitmq_host": "m"})
+            )
+        self.assertEqual(result.status, "success")
+        return publish.call_args.kwargs["body"]
+
+    def test_rabbitmq_json_body_is_published_as_the_object(self) -> None:
+        body = self._rabbitmq_body(
+            '{"name": "$input.name", "event": "signup"}', {"input": {"name": TRICKY}}
+        )
+        self.assertEqual(body, {"name": TRICKY, "event": "signup"})
+
+    def test_rabbitmq_text_body_is_still_published_as_text(self) -> None:
+        body = self._rabbitmq_body("Hello $input.name", {"input": {"name": "Ada"}})
+        self.assertEqual(body, "Hello Ada")
+
+    def test_sentry_payload_keeps_the_value(self) -> None:
+        service = MagicMock()
+        service.update_project.return_value = {"slug": "web"}
+        node = {
+            "id": "s1",
+            "type": "sentry",
+            "data": {
+                "label": "sentry",
+                "credentialId": "cred-1",
+                "sentryOperation": "updateProject",
+                "sentryOrganizationSlug": "acme",
+                "sentryProjectSlug": "web",
+                "sentryPayload": '{"name": "$input.name"}',
+            },
+        }
+        result = _run(
+            node,
+            {"input": {"name": TRICKY}},
+            _credential(CredentialType.sentry, {"auth_token": "t"}),
+            patch("app.services.node_execution.nodes.sentry_node.SessionLocal", MagicMock()),
+            patch(
+                "app.services.node_execution.nodes.sentry_node.SentryService",
+                return_value=service,
+            ),
+        )
+
+        self.assertEqual(result.status, "success")
+        self.assertEqual(service.update_project.call_args.args[-1], {"name": TRICKY})
+
+    def test_github_workflow_inputs_keep_the_value(self) -> None:
+        service = MagicMock()
+        service.dispatch_workflow.return_value = {"dispatched": True}
+        node = {
+            "id": "g1",
+            "type": "github",
+            "data": {
+                "label": "deploy",
+                "credentialId": "cred-1",
+                "githubOperation": "dispatchWorkflow",
+                "githubOwner": "acme",
+                "githubRepo": "web",
+                "githubWorkflowId": "notify.yml",
+                "githubBranch": "main",
+                "githubWorkflowInputs": '{"message": "$input.name"}',
+            },
+        }
+        with patch("app.services.github_service.GitHubService", return_value=service):
+            result = _run(
+                node, {"input": {"name": TRICKY}}, _credential(CredentialType.github, {"t": 1})
+            )
+
+        self.assertEqual(result.status, "success")
+        self.assertEqual(service.dispatch_workflow.call_args.kwargs["inputs"], {"message": TRICKY})
+
+    def _websocket_frame(self, template: str, inputs: dict) -> object:
+        send = AsyncMock(return_value={"sent": True})
+        node = {
+            "id": "w1",
+            "type": "websocketSend",
+            "data": {
+                "label": "push",
+                "websocketUrl": "wss://feed.example/ws",
+                "websocketMessage": template,
+            },
+        }
+        with patch("app.services.workflow_executor.send_websocket_message", send):
+            result = _run(node, inputs, SimpleNamespace(type=None, encrypted_config=""))
+        self.assertEqual(result.status, "success")
+        return send.call_args.kwargs["message"]
+
+    def test_websocket_json_message_stays_valid_json(self) -> None:
+        frame = self._websocket_frame(
+            '{"name": "$input.name", "kind": "lead"}', {"input": {"name": TRICKY}}
+        )
+        self.assertEqual(json.loads(frame), {"name": TRICKY, "kind": "lead"})
+
+    def test_websocket_text_and_static_messages_are_sent_as_written(self) -> None:
+        inputs = {"input": {"name": "Ada"}}
+        self.assertEqual(self._websocket_frame("Hello $input.name", inputs), "Hello Ada")
+        self.assertEqual(self._websocket_frame('{"ping":1}', inputs), '{"ping":1}')
+
+    def _decision_body(self, template: str, inputs: dict) -> object:
+        call = MagicMock(return_value={"answers": []})
+        node = {
+            "id": "d1",
+            "type": "decision",
+            "data": {
+                "label": "decide",
+                "credentialId": "cred-1",
+                "customBodyEnabled": True,
+                "customBody": template,
+            },
+        }
+        result = _run(
+            node,
+            inputs,
+            SimpleNamespace(type=None, encrypted_config=""),
+            patch("app.services.node_execution.nodes.decision_node.call_decision_model", call),
+            patch(
+                "app.services.node_execution.nodes.decision_node.load_decision_credential",
+                return_value={"base_url": "https://decide.example", "api_key": "k"},
+            ),
+        )
+        self.assertEqual(result.status, "success")
+        return call.call_args.kwargs["body"]
+
+    def test_decision_custom_body_keeps_the_value(self) -> None:
+        body = self._decision_body(
+            '{"model": "m", "state": "Customer: $input.name", "questions": []}',
+            {"input": {"name": TRICKY}},
+        )
+        self.assertEqual(body, {"model": "m", "state": f"Customer: {TRICKY}", "questions": []})
+
+    def test_decision_custom_body_from_one_expression_resolves_as_before(self) -> None:
+        raw = json.dumps({"model": "m", "state": "s", "questions": []})
+        body = self._decision_body("$input.body", {"input": {"body": raw}})
+        self.assertEqual(body, {"model": "m", "state": "s", "questions": []})
 
 
 if __name__ == "__main__":

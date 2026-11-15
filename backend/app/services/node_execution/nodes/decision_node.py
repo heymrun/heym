@@ -14,6 +14,7 @@ from app.services.decision_models import (
 )
 from app.services.image_input import load_image_bytes
 from app.services.node_execution.base import NodeExecutionContext
+from app.services.node_execution.json_fields import render_json_template
 from app.services.ssrf_guard import SsrfBlockedError
 
 
@@ -104,7 +105,13 @@ def execute(ctx: NodeExecutionContext) -> object:
             raw_body = str(node_data.get("customBody") or "").strip()
             if not raw_body:
                 raise DecisionRequestError("Custom request body is empty")
-            resolved_body = self._resolve_template(raw_body, inputs, node_id)
+            # A JSON body is resolved per value, so a quote or a line break in a value
+            # stays inside its string; a body that is one expression resolves as before.
+            resolved_body = (
+                self._resolve_template(raw_body, inputs, node_id)
+                if raw_body.startswith("$")
+                else render_json_template(self, raw_body, inputs, node_id)
+            )
             try:
                 body = json.loads(resolved_body)
             except (json.JSONDecodeError, ValueError) as exc:

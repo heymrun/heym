@@ -4,6 +4,7 @@ import json
 from importlib import import_module
 
 from app.services.node_execution.base import NodeExecutionContext
+from app.services.node_execution.json_fields import render_json_template
 
 
 def execute(ctx: NodeExecutionContext) -> object:
@@ -61,7 +62,7 @@ def execute(ctx: NodeExecutionContext) -> object:
             raise ValueError("RabbitMQ Send requires routing key or queue name")
 
         message_body_template = node_data.get("rabbitmqMessageBody", "$input")
-        message_body_str = self.evaluate_message_template(message_body_template, inputs, node_id)
+        message_body_str = render_json_template(self, message_body_template, inputs, node_id)
 
         try:
             message_body = (

@@ -15,6 +15,7 @@ def execute(ctx: NodeExecutionContext) -> object:
     from app.db.session import SessionLocal
     from app.services.clickhouse_service import ClickHouseService
     from app.services.encryption import decrypt_config
+    from app.services.node_execution.json_fields import render_json_template
 
     credential_id = node_data.get("credentialId")
     if not credential_id:
@@ -40,8 +41,8 @@ def execute(ctx: NodeExecutionContext) -> object:
         ).strip()
 
     def _resolve_filters() -> dict:
-        raw = self.evaluate_message_template(
-            str(node_data.get("clickhouseFilter", "{}") or "{}"), inputs, node_id
+        raw = render_json_template(
+            self, str(node_data.get("clickhouseFilter", "{}") or "{}"), inputs, node_id
         )
         parsed = _json.loads(raw or "{}")
         if not isinstance(parsed, dict):
@@ -68,8 +69,8 @@ def execute(ctx: NodeExecutionContext) -> object:
                     str(mapping.get("value", "")), inputs, node_id
                 )
             return [row]
-        raw = self.evaluate_message_template(
-            str(node_data.get("clickhouseData", "[]") or "[]"), inputs, node_id
+        raw = render_json_template(
+            self, str(node_data.get("clickhouseData", "[]") or "[]"), inputs, node_id
         )
         parsed = _json.loads(raw or "[]")
         if isinstance(parsed, dict):
@@ -101,8 +102,8 @@ def execute(ctx: NodeExecutionContext) -> object:
     if operation == "upsert":
         return service.upsert(_resolve("clickhouseTable"), _resolve_rows())
     if operation == "update":
-        raw_data = self.evaluate_message_template(
-            str(node_data.get("clickhouseData", "{}") or "{}"), inputs, node_id
+        raw_data = render_json_template(
+            self, str(node_data.get("clickhouseData", "{}") or "{}"), inputs, node_id
         )
         data = _json.loads(raw_data or "{}")
         if not isinstance(data, dict):
