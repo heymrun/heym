@@ -52,9 +52,12 @@ The following endpoints are rate-limited per IP:
 | Endpoint | Limit | Ban duration |
 |----------|-------|--------------|
 | `POST /api/auth/login` | 10 req / 60 s | 15 min |
+| `POST /authorize` (MCP OAuth consent, password step) | Shares the `POST /api/auth/login` budget | 15 min |
 | `POST /api/auth/register` | 5 req / 60 s | 10 min |
 | `POST /register` (OAuth clients) | 5 req / 60 s | 10 min |
 | Portal login | 3 attempts | 24 h |
+
+Password attempts on the MCP consent page and on `POST /api/auth/login` count against the same per-IP budget, so a ban earned on one blocks the other. The authenticator-code step that follows a correct password is limited per account instead and does not spend that budget.
 
 When `REDIS_URL` is configured, rate limits are shared across all backend workers. Without it, limits apply per worker process.
 

@@ -158,14 +158,19 @@ class OAuthEndpointFlowTests(unittest.IsolatedAsyncioTestCase):
         db.execute = AsyncMock(
             side_effect=[
                 _query_result(client),
-                _query_result(user),
-                # The consent form now consults the SSO settings before accepting a password.
+                # The consent form signs in through password_sign_in(), which reads the SSO
+                # settings before it looks the account up.
                 _query_result(_sso_settings_row()),
+                _query_result(user),
             ]
         )
 
         authorize_response = None
-        with patch("app.api.oauth.verify_password", return_value=True):
+        with (
+            patch("app.api.auth.verify_password", return_value=True),
+            patch("app.api.auth.login_limiter") as limiter,
+        ):
+            limiter.is_allowed.return_value = (True, 0)
             authorize_response = await authorize_post(
                 request=_request(
                     path="/authorize",
@@ -531,7 +536,7 @@ class TestRedirectUriEndpointRegression(unittest.IsolatedAsyncioTestCase):
             ]
         )
 
-        with patch("app.api.oauth.verify_password", return_value=True):
+        with patch("app.api.auth.verify_password", return_value=True):
             with self.assertRaises(HTTPException) as ctx:
                 await authorize_post(
                     request=_request(
