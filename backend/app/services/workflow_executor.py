@@ -2926,15 +2926,12 @@ class WorkflowExecutor:
         completed_nodes: set[str],
         pending_count: dict[str, int],
     ) -> None:
-        # Stop at loop-back edges: a nested loop's done branch leads back into the outer
-        # loop, and walking on through it would reset (un-skip) the inner loop's body.
+        # Not across loop-back edges: that would un-skip a nested loop's body from its done.
+        loop_ids = {nid for nid, node in self.nodes.items() if node.get("type") == "loop"}
         forward_edges = [
-            edge
-            for edge in active_edges
-            if not (
-                edge.get("targetHandle") == "loop"
-                and self.nodes.get(edge["target"], {}).get("type") == "loop"
-            )
+            e
+            for e in active_edges
+            if not (e.get("targetHandle") == "loop" and e["target"] in loop_ids)
         ]
         branch_nodes: set[str] = set()
         for start_node_id in start_node_ids:
