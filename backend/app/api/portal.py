@@ -38,7 +38,11 @@ from app.models.schemas import (
 )
 from app.services import workflow_concurrency
 from app.services.auth import hash_password, verify_password
-from app.services.cluster.dispatch import resolve_placement, wait_for_result
+from app.services.cluster.dispatch import (
+    resolve_placement,
+    result_wait_seconds,
+    wait_for_result,
+)
 from app.services.codex_followup_service import (
     is_codex_pending_execution,
     persist_pending_codex_followup_execution,
@@ -373,7 +377,8 @@ async def portal_execute(
     if admission is not None and admission.kind == "queued":
         # A Portal browser has no use for a status URL: wait here like a background trigger.
         waited = await wait_for_result(
-            execution_id, timeout_seconds=workflow.workflow_timeout_seconds
+            execution_id,
+            timeout_seconds=result_wait_seconds(workflow.workflow_timeout_seconds, held=True),
         )
         audit_workflow_run(
             workflow_id=workflow.id,
