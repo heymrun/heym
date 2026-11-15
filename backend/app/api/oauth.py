@@ -7,22 +7,21 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode, urlparse
 
 import bcrypt
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.auth import password_sign_in
 from app.api.deps import get_client_ip
 from app.config import settings
 from app.db.models import OAuthAccessToken, OAuthAuthorizationCode, OAuthClient, User
 from app.db.session import get_db
+from app.models.schemas import UserLogin
 from app.services import mfa
-from app.services.account_status import DEACTIVATED_DETAIL
-from app.services.auth import verify_password
 from app.services.auth_rate_limiter import oauth_register_limiter
 from app.services.oauth_tokens import hash_oauth_token
-from app.services.sso_settings import get_sso_settings, password_login_blocked
-from app.services.user_lookup import find_user_by_email
 
 router = APIRouter()
 
@@ -577,7 +576,13 @@ async def authorize_post(
             400, detail="Invalid or expired form token. Please reload and try again."
         )
 
-    def consent_error(error: str, mfa_challenge: str | None = None) -> HTMLResponse:
+    def consent_error(
+        error: str,
+        mfa_challenge: str | None = None,
+        *,
+        status_code: int = status.HTTP_400_BAD_REQUEST,
+        headers: dict[str, str] | None = None,
+    ) -> HTMLResponse:
         return HTMLResponse(
             _render_consent_page(
                 client_name=client.client_name,
@@ -591,7 +596,8 @@ async def authorize_post(
                 error=error,
                 mfa_challenge=mfa_challenge,
             ),
-            status_code=400,
+            status_code=status_code,
+            headers=headers,
         )
 
     challenge_token = str(form.get("mfa_challenge", ""))
@@ -602,18 +608,22 @@ async def authorize_post(
         if user is None:
             return consent_error("That code is not valid, or the attempt expired.", challenge_token)
     else:
-        user = await find_user_by_email(db, email)
-
-        # The same gate as /api/auth/login. Closing only that one would make the setting a lie.
-        sso_row = await get_sso_settings(db)
-        if (
-            password_login_blocked(sso_row, email)
-            or user is None
-            or not verify_password(password, user.hashed_password)
-        ):
+        try:
+            credentials = UserLogin(email=email, password=password)
+        except ValidationError:
             return consent_error("Invalid email or password")
-        if not user.is_active:
-            return consent_error(DEACTIVATED_DETAIL)
+        # The same gate as /api/auth/login, not a copy of it: one per-IP budget, the
+        # SSO-only rule and the auth.login audit line, so the two doors cannot drift apart.
+        try:
+            user = await password_sign_in(
+                db, credentials, get_client_ip(request), client=_consent_client(client_id)
+            )
+        except HTTPException as exc:
+            if exc.status_code == status.HTTP_429_TOO_MANY_REQUESTS:
+                return consent_error(
+                    str(exc.detail), status_code=exc.status_code, headers=exc.headers
+                )
+            return consent_error(str(exc.detail))
         requirement = mfa.password_sign_in_requirement(user)
         if requirement == mfa.PURPOSE_ENROLL:
             return consent_error(
