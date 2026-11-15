@@ -1,5 +1,6 @@
 """Unit tests for IMAP trigger polling and execution history."""
 
+import asyncio
 import socket
 import threading
 import unittest
@@ -133,9 +134,90 @@ class ImapTriggerPollIsolationTests(unittest.IsolatedAsyncioTestCase):
             self.assertLogs("imap_trigger", level="ERROR") as logs,
         ):
             await manager._poll_workflows()
+            await manager.wait_for_polls()
 
         self.assertEqual(polled, ["down", "up"])
         self.assertIn("down", "\n".join(logs.output))
+
+
+class ImapSlowRunTests(unittest.IsolatedAsyncioTestCase):
+    """A slow workflow run holds up only its own IMAP trigger, not the poll pass."""
+
+    async def asyncSetUp(self) -> None:
+        self.gate = asyncio.Event()
+        self.b_polled = asyncio.Event()
+        self.polled: list[str] = []
+        self.manager = ImapTriggerManager()
+        self._patched = False
+        self.workflows = [
+            SimpleNamespace(
+                id=uuid.uuid4(),
+                nodes=[{"id": node_id, "type": "imapTrigger", "data": {"credentialId": "c"}}],
+            )
+            for node_id in ("a1", "b1")
+        ]
+
+    async def _poll_node(self, workflow: SimpleNamespace, node: dict) -> None:
+        self.polled.append(node["id"])
+        if node["id"] == "a1":
+            await self.gate.wait()  # A's workflow is still answering its email
+        else:
+            self.b_polled.set()
+
+    def _patch(self, *args: object, **kwargs: object) -> None:
+        patcher = patch.object(*args, **kwargs)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    async def _pass(self) -> None:
+        # Patches stay on for the whole test: the node polls run after the pass returns.
+        if not self._patched:
+            self._patched = True
+            session = AsyncMock()
+            session.__aenter__.return_value = session
+            self._patch(imap_trigger_service, "async_session_maker", return_value=session)
+            self._patch(
+                self.manager,
+                "_get_workflows_with_imap_trigger",
+                AsyncMock(return_value=self.workflows),
+            )
+            self._patch(self.manager, "_poll_workflow_node", side_effect=self._poll_node)
+            self._patch(self.manager, "_should_poll_node", return_value=True)
+            self._patch(self.manager, "_forget_inactive_cursors", AsyncMock())
+        # Before the fix the pass waited for A's run here, so this timed out.
+        await asyncio.wait_for(self.manager._poll_workflows(), timeout=5)
+
+    async def test_another_inbox_is_polled_while_a_slow_run_is_going(self) -> None:
+        await self._pass()
+        await asyncio.wait_for(self.b_polled.wait(), timeout=5)
+
+        self.assertFalse(self.gate.is_set())
+        self.assertEqual(self.polled, ["a1", "b1"])
+        self.gate.set()
+        await self.manager.wait_for_polls()
+
+    async def test_an_inbox_with_runs_in_flight_is_not_polled_again(self) -> None:
+        await self._pass()
+        b_key = self.manager._get_node_key(self.workflows[1].id, "b1")
+        b_poll = self.manager._node_polls.get(b_key)
+        if b_poll is not None:
+            await asyncio.wait_for(b_poll, timeout=5)  # B's poll has ended, A's has not
+            await asyncio.sleep(0)  # let its done callback drop it
+        self.b_polled.clear()
+
+        await self._pass()
+        await asyncio.wait_for(self.b_polled.wait(), timeout=5)
+
+        self.assertEqual(self.polled, ["a1", "b1", "b1"])
+        self.gate.set()
+        await self.manager.wait_for_polls()
+
+    async def test_stop_cancels_polls_in_flight(self) -> None:
+        await self._pass()
+
+        await self.manager.stop()
+
+        self.assertEqual(self.manager._node_polls, {})
 
 
 class ImapTriggerRetryTests(unittest.IsolatedAsyncioTestCase):

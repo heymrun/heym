@@ -353,6 +353,8 @@ class ImapTriggerManager:
         self._task: asyncio.Task | None = None
         self._last_poll_at: dict[str, datetime] = {}
         self._cursors: dict[str, ImapCursor] = {}
+        # Each node's poll and runs, so a slow workflow holds up only its own trigger.
+        self._node_polls: dict[str, asyncio.Task] = {}
         self._poll_loop_seconds = 15
         self._max_pre_dispatch_attempts = 3
 
@@ -374,6 +376,10 @@ class ImapTriggerManager:
                 await self._task
             except asyncio.CancelledError:
                 pass
+        node_polls = list(self._node_polls.values())
+        for poll in node_polls:
+            poll.cancel()
+        await asyncio.gather(*node_polls, return_exceptions=True)
         self._last_poll_at.clear()
         self._cursors.clear()
         logger.info("IMAP trigger manager stopped")
@@ -404,23 +410,46 @@ class ImapTriggerManager:
                 key = self._get_node_key(workflow.id, node_id)
                 current_keys.add(key)
 
-                if not self._should_poll_node(key, now, node):
+                if key in self._node_polls or not self._should_poll_node(key, now, node):
                     continue
 
                 self._last_poll_at[key] = now
-                try:
-                    await self._poll_workflow_node(workflow, node)
-                except Exception:
-                    # One unreachable mailbox must not keep the other triggers from polling.
-                    logger.exception(
-                        "IMAP trigger poll failed for workflow %s node %s", workflow.id, node_id
-                    )
+                self._start_node_poll(key, workflow, node)
 
         stale_keys = set(self._last_poll_at.keys()) - current_keys
         for key in stale_keys:
             self._last_poll_at.pop(key, None)
             self._cursors.pop(key, None)
         await self._forget_inactive_cursors(current_keys)
+
+    def _start_node_poll(self, key: str, workflow: Workflow, node: dict[str, Any]) -> None:
+        """Poll one node and run its new emails in order, without holding up the pass."""
+        task = asyncio.create_task(self._poll_node_logged(workflow, node))
+        self._node_polls[key] = task
+
+        def _forget(done: asyncio.Task) -> None:
+            if self._node_polls.get(key) is done:
+                del self._node_polls[key]
+
+        task.add_done_callback(_forget)
+
+    async def _poll_node_logged(self, workflow: Workflow, node: dict[str, Any]) -> None:
+        try:
+            await self._poll_workflow_node(workflow, node)
+        except Exception:
+            # One unreachable mailbox must not keep the other triggers from polling.
+            logger.exception(
+                "IMAP trigger poll failed for workflow %s node %s", workflow.id, node.get("id")
+            )
+
+    async def wait_for_polls(self) -> None:
+        """Wait until every node's started poll and its runs have ended."""
+        while self._node_polls:
+            await asyncio.gather(*list(self._node_polls.values()), return_exceptions=True)
+            # Awaiting finished tasks does not yield, so their done callbacks have not run yet.
+            for key, poll in list(self._node_polls.items()):
+                if poll.done():
+                    del self._node_polls[key]
 
     async def _forget_inactive_cursors(self, active_keys: set[str]) -> None:
         """Drop stored cursors of IMAP Triggers that were removed or deactivated.
