@@ -2,6 +2,7 @@
 
 import ast
 import io
+import json
 import keyword
 import tokenize
 
@@ -62,3 +63,11 @@ def restore_reserved_attribute_names(tree: ast.AST, expr: str) -> ast.AST:
         if isinstance(node, ast.Attribute):
             node.attr = names_by_alias.get(node.attr, node.attr)
     return tree
+
+
+def render_in_text(value: object) -> str:
+    """A list or object inside text reads as JSON; a value JSON cannot hold keeps str()."""
+    try:
+        return json.dumps(value, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return str(value)

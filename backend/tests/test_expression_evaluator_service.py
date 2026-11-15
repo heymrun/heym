@@ -2552,3 +2552,105 @@ class TestLeadingDollarTextTemplates(unittest.TestCase):
             resolve_leading_dollar_value(executor, condition, inputs, "n1"),
             executor.resolve_expression(condition, inputs, "n1", preserve_type=True),
         )
+
+
+class TestOutputNodeTemplatesRenderJson(unittest.TestCase):
+    """A list or object inside an Output node's text reads as JSON, as in a Set node and in
+    the dialog, not as a Python repr."""
+
+    BODY = {"name": "Alice", "tags": ["vip", "beta"], "meta": {"plan": "pro"}}
+    TAGS = ("Tags: $userInput.body.tags", 'Tags: ["vip", "beta"]')
+    META = (
+        "Customer $userInput.body.name meta=$userInput.body.meta",
+        'Customer Alice meta={"plan": "pro"}',
+    )
+
+    def test_output_fields_and_message_match_the_set_node_and_the_dialog(self) -> None:
+        nodes = [
+            {"id": "in", "type": "textInput", "data": {"label": "userInput"}},
+            {
+                "id": "set1",
+                "type": "set",
+                "data": {
+                    "label": "compose",
+                    "mappings": [
+                        {"key": "tags", "value": self.TAGS[0]},
+                        {"key": "meta", "value": self.META[0]},
+                    ],
+                },
+            },
+            {
+                "id": "out1",
+                "type": "output",
+                "data": {
+                    "label": "reply",
+                    "outputSchema": [
+                        {"key": "tags", "value": self.TAGS[0]},
+                        {"key": "meta", "value": self.META[0]},
+                    ],
+                },
+            },
+            {"id": "out2", "type": "output", "data": {"label": "note", "message": self.TAGS[0]}},
+        ]
+        edges = [
+            {"id": "e1", "source": "in", "target": "set1"},
+            {"id": "e2", "source": "in", "target": "out1"},
+            {"id": "e3", "source": "in", "target": "out2"},
+        ]
+        result = execute_workflow(
+            workflow_id=uuid.uuid4(),
+            nodes=nodes,
+            edges=edges,
+            inputs={"body": self.BODY},
+            test_run=True,
+        )
+        outputs = {r["node_id"]: r["output"] for r in result.node_results}
+        canvas = [
+            {"node_id": r["node_id"], "label": r["node_label"], "output": r["output"]}
+            for r in result.node_results
+        ]
+        context = build_eval_context(
+            nodes,
+            canvas,
+            workflow_edges=edges,
+            current_node_id="out1",
+            initial_inputs={"body": self.BODY},
+        )
+        service = ExpressionEvaluatorService(
+            workflow_nodes=nodes,
+            workflow_edges=edges,
+            vars_context=build_vars_context(
+                nodes, canvas, workflow_edges=edges, current_node_id="out1"
+            ),
+            workflow_id=uuid.uuid4(),
+        )
+
+        for key, (template, expected) in (("tags", self.TAGS), ("meta", self.META)):
+            with self.subTest(key=key):
+                self.assertEqual(outputs["set1"][key], expected)
+                self.assertEqual(outputs["out1"]["result"][key], expected)
+                dialog = service.evaluate(template, context, current_node_id="out1").result
+                self.assertEqual(dialog, expected)
+        self.assertEqual(outputs["out2"]["result"], self.TAGS[1])
+
+    def test_a_value_json_cannot_hold_keeps_the_old_text(self) -> None:
+        meta = {"plan": "pro", "at": datetime(2026, 11, 15, 9, 30)}
+        nodes = [
+            {"id": "in", "type": "textInput", "data": {"label": "userInput"}},
+            {
+                "id": "o",
+                "type": "output",
+                "data": {"label": "note", "message": "At $userInput.body.meta"},
+            },
+        ]
+        result = execute_workflow(
+            workflow_id=uuid.uuid4(),
+            nodes=nodes,
+            edges=[{"id": "e", "source": "in", "target": "o"}],
+            inputs={"body": {"meta": meta}},
+            test_run=True,
+        )
+        out = next(r for r in result.node_results if r["node_id"] == "o")
+
+        self.assertEqual(out["status"], "success")
+        self.assertEqual(out["output"]["result"], f"At {meta}")
