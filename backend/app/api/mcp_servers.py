@@ -621,6 +621,7 @@ async def _dispatch_named_server_jsonrpc(
                 trace_user_id=user.id,
                 actor_user_id=user.id,
                 cancel_event=cancel_event,
+                timeout_seconds=getattr(target_workflow, "workflow_timeout_seconds", None),
                 concurrency_limit=target_workflow.concurrency_limit,
                 on_queued="return",
             )
