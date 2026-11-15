@@ -4,6 +4,7 @@ import json
 
 from app.services.http_paths import encode_path_segment
 from app.services.node_execution.base import NodeExecutionContext
+from app.services.node_execution.json_fields import render_json_template
 
 
 def execute(ctx: NodeExecutionContext) -> object:
@@ -107,7 +108,7 @@ def execute(ctx: NodeExecutionContext) -> object:
         params: dict = {}
         filter_template = node_data.get("gristFilter", "")
         if filter_template and filter_template.strip() not in ("", "{}"):
-            filter_str = self.evaluate_message_template(filter_template, inputs, node_id)
+            filter_str = render_json_template(self, filter_template, inputs, node_id)
             if filter_str and filter_str.strip() not in ("", "{}"):
                 try:
                     filter_obj = json.loads(filter_str)
@@ -149,7 +150,7 @@ def execute(ctx: NodeExecutionContext) -> object:
         if not doc_id or not table_id:
             raise ValueError("Grist createRecord requires document ID and table ID")
         record_data_template = node_data.get("gristRecordData", "{}")
-        record_data_str = self.evaluate_message_template(record_data_template, inputs, node_id)
+        record_data_str = render_json_template(self, record_data_template, inputs, node_id)
         try:
             record_data = (
                 json.loads(record_data_str) if isinstance(record_data_str, str) else record_data_str
@@ -176,7 +177,7 @@ def execute(ctx: NodeExecutionContext) -> object:
         if not doc_id or not table_id:
             raise ValueError("Grist createRecords requires document ID and table ID")
         records_data_template = node_data.get("gristRecordsData", "[]")
-        records_data_str = self.evaluate_message_template(records_data_template, inputs, node_id)
+        records_data_str = render_json_template(self, records_data_template, inputs, node_id)
         try:
             records_data = (
                 json.loads(records_data_str)
@@ -213,7 +214,7 @@ def execute(ctx: NodeExecutionContext) -> object:
         if not record_id:
             raise ValueError("Grist updateRecord requires a record ID")
         record_data_template = node_data.get("gristRecordData", "{}")
-        record_data_str = self.evaluate_message_template(record_data_template, inputs, node_id)
+        record_data_str = render_json_template(self, record_data_template, inputs, node_id)
         try:
             record_data = (
                 json.loads(record_data_str) if isinstance(record_data_str, str) else record_data_str
@@ -237,7 +238,7 @@ def execute(ctx: NodeExecutionContext) -> object:
         if not doc_id or not table_id:
             raise ValueError("Grist updateRecords requires document ID and table ID")
         records_data_template = node_data.get("gristRecordsData", "[]")
-        records_data_str = self.evaluate_message_template(records_data_template, inputs, node_id)
+        records_data_str = render_json_template(self, records_data_template, inputs, node_id)
         try:
             records_data = (
                 json.loads(records_data_str)
