@@ -153,8 +153,8 @@ class ChatCompletionsAgentLoopTests(IsolatedAsyncioTestCase):
 
         self.assertEqual(executed, [])
         self.assertEqual(len(sent), 2)
-        self.assertIn("maxTokens", result["error"])
-        self.assertIn("64", result["error"])
+        self.assertIn("The limit in use is the node's maxTokens (64).", result["error"])
+        self.assertIn("Set maxTokens on this node in the workflow JSON", result["error"])
         self.assertEqual([e["status"] for e in result["tool_calls"]], ["error", "error"])
 
     async def test_a_complete_turn_after_a_cut_one_runs_and_resets_the_count(self) -> None:

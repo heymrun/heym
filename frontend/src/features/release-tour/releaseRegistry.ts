@@ -17,30 +17,19 @@ import type { ReleaseEntry } from "@/features/release-tour/releaseTour.types";
  */
 export const RELEASE_REGISTRY: ReleaseEntry[] = [
   {
-    releaseId: "2026.31",
-    publishedAt: new Date("2026-11-14T12:00:00Z"),
-    headline: "Revert AI widget changes, and standardized /mcp server endpoints",
+    releaseId: "2026.33",
+    publishedAt: new Date("2026-11-15T00:00:00Z"),
+    headline: "Standardized /mcp server endpoints",
     releaseTour: {
       label: "New in Heym", introTitle: "New in this release",
-      introDescription: "Undo an AI change to a dashboard widget in one click, and connect new MCP clients through /mcp.",
-      tourEnabled: true,
-      sectionOrder: ["chat-widget-revert", "mcp-endpoint"],
+      introDescription: "Connect new MCP clients through /mcp, with existing /sse servers preserved.",
+      tourEnabled: false,
+      sectionOrder: ["mcp-endpoint"],
     },
     sections: [
       {
-        id: "chat-widget-revert", title: "Revert a widget Chat changed",
-        publishedAt: new Date("2026-11-14T12:00:00Z"),
-        blocks: [{ type: "prose", markdown: "When Chat changes a dashboard widget, or you fine-tune one with AI, the card shows **Revert previous**. One click puts the widget back as it was before that change, together with any fix Chat made to its data in the same change: a change and its fixes are now one Edit History entry. The offer lasts until you reload or the widget changes again, and Heym never overwrites a save made since. Heym Work's pages offer the same button." }],
-        tour: {
-          description: "Undo the last AI change to a dashboard widget, from Chat or a fine-tune, in one click.",
-          useCases: ["Try another chart from Chat and go back if the old one was better", "Undo a fine-tune that left a widget empty", "Review AI edits to a page before keeping them"],
-          tourVisual: "chat-widget-revert",
-          docTarget: { categoryId: "tabs", slug: "dashboard-tab", title: "Dashboard" },
-        },
-      },
-      {
         id: "mcp-endpoint", title: "Standardized /mcp endpoint for new MCP servers",
-        publishedAt: new Date("2026-11-14T14:00:00Z"),
+        publishedAt: new Date("2026-11-15T00:00:00Z"),
         blocks: [{ type: "prose", markdown: "New MCP servers get an address ending in `/mcp`. Servers you already have keep their `/sse` address, so connected clients keep working. Copy JSON and Add to Cursor always use the right address." }],
         tour: {
           description: "New MCP servers get an address ending in /mcp. Servers you already have keep their /sse address, so connected clients keep working. Copy JSON and Add to Cursor always use the right address.",
@@ -50,6 +39,52 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
         },
       },
     ],
+  },
+
+  {
+    releaseId: "2026.32",
+    publishedAt: new Date("2026-11-14T21:00:00Z"),
+    headline: "Email attachments in Heym Drive",
+    releaseTour: {
+      label: "New in Heym", introTitle: "New in this release",
+      introDescription: "Work with the files an email brings, straight from the IMAP Trigger.",
+      tourEnabled: true,
+      sectionOrder: ["imap-attachments"],
+    },
+    sections: [{
+      id: "imap-attachments", title: "Email attachments in Heym Drive",
+      publishedAt: new Date("2026-11-14T21:00:00Z"),
+      blocks: [{ type: "prose", markdown: "Turn on **Download attachments to Drive** in the IMAP Trigger and every attachment of a new email is saved to your Heym Drive while the run executes. The trigger output gets `attachments`, with each file's name, size and Drive link, and `file_ids`, which goes straight into an Agent's message, a Converter or a Drive node: read an invoice PDF, hand a contract to an Agent or pass a scan on. Up to 10 files per email are saved; a file over the Drive size limit is listed as skipped and the run keeps going. The email stays unread, and the toggle is off by default, so existing workflows behave as before." }],
+      tour: {
+        description: "Save the files of each new email to Drive and let the next node read them.",
+        useCases: ["Extract totals and due dates from invoice PDFs sent to a billing inbox", "Hand contracts that arrive by email to an Agent for review", "File scans and delivery notes in Drive with the email they came with"],
+        tourVisual: "imap-attachments",
+        docTarget: { categoryId: "nodes", slug: "imap-trigger-node", title: "IMAP Trigger" },
+      },
+    }],
+  },
+
+  {
+    releaseId: "2026.31",
+    publishedAt: new Date("2026-11-14T12:00:00Z"),
+    headline: "Revert a widget Chat changed",
+    releaseTour: {
+      label: "New in Heym", introTitle: "New in this release",
+      introDescription: "Undo an AI change to a dashboard widget in one click.",
+      tourEnabled: true,
+      sectionOrder: ["chat-widget-revert"],
+    },
+    sections: [{
+      id: "chat-widget-revert", title: "Revert a widget Chat changed",
+      publishedAt: new Date("2026-11-14T12:00:00Z"),
+      blocks: [{ type: "prose", markdown: "When Chat changes a dashboard widget, or you fine-tune one with AI, the card shows **Revert previous**. One click puts the widget back as it was before that change, together with any fix Chat made to its data in the same change: a change and its fixes are now one Edit History entry. The offer lasts until you reload or the widget changes again, and Heym never overwrites a save made since. Heym Work's pages offer the same button." }],
+      tour: {
+        description: "Undo the last AI change to a dashboard widget, from Chat or a fine-tune, in one click.",
+        useCases: ["Try another chart from Chat and go back if the old one was better", "Undo a fine-tune that left a widget empty", "Review AI edits to a page before keeping them"],
+        tourVisual: "chat-widget-revert",
+        docTarget: { categoryId: "tabs", slug: "dashboard-tab", title: "Dashboard" },
+      },
+    }],
   },
 
   {
@@ -94,29 +129,6 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
         useCases: ["Feed an Agent only the passages that answer the question", "Rerank support articles before drafting a reply", "Use one decision model for routing, judging and reranking"],
         tourVisual: "decision-reranker",
         docTarget: { categoryId: "nodes", slug: "rag-node", title: "RAG / Vector Store" },
-      },
-    }],
-  },
-
-  {
-    releaseId: "2026.28",
-    publishedAt: new Date("2026-11-10T12:00:00Z"),
-    headline: "Transcribe voice notes and recordings in the Converter node",
-    releaseTour: {
-      label: "New in Heym", introTitle: "New in this release",
-      introDescription: "Speech becomes text inside your workflow, on your own instance.",
-      tourEnabled: true,
-      sectionOrder: ["voice-transcribe"],
-    },
-    sections: [{
-      id: "voice-transcribe", title: "Voice transcribe in the Converter node",
-      publishedAt: new Date("2026-11-10T12:00:00Z"),
-      blocks: [{ type: "prose", markdown: "Pick **Audio → Text (Voice Transcribe)** in a **Converter** node and point it at an mp3, wav or ogg file in Drive. The node returns what was said as text, together with the language it heard and timed segments. Recognition runs on your own Heym instance with one multilingual model that covers about a hundred languages and detects the spoken one, the same way on Docker and Kubernetes. Recordings can be up to 30 minutes long. Pass the transcript to an LLM or Agent node to summarize a call, route a voice note or fill in a ticket." }],
-      tour: {
-        description: "Turn a voice note or call recording into text inside a workflow, in any language, on your own instance.",
-        useCases: ["Summarize a customer call recording with an LLM node", "Route an uploaded voice note to the right team", "Keep timed transcripts of meetings searchable"],
-        tourVisual: "voice-transcribe",
-        docTarget: { categoryId: "nodes", slug: "converter-node", title: "Converter" },
       },
     }],
   },
