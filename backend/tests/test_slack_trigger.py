@@ -40,6 +40,56 @@ def _make_request(body_bytes: bytes, headers: dict) -> MagicMock:
     return Request(scope, receive)
 
 
+class TestSlackNodeWebhookRedelivery(unittest.IsolatedAsyncioTestCase):
+    """A Slack retry (same event_id) on the node webhook URL starts the workflow once."""
+
+    async def test_a_retry_starts_nothing(self) -> None:
+        from app.api import slack as slack_api
+
+        node_id = str(uuid.uuid4())
+        secret = "test_secret_abc"
+        workflow = MagicMock()
+        workflow.nodes = [
+            {"id": node_id, "type": "slackTrigger", "data": {"credentialId": str(uuid.uuid4())}}
+        ]
+        body = json.dumps(
+            {
+                "type": "event_callback",
+                "event_id": "Ev" + uuid.uuid4().hex[:10],
+                "event": {"type": "message", "text": "hello", "user": "U1"},
+            }
+        )
+        claimed: set[str] = set()
+
+        async def claim(event_id: object, scope: str) -> bool:
+            key = f"{scope}:{event_id}"
+            first = key not in claimed
+            claimed.add(key)
+            return first
+
+        with (
+            patch.object(slack_api, "_find_workflow_by_node_id", AsyncMock(return_value=workflow)),
+            patch.object(slack_api, "_get_signing_secret", AsyncMock(return_value=secret)),
+            patch.object(slack_api, "claim_slack_event", side_effect=claim),
+            patch.object(slack_api, "_execute_workflow_background", new=AsyncMock()) as run,
+        ):
+            for retry in (None, "1"):
+                timestamp = str(int(time.time()))
+                headers = {
+                    "x-slack-request-timestamp": timestamp,
+                    "x-slack-signature": _make_signature(secret, timestamp, body),
+                    "content-type": "application/json",
+                }
+                if retry:
+                    headers["x-slack-retry-num"] = retry
+                response = await slack_api.slack_webhook(
+                    node_id, _make_request(body.encode(), headers)
+                )
+                self.assertEqual(response, {"ok": True})
+
+        run.assert_called_once()
+
+
 class TestSlackUrlVerification(unittest.IsolatedAsyncioTestCase):
     """Slack sends url_verification; endpoint must echo challenge, no workflow execution."""
 
