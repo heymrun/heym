@@ -197,6 +197,20 @@ class CombinedJudgeParserTests(unittest.TestCase):
         text = 'Here is my verdict {see below}:\n```json\n{"answer": "Paris", "score": 90}\n```'
         self.assertEqual(_parse_combined_judge_response(text), ("Paris", "90", None))
 
+    def test_a_verdict_after_another_object_still_wins(self) -> None:
+        text = 'Config used: {"model": "gpt", "temperature": 0}\n{"answer": "Paris", "score": 88}'
+        self.assertEqual(_parse_combined_judge_response(text), ("Paris", "88", None))
+
+    def test_a_long_cut_off_code_answer_is_scanned_quickly(self) -> None:
+        """An answer cut off by max_tokens: ~500 KB of code with many braces, no closing."""
+        import time
+
+        code = "def f():\n    return {k: {v: {}} for k, v in items}\n" * 10000
+        started = time.monotonic()
+        result = _parse_combined_judge_response('{"actual_answer": "' + code)
+        self.assertEqual(result, ("", "0", None))
+        self.assertLess(time.monotonic() - started, 0.25)
+
     def test_unreadable_text_scores_zero(self) -> None:
         self.assertEqual(_parse_combined_judge_response("no json here"), ("", "0", None))
         self.assertEqual(

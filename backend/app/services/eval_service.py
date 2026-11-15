@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import math
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -115,6 +116,9 @@ def _score_contains(actual: str, expected: str) -> str:
 
 # Keys of a verdict, in self-scoring and in a separate judge's answer.
 _VERDICT_KEYS = frozenset({"score", "actual_answer", "answer", "explanation"})
+# Where a JSON object can start: "{" before a key or "}". Trying only these keeps the scan
+# fast on long, cut-off code answers full of braces.
+_OBJECT_START = re.compile(r'\{\s*["}]')
 
 
 def _find_judge_payload(text: str) -> dict | None:
@@ -128,12 +132,12 @@ def _find_judge_payload(text: str) -> dict | None:
     t = (text or "").strip()
     decoder = json.JSONDecoder()
     first: dict | None = None
-    start = t.find("{")
-    while start >= 0:
+    match = _OBJECT_START.search(t)
+    while match:
         try:
-            data, end = decoder.raw_decode(t, start)
+            data, end = decoder.raw_decode(t, match.start())
         except ValueError:
-            start = t.find("{", start + 1)
+            match = _OBJECT_START.search(t, match.start() + 1)
             continue
         if isinstance(data, dict):
             inner = data.get("response") or data.get("output") or data
@@ -142,7 +146,7 @@ def _find_judge_payload(text: str) -> dict | None:
                     return inner
                 if first is None:
                     first = inner
-        start = t.find("{", end)
+        match = _OBJECT_START.search(t, end)
     return first
 
 
