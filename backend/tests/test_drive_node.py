@@ -1413,6 +1413,17 @@ class DriveNodeDownloadUrlTests(unittest.TestCase):
             with self.subTest(url=url):
                 self.assertEqual(self._download_name(url), "jan.pdf")
 
+    def test_a_url_name_storage_refuses_decoded_is_saved_as_written(self) -> None:
+        # What main saves today: the segment exactly as it appears in the URL.
+        for segment in ("a%00b.pdf", "%2E%2E", "x%2F..", "C%3Areport.pdf", "%20%20"):
+            with self.subTest(segment=segment):
+                self.assertEqual(
+                    self._download_name(f"https://example.com/files/{segment}"), segment
+                )
+
+    def test_a_url_without_a_name_saves_as_downloaded_file(self) -> None:
+        self.assertEqual(self._download_name("https://example.com/"), "downloaded_file")
+
     def test_download_url_rejects_unsafe_content_disposition_filename(self) -> None:
         """Remote filenames cannot escape the generated-file directory."""
         owner_id = uuid.uuid4()

@@ -246,6 +246,21 @@ class TestDownloadAttachments(unittest.TestCase):
             ["AGB.pdf", "Rechnung 2024_0815.pdf"],
         )
 
+    def test_names_storage_refuses_are_saved_as_attachment(self) -> None:
+        odd = [(name, "application/pdf", b"%PDF") for name in (".", "..", "C:report.pdf")]
+        terms = ("AGB.pdf", "application/pdf", b"%PDF-terms")
+        harness = _Harness(self, {"4182": _raw_email([*odd, terms])})
+
+        out = imap_trigger_node.execute(
+            _ctx({"imapDownloadAttachments": True}, {"email": _email()})
+        )
+
+        self.assertEqual(len(out["file_ids"]), 4)
+        self.assertEqual(
+            sorted(p.name for p in harness.stored_files()),
+            ["AGB.pdf", "attachment", "attachment", "attachment"],
+        )
+
     def test_at_most_ten_attachments_are_saved(self) -> None:
         files = [(f"page-{index:02d}.pdf", "application/pdf", b"%PDF") for index in range(12)]
         harness = _Harness(self, {"4182": _raw_email(files)})

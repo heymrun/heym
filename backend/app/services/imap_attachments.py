@@ -126,8 +126,14 @@ def _storable_name(filename: str) -> str:
     Senders put "/" in names ("Rechnung 2024/0815.pdf"), and storage refuses path
     components, which would fail the whole step and save none of the attachments.
     """
+    from app.services.file_storage import _normalize_storage_filename
+
     name = filename.replace("/", "_").replace("\\", "_").replace("\x00", "").strip()
-    return name or "attachment"
+    try:
+        # What storage still refuses (".", "..", "C:report.pdf") is saved as "attachment".
+        return _normalize_storage_filename(name)
+    except ValueError:
+        return "attachment"
 
 
 def _store(
