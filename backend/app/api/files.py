@@ -4,7 +4,7 @@ import base64
 import io
 import uuid
 import zipfile
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import (
     APIRouter,
@@ -191,8 +191,8 @@ async def list_files(
     request: Request,
     workflow_id: uuid.UUID | None = None,
     mime_type: str | None = None,
-    limit: int = 50,
-    offset: int = 0,
+    limit: Annotated[int, Query(ge=0)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> FileListResponse:
