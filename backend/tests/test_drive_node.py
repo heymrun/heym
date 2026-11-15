@@ -1424,39 +1424,22 @@ class DriveNodeDownloadUrlTests(unittest.TestCase):
     def test_a_url_without_a_name_saves_as_downloaded_file(self) -> None:
         self.assertEqual(self._download_name("https://example.com/"), "downloaded_file")
 
-    def test_download_url_rejects_unsafe_content_disposition_filename(self) -> None:
-        """Remote filenames cannot escape the generated-file directory."""
-        owner_id = uuid.uuid4()
-        file_bytes = b"evil"
-        db = MagicMock()
-        db.__enter__ = MagicMock(return_value=db)
-        db.__exit__ = MagicMock(return_value=False)
-        db.flush = MagicMock()
-        db.commit = MagicMock()
-        db.add = MagicMock()
-
-        http_resp = self._make_http_response(
-            file_bytes,
-            content_type="text/plain",
-            content_disposition='attachment; filename="../evil.txt"',
-        )
-        storage_path = self._make_storage_path()
-
-        nr = self._run_download_workflow(
-            {
-                "label": "dl",
-                "driveOperation": "downloadUrl",
-                "driveSourceUrl": "https://example.com/file.txt",
-            },
-            owner_id,
-            db,
-            http_resp,
-            storage_path,
-        )
-
-        self.assertEqual(nr["status"], "error")
-        self.assertIn("Filename cannot contain path components", nr["error"])
-        storage_path.write_bytes.assert_not_called()
+    def test_download_url_saves_under_the_url_name_when_storage_refuses_the_header_name(
+        self,
+    ) -> None:
+        """Remote filenames cannot escape the generated-file directory, and don't fail the step."""
+        for disposition in (
+            'attachment; filename="../evil.txt"',
+            "attachment; filename*=utf-8''Rechnung%202024%2F0815.pdf",
+            "attachment; filename*=utf-8''..",
+            "attachment; filename*=utf-8''a%00b.pdf",
+            'attachment; filename="C:report.pdf"',
+        ):
+            with self.subTest(disposition=disposition):
+                self.assertEqual(
+                    self._download_name("https://example.com/files/report.pdf", disposition),
+                    "report.pdf",
+                )
 
     def test_download_url_rejects_private_ip_before_fetch(self) -> None:
         """Private/internal targets are blocked before httpx connects."""
