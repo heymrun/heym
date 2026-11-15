@@ -7,6 +7,7 @@ import Button from "@/components/ui/Button.vue";
 interface Props {
   nodeId: string;
   fieldKey: string;
+  aliases?: string[];
 }
 
 const props = defineProps<Props>();
@@ -22,11 +23,7 @@ const isAgentProvided = computed((): boolean => {
   if (!isToolNodeField.value) return false;
   const node = workflowStore.nodes.find((n) => n.id === props.nodeId);
   const fields: string[] = node?.data.agentProvidedFields ?? [];
-  if (fields.includes(props.fieldKey)) return true;
-  if (props.fieldKey === "gmIncludeBusyDetails" && fields.includes("gmIncludeBusyTitles")) {
-    return true;
-  }
-  return false;
+  return [props.fieldKey, ...(props.aliases ?? [])].some((key) => fields.includes(key));
 });
 
 function toggle(): void {
@@ -34,14 +31,10 @@ function toggle(): void {
   const node = workflowStore.nodes.find((n) => n.id === props.nodeId);
   if (!node) return;
   const current: string[] = node.data.agentProvidedFields ?? [];
-  const keysToRemove = new Set(
-    props.fieldKey === "gmIncludeBusyDetails"
-      ? ["gmIncludeBusyDetails", "gmIncludeBusyTitles"]
-      : [props.fieldKey],
-  );
+  const keysToRemove = new Set([props.fieldKey, ...(props.aliases ?? [])]);
   const updated = isAgentProvided.value
-    ? current.filter((f) => !keysToRemove.has(f))
-    : [...current.filter((f) => !keysToRemove.has(f)), props.fieldKey];
+    ? current.filter((field) => !keysToRemove.has(field))
+    : [...current.filter((field) => !keysToRemove.has(field)), props.fieldKey];
   workflowStore.updateNode(props.nodeId, { agentProvidedFields: updated });
 }
 </script>
