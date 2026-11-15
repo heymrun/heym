@@ -137,3 +137,38 @@ class HttpNodeCurlExpressionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HttpNodeCurlUserTests(unittest.TestCase):
+    """`curl -u user:password`, as Stripe, Twilio and Mailgun document their APIs."""
+
+    @staticmethod
+    def _basic(user_pass: str) -> str:
+        import base64
+
+        return "Basic " + base64.b64encode(user_pass.encode()).decode()
+
+    def test_user_option_sends_basic_auth(self) -> None:
+        for curl, user_pass in (
+            ("curl https://api.example.com/v1/customers -u sk_test_123:", "sk_test_123:"),
+            ("curl --user 'AC123:auth token' https://api.example.com/x", "AC123:auth token"),
+            ("curl -u api https://api.example.com/x", "api:"),
+        ):
+            with self.subTest(curl=curl):
+                request = _run_curl(curl)
+                self.assertEqual(request.headers["authorization"], self._basic(user_pass))
+
+    def test_user_option_resolves_expressions(self) -> None:
+        request = _run_curl(
+            "curl -u '$credentials.stripe:' https://api.example.com/v1/charges",
+            credentials={"stripe": "sk_live_abcdef123456"},
+        )
+        self.assertEqual(request.headers["authorization"], self._basic("sk_live_abcdef123456:"))
+
+    def test_an_explicit_authorization_header_wins(self) -> None:
+        for curl in (
+            "curl -u a:b -H 'Authorization: Bearer t1' https://api.example.com/x",
+            "curl -H 'authorization: Bearer t1' -u a:b https://api.example.com/x",
+        ):
+            with self.subTest(curl=curl):
+                self.assertEqual(_run_curl(curl).headers["authorization"], "Bearer t1")

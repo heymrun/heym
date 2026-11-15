@@ -68,6 +68,19 @@ def _render_json_body_template(
     return "".join(rendered)
 
 
+def _shown_request_headers(headers: Any) -> dict[str, str]:
+    """The sent headers for the node output, with a Basic credential hidden.
+
+    A Basic value is base64 of `user:password` (`curl -u`), which credential masking,
+    a search for the secret itself, cannot recognise in persisted output.
+    """
+    shown = dict(headers)
+    for key, value in shown.items():
+        if key.lower() == "authorization" and value[:6].lower() == "basic ":
+            shown[key] = "Basic **"
+    return shown
+
+
 def execute(ctx: NodeExecutionContext) -> object:
     """Execute the http node."""
     ssrf_guard = import_module("app.services.ssrf_guard")
@@ -115,7 +128,7 @@ def execute(ctx: NodeExecutionContext) -> object:
         "request": {
             "method": method,
             "url": str(response.request.url),
-            "headers": dict(response.request.headers),
+            "headers": _shown_request_headers(response.request.headers),
         },
     }
     return output

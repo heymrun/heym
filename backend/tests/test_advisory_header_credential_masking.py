@@ -51,6 +51,20 @@ def _http_output(curl: str) -> dict:
             return http_node.execute(context)
 
 
+class BasicAuthOutputTests(unittest.TestCase):
+    """`curl -u` sends base64(user:password), which masking a secret cannot find."""
+
+    def test_curl_user_credential_is_not_in_the_output(self) -> None:
+        import base64
+
+        output = _http_output("curl https://api.example.com -u '$credentials.google:'")
+
+        dumped = json.dumps(mask_sensitive_output(output, _CREDENTIALS))
+        self.assertNotIn(_API_KEY, dumped)
+        self.assertNotIn(base64.b64encode(f"{_API_KEY}:".encode()).decode(), dumped)
+        self.assertEqual(output["request"]["headers"]["authorization"], "Basic **")
+
+
 class HeaderCredentialMaskingTests(unittest.TestCase):
     def test_header_credential_secret_is_masked_in_http_output(self) -> None:
         output = _http_output("curl -X GET https://api.example.com -H '$credentials.vendor'")

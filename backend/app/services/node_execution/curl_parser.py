@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from collections.abc import Callable
 from typing import Any
 
@@ -40,6 +41,7 @@ def parse_curl(
     data = None
     url = ""
     follow_redirects = False
+    basic_user: str | None = None
     i = 0
     while i < len(tokens):
         token = tokens[i]
@@ -54,6 +56,10 @@ def parse_curl(
                 headers[key.strip()] = value.strip()
         elif token in ("-L", "--location"):
             follow_redirects = True
+        elif token in ("-u", "--user") and i + 1 < len(tokens):
+            # How Stripe, Twilio and Mailgun document their APIs: `-u sk_test_123:`.
+            i += 1
+            basic_user = rendered(tokens[i])
         elif token in (
             "-d",
             "--data",
@@ -82,5 +88,10 @@ def parse_curl(
             if candidate.startswith(("http://", "https://")):
                 url = candidate
                 break
+
+    if basic_user is not None and not any(k.lower() == "authorization" for k in headers):
+        # As curl does: an explicit Authorization header wins, and `-u user` means no password.
+        user_pass = basic_user if ":" in basic_user else f"{basic_user}:"
+        headers["Authorization"] = "Basic " + base64.b64encode(user_pass.encode()).decode()
 
     return method, url, headers, data, follow_redirects
