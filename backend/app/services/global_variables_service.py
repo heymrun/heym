@@ -2,7 +2,8 @@
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import GlobalVariable, GlobalVariableShare, GlobalVariableTeamShare, TeamMember
@@ -73,23 +74,18 @@ async def upsert_global_variable(
     value: object,
     value_type: str = "string",
 ) -> None:
-    """Create or update a global variable by name."""
-    result = await db.execute(
-        select(GlobalVariable).where(
-            GlobalVariable.owner_id == owner_id,
-            GlobalVariable.name == name,
+    """Create or update a global variable by name.
+
+    One INSERT ... ON CONFLICT DO UPDATE: with a read then an insert, two runs that set
+    the same new variable at once both inserted, and the second commit failed on
+    uq_global_variable_name, losing that run's whole persistence transaction.
+    """
+    stored = {"v": value}
+    await db.execute(
+        pg_insert(GlobalVariable)
+        .values(id=uuid.uuid4(), owner_id=owner_id, name=name, value=stored, value_type=value_type)
+        .on_conflict_do_update(
+            constraint="uq_global_variable_name",
+            set_={"value": stored, "value_type": value_type, "updated_at": func.now()},
         )
     )
-    existing = result.scalar_one_or_none()
-    stored = {"v": value}
-    if existing:
-        existing.value = stored
-        existing.value_type = value_type
-    else:
-        new_var = GlobalVariable(
-            owner_id=owner_id,
-            name=name,
-            value=stored,
-            value_type=value_type,
-        )
-        db.add(new_var)
