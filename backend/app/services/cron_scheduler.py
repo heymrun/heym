@@ -440,7 +440,10 @@ class CronScheduler:
                     logger.debug("Scheduled deletion cleanup already handled by another worker")
 
     async def _cleanup_scheduled_workflows(self) -> None:
-        from app.services.workflow_lifecycle import has_unfinished_workflow_executions
+        from app.services.workflow_lifecycle import (
+            close_expired_reviews,
+            has_unfinished_workflow_executions,
+        )
 
         async with async_session_maker() as db:
             result = await db.execute(
@@ -450,9 +453,11 @@ class CronScheduler:
 
             deleted_count = 0
             for workflow in scheduled_workflows:
-                if self._should_delete_workflow(
-                    workflow
-                ) and not await has_unfinished_workflow_executions(db, workflow.id):
+                should_delete = self._should_delete_workflow(workflow)
+                if should_delete:
+                    # Commits on its own; run per workflow, right before its delete.
+                    await close_expired_reviews(db, workflow.id)
+                if should_delete and not await has_unfinished_workflow_executions(db, workflow.id):
                     logger.info(
                         "Deleting scheduled workflow %s (%s) - all start nodes deactivated",
                         workflow.id,
