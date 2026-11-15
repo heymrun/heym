@@ -465,6 +465,7 @@ async def compute_widget_data(
             trace_user_id=run_as_user_id,
             actor_user_id=run_as_user_id,
             return_on_chart_output=True,
+            timeout_seconds=getattr(workflow, "workflow_timeout_seconds", None),
             concurrency_limit=workflow.concurrency_limit,
         )
     except Exception as exc:  # surface execution errors to the widget, never 500 the dashboard
@@ -574,6 +575,7 @@ async def _run_widget_workflow(
             global_variables_context=global_variables_context,
             trace_user_id=run_as_user_id,
             actor_user_id=run_as_user_id,
+            timeout_seconds=getattr(workflow, "workflow_timeout_seconds", None),
             concurrency_limit=workflow.concurrency_limit,
         )
     except WorkflowCancelledError as exc:
