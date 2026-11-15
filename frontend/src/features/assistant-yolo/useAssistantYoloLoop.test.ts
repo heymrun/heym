@@ -30,6 +30,7 @@ interface HostCalls {
   reports: Array<{ text: string; label: string }>;
   stops: number;
   verified: number;
+  awaitingUser: number;
 }
 
 const RUN_WITH_JSON: YoloResponseShape = {
@@ -75,7 +76,7 @@ function createHost(): { host: YoloLoopHost<TestMessage>; hostState: HostState; 
     },
     nextStatus: "success",
   });
-  const calls: HostCalls = { applied: 0, runs: [], reports: [], stops: 0, verified: 0 };
+  const calls: HostCalls = { applied: 0, runs: [], reports: [], stops: 0, verified: 0, awaitingUser: 0 };
   const host: YoloLoopHost<TestMessage> = {
     applyWorkflow: async () => {
       calls.applied += 1;
@@ -121,6 +122,9 @@ function createHost(): { host: YoloLoopHost<TestMessage>; hostState: HostState; 
     onVerified: () => {
       calls.verified += 1;
     },
+    onAwaitingUser: () => {
+      calls.awaitingUser += 1;
+    },
   };
   return { host, hostState, calls };
 }
@@ -163,6 +167,7 @@ describe("useAssistantYoloLoop", () => {
 
     expect(loop.state.value).toBe("awaitingInputs");
     expect(first.yoloInputs?.draft).toEqual({ mode: "legacy", values: { text: "hi" } });
+    expect(calls.awaitingUser).toBe(1);
     loop.confirmInputs({ mode: "legacy", values: { text: "hello" } });
     await handled;
 
@@ -194,6 +199,7 @@ describe("useAssistantYoloLoop", () => {
     expect(labels(second)).toEqual(["Verified in 1 attempt"]);
     expect(second.yoloSteps?.[0].response_summary).toBe("Echo works");
     expect(calls.verified).toBe(1);
+    expect(calls.awaitingUser).toBe(1);
     expect(loop.state.value).toBe("finished");
   });
 
@@ -248,11 +254,12 @@ describe("useAssistantYoloLoop", () => {
     expect(calls.applied).toBe(6);
     expect(labels(last)).toEqual(["Applying changes to canvas", "Stopped after 5 attempts"]);
     expect(last.yoloSteps?.[1].response_summary).toBe("Latest changes applied but not run.");
+    expect(calls.awaitingUser).toBe(1);
     expect(loop.state.value).toBe("stopped");
   });
 
   it("pauses on a clarify block and starts a fresh budget after the answers", async () => {
-    const { host } = createHost();
+    const { host, calls } = createHost();
     const loop = useAssistantYoloLoop(host);
     loop.begin();
 
@@ -264,6 +271,8 @@ describe("useAssistantYoloLoop", () => {
 
     expect(loop.state.value).toBe("paused");
     expect(loop.isActive.value).toBe(false);
+    expect(calls.awaitingUser).toBe(1);
+    expect(calls.verified).toBe(0);
     loop.begin();
     expect(loop.state.value).toBe("generating");
   });
@@ -283,6 +292,7 @@ describe("useAssistantYoloLoop", () => {
       "Resolve the save conflict, then send a message to continue.",
     );
     expect(calls.reports).toHaveLength(0);
+    expect(calls.awaitingUser).toBe(1);
     expect(loop.state.value).toBe("stopped");
   });
 
@@ -295,6 +305,7 @@ describe("useAssistantYoloLoop", () => {
 
     expect(first.yoloSteps?.[2].response_summary).toBe("The run did not start.");
     expect(calls.reports).toHaveLength(0);
+    expect(calls.awaitingUser).toBe(1);
   });
 
   it("stops when the run waits for a human review", async () => {
@@ -307,6 +318,8 @@ describe("useAssistantYoloLoop", () => {
     expect(first.yoloSteps?.[2].status).toBe("pending");
     expect(first.yoloSteps?.[2].response_summary).toContain("Waiting for human review");
     expect(calls.reports).toHaveLength(0);
+    expect(calls.awaitingUser).toBe(2);
+    expect(calls.verified).toBe(0);
     expect(loop.state.value).toBe("stopped");
   });
 
@@ -322,6 +335,7 @@ describe("useAssistantYoloLoop", () => {
     expect(labels(second)).toEqual(["Finished — last run ended with an error"]);
     expect(second.yoloSteps?.[0].status).toBe("error");
     expect(calls.verified).toBe(0);
+    expect(calls.awaitingUser).toBe(1);
   });
 
   it("waits for a manual run to finish before starting its own", async () => {
@@ -350,6 +364,7 @@ describe("useAssistantYoloLoop", () => {
     loop.begin();
     const handled = loop.handleAssistantResponse(first, RUN_WITH_JSON);
     await settle();
+    expect(calls.awaitingUser).toBe(1);
     await loop.stop(first);
     await handled;
 
@@ -361,6 +376,120 @@ describe("useAssistantYoloLoop", () => {
     ]);
     expect(first.yoloSteps?.[1].status).toBe("cancelled");
     expect(calls.runs).toHaveLength(0);
+    expect(calls.awaitingUser).toBe(1);
     expect(loop.state.value).toBe("stopped");
+  });
+
+  it("triggers onAwaitingUser exactly once when stopping for human review", async () => {
+    const { host, hostState, calls } = createHost();
+    hostState.inputs.fieldKeys = [];
+    hostState.nextStatus = "pending";
+    const loop = useAssistantYoloLoop(host);
+
+    const first = message("a1");
+    loop.begin();
+    await loop.handleAssistantResponse(first, RERUN_JSON);
+
+    expect(first.yoloSteps?.[1].status).toBe("pending");
+    expect(calls.awaitingUser).toBe(1);
+    expect(calls.verified).toBe(0);
+    expect(loop.state.value).toBe("stopped");
+  });
+
+  it("does not trigger onAwaitingUser when manually stopping an in-flight run", async () => {
+    const { host, hostState, calls } = createHost();
+    hostState.inputs.fieldKeys = [];
+
+    let resolveWorkflow!: () => void;
+    const workflowPromise = new Promise<void>((resolve) => {
+      resolveWorkflow = resolve;
+    });
+
+    host.runWorkflow = async (body) => {
+      calls.runs.push(body);
+      hostState.executing = true;
+      await workflowPromise;
+      hostState.executing = false;
+    };
+
+    const loop = useAssistantYoloLoop(host);
+    const first = message("a1");
+    loop.begin();
+    const handled = loop.handleAssistantResponse(first, RERUN_JSON);
+    await settle();
+
+    expect(loop.state.value).toBe("running");
+    expect(calls.runs).toHaveLength(1);
+
+    await loop.stop();
+
+    expect(calls.stops).toBe(1);
+    expect(calls.awaitingUser).toBe(0);
+
+    resolveWorkflow();
+    await handled;
+
+    expect(loop.state.value).toBe("stopped");
+    expect(calls.awaitingUser).toBe(0);
+  });
+
+  it("triggers onVerified and not onAwaitingUser upon verified completion", async () => {
+    const { host, hostState, calls } = createHost();
+    hostState.inputs.fieldKeys = [];
+    const loop = useAssistantYoloLoop(host);
+    const first = message("a1");
+
+    loop.begin();
+    await loop.handleAssistantResponse(first, RERUN_JSON);
+    expect(calls.awaitingUser).toBe(0);
+    expect(calls.verified).toBe(0);
+
+    const second = message("a2");
+    await loop.handleAssistantResponse(second, DONE);
+
+    expect(calls.verified).toBe(1);
+    expect(calls.awaitingUser).toBe(0);
+    expect(loop.state.value).toBe("finished");
+  });
+
+  it("does not trigger onAwaitingUser when stopping after reaching attempt limit", async () => {
+    const { host, hostState, calls } = createHost();
+    hostState.inputs.fieldKeys = [];
+    const loop = useAssistantYoloLoop(host);
+    loop.begin();
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
+      await loop.handleAssistantResponse(message(`a${attempt}`), RERUN_JSON);
+    }
+    expect(calls.runs).toHaveLength(5);
+    expect(calls.awaitingUser).toBe(0);
+
+    const sixth = message("a6");
+    await loop.handleAssistantResponse(sixth, RERUN_JSON);
+    expect(loop.state.value).toBe("stopped");
+    expect(calls.awaitingUser).toBe(0);
+  });
+
+  it("does not trigger onAwaitingUser when stopped with no workflow and no directive", async () => {
+    const { host, calls } = createHost();
+    const loop = useAssistantYoloLoop(host);
+    loop.begin();
+    await loop.handleAssistantResponse(message("s1"), {
+      hasClarify: false,
+      hasWorkflowJson: false,
+      directive: null,
+    });
+    expect(loop.state.value).toBe("stopped");
+    expect(calls.awaitingUser).toBe(0);
+  });
+
+  it("does not trigger onAwaitingUser when run requires a file upload", async () => {
+    const { host, hostState, calls } = createHost();
+    hostState.inputs.fieldKeys = [];
+    hostState.nextStatus = "awaiting_file_upload";
+    const loop = useAssistantYoloLoop(host);
+    loop.begin();
+    await loop.handleAssistantResponse(message("u1"), RERUN_JSON);
+    expect(loop.state.value).toBe("stopped");
+    expect(calls.awaitingUser).toBe(0);
   });
 });

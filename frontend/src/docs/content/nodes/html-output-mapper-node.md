@@ -46,6 +46,10 @@ A workflow with no trigger node whose only terminal is this node shows a **WEB**
 
 Every page response carries `Content-Security-Policy: sandbox …` and `X-Content-Type-Options: nosniff`, whatever `contentType` you set. Scripts, forms, popups, dialogs and downloads still work, but the page gets an opaque origin: it cannot read cookies or localStorage, and it cannot call the Heym API with the session of whoever opens it. A page that needs data should get it from the workflow (template expressions such as `$llm.text`), not by calling `/api/…` from its script.
 
+## On a dashboard
+
+To show HTML inside a [dashboard widget](../tabs/dashboard-tab.md#html-widgets), use a [Chart Output](./chart-output-node.md#html-widgets) node with chart type **HTML** instead. Its `html` field takes the same template and resolves expressions the same way; the widget runs it in a sandboxed frame without network access.
+
 ## Agent tool usage
 
 Not supported. This node is a terminal sink, so it cannot be attached to an [Agent Node](./agent-node.md) tools handle. The same applies to [JSON output mapper](./json-output-mapper-node.md).
@@ -71,6 +75,7 @@ Same rule as [Output](./output-node.md): do not place this node inside a loop it
 ## Related
 
 - [JSON output mapper](./json-output-mapper-node.md) – Same idea for API clients expecting JSON
+- [Chart Output](./chart-output-node.md#html-widgets) – The same template as a sandboxed dashboard widget
 - [Output](./output-node.md) – Message or schema-based response with `result` wrapping
 - [Webhooks](../reference/webhooks.md) – Execute endpoint, request methods, and responses
 - [Node Types](../reference/node-types.md) – All node types

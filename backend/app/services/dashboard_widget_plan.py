@@ -49,6 +49,7 @@ WIDGET_CHART_TYPES = (
     "erDiagram",
     "barGauge",
     "text",
+    "html",
     "hitl",
 )
 
@@ -71,13 +72,15 @@ Answer with JSON only, no prose:
   table for a list of records, text for notes or checklists, hitl for pending human reviews
   (when the description names the workflow whose reviews it shows, keep that name in prompt).
   Use gantt for schedules, project plans and task timelines. Use erDiagram for database
-  schemas and entity relationships. Prefer these when the description asks for them.
+  schemas and entity relationships. Use html for a card the description asks to be HTML or
+  designed freely (a styled summary, a banner, a custom layout) that no other chart type
+  draws. Prefer these when the description asks for them.
 - prompt: one or two sentences for the builder: what the widget shows, which data it uses,
   how it is grouped or filtered, and the chart type. When the description names no data
   source, say the widget uses sample data.
 - example: a preview of what the widget will show, {{"labels": [...], "values": [...]}} with
   at most {MAX_EXAMPLE_POINTS} labels and one number per label (one label and one value for
-  numeric). Omit it for table, text and hitl.
+  numeric). Omit it for table, text, html and hitl.
   For gantt, instead return {{"tasks":[{{"id":"design","label":"Design",
   "start":"2026-10-01","end":"2026-10-05","progress":60,"dependencies":[]}}]}}.
   Include at most {MAX_EXAMPLE_POINTS} tasks, with unique ids and dependencies on those ids.

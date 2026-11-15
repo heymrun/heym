@@ -56,6 +56,7 @@ export interface YoloLoopHost<M extends YoloMessageFields> {
   executionResult: () => ExecutionResult | null;
   nodeResults: () => readonly NodeResult[];
   onVerified: () => void;
+  onAwaitingUser: () => void;
 }
 
 export interface AssistantYoloLoop<M extends YoloMessageFields> {
@@ -179,6 +180,7 @@ export function useAssistantYoloLoop<M extends YoloMessageFields>(
       fieldKeys: [...inputs.fieldKeys],
       status: "pending",
     };
+    host.onAwaitingUser();
     const draft = await new Promise<YoloInputDraft | null>((resolve) => {
       resolveInputs = resolve;
     });
@@ -246,6 +248,7 @@ export function useAssistantYoloLoop<M extends YoloMessageFields>(
       step.response_summary =
         "Waiting for human review — approve it in the Debug panel, then send a message.";
       end("stopped");
+      host.onAwaitingUser();
       return;
     }
     if (result.status === "awaiting_file_upload") {
@@ -276,6 +279,7 @@ export function useAssistantYoloLoop<M extends YoloMessageFields>(
     const next = decideYoloNextAction(shape);
     if (next.kind === "pause") {
       state.value = "paused";
+      host.onAwaitingUser();
       return;
     }
     if (next.kind === "stop") {

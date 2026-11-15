@@ -137,7 +137,7 @@ TABLE_WIDGET_ROW_LIMIT = 500
 _AI_WIDGET_SUFFIX = (
     " The workflow MUST end with a single chartOutput node that produces the chart. "
     "Choose an appropriate chartType (pie, bar, line, area, table, numeric, gauge, scatter, "
-    "proportion, barGauge, gantt, erDiagram, text, or hitl) and set "
+    "proportion, barGauge, gantt, erDiagram, text, html, or hitl) and set "
     "labelField/valueField (or series for multi-series line/area, or xField/yField for scatter, "
     "or min/max for gauge, or text for a markdown message) on the "
     "chartOutput node so it renders the requested metric. When the user only describes example or "
@@ -149,6 +149,12 @@ _AI_WIDGET_SUFFIX = (
     "[{source,target,sourceField,targetField,cardinality,label}]. key is PK, FK or PK/FK; "
     "cardinality is one-to-one, one-to-many, many-to-one or many-to-many. Build the graph "
     "object with $dict(entities=array(dict(...)), relations=array(dict(...))), not task rows. "
+    "For chartType html, put one self-contained HTML document in chartOutput html, with inline "
+    "<style> and <script>; its $nodeLabel.field expressions are filled in as in an "
+    "htmlOutputMapper node. To show HTML built upstream, leave html empty and set valueField "
+    "to the row key that holds it. The widget runs the HTML in a sandboxed frame without "
+    "network access: no fetch, no forms and no calls to the Heym API, so the template itself "
+    "must carry every value it shows. "
     "For markdown checklists / task lists, use chartType text and put GFM task list lines "
     "(- [ ] / - [x]) directly in chartOutput text (not only in upstream rows). "
     "For numbered markdown lines (especially descending lists), prefix each line with the "
@@ -386,8 +392,8 @@ def _seed_widget_nodes(chart_type: str) -> tuple[list, list]:
         else ""
     )
     chart_data: dict = {"label": "chart", "chartType": chart_type, "dataPath": data_key}
-    if chart_type == "text":
-        chart_data["valueField"] = "text"
+    if chart_type in ("text", "html"):
+        chart_data["valueField"] = chart_type
     elif chart_type == "scatter":
         chart_data["xField"] = "x"
         chart_data["yField"] = "y"

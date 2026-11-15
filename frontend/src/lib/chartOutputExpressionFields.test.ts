@@ -23,6 +23,10 @@ describe("getChartOutputExpressionFields", () => {
     ]);
   });
 
+  it("offers the HTML template first for the html widget", () => {
+    expect(keys("html")).toEqual(["html", "valueField", "dataPath", "title", "url"]);
+  });
+
   it("keeps the fields of the other chart types", () => {
     expect(keys(undefined)).toEqual(["dataPath", "labelField", "valueField", "title", "url"]);
     expect(keys("text")).toEqual(["text", "valueField", "dataPath", "title", "url"]);

@@ -277,6 +277,7 @@ In workflow expressions:
   - `label`: Node identifier (e.g., "supportInbox")
   - `credentialId`: UUID of an `imap` credential containing host, username, password, mailbox, and SSL settings
   - `pollIntervalMinutes`: Integer polling interval in minutes (minimum `1`, common values `1`, `5`, `15`)
+  - `imapDownloadAttachments`: Boolean, default `false`. When `true`, every attachment of the email is saved to the workflow owner's Heym Drive during the run (at most 10 per email, each within the Drive size limit). Set it whenever a later node must read the attached files (invoice PDF, contract, scan); leave it off when only the subject or body matters
 - **Output fields available downstream**:
   - `$<label>.email` — full parsed email payload
   - `$<label>.email.subject` — decoded email subject
@@ -288,12 +289,20 @@ In workflow expressions:
   - `$<label>.email.attachments` — attachment metadata array
   - `$<label>.email.headers` — decoded header map
   - `$<label>.email.uid` — IMAP UID for the message
+  - `$<label>.attachments` — one item per attachment, in email order. With `imapDownloadAttachments` on: `id` (Drive file id), `filename`, `content_type`, `size_bytes`, `download_url`, `skipped_reason` (`null` when saved, otherwise `"too_large"`, `"too_many"` or `"unavailable"`). With it off: the same metadata as `email.attachments`
+  - `$<label>.file_ids` — Drive file ids of the saved attachments only (`[]` when the toggle is off). Same shape as the Slack node's `file_ids`: put `$<label>.file_ids` in an Agent's user message for file analysis, or pass it to a Drive or Converter node
   - `$<label>.triggered_at` — ISO timestamp for the workflow run
 
 **Example node JSON:**
 ```json
 {"id": "n1", "type": "imapTrigger", "position": {"x": 100, "y": 100}, "data": {"label": "supportInbox", "credentialId": "imap-credential-uuid", "pollIntervalMinutes": 5}}
 ```
+
+**Example with attachments saved to Drive (invoice inbox → Agent reads the PDFs):**
+```json
+{"id": "n1", "type": "imapTrigger", "position": {"x": 100, "y": 100}, "data": {"label": "invoiceInbox", "credentialId": "imap-credential-uuid", "pollIntervalMinutes": 5, "imapDownloadAttachments": true}}
+```
+Then an Agent user message such as `"Extract vendor, total and due date from these invoices: $invoiceInbox.file_ids"`.
 
 ### 3b. telegramTrigger (Telegram Bot Webhook Trigger)
 - **Purpose**: Receive Telegram Bot API webhook updates and start the workflow automatically
@@ -1438,7 +1447,7 @@ Do NOT use downstream nodes that depend on `$notifyWorkflow.outputs` when `execu
   - `statusCode`: HTTP status for the response (default `200`)
   - `contentType`: Response content type (default `text/html; charset=utf-8`)
 
-**When to use**: Serving a page straight to a browser - a status dashboard, a generated report, a confirmation screen. Use `jsonOutputMapper` instead when the caller is an API client.
+**When to use**: Serving a page straight to a browser - a status dashboard, a generated report, a confirmation screen. Use `jsonOutputMapper` instead when the caller is an API client. For HTML inside a dashboard widget, use `chartOutput` with `chartType: "html"` and the same `html` template instead; a widget workflow ends in `chartOutput`.
 
 **Example**:
 ```json
@@ -3932,7 +3941,7 @@ Access the saved file downstream: `$saveAudio.id`, `$saveAudio.download_url`
   `[{"month": "Jan", "revenue": 120}, ...]`).
 - **Data fields**:
   - `label`: Node identifier (camelCase)
-  - `chartType`: `"pie"` | `"bar"` | `"line"` | `"area"` | `"table"` | `"numeric"` | `"gauge"` | `"scatter"` | `"proportion"` | `"barGauge"` | `"gantt"` | `"erDiagram"` | `"text"` | `"hitl"` (required)
+  - `chartType`: `"pie"` | `"bar"` | `"line"` | `"area"` | `"table"` | `"numeric"` | `"gauge"` | `"scatter"` | `"proportion"` | `"barGauge"` | `"gantt"` | `"erDiagram"` | `"text"` | `"html"` | `"hitl"` (required)
   - `gantt`: `dataPath` selects task rows (no labelField/valueField mapping). Each row has
     `id`, `label`, `start`, `end` (ISO dates or datetimes; timezone-free values mean UTC),
     optional `progress` (0-100) and `dependencies` (existing predecessor task ids).
@@ -3971,6 +3980,12 @@ Access the saved file downstream: `$saveAudio.id`, `$saveAudio.download_url`
   - `unit`: optional unit string for `numeric`/`gauge`
   - `text`: markdown string for the `text` chart type (a static message; supports markdown). For a
     dynamic message, leave `text` empty and set `valueField` to a row key holding the string.
+  - `html`: HTML template for the `html` chart type, filled in exactly like an `htmlOutputMapper`
+    node's `html` (`$nodeLabel.field` expressions are interpolated). Write one self-contained
+    document with inline `<style>` and `<script>`. For HTML built upstream, leave `html` empty and
+    set `valueField` to the row key holding it. The dashboard runs it in a sandboxed frame without
+    network access: no `fetch`, no forms, no cookies or storage, no calls to the Heym API and no
+    popups, so the template must carry every value it shows. Links still open in a new tab.
   - `title`: optional chart title
   - `hitlWorkflowId` / `hitlNodeId`: `hitl` only. The workflow, and optionally the step, whose
     reviews the widget shows. Use only ids from the review sources you are given; leave both out
@@ -4094,6 +4109,12 @@ syntax (`- [ ]` / `- [x]`) in `text` — do not use plain bullets for checkbox i
 Text checklist (three items, one checked — put markdown in `text` so dashboard toggles persist):
 ```json
 {"type": "chartOutput", "data": {"label": "todoList", "chartType": "text", "text": "- [x] Option 1\\n- [ ] Option 2\\n- [ ] Option 3", "title": "Tasks"}}
+```
+
+HTML (a custom card the other types do not draw; values come from upstream expressions, as in
+`htmlOutputMapper`, e.g. `$stats.open` reads the `open` mapping of a `set` node labelled `stats`):
+```json
+{"type": "chartOutput", "data": {"label": "summaryCard", "chartType": "html", "html": "<style>body{font-family:system-ui;margin:0;padding:12px}.n{font-size:32px;font-weight:600}</style><div class=\"n\">$stats.open</div><div>open tickets</div>", "title": "Summary"}}
 ```
 
 **HITL inbox (`chartType: "hitl"`):** a dashboard carousel of the signed-in user's pending human

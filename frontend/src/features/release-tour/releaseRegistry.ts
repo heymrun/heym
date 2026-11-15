@@ -17,13 +17,36 @@ import type { ReleaseEntry } from "@/features/release-tour/releaseTour.types";
  */
 export const RELEASE_REGISTRY: ReleaseEntry[] = [
   {
+    releaseId: "2026.32",
+    publishedAt: new Date("2026-11-14T21:00:00Z"),
+    headline: "Email attachments in Heym Drive",
+    releaseTour: {
+      label: "New in Heym", introTitle: "New in this release",
+      introDescription: "Work with the files an email brings, straight from the IMAP Trigger.",
+      tourEnabled: true,
+      sectionOrder: ["imap-attachments"],
+    },
+    sections: [{
+      id: "imap-attachments", title: "Email attachments in Heym Drive",
+      publishedAt: new Date("2026-11-14T21:00:00Z"),
+      blocks: [{ type: "prose", markdown: "Turn on **Download attachments to Drive** in the IMAP Trigger and every attachment of a new email is saved to your Heym Drive while the run executes. The trigger output gets `attachments`, with each file's name, size and Drive link, and `file_ids`, which goes straight into an Agent's message, a Converter or a Drive node: read an invoice PDF, hand a contract to an Agent or pass a scan on. Up to 10 files per email are saved; a file over the Drive size limit is listed as skipped and the run keeps going. The email stays unread, and the toggle is off by default, so existing workflows behave as before." }],
+      tour: {
+        description: "Save the files of each new email to Drive and let the next node read them.",
+        useCases: ["Extract totals and due dates from invoice PDFs sent to a billing inbox", "Hand contracts that arrive by email to an Agent for review", "File scans and delivery notes in Drive with the email they came with"],
+        tourVisual: "imap-attachments",
+        docTarget: { categoryId: "nodes", slug: "imap-trigger-node", title: "IMAP Trigger" },
+      },
+    }],
+  },
+
+  {
     releaseId: "2026.31",
     publishedAt: new Date("2026-11-14T12:00:00Z"),
     headline: "Revert a widget Chat changed",
     releaseTour: {
       label: "New in Heym", introTitle: "New in this release",
       introDescription: "Undo an AI change to a dashboard widget in one click.",
-      tourEnabled: false,
+      tourEnabled: true,
       sectionOrder: ["chat-widget-revert"],
     },
     sections: [{
@@ -104,29 +127,6 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
         useCases: ["Summarize a customer call recording with an LLM node", "Route an uploaded voice note to the right team", "Keep timed transcripts of meetings searchable"],
         tourVisual: "voice-transcribe",
         docTarget: { categoryId: "nodes", slug: "converter-node", title: "Converter" },
-      },
-    }],
-  },
-
-  {
-    releaseId: "2026.27",
-    publishedAt: new Date("2026-11-08T12:00:00Z"),
-    headline: "Two-factor sign-in, account deactivation and data retention",
-    releaseTour: {
-      label: "New in Heym", introTitle: "New in this release",
-      introDescription: "Controls a security review asks for, on your own instance.",
-      tourEnabled: true,
-      sectionOrder: ["account-security"],
-    },
-    sections: [{
-      id: "account-security", title: "Two-factor sign-in and offboarding",
-      publishedAt: new Date("2026-11-08T12:00:00Z"),
-      blocks: [{ type: "prose", markdown: "Turn on **two-factor sign-in** and every password sign-in asks for a code from an authenticator app. Anyone without one scans a QR code first, before reaching anything, and gets ten single-use recovery codes. SSO sign-in stays with your identity provider. Administrators get a **Users** tab in Settings: **Deactivate** an account when someone leaves and their sessions end, their keys stop working and the automatic triggers of their workflows pause; **Reactivate** brings it all back. Anyone can **Sign out other sessions** from Settings → Security. Execution history and LLM traces now keep 90 days by default, which you can change or turn off." }],
-      tour: {
-        description: "Require an authenticator code at password sign-in, offboard leavers in one click, and keep history for a set time.",
-        useCases: ["Meet the MFA requirement of a security review", "Remove a departing employee's access and pause their automations", "Keep run history and prompts for 90 days only"],
-        tourVisual: "account-security",
-        docTarget: { categoryId: "reference", slug: "security", title: "Security" },
       },
     }],
   },

@@ -506,6 +506,7 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
       label: "imapTrigger",
       credentialId: "",
       pollIntervalMinutes: 5,
+      imapDownloadAttachments: false,
     },
   },
   googleDriveTrigger: {
@@ -1277,6 +1278,7 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
         | "erDiagram"
         | "barGauge"
         | "text"
+        | "html"
         | "hitl",
       orientation: "vertical" as "horizontal" | "vertical",
       dataPath: "",

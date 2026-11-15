@@ -10,7 +10,7 @@ Heym Work runs as its own container next to your Heym, with a separate license f
 |------|--------------|
 | **Chat** | Describe a job by typing or by voice. Heym asks what it needs, builds the workflow, tests it, and marks it Verified. |
 | **Flows** | Editors build a flow from choices instead of a canvas: what starts it, an optional AI draft, and actions in Slack, Google Sheets and email. Answers from Slack continue the run, and approvals also wait in Activity. See [Flows](#flows). |
-| **Pages** | Pinned pages of widgets: numbers, charts, tables with status chips, file drops and approvals. A table row can open its own detail page. |
+| **Pages** | Pinned pages of widgets: numbers, charts, tables with status chips, HTML cards, file drops and approvals. A table row can open its own detail page. |
 | **Approvals** | Reviews from [Human-in-the-Loop](./human-in-the-loop.md) steps wait in Activity and on pages, with Approve, Request changes and Reject. |
 | **Activity** | Every run, with the person who started it and the instance that ran it. |
 | **Roles** | Owner, Editor and Viewer. People sign in with the [single sign-on](./sso.md) Heym already uses. |

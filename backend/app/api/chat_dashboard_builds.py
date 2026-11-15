@@ -302,6 +302,8 @@ def empty_reason(data: WidgetDataResponse) -> str | None:
         return None
     if chart_type == "text":
         return None if str(payload.get("text") or "").strip() else "The widget's text is empty."
+    if chart_type == "html":
+        return None if str(payload.get("html") or "").strip() else "The widget's HTML is empty."
     if chart_type in ("numeric", "gauge"):
         return None if _has_value(payload.get("value")) else "The widget's value is empty."
     if chart_type == "table":

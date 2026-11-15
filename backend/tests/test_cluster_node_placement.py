@@ -57,6 +57,15 @@ class NodePlacementTests(unittest.TestCase):
             node = {"type": "slack", "data": data}
             self.assertEqual(node_placement(node), Placement.ANYWHERE)
 
+    def test_imap_trigger_saving_attachments_is_pinned_to_main(self) -> None:
+        node = {"type": "imapTrigger", "data": {"imapDownloadAttachments": True}}
+        self.assertEqual(node_placement(node), Placement.MAIN_ONLY)
+
+    def test_imap_trigger_without_attachments_runs_anywhere(self) -> None:
+        for data in ({}, {"imapDownloadAttachments": False}, {"imapDownloadAttachments": None}):
+            node = {"type": "imapTrigger", "data": data}
+            self.assertEqual(node_placement(node), Placement.ANYWHERE)
+
     def test_unknown_node_type_is_pinned_to_main(self) -> None:
         self.assertEqual(node_placement({"type": "acmePlugin", "data": {}}), Placement.MAIN_ONLY)
 

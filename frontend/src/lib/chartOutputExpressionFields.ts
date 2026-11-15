@@ -2,6 +2,7 @@ import type { NodeData } from "@/types/workflow";
 
 export type ChartOutputExpressionFieldKey =
   | "text"
+  | "html"
   | "valueField"
   | "dataPath"
   | "statusColumn"
@@ -30,6 +31,10 @@ export function getChartOutputExpressionFields(
 
   if (type === "text") {
     fields.push({ key: "text", label: "Text (markdown)" }, { key: "valueField", label: "Value field" });
+  }
+
+  if (type === "html") {
+    fields.push({ key: "html", label: "HTML" }, { key: "valueField", label: "Value field" });
   }
 
   fields.push({ key: "dataPath", label: "Data path" });

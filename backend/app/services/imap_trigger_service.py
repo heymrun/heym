@@ -2,6 +2,8 @@ import asyncio
 import imaplib
 import logging
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from email import message_from_bytes, policy
@@ -23,6 +25,9 @@ from app.services.trigger_run_dispatch import (
 )
 
 logger = logging.getLogger("imap_trigger")
+
+# Seconds a socket operation may block. Without it one silent mailbox stalls the poller.
+IMAP_TIMEOUT_SECONDS = 30
 
 
 @dataclass(frozen=True)
@@ -100,22 +105,48 @@ def _extract_email_bodies(message: Message) -> tuple[str, str]:
     return "\n\n".join(text_parts).strip(), "\n\n".join(html_parts).strip()
 
 
-def _extract_attachment_summaries(message: Message) -> list[dict[str, Any]]:
-    """Return lightweight attachment metadata without loading file contents into workflow inputs."""
-    attachments: list[dict[str, Any]] = []
+@dataclass(frozen=True)
+class EmailAttachment:
+    """One attachment of a parsed email, with its decoded bytes."""
+
+    filename: str
+    content_type: str
+    content: bytes
+
+
+def _attachment_parts(message: Message) -> list[EmailAttachment]:
+    """Every part with a filename, in the order it appears in the email."""
+    attachments: list[EmailAttachment] = []
     for part in message.walk():
         filename = part.get_filename()
         if not filename:
             continue
-        payload = part.get_payload(decode=True) or b""
         attachments.append(
-            {
-                "filename": _decode_header_value(filename),
-                "content_type": part.get_content_type(),
-                "size_bytes": len(payload),
-            }
+            EmailAttachment(
+                filename=_decode_header_value(filename),
+                content_type=part.get_content_type(),
+                content=part.get_payload(decode=True) or b"",
+            )
         )
     return attachments
+
+
+def email_attachments(raw_bytes: bytes) -> tuple[str, list[EmailAttachment]]:
+    """The Message-ID and the attachments of raw RFC822 bytes."""
+    message = message_from_bytes(raw_bytes, policy=policy.default)
+    return _decode_header_value(message.get("Message-ID")), _attachment_parts(message)
+
+
+def _extract_attachment_summaries(message: Message) -> list[dict[str, Any]]:
+    """Return lightweight attachment metadata without loading file contents into workflow inputs."""
+    return [
+        {
+            "filename": item.filename,
+            "content_type": item.content_type,
+            "size_bytes": len(item.content),
+        }
+        for item in _attachment_parts(message)
+    ]
 
 
 def _extract_raw_message_bytes(fetch_data: list[Any]) -> bytes | None:
@@ -126,8 +157,14 @@ def _extract_raw_message_bytes(fetch_data: list[Any]) -> bytes | None:
     return None
 
 
-def _parse_email_message(raw_bytes: bytes, uid: int) -> dict[str, Any]:
-    """Convert raw RFC822 bytes into the workflow-friendly email payload."""
+def _parse_email_message(
+    raw_bytes: bytes, uid: int, uidvalidity: str | None = None
+) -> dict[str, Any]:
+    """Convert raw RFC822 bytes into the workflow-friendly email payload.
+
+    ``uid`` and ``uidvalidity`` together name the message in its mailbox, so the trigger
+    node can fetch it again by UID to save its attachments.
+    """
     message = message_from_bytes(raw_bytes, policy=policy.default)
     text_body, html_body = _extract_email_bodies(message)
 
@@ -147,6 +184,7 @@ def _parse_email_message(raw_bytes: bytes, uid: int) -> dict[str, Any]:
 
     return {
         "uid": str(uid),
+        "uidvalidity": uidvalidity,
         "subject": _decode_header_value(message.get("Subject")),
         "from": _decode_header_value(message.get("From")),
         "fromAddresses": _serialise_addresses(message.get("From")),
@@ -165,11 +203,12 @@ def _parse_email_message(raw_bytes: bytes, uid: int) -> dict[str, Any]:
     }
 
 
-def fetch_imap_messages(
-    credential_config: dict[str, Any],
-    cursor: ImapCursor,
-) -> tuple[ImapCursor, list[dict[str, Any]]]:
-    """Fetch newly arrived emails using IMAP UIDs, baselining existing inbox contents on first poll."""
+@contextmanager
+def _open_mailbox(credential_config: dict[str, Any]) -> Iterator[tuple[Any, str | None]]:
+    """Log in and select the credential's mailbox read-only, so nothing is marked as read.
+
+    Yields the client and the mailbox UIDVALIDITY, and always closes the connection.
+    """
     host = str(credential_config.get("imap_host", "")).strip()
     port = int(credential_config.get("imap_port", 993))
     username = str(credential_config.get("imap_username", "")).strip()
@@ -178,7 +217,10 @@ def fetch_imap_messages(
     use_ssl = bool(credential_config.get("imap_use_ssl", True))
 
     client: imaplib.IMAP4 | imaplib.IMAP4_SSL
-    client = imaplib.IMAP4_SSL(host, port) if use_ssl else imaplib.IMAP4(host, port)
+    if use_ssl:
+        client = imaplib.IMAP4_SSL(host, port, timeout=IMAP_TIMEOUT_SECONDS)
+    else:
+        client = imaplib.IMAP4(host, port, timeout=IMAP_TIMEOUT_SECONDS)
 
     try:
         login_status, _ = client.login(username, password)
@@ -194,6 +236,25 @@ def fetch_imap_messages(
         if uidvalidity_data and uidvalidity_data[0]:
             uidvalidity = uidvalidity_data[0].decode("utf-8", errors="replace")
 
+        yield client, uidvalidity
+    finally:
+        try:
+            client.close()
+        except Exception:
+            pass
+        try:
+            client.logout()
+        except Exception:
+            pass
+
+
+def fetch_imap_messages(
+    credential_config: dict[str, Any],
+    cursor: ImapCursor,
+) -> tuple[ImapCursor, list[dict[str, Any]]]:
+    """Fetch newly arrived emails using IMAP UIDs, baselining existing inbox contents on first poll."""
+    mailbox = str(credential_config.get("imap_mailbox", "INBOX")).strip() or "INBOX"
+    with _open_mailbox(credential_config) as (client, uidvalidity):
         search_status, search_data = client.uid("search", None, "ALL")
         if search_status != "OK":
             raise ValueError("IMAP UID search failed")
@@ -223,18 +284,28 @@ def fetch_imap_messages(
             if raw_bytes is None:
                 logger.warning("Missing RFC822 payload for IMAP uid=%s", uid)
                 continue
-            emails.append(_parse_email_message(raw_bytes, uid))
+            emails.append(_parse_email_message(raw_bytes, uid, uidvalidity))
 
         return next_cursor, emails
-    finally:
-        try:
-            client.close()
-        except Exception:
-            pass
-        try:
-            client.logout()
-        except Exception:
-            pass
+
+
+def fetch_imap_message_by_uid(
+    credential_config: dict[str, Any], uid: str, uidvalidity: str
+) -> bytes | None:
+    """The raw RFC822 bytes of one message, or None when it is no longer that message.
+
+    Uses the same login and read-only select as :func:`fetch_imap_messages`. A mailbox whose
+    UIDVALIDITY changed since the poll gives None, because the UID may now name another
+    message; so does a message that was deleted or moved. ``BODY.PEEK[]`` leaves the message
+    unread. Login and network failures raise.
+    """
+    with _open_mailbox(credential_config) as (client, current_uidvalidity):
+        if not uidvalidity or current_uidvalidity != uidvalidity:
+            return None
+        fetch_status, fetch_data = client.uid("fetch", str(uid), "(BODY.PEEK[])")
+        if fetch_status != "OK" or not isinstance(fetch_data, list):
+            return None
+        return _extract_raw_message_bytes(fetch_data)
 
 
 class ImapTriggerManager:
@@ -298,7 +369,13 @@ class ImapTriggerManager:
                     continue
 
                 self._last_poll_at[key] = now
-                await self._poll_workflow_node(workflow, node)
+                try:
+                    await self._poll_workflow_node(workflow, node)
+                except Exception:
+                    # One unreachable mailbox must not keep the other triggers from polling.
+                    logger.exception(
+                        "IMAP trigger poll failed for workflow %s node %s", workflow.id, node_id
+                    )
 
         stale_keys = set(self._last_poll_at.keys()) - current_keys
         for key in stale_keys:
