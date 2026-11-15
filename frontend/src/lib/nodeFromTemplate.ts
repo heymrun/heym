@@ -21,6 +21,18 @@ export function buildWorkflowNodeFromNodeTemplate(
   const definition = NODE_DEFINITIONS[type];
   const defaults = definition ? { ...definition.defaultData } : ({} as WorkflowNode["data"]);
   let merged = { ...defaults, ...template.node_data } as WorkflowNode["data"];
+  if (type === "googleMeet" && template.node_data) {
+    if ("gmIncludeBusyDetails" in template.node_data) {
+      merged.gmIncludeBusyDetails = template.node_data.gmIncludeBusyDetails === true;
+    } else if ("gmIncludeBusyTitles" in template.node_data) {
+      merged.gmIncludeBusyDetails = template.node_data.gmIncludeBusyTitles === true;
+    }
+    if (Array.isArray(merged.agentProvidedFields)) {
+      merged.agentProvidedFields = merged.agentProvidedFields.map((field) =>
+        field === "gmIncludeBusyTitles" ? "gmIncludeBusyDetails" : field,
+      );
+    }
+  }
   if (sourceForRefs) {
     merged = replaceInputRefs(merged, sourceForRefs);
   }

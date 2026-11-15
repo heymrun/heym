@@ -60,7 +60,7 @@ class TestGoogleMeetBusyTitles(unittest.TestCase):
         )
 
     def test_default_and_explicit_false_never_fetch_or_expose_titles(self) -> None:
-        for kwargs in ({}, {"include_busy_titles": False}):
+        for kwargs in ({}, {"include_busy_details": False}):
             with self.subTest(kwargs=kwargs):
                 result = self.read(**kwargs)
                 self.assertEqual(
@@ -68,15 +68,19 @@ class TestGoogleMeetBusyTitles(unittest.TestCase):
                     [{"start": "2026-11-06T09:00:00+00:00", "end": "2026-11-06T12:00:00+00:00"}],
                 )
                 self.assertNotIn("Team meeting", str(result))
+                self.assertNotIn("attendees", result["busy_slots"][0])
         self.assertTrue(all(request.method == "POST" for request in self.requests))
 
     def test_enabled_returns_actual_title_and_preserves_available_slots(self) -> None:
         title = 'Design review: "release"\nFollow-up'
         self.pages[0]["items"][0]["summary"] = title
-        original, enriched = self.read(), self.read(include_busy_titles=True)
+        original, enriched = self.read(), self.read(include_busy_details=True)
         self.assertEqual(enriched["available_slots"], original["available_slots"])
         self.assertEqual(enriched["count"], original["count"])
-        self.assertEqual(enriched["busy_slots"], [{**original["busy_slots"][0], "title": title}])
+        self.assertEqual(
+            enriched["busy_slots"],
+            [{**original["busy_slots"][0], "title": title, "attendees": []}],
+        )
         request = self.requests[-1]
         self.assertEqual(request.url.path, "/calendar/v3/calendars/primary/events")
         for key, value in {
@@ -89,18 +93,61 @@ class TestGoogleMeetBusyTitles(unittest.TestCase):
             self.assertEqual(request.url.params[key], value)
         self.assertNotIn("timeZone", request.url.params)
         self.assertNotIn("description", request.url.params["fields"])
-        self.assertNotIn("attendees", request.url.params["fields"])
+        self.assertNotIn("accessRole", request.url.params["fields"])
+        self.assertNotIn("visibility", request.url.params["fields"])
+        self.assertIn("attendeesOmitted", request.url.params["fields"])
+        self.assertIn("attendees(email,resource)", request.url.params["fields"])
         self.assertEqual(request.headers["Authorization"], "Bearer dummy-access")
+
+    def test_attendee_emails_are_returned_and_resources_excluded(self) -> None:
+        self.pages[0]["items"][0]["attendees"] = [
+            {"email": "alice@example.com"},
+            {"email": "conf-room-1@example.com", "resource": True},
+            {"email": "bob@example.com", "resource": False},
+        ]
+        result = self.read(include_busy_details=True)
+        self.assertEqual(
+            result["busy_slots"][0]["attendees"],
+            ["alice@example.com", "bob@example.com"],
+        )
+
+    def test_no_guests_and_only_resources_return_empty_array(self) -> None:
+        for attendees_val in (
+            [],
+            [{"email": "room@example.com", "resource": True}],
+        ):
+            with self.subTest(attendees=attendees_val):
+                self.pages[0]["items"][0]["attendees"] = attendees_val
+                result = self.read(include_busy_details=True)
+                self.assertEqual(result["busy_slots"][0]["attendees"], [])
 
     def test_overlapping_and_adjacent_events_keep_individual_titles(self) -> None:
         self.pages[0]["items"] = [
-            timed_event("2026-11-06T09:00:00Z", "2026-11-06T10:00:00Z", "First"),
-            timed_event("2026-11-06T09:30:00Z", "2026-11-06T11:00:00Z", "Second"),
-            timed_event("2026-11-06T11:00:00Z", "2026-11-06T12:00:00Z", "Third"),
+            timed_event(
+                "2026-11-06T09:00:00Z",
+                "2026-11-06T10:00:00Z",
+                "First",
+                attendees=[{"email": "first@example.com"}],
+            ),
+            timed_event(
+                "2026-11-06T09:30:00Z",
+                "2026-11-06T11:00:00Z",
+                "Second",
+                attendees=[{"email": "second@example.com"}],
+            ),
+            timed_event(
+                "2026-11-06T11:00:00Z",
+                "2026-11-06T12:00:00Z",
+                "Third",
+            ),
         ]
-        original, result = self.read(), self.read(include_busy_titles=True)
+        original, result = self.read(), self.read(include_busy_details=True)
         self.assertEqual(
             [slot["title"] for slot in result["busy_slots"]], ["First", "Second", "Third"]
+        )
+        self.assertEqual(
+            [slot["attendees"] for slot in result["busy_slots"]],
+            [["first@example.com"], ["second@example.com"], []],
         )
         self.assertEqual(result["busy_slots"][1]["start"], "2026-11-06T09:30:00+00:00")
         self.assertEqual(result["available_slots"], original["available_slots"])
@@ -109,7 +156,7 @@ class TestGoogleMeetBusyTitles(unittest.TestCase):
         self.pages[0]["items"] = [
             timed_event("2026-11-06T10:00:00Z", "2026-11-06T11:00:00Z", "Visible")
         ]
-        result = self.read(include_busy_titles=True)
+        result = self.read(include_busy_details=True)
         self.assertEqual(
             result["busy_slots"],
             [
@@ -117,23 +164,71 @@ class TestGoogleMeetBusyTitles(unittest.TestCase):
                     "start": "2026-11-06T09:00:00+00:00",
                     "end": "2026-11-06T10:00:00+00:00",
                     "title": None,
+                    "attendees": None,
                 },
                 {
                     "start": "2026-11-06T10:00:00+00:00",
                     "end": "2026-11-06T11:00:00+00:00",
                     "title": "Visible",
+                    "attendees": [],
                 },
                 {
                     "start": "2026-11-06T11:00:00+00:00",
                     "end": "2026-11-06T12:00:00+00:00",
                     "title": None,
+                    "attendees": None,
                 },
             ],
         )
 
-    def test_private_event_without_summary_has_null_title(self) -> None:
+    def test_private_event_without_summary_has_null_title_and_null_attendees(self) -> None:
         self.pages[0]["items"][0].pop("summary")
-        self.assertIsNone(self.read(include_busy_titles=True)["busy_slots"][0]["title"])
+        slot = self.read(include_busy_details=True)["busy_slots"][0]
+        self.assertIsNone(slot["title"])
+        self.assertIsNone(slot["attendees"])
+
+    def test_visible_event_with_no_guests_returns_empty_attendees_list(self) -> None:
+        self.pages[0]["items"] = [
+            timed_event(
+                "2026-11-06T09:00:00Z",
+                "2026-11-06T12:00:00Z",
+                title="Visible Meeting",
+            )
+        ]
+        result = self.read(include_busy_details=True)
+        slot = result["busy_slots"][0]
+        self.assertEqual(slot["title"], "Visible Meeting")
+        self.assertEqual(slot["attendees"], [])
+
+    def test_attendees_omitted_returns_null_attendees_and_preserves_title(self) -> None:
+        # When attendeesOmitted is True and partial attendee list is returned in response:
+        self.pages[0]["items"] = [
+            timed_event(
+                "2026-11-06T09:00:00Z",
+                "2026-11-06T12:00:00Z",
+                title="Company All-Hands",
+                attendeesOmitted=True,
+                attendees=[{"email": "partial-guest@example.com"}],
+            )
+        ]
+        result = self.read(include_busy_details=True)
+        slot = result["busy_slots"][0]
+        self.assertEqual(slot["title"], "Company All-Hands")
+        self.assertIsNone(slot["attendees"])
+
+        # When attendeesOmitted is True and no attendees field is present:
+        self.pages[0]["items"] = [
+            timed_event(
+                "2026-11-06T09:00:00Z",
+                "2026-11-06T12:00:00Z",
+                title="Large Conference",
+                attendeesOmitted=True,
+            )
+        ]
+        result = self.read(include_busy_details=True)
+        slot = result["busy_slots"][0]
+        self.assertEqual(slot["title"], "Large Conference")
+        self.assertIsNone(slot["attendees"])
 
     def test_free_cancelled_and_out_of_window_events_cannot_label_busy_time(self) -> None:
         self.pages[0]["items"] = [
@@ -146,7 +241,7 @@ class TestGoogleMeetBusyTitles(unittest.TestCase):
             {"status": "cancelled", "summary": "Deleted event"},
             timed_event("2026-11-07T09:00:00Z", "2026-11-07T12:00:00Z", "Outside window"),
         ]
-        result = self.read(include_busy_titles=True)
+        result = self.read(include_busy_details=True)
         self.assertEqual(len(result["busy_slots"]), 1)
         self.assertIsNone(result["busy_slots"][0]["title"])
 
@@ -164,7 +259,7 @@ class TestGoogleMeetBusyTitles(unittest.TestCase):
                 ],
             }
         ]
-        result = self.read(include_busy_titles=True, time_zone="Europe/Berlin")
+        result = self.read(include_busy_details=True, time_zone="Europe/Berlin")
         self.assertEqual(
             result["busy_slots"],
             [
@@ -172,6 +267,7 @@ class TestGoogleMeetBusyTitles(unittest.TestCase):
                     "start": "2026-11-06T06:00:00+01:00",
                     "end": "2026-11-07T01:00:00+01:00",
                     "title": "Holiday",
+                    "attendees": [],
                 }
             ],
         )
@@ -193,7 +289,7 @@ class TestGoogleMeetBusyTitles(unittest.TestCase):
                 ],
             },
         ]
-        result = self.read(include_busy_titles=True)
+        result = self.read(include_busy_details=True)
         self.assertEqual(
             [slot["title"] for slot in result["busy_slots"]], ["Daily standup", "Daily standup"]
         )
@@ -211,25 +307,25 @@ class TestGoogleMeetBusyTitles(unittest.TestCase):
             with self.subTest(pages=pages):
                 self.pages, self.page_index = pages, 0
                 with self.assertRaises(HTTPException):
-                    self.read(include_busy_titles=True)
+                    self.read(include_busy_details=True)
 
     def test_events_denial_fails_only_when_titles_are_enabled(self) -> None:
         self.events_status = 403
         self.assertEqual(self.read()["status"], "success")
         with self.assertRaises(HTTPException) as caught:
-            self.read(include_busy_titles=True)
+            self.read(include_busy_details=True)
         self.assertEqual(caught.exception.status_code, 403)
 
     def test_no_busy_time_needs_no_event_lookup_even_when_enabled(self) -> None:
         self.busy = []
-        self.assertEqual(self.read(include_busy_titles=True)["busy_slots"], [])
+        self.assertEqual(self.read(include_busy_details=True)["busy_slots"], [])
         self.assertEqual(len(self.requests), 1)
 
     def test_titles_cannot_create_busy_time_outside_freebusy(self) -> None:
         self.pages[0]["items"] = [
             timed_event("2026-11-05T23:00:00Z", "2026-11-07T01:00:00Z", "Long event")
         ]
-        result = self.read(include_busy_titles=True)
+        result = self.read(include_busy_details=True)
         self.assertEqual(
             result["busy_slots"],
             [
@@ -237,6 +333,7 @@ class TestGoogleMeetBusyTitles(unittest.TestCase):
                     "start": "2026-11-06T09:00:00+00:00",
                     "end": "2026-11-06T12:00:00+00:00",
                     "title": "Long event",
+                    "attendees": [],
                 }
             ],
         )
@@ -254,7 +351,7 @@ class TestGoogleMeetBusyTitles(unittest.TestCase):
                 ],
             }
         ]
-        result = self.read(include_busy_titles=True)
+        result = self.read(include_busy_details=True)
         self.assertEqual(
             result["busy_slots"],
             [
@@ -262,6 +359,7 @@ class TestGoogleMeetBusyTitles(unittest.TestCase):
                     "start": "2026-11-06T09:00:00+00:00",
                     "end": "2026-11-06T12:00:00+00:00",
                     "title": "Berlin meeting",
+                    "attendees": [],
                 }
             ],
         )
@@ -281,7 +379,7 @@ class TestGoogleMeetBusyTitles(unittest.TestCase):
             start="2026-10-25T00:00:00Z",
             end="2026-10-25T02:00:00Z",
             time_zone="Europe/Berlin",
-            include_busy_titles=True,
+            include_busy_details=True,
         )
         named = [slot for slot in result["busy_slots"] if slot["title"] is not None]
         self.assertEqual([slot["title"] for slot in named], ["Before rollback", "After rollback"])

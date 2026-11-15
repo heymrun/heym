@@ -51,10 +51,10 @@ test("Google Meet exposes availability, booking fields and expression navigation
     await page.locator('.vue-flow__node[data-id="meeting"]').click();
     const panel = page.locator(".properties-panel");
     await expect(panel.getByTestId("gm-field-gmEndDate")).toBeVisible();
-    const includeTitles = panel.getByLabel("Include Busy Event Titles", { exact: true });
-    await expect(includeTitles).not.toBeChecked();
-    await includeTitles.check();
-    await expect(includeTitles).toBeChecked();
+    const includeDetails = panel.getByLabel("Include Busy Event Details", { exact: true });
+    await expect(includeDetails).not.toBeChecked();
+    await includeDetails.check();
+    await expect(includeDetails).toBeChecked();
     await expect(panel.getByTestId("gm-field-gmAttendees")).toHaveCount(0);
     await panel.getByTestId("gm-operation-field").locator("select").selectOption("create");
     await expect(panel.getByTestId("gm-field-gmAttendees")).toBeVisible();
@@ -63,7 +63,7 @@ test("Google Meet exposes availability, booking fields and expression navigation
     await expect(panel.getByTestId("gm-field-gmStartTime")).toBeVisible();
     await expect(panel.getByTestId("gm-field-gmEndTime")).toBeVisible();
     await expect(panel.getByTestId("gm-field-gmEndDate")).toHaveCount(0);
-    await expect(panel.getByTestId("gm-busy-titles-option")).toHaveCount(0);
+    await expect(panel.getByTestId("gm-busy-details-option")).toHaveCount(0);
     await panel.getByTestId("gm-field-gmAttendees").locator("textarea").fill("$input.email");
     await panel.getByTestId("gm-operation-field").locator("select").selectOption("update");
     await expect(panel.getByTestId("gm-field-gmEventId")).toBeVisible();
@@ -71,8 +71,8 @@ test("Google Meet exposes availability, booking fields and expression navigation
     await expect(panel.getByTestId("gm-field-gmEventId")).toBeVisible();
     await expect(panel.getByTestId("gm-field-gmAttendees")).toHaveCount(0);
     await panel.getByTestId("gm-operation-field").locator("select").selectOption("read");
-    await expect(includeTitles).toBeChecked();
-    await includeTitles.uncheck();
+    await expect(includeDetails).toBeChecked();
+    await includeDetails.uncheck();
     await panel.getByTestId("gm-operation-field").locator("select").selectOption("delete");
     await page.locator('.vue-flow__node[data-id="meeting"]').dblclick();
     await expect(page.getByRole("heading", { name: "Booking – Calendar ID or Email", exact: true })).toBeVisible();

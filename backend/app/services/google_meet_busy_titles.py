@@ -1,4 +1,4 @@
-"""Opt-in event titles layered over authoritative Calendar free/busy intervals."""
+"""Opt-in event details layered over authoritative Calendar free/busy intervals."""
 
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -17,6 +17,7 @@ class BusyEvent:
     start: datetime
     end: datetime
     title: str | None
+    attendees: list[str] | None = None
 
 
 def read_busy_events(
@@ -25,7 +26,7 @@ def read_busy_events(
     lower: datetime,
     upper: datetime,
 ) -> list[BusyEvent]:
-    """Read every occurrence in the window without fetching descriptions or guest lists."""
+    """Read every occurrence in the window without fetching descriptions."""
     from app.services.google_meet_service import calendar_zone, parse_datetime
 
     events: list[BusyEvent] = []
@@ -38,7 +39,10 @@ def read_busy_events(
             "singleEvents": True,
             "showDeleted": False,
             "maxResults": 2500,
-            "fields": "nextPageToken,timeZone,items(summary,start,end,status,transparency)",
+            "fields": (
+                "nextPageToken,timeZone,"
+                "items(summary,start,end,status,transparency,attendeesOmitted,attendees(email,resource))"
+            ),
         }
         if page_token:
             params["pageToken"] = page_token
@@ -70,12 +74,31 @@ def read_busy_events(
             if right <= left:
                 raise HTTPException(502, "Google Meet: Calendar event has an invalid time range")
             if left < upper and right > lower:
-                title = event.get("summary")
+                raw_title = event.get("summary")
+                title = raw_title if isinstance(raw_title, str) else None
+                if event.get("attendeesOmitted") is True:
+                    attendees = None
+                else:
+                    raw_attendees = event.get("attendees")
+                    if raw_attendees is not None:
+                        attendees = [
+                            attendee["email"]
+                            for attendee in raw_attendees
+                            if isinstance(attendee, dict)
+                            and isinstance(attendee.get("email"), str)
+                            and attendee.get("email")
+                            and attendee.get("resource") is not True
+                        ]
+                    elif title is not None:
+                        attendees = []
+                    else:
+                        attendees = None
                 events.append(
                     BusyEvent(
                         max(left, lower),
                         min(right, upper),
-                        title if isinstance(title, str) else None,
+                        title,
+                        attendees,
                     )
                 )
         page_token = page.get("nextPageToken", "")
@@ -88,12 +111,14 @@ def read_busy_events(
 
 def label_busy_intervals(
     busy: list[tuple[datetime, datetime]], events: list[BusyEvent], zone: ZoneInfo
-) -> list[dict[str, str | None]]:
-    """Keep each event's title and retain any unlabelled busy time with a null title."""
+) -> list[dict[str, Any]]:
+    """Keep each event's details and retain any unlabelled busy time with null details."""
     slots: list[BusyEvent] = []
 
-    def append(left: datetime, right: datetime, title: str | None) -> None:
-        slots.append(BusyEvent(left, right, title))
+    def append(
+        left: datetime, right: datetime, title: str | None, attendees: list[str] | None
+    ) -> None:
+        slots.append(BusyEvent(left, right, title, attendees))
 
     ordered_events = sorted(events, key=lambda event: (event.start, event.end))
     for left, right in busy:
@@ -103,16 +128,17 @@ def label_busy_intervals(
                 continue
             start, end = max(left, event.start), min(right, event.end)
             if cursor < start:
-                append(cursor, start, None)
-            append(start, end, event.title)
+                append(cursor, start, None, None)
+            append(start, end, event.title, event.attendees)
             cursor = max(cursor, end)
         if cursor < right:
-            append(cursor, right, None)
+            append(cursor, right, None, None)
     return [
         {
             "start": slot.start.astimezone(zone).isoformat(),
             "end": slot.end.astimezone(zone).isoformat(),
             "title": slot.title,
+            "attendees": slot.attendees,
         }
         for slot in sorted(slots, key=lambda slot: (slot.start, slot.end))
     ]

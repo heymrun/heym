@@ -203,9 +203,10 @@ class GoogleMeetService:
         end: str = "",
         time_zone: str = "UTC",
         *,
-        include_busy_titles: bool = False,
+        include_busy_details: bool = False,
     ) -> dict[str, Any]:
         """Return free intervals, failing closed on per-calendar FreeBusy errors."""
+        enabled = bool(include_busy_details)
         start_at, end_at = availability_window(start, end, time_zone)
         result = self._request(
             "POST",
@@ -265,8 +266,8 @@ class GoogleMeetService:
                 for a, b in values
             ]
 
-        busy_slots: list[dict[str, str | None]] = list(intervals(merged))
-        if include_busy_titles and merged:
+        busy_slots: list[dict[str, Any]] = list(intervals(merged))
+        if enabled and merged:
             from app.services.google_meet_busy_titles import label_busy_intervals, read_busy_events
 
             busy_slots = label_busy_intervals(

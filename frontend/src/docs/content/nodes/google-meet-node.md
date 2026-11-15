@@ -23,7 +23,7 @@ Tokens are encrypted in storage and refreshed automatically. This is a separate 
 
 ## Configuration
 
-The text fields below accept expressions. All fields, including the boolean title option, can be supplied by an Agent when this node is attached as a tool.
+The text fields below accept expressions. All fields, including the boolean details option, can be supplied by an Agent when this node is attached as a tool.
 
 | Field | Default | Purpose |
 | --- | --- | --- |
@@ -31,7 +31,7 @@ The text fields below accept expressions. All fields, including the boolean titl
 | `gmTimeZone` | `UTC` | IANA zone, such as `Europe/Berlin`, used for local dates and response times |
 | `gmStartDate` | Current time | Read range start, as an ISO date or datetime |
 | `gmEndDate` | First day of the following month at midnight | Exclusive read range end; maximum range is 60 calendar days |
-| `gmIncludeBusyTitles` | `false` | Read only: opt in to event titles in `busy_slots`; boolean, not an expression field |
+| `gmIncludeBusyDetails` | `false` | Read only: opt in to event titles and attendees in `busy_slots`; boolean, not an expression field (legacy `gmIncludeBusyTitles` supported) |
 | `gmEventId` | Empty | Calendar event ID for update/delete; use the returned `event_id`, not a Meet URL |
 | `gmTitle` | Empty | Invitation title; required on create |
 | `gmDescription` | Empty | Invitation description |
@@ -63,23 +63,26 @@ Use a person's calendar email as `gmCalendarId` only when the connected account 
 }
 ```
 
-### Include busy event titles
+### Include Busy Event Details
 
-Under **Read Available Time Slots**, enable **Include Busy Event Titles** (`gmIncludeBusyTitles: true`) to add the Calendar item's `title` to each busy slot. This option is **off by default**, including for existing workflows: no event-details request is made and busy slots keep their original `{start, end}` shape.
+Under **Read Available Time Slots**, enable **Include Busy Event Details** (`gmIncludeBusyDetails: true`) to add the Calendar item's `title` and `attendees` to each busy slot. This option is **off by default**, including for existing workflows: no event-details request is made and busy slots keep their original `{start, end}` shape. Existing saved workflows using `gmIncludeBusyTitles: true` remain supported and return the same enriched detail structure.
 
-When enabled, the node also reads the Calendar events list in the same time window, including recurring occurrences and all result pages. Each visible blocking event becomes a busy slot with `{start, end, title}`. Overlapping or adjacent events stay separate so each keeps its own title. Busy time without visible event details remains present with `title: null`; cancelled events and events marked as available do not supply busy titles. `available_slots`, its `count`, and the 60-day limit remain based on the same free/busy data.
+When enabled, the node also reads the Calendar events list in the same time window, including recurring occurrences and all result pages. Each visible blocking event becomes a busy slot with `{start, end, title, attendees}`. Overlapping or adjacent events stay separate so each keeps its own details. `attendees` is a list of email strings for invitees on that event, excluding room/calendar resources (`resource: true`). An event without guests returns an empty list (`attendees: []`). Busy time without visible event details remains present with `title: null, attendees: null`; cancelled events and events marked as available do not supply busy details. `available_slots`, its `count`, and the 60-day limit remain based on the same free/busy data.
 
 ```json
 {
   "start": "2026-11-06T21:15:00+01:00",
   "end": "2026-11-06T21:30:00+01:00",
-  "title": "Daily check-in"
+  "title": "Daily check-in",
+  "attendees": [
+    "colleague@example.com"
+  ]
 }
 ```
 
-Google's calendar sharing rules still apply. Private event titles may be hidden, and a failed events-list request fails the opted-in read instead of returning incomplete data. The existing Google Meet credential's `calendar.events` scope supports the events-list call; no new credential type or scope is required. See [Google's Events list reference](https://developers.google.com/workspace/calendar/api/v3/reference/events/list). Descriptions and guest lists are not requested.
+Google's calendar sharing rules still apply. Private event titles or guest lists may be hidden, and a failed events-list request fails the opted-in read instead of returning incomplete data. The existing Google Meet credential's `calendar.events` scope supports the events-list call; no new credential type or scope is required. See [Google's Events list reference](https://developers.google.com/workspace/calendar/api/v3/reference/events/list). Descriptions are not requested.
 
-For a public booking workflow, keep the option off unless you intend to include event titles in the workflow's output and history. Downstream nodes can access a title with `$Availability.busy_slots[0].title`.
+For a public booking workflow, keep the option off unless you intend to include event details in the workflow's output and history. Downstream nodes can access details with `$Availability.busy_slots[0].title` and `$Availability.busy_slots[0].attendees`.
 
 ### Book a calendar with me
 
