@@ -10,6 +10,28 @@ from app.services.file_sandbox.scope import grant_run_files
 from app.services.node_execution.base import NodeExecutionContext
 
 
+def _url_file_name(url_path: str) -> str:
+    """The name to save a URL download under, which storage always accepts.
+
+    The last path segment decoded, keeping only what follows an encoded slash (Cloud
+    Storage `o/invoices%2F2024%2Fjan.pdf` is `jan.pdf`); when storage refuses that (`..`,
+    `C:report.pdf`, a NUL or only spaces), the segment as it appears in the URL; else
+    `downloaded_file`.
+    """
+    from urllib.parse import unquote
+
+    from app.services.file_storage import _normalize_storage_filename
+
+    raw = url_path.split("/")[-1] if url_path else ""
+    decoded = unquote(raw).replace("\\", "/").rsplit("/", 1)[-1]
+    for candidate in (decoded, raw):
+        try:
+            return _normalize_storage_filename(candidate)
+        except ValueError:
+            continue
+    return "downloaded_file"
+
+
 def execute(ctx: NodeExecutionContext) -> object:
     """Execute the drive node."""
     _workflow_executor = import_module("app.services.workflow_executor")
@@ -220,6 +242,7 @@ def execute(ctx: NodeExecutionContext) -> object:
         import mimetypes as _mimetypes
         import secrets as _secrets
         import urllib.parse as _urllib_parse
+        from email.message import Message as _EmailMessage
 
         from app.config import settings as _settings
 
@@ -235,18 +258,15 @@ def execute(ctx: NodeExecutionContext) -> object:
             cd = _resp.headers.get("content-disposition", "")
             filename = ""
             if cd:
-                for _part in cd.split(";"):
-                    _part = _part.strip()
-                    if _part.lower().startswith("filename="):
-                        filename = _part[len("filename=") :].strip().strip("\"'")
-                        break
-            if not filename:
-                _parsed = _urllib_parse.urlparse(source_url)
-                _url_path = _parsed.path.rstrip("/")
-                filename = _url_path.split("/")[-1] if _url_path else ""
-            if not filename:
-                filename = "downloaded_file"
-            filename = _normalize_storage_filename(filename)
+                # Reads filename*=utf-8''… (RFC 6266), which servers send for non-ASCII
+                # names, as well as plain and quoted filename=.
+                _disposition = _EmailMessage()
+                _disposition["content-disposition"] = cd
+                filename = (_disposition.get_filename() or "").strip()
+            if filename:
+                filename = _normalize_storage_filename(filename)
+            else:
+                filename = _url_file_name(_urllib_parse.urlparse(source_url).path.rstrip("/"))
             if not mime_type or mime_type == "application/octet-stream":
                 _guessed = _mimetypes.guess_type(filename)[0]
                 if _guessed:
