@@ -10,6 +10,7 @@ from concurrent.futures import CancelledError, ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any
+from urllib.parse import parse_qs
 
 from fastapi import (
     APIRouter,
@@ -3253,8 +3254,22 @@ async def parse_execute_body(request: Request) -> tuple[object, bool, str | None
                         trigger_source = body_trigger_source
                     raw_body = raw_body.get("inputs", {})
     except (json.JSONDecodeError, UnicodeDecodeError):
-        pass
+        raw_body = _form_body(request, body_bytes)
     return raw_body, test_run, trigger_source or "API", simple_response
+
+
+def _form_body(request: Request, body: bytes) -> object:
+    """A form-encoded webhook body as a dict of its fields, else `{}` as before.
+
+    Twilio, Slack slash commands, Mailgun and PayPal post `application/x-www-form-urlencoded`.
+    JSON is tried first, since `curl -d '{...}'` sends JSON under that same content type.
+    A field sent once is a string, a repeated field a list.
+    """
+    content_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    if content_type != "application/x-www-form-urlencoded":
+        return {}
+    fields = parse_qs(body.decode("utf-8", errors="replace"), keep_blank_values=True)
+    return {key: values[0] if len(values) == 1 else values for key, values in fields.items()}
 
 
 #: The verbs a workflow's execute endpoint can be configured to accept.
