@@ -198,6 +198,15 @@ class ParameterResolutionTest(unittest.TestCase):
         self.assertIsInstance(params["subset"], list)
 
 
+    def test_dictionary_index_expression_with_spaces_keeps_its_type(self) -> None:
+        expr = "$data['key with spaces']"
+        params = self._params_for(
+            '{\"selected\": \"$data[\'key with spaces\']\"}',
+            {expr: {"id": 7}},
+        )
+        self.assertEqual(params, {"selected": {"id": 7}})
+        self.assertIsInstance(params["selected"], dict)
+
 class RegistryTest(unittest.TestCase):
     def test_code_node_is_registered(self) -> None:
         from app.services.node_execution.registry import get_node_handler
