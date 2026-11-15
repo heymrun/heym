@@ -7287,9 +7287,7 @@ class WorkflowExecutor:
             if preserve_type and isinstance(result, str):
                 return result + tail
             if preserve_type and isinstance(self._unwrap_value(result), (dict, list)):
-                # Inside text a list or object reads as JSON, as without preserve_type
-                # and in the expression dialog, not as a Python repr.
-                return str(self._serialize_result(result)) + tail
+                return str(self._serialize_result(result)) + tail  # JSON in text, as the dialog
             return (str(result) if result is not None else core) + tail
 
         return self._replace_expressions(template, replace_expr)
