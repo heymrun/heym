@@ -91,6 +91,39 @@ def _check_unique_sync(
         raise ValueError(errors[0])
 
 
+def _resolve_json_values(executor, value: object, inputs: dict, node_id: str) -> object:
+    """Resolve ``$`` expressions in every string value of already-parsed JSON."""
+    if isinstance(value, dict):
+        return {
+            key: _resolve_json_values(executor, item, inputs, node_id)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_resolve_json_values(executor, item, inputs, node_id) for item in value]
+    if isinstance(value, str) and "$" in value:
+        return executor.evaluate_message_template(value, inputs, node_id)
+    return value
+
+
+def _resolve_json_field(executor, template: object, inputs: dict, node_id: str) -> object:
+    """A data or filter field with its expressions resolved. Raises JSONDecodeError if invalid.
+
+    Parsed first, resolved second, like the Code node's Parameters: substituting into the
+    raw text breaks the JSON as soon as a resolved value holds a quote or a line break. A
+    template that is not JSON on its own, such as {"age": $start.age}, is still
+    substituted first and parsed after.
+    """
+    if isinstance(template, str):
+        try:
+            parsed = json.loads(template)
+        except json.JSONDecodeError:
+            pass
+        else:
+            return _resolve_json_values(executor, parsed, inputs, node_id)
+    rendered = executor.evaluate_message_template(template, inputs, node_id)
+    return json.loads(rendered) if isinstance(rendered, str) else rendered
+
+
 def execute(ctx: NodeExecutionContext) -> object:
     """Execute the dataTable node."""
     _workflow_executor = import_module("app.services.workflow_executor")
@@ -158,10 +191,9 @@ def execute(ctx: NodeExecutionContext) -> object:
 
         if operation == "find":
             filter_template = node_data.get("dataTableFilter", "{}")
-            filter_str = self.evaluate_message_template(filter_template, inputs, node_id)
             try:
-                filter_dict = json.loads(filter_str) if isinstance(filter_str, str) else filter_str
-            except Exception:
+                filter_dict = _resolve_json_field(self, filter_template, inputs, node_id)
+            except json.JSONDecodeError:
                 filter_dict = {}
 
             query = db.query(DataTableRow).filter(DataTableRow.table_id == data_table_id)
@@ -227,10 +259,9 @@ def execute(ctx: NodeExecutionContext) -> object:
 
         elif operation == "count":
             filter_template = node_data.get("dataTableFilter", "{}")
-            filter_str = self.evaluate_message_template(filter_template, inputs, node_id)
             try:
-                filter_dict = json.loads(filter_str) if isinstance(filter_str, str) else filter_str
-            except Exception:
+                filter_dict = _resolve_json_field(self, filter_template, inputs, node_id)
+            except json.JSONDecodeError:
                 filter_dict = {}
 
             query = db.query(DataTableRow).filter(DataTableRow.table_id == data_table_id)
@@ -273,10 +304,9 @@ def execute(ctx: NodeExecutionContext) -> object:
 
         elif operation == "insert":
             data_template = node_data.get("dataTableData", "{}")
-            data_str = self.evaluate_message_template(data_template, inputs, node_id)
             try:
-                row_data = json.loads(data_str) if isinstance(data_str, str) else data_str
-            except Exception:
+                row_data = _resolve_json_field(self, data_template, inputs, node_id)
+            except json.JSONDecodeError:
                 row_data = {}
 
             coerced_data = row_data if isinstance(row_data, dict) else {}
@@ -311,10 +341,9 @@ def execute(ctx: NodeExecutionContext) -> object:
                 raise ValueError("DataTable update requires a row ID")
 
             data_template = node_data.get("dataTableData", "{}")
-            data_str = self.evaluate_message_template(data_template, inputs, node_id)
             try:
-                update_data = json.loads(data_str) if isinstance(data_str, str) else data_str
-            except Exception:
+                update_data = _resolve_json_field(self, data_template, inputs, node_id)
+            except json.JSONDecodeError:
                 update_data = {}
 
             row = (
@@ -376,17 +405,15 @@ def execute(ctx: NodeExecutionContext) -> object:
 
         elif operation == "upsert":
             filter_template = node_data.get("dataTableFilter", "{}")
-            filter_str = self.evaluate_message_template(filter_template, inputs, node_id)
             try:
-                filter_dict = json.loads(filter_str) if isinstance(filter_str, str) else filter_str
-            except Exception:
+                filter_dict = _resolve_json_field(self, filter_template, inputs, node_id)
+            except json.JSONDecodeError:
                 filter_dict = {}
 
             data_template = node_data.get("dataTableData", "{}")
-            data_str = self.evaluate_message_template(data_template, inputs, node_id)
             try:
-                upsert_data = json.loads(data_str) if isinstance(data_str, str) else data_str
-            except Exception:
+                upsert_data = _resolve_json_field(self, data_template, inputs, node_id)
+            except json.JSONDecodeError:
                 upsert_data = {}
 
             # Try to find existing row by filter
