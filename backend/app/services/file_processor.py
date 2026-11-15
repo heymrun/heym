@@ -8,6 +8,11 @@ from dataclasses import dataclass
 from typing import Protocol
 
 
+def _is_struck_glyph(token: str) -> bool:
+    """A single letter or a doubled one ("m", "mm"): what faux-bold PDF text splits into."""
+    return token.isalpha() and (len(token) == 1 or (len(token) == 2 and token[0] == token[1]))
+
+
 def _decode_text(raw: bytes) -> str:
     """Uploaded text as a string, whatever common encoding it was saved in.
 
@@ -102,8 +107,14 @@ class FileProcessor:
                 while j < len(parts) and parts[j] == part:
                     count += 1
                     j += 1
-                for _ in range(count):
-                    result.append(part[0])
+                # Halve only inside a run of struck glyphs ("mm ii ss ss"). On its own, a
+                # doubled pair is a real token: "Phase II", "World War II", "AA batteries".
+                neighbours = [parts[k] for k in (i - 1, j) if 0 <= k < len(parts)]
+                if count > 1 or any(_is_struck_glyph(token) for token in neighbours):
+                    for _ in range(count):
+                        result.append(part[0])
+                else:
+                    result.append(part)
                 i = j
             else:
                 result.append(part)
@@ -199,8 +210,6 @@ class FileProcessor:
 
         cleaned = re.sub(r"([a-z]+)\s*/\s*(\d+)\s*/\s*", r"\1/\2/", cleaned)
 
-        cleaned = re.sub(r"([a-z]+)\s+([a-z]+)\s*/\s*", r"\1\2/", cleaned)
-
         cleaned = re.sub(r"/\s+([a-z]+)\s+/", r"/\1/", cleaned)
 
         cleaned = re.sub(r"\?\s*nid\s*=\s*", r"?nid=", cleaned)
@@ -260,10 +269,6 @@ class FileProcessor:
             cleaned = new_cleaned
 
         cleaned = re.sub(r"([a-z]+)-\s*([a-z])\s+([a-z])\s+([a-z])\s*-\s*", r"\1-\2\3\4-", cleaned)
-
-        cleaned = re.sub(r"von\s+(\d)(\d{2})\.", r"von \1 \2.", cleaned)
-
-        cleaned = re.sub(r"von\s+(\d{3})\.", r"von \1.", cleaned)
 
         cleaned = re.sub(r"\s+", " ", cleaned)
 

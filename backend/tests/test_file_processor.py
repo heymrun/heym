@@ -94,6 +94,21 @@ class CleanPdfTextTests(unittest.TestCase):
         text = "Qty 1 2 3\nTotal 4 5 6"
         self.assertEqual(FileProcessor()._clean_pdf_text(text), "Qty 1 2 3 Total 4 5 6")
 
+    def test_real_text_with_doubled_letters_slashes_and_amounts_is_kept(self) -> None:
+        for text in (
+            "The Phase II trial ended after World War II.",
+            "Requires two AA batteries.",
+            "Use the and/or operator or the client/server mode.",
+            "Ein Zuschuss von 150.000 Euro.",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(FileProcessor()._clean_pdf_text(text), text)
+
+    def test_a_doubled_pair_inside_struck_text_still_collapses(self) -> None:
+        self.assertEqual(
+            FileProcessor()._clean_pdf_text("Joint mm ii ss ss ii oo nn"), "Joint mission"
+        )
+
     def test_hyphen_at_a_line_break_is_kept(self) -> None:
         self.assertEqual(
             FileProcessor()._clean_pdf_text("A self-\nservice portal"), "A self-service portal"
