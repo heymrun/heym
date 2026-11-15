@@ -55,10 +55,10 @@ def execute(ctx: NodeExecutionContext) -> object:
         elif var_type == "number":
             try:
                 if isinstance(resolved_value, str):
-                    if "." in resolved_value:
-                        resolved_value = float(resolved_value)
-                    else:
+                    try:
                         resolved_value = int(resolved_value)
+                    except ValueError:
+                        resolved_value = float(resolved_value)
                 elif isinstance(resolved_value, bool) or not isinstance(resolved_value, int):
                     # A whole number stays an int, as it does when typed as text: 6, not 6.0.
                     resolved_value = float(resolved_value)
