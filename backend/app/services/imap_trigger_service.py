@@ -66,15 +66,20 @@ def _serialise_addresses(raw_value: str | None) -> list[dict[str, str]]:
     return addresses
 
 
-def _walk_own_parts(message: Message) -> Iterator[Message]:
-    """Like ``Message.walk()``, but an attached email (``message/rfc822``) is one part.
+def _walk_body_parts(message: Message) -> Iterator[Message]:
+    """Like ``Message.walk()``, but without the inside of an email attached as a file.
 
-    Its own body and attachments belong to the forwarded email, not to this one.
+    An attached email with a filename (``Invoice.eml``) is an attachment, so its text is not
+    this email's body. One without a filename (inline forwards, delivery-status bounces) is
+    still read, as before.
     """
     yield message
-    if message.is_multipart() and message.get_content_type() != "message/rfc822":
-        for part in message.get_payload():
-            yield from _walk_own_parts(part)
+    if not message.is_multipart():
+        return
+    if message.get_content_type() == "message/rfc822" and message.get_filename():
+        return
+    for part in message.get_payload():
+        yield from _walk_body_parts(part)
 
 
 def _extract_email_bodies(message: Message) -> tuple[str, str]:
@@ -82,7 +87,7 @@ def _extract_email_bodies(message: Message) -> tuple[str, str]:
     text_parts: list[str] = []
     html_parts: list[str] = []
 
-    for part in _walk_own_parts(message):
+    for part in _walk_body_parts(message):
         if part.get_content_maintype() == "multipart":
             continue
         if part.get_filename():
@@ -125,16 +130,28 @@ class EmailAttachment:
     content: bytes
 
 
+def _attached_email_bytes(part: Message) -> bytes:
+    """The bytes of an attached email; it has no transfer-decoded payload of its own.
+
+    Re-serialising can fail on a malformed header (an encoded name with CR/LF); that one
+    attachment is then empty instead of failing the whole batch on every poll.
+    """
+    try:
+        return part.get_payload(0).as_bytes()
+    except Exception:  # noqa: BLE001 - email's generator raises several types on bad headers
+        logger.warning("Could not serialise an attached email", exc_info=True)
+        return b""
+
+
 def _attachment_parts(message: Message) -> list[EmailAttachment]:
     """Every part with a filename, in the order it appears in the email."""
     attachments: list[EmailAttachment] = []
-    for part in _walk_own_parts(message):
+    for part in message.walk():
         filename = part.get_filename()
         if not filename:
             continue
         if part.get_content_type() == "message/rfc822":
-            # An attached email has no transfer-decoded payload; its bytes are the message.
-            content = part.get_payload(0).as_bytes()
+            content = _attached_email_bytes(part)
         else:
             content = part.get_payload(decode=True) or b""
         attachments.append(

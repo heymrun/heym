@@ -6,6 +6,8 @@ import unittest
 import unittest.mock
 import uuid
 from datetime import datetime, timedelta, timezone
+from email import message_from_bytes, policy
+from email.message import EmailMessage
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -231,17 +233,11 @@ class ImapConnectTimeoutTests(unittest.TestCase):
         self.assertIsInstance(outcome[0], OSError)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class ForwardedEmailAttachmentTests(unittest.TestCase):
-    """An email forwarded as an attachment (.eml) is one attachment of the outer email."""
+    """An email forwarded as an attachment (.eml) is an attachment, not part of the body."""
 
     @staticmethod
-    def _raw() -> bytes:
-        from email.message import EmailMessage
-
+    def _forwarded() -> EmailMessage:
         forwarded = EmailMessage()
         forwarded["From"] = "billing@vendor.example"
         forwarded["Subject"] = "Invoice 4411"
@@ -249,31 +245,66 @@ class ForwardedEmailAttachmentTests(unittest.TestCase):
         forwarded.add_attachment(
             b"%PDF-1.4 inner", maintype="application", subtype="pdf", filename="inner.pdf"
         )
+        return forwarded
 
+    @classmethod
+    def _raw(cls, *, filename: str | None = "Invoice 4411.eml") -> bytes:
         outer = EmailMessage()
         outer["From"] = "colleague@example.com"
         outer["To"] = "ap@example.com"
         outer["Subject"] = "Fwd: Invoice 4411"
         outer["Message-ID"] = "<fwd-1@example.com>"
         outer.set_content("Please book this one.")
-        outer.add_attachment(forwarded, filename="Invoice 4411.eml")
+        if filename is None:
+            outer.add_attachment(cls._forwarded(), disposition="inline")
+        else:
+            outer.add_attachment(cls._forwarded(), filename=filename)
         return outer.as_bytes()
 
     def test_the_attached_email_keeps_its_bytes(self) -> None:
-        from email import message_from_bytes, policy
-
         _message_id, attachments = imap_trigger_service.email_attachments(self._raw())
 
-        self.assertEqual([a.filename for a in attachments], ["Invoice 4411.eml"])
+        self.assertEqual([a.filename for a in attachments], ["Invoice 4411.eml", "inner.pdf"])
         self.assertEqual(attachments[0].content_type, "message/rfc822")
         attached = message_from_bytes(attachments[0].content, policy=policy.default)
         self.assertEqual(attached["Subject"], "Invoice 4411")
+        self.assertEqual(attachments[1].content, b"%PDF-1.4 inner")
 
-    def test_the_forwarded_body_and_files_stay_out_of_the_outer_email(self) -> None:
+    def test_the_attached_email_body_stays_out_of_the_outer_email(self) -> None:
         payload = imap_trigger_service._parse_email_message(self._raw(), uid=7)
 
         self.assertEqual(payload["text"], "Please book this one.")
         self.assertEqual(
             [(a["filename"], a["size_bytes"] > 0) for a in payload["attachments"]],
-            [("Invoice 4411.eml", True)],
+            [("Invoice 4411.eml", True), ("inner.pdf", True)],
         )
+
+    def test_an_inline_forward_without_a_filename_is_still_read(self) -> None:
+        payload = imap_trigger_service._parse_email_message(self._raw(filename=None), uid=8)
+
+        self.assertIn("Please book this one.", payload["text"])
+        self.assertIn("Amount due: 1,250.00 EUR", payload["text"])
+        self.assertEqual([a["filename"] for a in payload["attachments"]], ["inner.pdf"])
+
+    def test_a_malformed_header_in_the_attached_email_does_not_fail_the_poll(self) -> None:
+        evil_from = "=?utf-8?q?Evil=0D=0ABcc:_x@y?= <evil-sender-with-a-long-name@example.com>"
+        raw = (
+            b"From: a@example.com\r\nTo: b@example.com\r\nSubject: Fwd\r\n"
+            b"Message-ID: <fwd-2@example.com>\r\nMIME-Version: 1.0\r\n"
+            b'Content-Type: multipart/mixed; boundary="B"\r\n\r\n'
+            b"--B\r\nContent-Type: text/plain\r\n\r\nSee attached.\r\n"
+            b"--B\r\nContent-Type: message/rfc822\r\n"
+            b'Content-Disposition: attachment; filename="x.eml"\r\n\r\n'
+            + f"From: {evil_from}\r\nSubject: s\r\n\r\nbody\r\n".encode()
+            + b"--B--\r\n"
+        )
+
+        payload = imap_trigger_service._parse_email_message(raw, uid=9)
+        _message_id, attachments = imap_trigger_service.email_attachments(raw)
+
+        self.assertEqual(payload["text"], "See attached.")
+        self.assertEqual([(a.filename, a.content) for a in attachments], [("x.eml", b"")])
+
+
+if __name__ == "__main__":
+    unittest.main()
