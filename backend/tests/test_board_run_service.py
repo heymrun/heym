@@ -978,3 +978,41 @@ class TestAutoAdvanceAfterAManualMove(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(card.run_status, "success")
         self.assertEqual(session.added, [])
         session.execute.assert_awaited_once()  # only the auto-advance setting was read
+
+
+class TestNextLinkIndex(unittest.TestCase):
+    """A chain edited while a card waits on a review continues after the paused link."""
+
+    def _links(self, *workflow_ids: uuid.UUID) -> list[dict]:
+        return [
+            {"workflow_id": wid, "workflow_name": "", "position": i}
+            for i, wid in enumerate(workflow_ids)
+        ]
+
+    def test_removing_an_earlier_link_keeps_the_next_one(self) -> None:
+        triage, approve, notify, archive = (uuid.uuid4() for _ in range(4))
+        run = SimpleNamespace(workflow_id=approve, chain_position=1)
+        links = self._links(approve, notify, archive)  # Triage removed during the review
+
+        self.assertEqual(links[board_run_service._next_link_index(links, run) :], links[1:])
+        self.assertIsNotNone(triage)
+
+    def test_adding_an_earlier_link_does_not_run_the_paused_one_again(self) -> None:
+        intake, approve, notify = (uuid.uuid4() for _ in range(3))
+        run = SimpleNamespace(workflow_id=approve, chain_position=0)
+        links = self._links(intake, approve, notify)
+
+        self.assertEqual(board_run_service._next_link_index(links, run), 2)
+
+    def test_a_repeated_workflow_continues_after_the_occurrence_nearest_the_pause(self) -> None:
+        check, approve = uuid.uuid4(), uuid.uuid4()
+        run = SimpleNamespace(workflow_id=check, chain_position=2)
+        links = self._links(check, approve, check, approve)
+
+        self.assertEqual(board_run_service._next_link_index(links, run), 3)
+
+    def test_a_removed_paused_workflow_keeps_the_old_position(self) -> None:
+        run = SimpleNamespace(workflow_id=uuid.uuid4(), chain_position=1)
+        links = self._links(uuid.uuid4(), uuid.uuid4(), uuid.uuid4())
+
+        self.assertEqual(board_run_service._next_link_index(links, run), 2)
