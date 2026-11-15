@@ -36,7 +36,10 @@ def execute(ctx: NodeExecutionContext) -> object:
         service = GoogleMeetService(credential_id, decrypt_config(credential.encrypted_config), db)
         calendar_id = resolve("gmCalendarId", "primary") or "primary"
         if operation == "read":
-            if "gmIncludeBusyDetails" in ctx.node_data:
+            agent_provided_fields = ctx.node_data.get("agentProvidedFields") or []
+            if "gmIncludeBusyTitles" in agent_provided_fields:
+                raw_value = ctx.node_data.get("gmIncludeBusyTitles")
+            elif "gmIncludeBusyDetails" in ctx.node_data:
                 raw_value = ctx.node_data["gmIncludeBusyDetails"]
             else:
                 raw_value = ctx.node_data.get("gmIncludeBusyTitles")
