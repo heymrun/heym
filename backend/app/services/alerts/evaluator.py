@@ -276,7 +276,11 @@ async def evaluate_alert(db: AsyncSession, alert: Any, *, now: datetime) -> bool
     Never raises: one broken alert must not stop the batch.
     """
     try:
-        observation, window_start, window_end = await observe(db, alert, now=now)
+        # A savepoint per alert: the batch shares this session, and a failed query would
+        # otherwise leave the Postgres transaction aborted for every later alert. A full
+        # rollback would expire the other claimed alerts instead.
+        async with db.begin_nested():
+            observation, window_start, window_end = await observe(db, alert, now=now)
     except Exception:  # noqa: BLE001
         logger.exception("Alert %s evaluation failed", getattr(alert, "id", "?"))
         return False
