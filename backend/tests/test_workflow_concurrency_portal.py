@@ -143,6 +143,19 @@ class PortalCancelHeldTests(unittest.IsolatedAsyncioTestCase):
 
 class PortalPlainExecuteWaitsTests(unittest.IsolatedAsyncioTestCase):
     async def test_a_queued_plain_portal_run_waits_for_its_result(self) -> None:
+        response, wait, execution_id = await self._queued_run(timeout_seconds=None)
+        wait.assert_awaited_once()
+        self.assertEqual(response.status, "success")
+        self.assertEqual(response.outputs, {"answer": 1})
+        self.assertEqual(response.execution_history_id, execution_id)
+
+    async def test_a_queued_portal_run_waits_its_turn_past_the_run_timeout(self) -> None:
+        from app.services.cluster.run_result_bus import DEFAULT_WAIT_SECONDS
+
+        _, wait, _ = await self._queued_run(timeout_seconds=4)
+        self.assertEqual(wait.await_args.kwargs["timeout_seconds"], DEFAULT_WAIT_SECONDS)
+
+    async def _queued_run(self, *, timeout_seconds: int | None):
         from app.api.portal import portal_execute
         from app.services.cluster.run_history import OffloadedRun
 
@@ -153,7 +166,7 @@ class PortalPlainExecuteWaitsTests(unittest.IsolatedAsyncioTestCase):
             nodes=[{"id": "o", "type": "output", "data": {}}],
             edges=[],
             concurrency_limit=1,
-            workflow_timeout_seconds=None,
+            workflow_timeout_seconds=timeout_seconds,
         )
         db = AsyncMock()
         db.execute = AsyncMock(side_effect=[_ScalarResult(workflow), _ScalarResult(None)])
@@ -181,7 +194,4 @@ class PortalPlainExecuteWaitsTests(unittest.IsolatedAsyncioTestCase):
                 db=db,
             )
         register.assert_not_called()
-        wait.assert_awaited_once()
-        self.assertEqual(response.status, "success")
-        self.assertEqual(response.outputs, {"answer": 1})
-        self.assertEqual(response.execution_history_id, execution_id_holder["id"])
+        return response, wait, execution_id_holder["id"]

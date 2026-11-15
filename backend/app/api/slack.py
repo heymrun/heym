@@ -295,6 +295,7 @@ async def _execute_workflow_background(
                     trace_user_id=fresh_workflow.owner_id,
                     actor_user_id=fresh_workflow.owner_id,
                     cancel_event=cancel_event,
+                    timeout_seconds=getattr(fresh_workflow, "workflow_timeout_seconds", None),
                     concurrency_limit=fresh_workflow.concurrency_limit,
                 )
             finally:

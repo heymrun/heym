@@ -1244,6 +1244,7 @@ async def call_mcp_tool(
             trace_user_id=mcp_user.id,
             actor_user_id=mcp_user.id,
             cancel_event=cancel_event,
+            timeout_seconds=getattr(target_workflow, "workflow_timeout_seconds", None),
             concurrency_limit=target_workflow.concurrency_limit,
             on_queued="return",
         )
@@ -1525,6 +1526,7 @@ async def _dispatch_mcp_jsonrpc(
                 trace_user_id=mcp_user.id,
                 actor_user_id=mcp_user.id,
                 cancel_event=cancel_event,
+                timeout_seconds=getattr(target_workflow, "workflow_timeout_seconds", None),
                 concurrency_limit=target_workflow.concurrency_limit,
                 on_queued="return",
             )
