@@ -69,6 +69,9 @@ def _coerce_value(value: object, value_type: str) -> object:
                     status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                     detail="Invalid number value",
                 )
+            # A whole number stays an int, as it does when typed as text: 5, not 5.0.
+            if isinstance(value, int) and not isinstance(value, bool):
+                return value
             return float(value)
         return 0
     if value_type == "boolean":
