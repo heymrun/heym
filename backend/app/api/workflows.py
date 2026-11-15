@@ -3740,11 +3740,15 @@ async def execute_workflow_endpoint(
                 custom_status_code = node_result["output"]["httpStatusCode"]
                 break
 
-        if custom_status_code:
+        if custom_status_code is not None:
+            try:
+                status_int = int(custom_status_code)
+                if not (100 <= status_int <= 599):
+                    status_int = 400
+            except (ValueError, TypeError):
+                status_int = 400
             if simple_response:
-                return JSONResponse(
-                    status_code=custom_status_code, content=execution_result.outputs
-                )
+                return JSONResponse(status_code=status_int, content=execution_result.outputs)
             payload: dict[str, object] = {
                 "workflow_id": str(execution_result.workflow_id),
                 "status": execution_result.status,
@@ -3755,7 +3759,7 @@ async def execute_workflow_endpoint(
             if history_entry is not None:
                 payload["execution_history_id"] = str(history_entry.id)
             return JSONResponse(
-                status_code=custom_status_code,
+                status_code=status_int,
                 content=payload,
             )
 

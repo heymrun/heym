@@ -19,7 +19,15 @@ def execute(ctx: NodeExecutionContext) -> object:
     node_label = ctx.node_label
 
     error_message_template = node_data.get("errorMessage", "")
-    http_status_code = node_data.get("httpStatusCode")
+    raw_status = node_data.get("httpStatusCode")
+    http_status_code: int | None = None
+    if raw_status is not None:
+        try:
+            parsed = int(raw_status)
+            if 100 <= parsed <= 599:
+                http_status_code = parsed
+        except (ValueError, TypeError):
+            http_status_code = None
 
     if error_message_template:
         error_message = self.evaluate_message_template(error_message_template, inputs, node_id)
@@ -32,7 +40,7 @@ def execute(ctx: NodeExecutionContext) -> object:
         node_label=node_label,
         node_type=node_type,
         status="error",
-        output={"httpStatusCode": http_status_code} if http_status_code else {},
+        output={"httpStatusCode": http_status_code} if http_status_code is not None else {},
         execution_time_ms=execution_time,
         error=str(error_message),
     )
