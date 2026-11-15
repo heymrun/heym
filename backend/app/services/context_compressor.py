@@ -270,6 +270,23 @@ def get_context_limit(model: str, client: Any) -> int:
     return _DEFAULT_LIMIT
 
 
+def _tail_start(messages: list[dict[str, Any]], cut: int) -> int:
+    """Where the kept tail may start without opening on a tool result.
+
+    A tool message must follow the assistant message that called it, so a cut that
+    lands among parallel tool results moves forward to the next non-tool message,
+    or back to the calling assistant message when the results run to the end.
+    """
+    forward = cut
+    while forward < len(messages) and messages[forward].get("role") == "tool":
+        forward += 1
+    if forward < len(messages):
+        return forward
+    while cut > 0 and messages[cut].get("role") == "tool":
+        cut -= 1
+    return cut
+
+
 async def maybe_compress_messages(
     messages: list[dict[str, Any]],
     model: str,
@@ -330,8 +347,9 @@ async def maybe_compress_messages(
         after_first_user = non_system[first_user_idx + 1 :]
         if len(after_first_user) <= _SINGLE_TURN_KEEP_TAIL:
             return messages, None
-        middle = after_first_user[:-_SINGLE_TURN_KEEP_TAIL]
-        tail = after_first_user[-_SINGLE_TURN_KEEP_TAIL:]
+        cut = _tail_start(after_first_user, len(after_first_user) - _SINGLE_TURN_KEEP_TAIL)
+        middle = after_first_user[:cut]
+        tail = after_first_user[cut:]
 
     if not middle:
         return messages, None
