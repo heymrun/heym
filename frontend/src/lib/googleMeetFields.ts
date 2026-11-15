@@ -28,9 +28,6 @@ export const GOOGLE_MEET_BUSY_DETAILS_OPTION = {
   help: "Adds each busy event's title and attendees when Google shares event details.",
 } as const;
 
-/** @deprecated Use GOOGLE_MEET_BUSY_DETAILS_OPTION */
-export const GOOGLE_MEET_BUSY_TITLES_OPTION = GOOGLE_MEET_BUSY_DETAILS_OPTION;
-
 const fields: Record<GoogleMeetFieldKey, GoogleMeetField> = {
   gmCalendarId: { key: "gmCalendarId", label: "Calendar ID or Email", placeholder: "primary", help: "Use primary for your calendar, or a calendar email you have permission to access." },
   gmTimeZone: { key: "gmTimeZone", label: "Time Zone", placeholder: "UTC", help: "IANA time zone, such as Europe/Berlin. Dates without an offset use this zone." },

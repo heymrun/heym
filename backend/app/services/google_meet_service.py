@@ -203,15 +203,10 @@ class GoogleMeetService:
         end: str = "",
         time_zone: str = "UTC",
         *,
-        include_busy_details: bool | None = None,
-        include_busy_titles: bool | None = None,
+        include_busy_details: bool = False,
     ) -> dict[str, Any]:
         """Return free intervals, failing closed on per-calendar FreeBusy errors."""
-        enabled = (
-            include_busy_details
-            if include_busy_details is not None
-            else (include_busy_titles if include_busy_titles is not None else False)
-        )
+        enabled = bool(include_busy_details)
         start_at, end_at = availability_window(start, end, time_zone)
         result = self._request(
             "POST",

@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import type { NodeTemplate } from "@/features/templates/types/template.types";
 import {
   GOOGLE_MEET_BUSY_DETAILS_OPTION,
-  GOOGLE_MEET_BUSY_TITLES_OPTION,
   GOOGLE_MEET_OPERATIONS,
   getGoogleMeetFields,
 } from "@/lib/googleMeetFields";
@@ -21,8 +20,6 @@ describe("Google Meet operation metadata", () => {
     );
     expect(GOOGLE_MEET_BUSY_DETAILS_OPTION.agentAutofill).toBe(true);
     expect(GOOGLE_MEET_BUSY_DETAILS_OPTION.expressionCapable).toBe(false);
-    // Legacy alias also references the new option
-    expect(GOOGLE_MEET_BUSY_TITLES_OPTION.key).toBe("gmIncludeBusyDetails");
   });
 
   it("hydrates legacy saved nodes and ensures new key takes precedence", () => {
@@ -79,7 +76,7 @@ describe("Google Meet operation metadata", () => {
     expect(nodeWithExplicitUndefined.data.gmIncludeBusyDetails).toBe(false);
   });
 
-  it("explicitly normalizes legacy gmIncludeBusyTitles values during template hydration", () => {
+  it("hydrates boolean legacy gmIncludeBusyTitles values during template hydration", () => {
     const hydrateWithTitles = (value: unknown) =>
       buildWorkflowNodeFromNodeTemplate(
         {
@@ -96,20 +93,9 @@ describe("Google Meet operation metadata", () => {
     expect(hydrateWithTitles(true).data.gmIncludeBusyDetails).toBe(true);
     // boolean false remains false
     expect(hydrateWithTitles(false).data.gmIncludeBusyDetails).toBe(false);
-    // string "true" becomes true
-    expect(hydrateWithTitles("true").data.gmIncludeBusyDetails).toBe(true);
-    expect(hydrateWithTitles("TRUE").data.gmIncludeBusyDetails).toBe(true);
-    expect(hydrateWithTitles("  true  ").data.gmIncludeBusyDetails).toBe(true);
-    // string "false" becomes false
-    expect(hydrateWithTitles("false").data.gmIncludeBusyDetails).toBe(false);
-    expect(hydrateWithTitles("FALSE").data.gmIncludeBusyDetails).toBe(false);
-    // invalid values are not silently converted to true
-    expect(hydrateWithTitles("invalid").data.gmIncludeBusyDetails).toBe(false);
-    expect(hydrateWithTitles("1").data.gmIncludeBusyDetails).toBe(false);
-    expect(hydrateWithTitles(1).data.gmIncludeBusyDetails).toBe(false);
-    expect(hydrateWithTitles([]).data.gmIncludeBusyDetails).toBe(false);
-    expect(hydrateWithTitles({}).data.gmIncludeBusyDetails).toBe(false);
+    // non-boolean or falsy values remain false
     expect(hydrateWithTitles(null).data.gmIncludeBusyDetails).toBe(false);
+    expect(hydrateWithTitles(undefined).data.gmIncludeBusyDetails).toBe(false);
   });
   it("exposes availability dates instead of event fields for read", () => {
     expect(getGoogleMeetFields("read").map((field) => field.key)).toEqual([

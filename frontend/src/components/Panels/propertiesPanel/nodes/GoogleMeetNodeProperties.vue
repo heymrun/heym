@@ -8,10 +8,6 @@ import ExpressionInput from "@/components/ui/ExpressionInput.vue";
 import Label from "@/components/ui/Label.vue";
 import Select from "@/components/ui/Select.vue";
 import { GOOGLE_MEET_BUSY_DETAILS_OPTION, GOOGLE_MEET_OPERATIONS } from "@/lib/googleMeetFields";
-import {
-  isBusyDetailsChecked as computeIsBusyDetailsChecked,
-  setBusyDetailsChecked,
-} from "./googleMeetNodeProperties";
 import { credentialsApi } from "@/services/api";
 import { usePropertiesPanelContext } from "../usePropertiesPanelController";
 
@@ -20,20 +16,14 @@ const {
   selectedNodeEvaluateDialogLabel, googleMeetExpressionFields,
 } = usePropertiesPanelContext();
 const { fields, register, navigate, registerIndex } = googleMeetExpressionFields;
-const isBusyDetailsChecked = computed({
-  get(): boolean {
-    return computeIsBusyDetailsChecked(selectedNode.value?.data);
-  },
-  set(checked: boolean): void {
-    setBusyDetailsChecked(checked, updateNodeData);
-  },
+const isBusyDetailsChecked = computed((): boolean => {
+  const data = selectedNode.value?.data;
+  if (!data) return false;
+  if ("gmIncludeBusyDetails" in data) {
+    return data.gmIncludeBusyDetails === true;
+  }
+  return data.gmIncludeBusyTitles === true;
 });
-
-function onBusyDetailsChange(event: Event): void {
-  const target = event.target as HTMLInputElement | null;
-  if (!target) return;
-  setBusyDetailsChecked(target.checked, updateNodeData);
-}
 const credentials = ref<CredentialListItem[]>([]);
 const credentialError = ref("");
 const credentialOptions = computed(() => {
@@ -140,7 +130,7 @@ onMounted(async (): Promise<void> => {
           type="checkbox"
           class="rounded border-border"
           :checked="isBusyDetailsChecked"
-          @change="onBusyDetailsChange"
+          @change="updateNodeData('gmIncludeBusyDetails', ($event.target as HTMLInputElement).checked)"
         >
         <Label for="gm-include-busy-details">{{ GOOGLE_MEET_BUSY_DETAILS_OPTION.label }}</Label>
         <AgentFieldToggle

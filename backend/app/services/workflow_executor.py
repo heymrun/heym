@@ -4979,7 +4979,12 @@ class WorkflowExecutor:
         schemas: list[dict] = []
         for tool in node_tools_for_agent(self.nodes, self.edges, agent_node_id):
             node_data = self.nodes[tool.node_id].get("data", {})
-            agent_provided: list[str] = node_data.get("agentProvidedFields") or []
+            agent_provided = list(
+                dict.fromkeys(
+                    "gmIncludeBusyDetails" if f == "gmIncludeBusyTitles" else f
+                    for f in (node_data.get("agentProvidedFields") or [])
+                )
+            )
             properties = {
                 field: {"type": "string", "description": f"Value for {field}"}
                 for field in agent_provided
@@ -5014,8 +5019,11 @@ class WorkflowExecutor:
         agent_provided: list[str] = original_data.get("agentProvidedFields") or []
         merged_data = {**original_data}
         for fname in agent_provided:
-            if fname in args:
-                merged_data[fname] = args[fname]
+            target = "gmIncludeBusyDetails" if fname == "gmIncludeBusyTitles" else fname
+            if target in args:
+                merged_data[target] = args[target]
+            elif fname in args:
+                merged_data[target] = args[fname]
 
         node_label = original_data.get("label", node_id)
         _queue = getattr(self, "agent_progress_queue", None)

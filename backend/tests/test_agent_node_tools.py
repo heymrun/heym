@@ -151,6 +151,28 @@ class TestBuildNodeToolSchemas(unittest.TestCase):
         for node_id, fields in fields_by_node.items():
             self.assertEqual(fields_by_tool[node_id], set(fields))
 
+    def test_legacy_google_meet_busy_titles_aliased_in_schema(self) -> None:
+        agent_id = "agent-1"
+        meet_id = "meet-1"
+        nodes = {
+            agent_id: {"type": "agent", "data": {"label": "Agent"}},
+            meet_id: {
+                "type": "googleMeet",
+                "data": {
+                    "label": "Read Calendar",
+                    "agentProvidedFields": ["gmIncludeBusyTitles"],
+                },
+            },
+        }
+        edges = [{"source": meet_id, "target": agent_id, "targetHandle": "tool-input"}]
+        ex = _make_executor(nodes, edges)
+
+        schemas = ex._build_node_tool_schemas(agent_id)
+        self.assertEqual(len(schemas), 1)
+        self.assertIn("gmIncludeBusyDetails", schemas[0]["parameters"]["properties"])
+        self.assertNotIn("gmIncludeBusyTitles", schemas[0]["parameters"]["properties"])
+        self.assertEqual(schemas[0]["parameters"]["required"], ["gmIncludeBusyDetails"])
+
 
 class TestExecuteNodeTool(unittest.TestCase):
     def _make_executor_with_execute(
@@ -200,6 +222,40 @@ class TestExecuteNodeTool(unittest.TestCase):
         self.assertEqual(result, {"body": "ok"})
         # Original data restored after execution
         self.assertEqual(ex.nodes[http_id]["data"]["curl"], "curl https://fixed.com")
+
+    def test_legacy_google_meet_busy_titles_aliased_in_execution(self) -> None:
+        from app.services.workflow_executor import NodeResult
+
+        meet_id = "meet-1"
+        nodes = {
+            meet_id: {
+                "type": "googleMeet",
+                "data": {
+                    "label": "Read Calendar",
+                    "agentProvidedFields": ["gmIncludeBusyTitles"],
+                    "active": True,
+                },
+            }
+        }
+        ex = self._make_executor_with_execute(nodes, [])
+        captured_data: list[dict] = []
+
+        def fake_execute_node(node_id: str, inputs: dict, **kwargs) -> NodeResult:
+            captured_data.append(dict(ex.nodes[node_id]["data"]))
+            return NodeResult(
+                node_id=node_id,
+                node_label="Read Calendar",
+                node_type="googleMeet",
+                status="success",
+                output={"status": "success"},
+                execution_time_ms=10.0,
+            )
+
+        ex.execute_node = fake_execute_node  # type: ignore[assignment]
+        tool_def = {"_source": "node_tool", "_node_id": meet_id}
+        ex._execute_node_tool(tool_def, {"gmIncludeBusyDetails": True})
+
+        self.assertIs(captured_data[0]["gmIncludeBusyDetails"], True)
 
     def test_returns_error_dict_on_node_failure(self) -> None:
         from app.services.workflow_executor import NodeResult

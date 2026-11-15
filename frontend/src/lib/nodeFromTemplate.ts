@@ -10,26 +10,6 @@ interface SourceForRefs {
 }
 
 /**
- * Normalizes boolean and boolean-string representations.
- * Invalid values return false (never silently converted to true).
- */
-export function normalizeBoolean(value: unknown): boolean {
-  if (typeof value === "boolean") {
-    return value;
-  }
-  if (typeof value === "string") {
-    const trimmed = value.trim().toLowerCase();
-    if (trimmed === "true") {
-      return true;
-    }
-    if (trimmed === "false") {
-      return false;
-    }
-  }
-  return false;
-}
-
-/**
  * Build a canvas node from a saved node template (defaults merged with template data).
  */
 export function buildWorkflowNodeFromNodeTemplate(
@@ -43,9 +23,14 @@ export function buildWorkflowNodeFromNodeTemplate(
   let merged = { ...defaults, ...template.node_data } as WorkflowNode["data"];
   if (type === "googleMeet" && template.node_data) {
     if ("gmIncludeBusyDetails" in template.node_data) {
-      merged.gmIncludeBusyDetails = normalizeBoolean(template.node_data.gmIncludeBusyDetails);
+      merged.gmIncludeBusyDetails = template.node_data.gmIncludeBusyDetails === true;
     } else if ("gmIncludeBusyTitles" in template.node_data) {
-      merged.gmIncludeBusyDetails = normalizeBoolean(template.node_data.gmIncludeBusyTitles);
+      merged.gmIncludeBusyDetails = template.node_data.gmIncludeBusyTitles === true;
+    }
+    if (Array.isArray(merged.agentProvidedFields)) {
+      merged.agentProvidedFields = merged.agentProvidedFields.map((field) =>
+        field === "gmIncludeBusyTitles" ? "gmIncludeBusyDetails" : field,
+      );
     }
   }
   if (sourceForRefs) {

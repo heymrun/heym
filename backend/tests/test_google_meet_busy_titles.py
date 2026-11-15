@@ -7,7 +7,6 @@ from unittest.mock import MagicMock, patch
 import httpx
 from fastapi import HTTPException
 
-from app.services.google_meet_busy_titles import can_see_event_details
 from app.services.google_meet_service import GoogleMeetService
 
 
@@ -19,60 +18,12 @@ def timed_event(start: str, end: str, title: str | None = "Team meeting", **extr
     return event
 
 
-class TestCanSeeEventDetails(unittest.TestCase):
-    def test_owner_and_writer_allow_all_documented_visibilities(self) -> None:
-        for role in ("owner", "writer", "Owner", "WRITER"):
-            for vis in ("default", "public", "private", "confidential"):
-                with self.subTest(role=role, visibility=vis):
-                    self.assertTrue(can_see_event_details(role, vis))
-            # Missing visibility means default
-            with self.subTest(role=role, visibility=None):
-                self.assertTrue(can_see_event_details(role, None))
-            # Unknown visibility fails closed
-            for bad_vis in ("unknown", "restricted", 123, ""):
-                with self.subTest(role=role, visibility=bad_vis):
-                    self.assertFalse(can_see_event_details(role, bad_vis))
-
-    def test_reader_and_writer_without_private_access(self) -> None:
-        for role in (
-            "reader",
-            "writerWithoutPrivateAccess",
-            "READER",
-            "writerwithoutprivateaccess",
-        ):
-            # Explicitly allow only public and default
-            self.assertTrue(can_see_event_details(role, "public"))
-            self.assertTrue(can_see_event_details(role, "default"))
-            self.assertTrue(can_see_event_details(role, None))  # missing means default
-            # Private and confidential are disallowed
-            self.assertFalse(can_see_event_details(role, "private"))
-            self.assertFalse(can_see_event_details(role, "confidential"))
-            # Unknown visibility fails closed
-            self.assertFalse(can_see_event_details(role, "unknown"))
-
-    def test_free_busy_reader_allows_only_public(self) -> None:
-        for role in ("freeBusyReader", "freebusyreader", "FREEBUSYREADER"):
-            self.assertTrue(can_see_event_details(role, "public"))
-            self.assertFalse(can_see_event_details(role, "default"))
-            self.assertFalse(can_see_event_details(role, None))  # missing means default
-            self.assertFalse(can_see_event_details(role, "private"))
-            self.assertFalse(can_see_event_details(role, "confidential"))
-            self.assertFalse(can_see_event_details(role, "unknown"))
-
-    def test_missing_and_unknown_roles_fail_closed(self) -> None:
-        for role in (None, "", "unknown", "admin", 123, []):
-            for vis in ("public", "default", "private", "confidential", None, "unknown"):
-                with self.subTest(role=role, visibility=vis):
-                    self.assertFalse(can_see_event_details(role, vis))
-
-
 class TestGoogleMeetBusyTitles(unittest.TestCase):
     def setUp(self) -> None:
         self.requests: list[httpx.Request] = []
         self.busy = [{"start": "2026-11-06T09:00:00Z", "end": "2026-11-06T12:00:00Z"}]
         self.pages: list[dict] = [
             {
-                "accessRole": "owner",
                 "timeZone": "UTC",
                 "items": [timed_event("2026-11-06T09:00:00Z", "2026-11-06T12:00:00Z")],
             }
@@ -109,7 +60,7 @@ class TestGoogleMeetBusyTitles(unittest.TestCase):
         )
 
     def test_default_and_explicit_false_never_fetch_or_expose_titles(self) -> None:
-        for kwargs in ({}, {"include_busy_details": False}, {"include_busy_titles": False}):
+        for kwargs in ({}, {"include_busy_details": False}):
             with self.subTest(kwargs=kwargs):
                 result = self.read(**kwargs)
                 self.assertEqual(
@@ -142,8 +93,8 @@ class TestGoogleMeetBusyTitles(unittest.TestCase):
             self.assertEqual(request.url.params[key], value)
         self.assertNotIn("timeZone", request.url.params)
         self.assertNotIn("description", request.url.params["fields"])
-        self.assertIn("accessRole", request.url.params["fields"])
-        self.assertIn("visibility", request.url.params["fields"])
+        self.assertNotIn("accessRole", request.url.params["fields"])
+        self.assertNotIn("visibility", request.url.params["fields"])
         self.assertIn("attendeesOmitted", request.url.params["fields"])
         self.assertIn("attendees(email,resource)", request.url.params["fields"])
         self.assertEqual(request.headers["Authorization"], "Bearer dummy-access")
@@ -230,142 +181,24 @@ class TestGoogleMeetBusyTitles(unittest.TestCase):
             ],
         )
 
-    def test_private_event_without_summary_has_null_title(self) -> None:
+    def test_private_event_without_summary_has_null_title_and_null_attendees(self) -> None:
         self.pages[0]["items"][0].pop("summary")
-        self.assertIsNone(self.read(include_busy_titles=True)["busy_slots"][0]["title"])
+        slot = self.read(include_busy_details=True)["busy_slots"][0]
+        self.assertIsNone(slot["title"])
+        self.assertIsNone(slot["attendees"])
 
-    def test_free_busy_reader_can_see_public_event_details(self) -> None:
-        self.pages[0]["accessRole"] = "freeBusyReader"
+    def test_visible_event_with_no_guests_returns_empty_attendees_list(self) -> None:
         self.pages[0]["items"] = [
             timed_event(
                 "2026-11-06T09:00:00Z",
                 "2026-11-06T12:00:00Z",
-                title="Visible Public Event",
-                visibility="public",
-                attendees=[{"email": "public-guest@example.com"}],
+                title="Visible Meeting",
             )
         ]
         result = self.read(include_busy_details=True)
         slot = result["busy_slots"][0]
-        self.assertEqual(slot["title"], "Visible Public Event")
-        self.assertEqual(slot["attendees"], ["public-guest@example.com"])
-
-    def test_free_busy_reader_cannot_see_default_private_or_confidential_events(self) -> None:
-        self.pages[0]["accessRole"] = "freeBusyReader"
-        for visibility in ("default", "private", "confidential", None):
-            with self.subTest(visibility=visibility):
-                event_kwargs = {"visibility": visibility} if visibility else {}
-                self.pages[0]["items"] = [
-                    timed_event(
-                        "2026-11-06T09:00:00Z",
-                        "2026-11-06T12:00:00Z",
-                        title="Hidden Event Details",
-                        attendees=[{"email": "hidden-guest@example.com"}],
-                        **event_kwargs,
-                    )
-                ]
-                result = self.read(include_busy_details=True)
-                slot = result["busy_slots"][0]
-                self.assertIsNone(slot["title"])
-                self.assertIsNone(slot["attendees"])
-
-    def test_reader_can_see_public_and_default_event_details(self) -> None:
-        self.pages[0]["accessRole"] = "reader"
-        for visibility in ("public", "default", None):
-            with self.subTest(visibility=visibility):
-                event_kwargs = {"visibility": visibility} if visibility else {}
-                self.pages[0]["items"] = [
-                    timed_event(
-                        "2026-11-06T09:00:00Z",
-                        "2026-11-06T12:00:00Z",
-                        title="Public Meeting",
-                        attendees=[{"email": "guest@example.com"}],
-                        **event_kwargs,
-                    )
-                ]
-                result = self.read(include_busy_details=True)
-                slot = result["busy_slots"][0]
-                self.assertEqual(slot["title"], "Public Meeting")
-                self.assertEqual(slot["attendees"], ["guest@example.com"])
-
-    def test_writer_without_private_access_cannot_see_private_event_details(self) -> None:
-        self.pages[0]["accessRole"] = "writerWithoutPrivateAccess"
-        for visibility in ("private", "confidential"):
-            with self.subTest(visibility=visibility):
-                self.pages[0]["items"] = [
-                    timed_event(
-                        "2026-11-06T09:00:00Z",
-                        "2026-11-06T12:00:00Z",
-                        title="Private Strategy",
-                        visibility=visibility,
-                        attendees=[{"email": "exec@example.com"}],
-                    )
-                ]
-                result = self.read(include_busy_details=True)
-                slot = result["busy_slots"][0]
-                self.assertIsNone(slot["title"])
-                self.assertIsNone(slot["attendees"])
-
-    def test_owner_and_writer_can_see_private_event_details(self) -> None:
-        for role in ("owner", "writer", "Owner", "WRITER"):
-            for visibility in ("private", "confidential"):
-                with self.subTest(role=role, visibility=visibility):
-                    self.pages[0]["accessRole"] = role
-                    self.pages[0]["items"] = [
-                        timed_event(
-                            "2026-11-06T09:00:00Z",
-                            "2026-11-06T12:00:00Z",
-                            title="Private Doctor Appointment",
-                            visibility=visibility,
-                            attendees=[{"email": "doctor@example.com"}],
-                        )
-                    ]
-                    result = self.read(include_busy_details=True)
-                    slot = result["busy_slots"][0]
-                    self.assertEqual(slot["title"], "Private Doctor Appointment")
-                    self.assertEqual(slot["attendees"], ["doctor@example.com"])
-
-    def test_missing_or_unknown_access_roles_fail_closed_for_all_events(self) -> None:
-        for access_role in (None, "unknownRole", "guest", 123, ""):
-            for visibility in ("public", "default", "private", "confidential", None):
-                with self.subTest(access_role=access_role, visibility=visibility):
-                    if access_role is None:
-                        self.pages[0].pop("accessRole", None)
-                    else:
-                        self.pages[0]["accessRole"] = access_role
-                    event_kwargs = {"visibility": visibility} if visibility else {}
-                    self.pages[0]["items"] = [
-                        timed_event(
-                            "2026-11-06T09:00:00Z",
-                            "2026-11-06T12:00:00Z",
-                            title="Important Event",
-                            attendees=[{"email": "guest@example.com"}],
-                            **event_kwargs,
-                        )
-                    ]
-                    result = self.read(include_busy_details=True)
-                    slot = result["busy_slots"][0]
-                    self.assertIsNone(slot["title"])
-                    self.assertIsNone(slot["attendees"])
-
-    def test_visible_event_with_no_guests_returns_empty_attendees_list(self) -> None:
-        for access_role in ("reader", "owner"):
-            for visibility in (None, "public", "default"):
-                with self.subTest(access_role=access_role, visibility=visibility):
-                    self.pages[0]["accessRole"] = access_role
-                    event_kwargs = {"visibility": visibility} if visibility else {}
-                    self.pages[0]["items"] = [
-                        timed_event(
-                            "2026-11-06T09:00:00Z",
-                            "2026-11-06T12:00:00Z",
-                            title="Visible Meeting",
-                            **event_kwargs,
-                        )
-                    ]
-                    result = self.read(include_busy_details=True)
-                    slot = result["busy_slots"][0]
-                    self.assertEqual(slot["title"], "Visible Meeting")
-                    self.assertEqual(slot["attendees"], [])
+        self.assertEqual(slot["title"], "Visible Meeting")
+        self.assertEqual(slot["attendees"], [])
 
     def test_attendees_omitted_returns_null_attendees_and_preserves_title(self) -> None:
         # When attendeesOmitted is True and partial attendee list is returned in response:
@@ -408,7 +241,7 @@ class TestGoogleMeetBusyTitles(unittest.TestCase):
             {"status": "cancelled", "summary": "Deleted event"},
             timed_event("2026-11-07T09:00:00Z", "2026-11-07T12:00:00Z", "Outside window"),
         ]
-        result = self.read(include_busy_titles=True)
+        result = self.read(include_busy_details=True)
         self.assertEqual(len(result["busy_slots"]), 1)
         self.assertIsNone(result["busy_slots"][0]["title"])
 
@@ -416,7 +249,6 @@ class TestGoogleMeetBusyTitles(unittest.TestCase):
         self.busy = [{"start": "2026-11-06T05:00:00Z", "end": "2026-11-07T05:00:00Z"}]
         self.pages = [
             {
-                "accessRole": "owner",
                 "timeZone": "America/New_York",
                 "items": [
                     {
@@ -427,7 +259,7 @@ class TestGoogleMeetBusyTitles(unittest.TestCase):
                 ],
             }
         ]
-        result = self.read(include_busy_titles=True, time_zone="Europe/Berlin")
+        result = self.read(include_busy_details=True, time_zone="Europe/Berlin")
         self.assertEqual(
             result["busy_slots"],
             [
@@ -442,9 +274,8 @@ class TestGoogleMeetBusyTitles(unittest.TestCase):
 
     def test_recurring_instances_page_through_empty_and_nonempty_pages(self) -> None:
         self.pages = [
-            {"accessRole": "owner", "timeZone": "UTC", "items": [], "nextPageToken": "page-2"},
+            {"timeZone": "UTC", "items": [], "nextPageToken": "page-2"},
             {
-                "accessRole": "owner",
                 "timeZone": "UTC",
                 "items": [
                     timed_event("2026-11-06T09:00:00Z", "2026-11-06T10:00:00Z", "Daily standup")
@@ -452,14 +283,13 @@ class TestGoogleMeetBusyTitles(unittest.TestCase):
                 "nextPageToken": "page-3",
             },
             {
-                "accessRole": "owner",
                 "timeZone": "UTC",
                 "items": [
                     timed_event("2026-11-06T10:00:00Z", "2026-11-06T12:00:00Z", "Daily standup")
                 ],
             },
         ]
-        result = self.read(include_busy_titles=True)
+        result = self.read(include_busy_details=True)
         self.assertEqual(
             [slot["title"] for slot in result["busy_slots"]], ["Daily standup", "Daily standup"]
         )
@@ -477,25 +307,25 @@ class TestGoogleMeetBusyTitles(unittest.TestCase):
             with self.subTest(pages=pages):
                 self.pages, self.page_index = pages, 0
                 with self.assertRaises(HTTPException):
-                    self.read(include_busy_titles=True)
+                    self.read(include_busy_details=True)
 
     def test_events_denial_fails_only_when_titles_are_enabled(self) -> None:
         self.events_status = 403
         self.assertEqual(self.read()["status"], "success")
         with self.assertRaises(HTTPException) as caught:
-            self.read(include_busy_titles=True)
+            self.read(include_busy_details=True)
         self.assertEqual(caught.exception.status_code, 403)
 
     def test_no_busy_time_needs_no_event_lookup_even_when_enabled(self) -> None:
         self.busy = []
-        self.assertEqual(self.read(include_busy_titles=True)["busy_slots"], [])
+        self.assertEqual(self.read(include_busy_details=True)["busy_slots"], [])
         self.assertEqual(len(self.requests), 1)
 
     def test_titles_cannot_create_busy_time_outside_freebusy(self) -> None:
         self.pages[0]["items"] = [
             timed_event("2026-11-05T23:00:00Z", "2026-11-07T01:00:00Z", "Long event")
         ]
-        result = self.read(include_busy_titles=True)
+        result = self.read(include_busy_details=True)
         self.assertEqual(
             result["busy_slots"],
             [
@@ -511,7 +341,6 @@ class TestGoogleMeetBusyTitles(unittest.TestCase):
     def test_event_explicit_zone_interprets_local_datetime_without_offset(self) -> None:
         self.pages = [
             {
-                "accessRole": "owner",
                 "timeZone": "America/New_York",
                 "items": [
                     {
@@ -522,7 +351,7 @@ class TestGoogleMeetBusyTitles(unittest.TestCase):
                 ],
             }
         ]
-        result = self.read(include_busy_titles=True)
+        result = self.read(include_busy_details=True)
         self.assertEqual(
             result["busy_slots"],
             [
@@ -539,7 +368,6 @@ class TestGoogleMeetBusyTitles(unittest.TestCase):
         self.busy = [{"start": "2026-10-25T00:00:00Z", "end": "2026-10-25T02:00:00Z"}]
         self.pages = [
             {
-                "accessRole": "owner",
                 "timeZone": "Europe/Berlin",
                 "items": [
                     timed_event("2026-10-25T00:30:00Z", "2026-10-25T00:45:00Z", "Before rollback"),
@@ -551,7 +379,7 @@ class TestGoogleMeetBusyTitles(unittest.TestCase):
             start="2026-10-25T00:00:00Z",
             end="2026-10-25T02:00:00Z",
             time_zone="Europe/Berlin",
-            include_busy_titles=True,
+            include_busy_details=True,
         )
         named = [slot for slot in result["busy_slots"] if slot["title"] is not None]
         self.assertEqual([slot["title"] for slot in named], ["Before rollback", "After rollback"])
@@ -562,7 +390,6 @@ class TestGoogleMeetBusyTitles(unittest.TestCase):
         self.busy = [{"start": "2026-11-06T09:00:00Z", "end": "2026-11-06T12:00:00Z"}]
         self.pages = [
             {
-                "accessRole": "owner",
                 "timeZone": "UTC",
                 "items": [
                     timed_event(
@@ -603,7 +430,6 @@ class TestGoogleMeetBusyTitles(unittest.TestCase):
         self.busy = [{"start": "2026-11-06T09:00:00Z", "end": "2026-11-06T13:00:00Z"}]
         self.pages = [
             {
-                "accessRole": "owner",
                 "timeZone": "UTC",
                 "items": [
                     timed_event(
@@ -662,7 +488,6 @@ class TestGoogleMeetBusyTitles(unittest.TestCase):
         self.busy = [{"start": "2026-11-06T09:00:00Z", "end": "2026-11-06T12:00:00Z"}]
         self.pages = [
             {
-                "accessRole": "owner",
                 "timeZone": "UTC",
                 "items": [
                     timed_event(
@@ -715,7 +540,6 @@ class TestGoogleMeetBusyTitles(unittest.TestCase):
         self.busy = [{"start": "2026-11-06T22:00:00Z", "end": "2026-11-07T00:00:00Z"}]
         self.pages = [
             {
-                "accessRole": "owner",
                 "timeZone": "UTC",
                 "items": [
                     timed_event(
@@ -749,7 +573,6 @@ class TestGoogleMeetBusyTitles(unittest.TestCase):
         self.busy = [{"start": "2026-11-06T09:00:00Z", "end": "2026-11-06T10:00:00Z"}]
         self.pages = [
             {
-                "accessRole": "owner",
                 "timeZone": "UTC",
                 "items": [
                     timed_event(
@@ -778,7 +601,6 @@ class TestGoogleMeetBusyTitles(unittest.TestCase):
         self.busy = []
         self.pages = [
             {
-                "accessRole": "owner",
                 "timeZone": "UTC",
                 "items": [
                     timed_event(
@@ -798,7 +620,6 @@ class TestGoogleMeetBusyTitles(unittest.TestCase):
         self.busy = [{"start": "2026-11-06T09:00:00Z", "end": "2026-11-06T12:00:00Z"}]
         self.pages = [
             {
-                "accessRole": "owner",
                 "timeZone": "UTC",
                 "items": [],
             }
@@ -815,32 +636,3 @@ class TestGoogleMeetBusyTitles(unittest.TestCase):
                 }
             ],
         )
-
-    def test_unknown_visibility_values_fail_closed_for_all_roles(self) -> None:
-        for role in (
-            "owner",
-            "writer",
-            "reader",
-            "writerWithoutPrivateAccess",
-            "freeBusyReader",
-        ):
-            with self.subTest(role=role):
-                self.pages = [
-                    {
-                        "accessRole": role,
-                        "timeZone": "UTC",
-                        "items": [
-                            timed_event(
-                                "2026-11-06T09:00:00Z",
-                                "2026-11-06T12:00:00Z",
-                                title="Custom Visibility Meeting",
-                                visibility="customUnknownVisibility",
-                                attendees=[{"email": "user@example.com"}],
-                            )
-                        ],
-                    }
-                ]
-                result = self.read(include_busy_details=True)
-                slot = result["busy_slots"][0]
-                self.assertIsNone(slot["title"])
-                self.assertIsNone(slot["attendees"])

@@ -9,47 +9,6 @@ from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
 
-DOCUMENTED_VISIBILITIES = frozenset({"default", "public", "private", "confidential"})
-
-
-def can_see_event_details(role: str | None, raw_visibility: Any) -> bool:
-    """Determine whether event details (title, attendees) may be exposed.
-
-    Rules:
-    - writer / owner: allow all documented visibility values.
-    - reader / writerWithoutPrivateAccess: explicitly allow only public and default visibility.
-    - freeBusyReader: allow only public visibility.
-    - Missing visibility means default.
-    - Unknown visibility values fail closed (False).
-    - Missing or unknown access roles fail closed (False).
-    """
-    if not isinstance(role, str):
-        return False
-    normalized_role = role.lower()
-    if normalized_role not in {
-        "owner",
-        "writer",
-        "reader",
-        "writerwithoutprivateaccess",
-        "freebusyreader",
-    }:
-        return False
-
-    if raw_visibility is None:
-        visibility = "default"
-    elif isinstance(raw_visibility, str) and raw_visibility.lower() in DOCUMENTED_VISIBILITIES:
-        visibility = raw_visibility.lower()
-    else:
-        return False
-
-    if normalized_role in ("owner", "writer"):
-        return True
-    if normalized_role in ("reader", "writerwithoutprivateaccess"):
-        return visibility in ("public", "default")
-    if normalized_role == "freebusyreader":
-        return visibility == "public"
-    return False
-
 
 @dataclass(frozen=True)
 class BusyEvent:
@@ -81,14 +40,13 @@ def read_busy_events(
             "showDeleted": False,
             "maxResults": 2500,
             "fields": (
-                "accessRole,nextPageToken,timeZone,"
-                "items(summary,start,end,status,transparency,visibility,attendeesOmitted,attendees(email,resource))"
+                "nextPageToken,timeZone,"
+                "items(summary,start,end,status,transparency,attendeesOmitted,attendees(email,resource))"
             ),
         }
         if page_token:
             params["pageToken"] = page_token
         page = request("GET", f"calendars/{quote(calendar_id, safe='')}/events", params=params)
-        access_role = page.get("accessRole")
         items = page.get("items", [])
         if not isinstance(items, list):
             raise HTTPException(502, "Google Meet: invalid Calendar events response")
@@ -116,29 +74,25 @@ def read_busy_events(
             if right <= left:
                 raise HTTPException(502, "Google Meet: Calendar event has an invalid time range")
             if left < upper and right > lower:
-                role = access_role.lower() if isinstance(access_role, str) else None
-                can_see_details = can_see_event_details(role, event.get("visibility"))
-
-                if not can_see_details:
-                    title = None
+                raw_title = event.get("summary")
+                title = raw_title if isinstance(raw_title, str) else None
+                if event.get("attendeesOmitted") is True:
                     attendees = None
                 else:
-                    raw_title = event.get("summary")
-                    title = raw_title if isinstance(raw_title, str) else None
-                    if event.get("attendeesOmitted") is True:
-                        attendees = None
+                    raw_attendees = event.get("attendees")
+                    if raw_attendees is not None:
+                        attendees = [
+                            attendee["email"]
+                            for attendee in raw_attendees
+                            if isinstance(attendee, dict)
+                            and isinstance(attendee.get("email"), str)
+                            and attendee.get("email")
+                            and attendee.get("resource") is not True
+                        ]
+                    elif title is not None:
+                        attendees = []
                     else:
-                        raw_attendees = event.get("attendees")
-                        attendees: list[str] = []
-                        if isinstance(raw_attendees, list):
-                            for attendee in raw_attendees:
-                                if (
-                                    isinstance(attendee, dict)
-                                    and attendee.get("resource") is not True
-                                ):
-                                    email = attendee.get("email")
-                                    if isinstance(email, str) and email:
-                                        attendees.append(email)
+                        attendees = None
                 events.append(
                     BusyEvent(
                         max(left, lower),

@@ -22,7 +22,11 @@ const isAgentProvided = computed((): boolean => {
   if (!isToolNodeField.value) return false;
   const node = workflowStore.nodes.find((n) => n.id === props.nodeId);
   const fields: string[] = node?.data.agentProvidedFields ?? [];
-  return fields.includes(props.fieldKey);
+  if (fields.includes(props.fieldKey)) return true;
+  if (props.fieldKey === "gmIncludeBusyDetails" && fields.includes("gmIncludeBusyTitles")) {
+    return true;
+  }
+  return false;
 });
 
 function toggle(): void {
@@ -30,11 +34,18 @@ function toggle(): void {
   const node = workflowStore.nodes.find((n) => n.id === props.nodeId);
   if (!node) return;
   const current: string[] = node.data.agentProvidedFields ?? [];
+  const keysToRemove = new Set(
+    props.fieldKey === "gmIncludeBusyDetails"
+      ? ["gmIncludeBusyDetails", "gmIncludeBusyTitles"]
+      : [props.fieldKey],
+  );
   const updated = isAgentProvided.value
-    ? current.filter((f) => f !== props.fieldKey)
-    : [...current, props.fieldKey];
+    ? current.filter((f) => !keysToRemove.has(f))
+    : [...current.filter((f) => !keysToRemove.has(f)), props.fieldKey];
   workflowStore.updateNode(props.nodeId, { agentProvidedFields: updated });
 }
+
+defineExpose({ isAgentProvided, isToolNodeField, toggle });
 </script>
 
 <template>
