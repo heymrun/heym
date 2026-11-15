@@ -144,11 +144,18 @@ async def upload_to_slot(
         raise
 
     mime = file.content_type or "application/octet-stream"
+    allowed = file_intake_service.is_mime_allowed(slot.allowed_mime, mime, file.filename or "")
     if mime == "application/octet-stream":
         # curl and many other clients send a type they cannot name as octet-stream
-        # (curl names only images, text, HTML, PDF and XML), so judge it by its extension.
-        mime = mimetypes.guess_type(file.filename or "")[0] or mime
-    if not file_intake_service.is_mime_allowed(slot.allowed_mime, mime, file.filename or ""):
+        # (curl names only images, text, HTML, PDF and XML), so judge it by its extension
+        # as well. A compressed file (`report.csv.gz`) is not what its inner extension says.
+        guessed, encoding = mimetypes.guess_type(file.filename or "")
+        if guessed and encoding is None:
+            allowed = allowed or file_intake_service.is_mime_allowed(
+                slot.allowed_mime, guessed, file.filename or ""
+            )
+            mime = guessed
+    if not allowed:
         await reject(
             "rejected_mime",
             status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,

@@ -148,12 +148,15 @@ class UploadGuardTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("rejected_mime", _added_events(db))
         self.assertEqual(db.execute.call_count, 1)
 
-    async def _type_check(self, filename: str, content_type: str) -> tuple[int, list[str]]:
-        """Upload to an audio/* slot whose consume loses the race: 409 means the type passed."""
+    async def _type_check(
+        self, filename: str, content_type: str, allowed: list[str] | None = None
+    ) -> tuple[int, list[str]]:
+        """Upload to a slot (audio/* by default) whose consume loses the race: 409 means the
+        type passed."""
         db = AsyncMock()
         db.add = MagicMock()
         db.execute.side_effect = [
-            _select_result(_make_slot(allowed_mime=["audio/*"])),
+            _select_result(_make_slot(allowed_mime=allowed or ["audio/*"])),
             _update_result(0),
         ]
         with self.assertRaises(HTTPException) as ctx:
@@ -177,6 +180,25 @@ class UploadGuardTests(unittest.IsolatedAsyncioTestCase):
                 status_code, events = await self._type_check(filename, "application/octet-stream")
                 self.assertEqual(status_code, 415)
                 self.assertIn("rejected_mime", events)
+
+    async def test_an_octet_stream_allow_list_still_takes_curl_uploads(self) -> None:
+        # A list that names application/octet-stream (a workaround for curl uploads) keeps
+        # accepting them although the stored type is now the one guessed from the name.
+        for filename in ("archive.zip", "voice-note.mp3", "noextension"):
+            with self.subTest(filename=filename):
+                status_code, events = await self._type_check(
+                    filename, "application/octet-stream", ["application/octet-stream"]
+                )
+                self.assertEqual(status_code, 409)
+                self.assertNotIn("rejected_mime", events)
+
+    async def test_a_compressed_file_is_not_typed_by_its_inner_extension(self) -> None:
+        # mimetypes reads report.csv.gz as ("text/csv", "gzip"); it is not a CSV file.
+        status_code, events = await self._type_check(
+            "report.csv.gz", "application/octet-stream", ["text/csv"]
+        )
+        self.assertEqual(status_code, 415)
+        self.assertIn("rejected_mime", events)
 
 
 class UploadHappyPathTests(unittest.IsolatedAsyncioTestCase):
@@ -250,6 +272,62 @@ class UploadHappyPathTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(get_active_execution_handle(history.id))
         self.assertIn("upload_accepted", _added_events(db))
         db.commit.assert_awaited()
+
+    async def _stored_mime(
+        self, filename: str, content_type: str, allowed: list[str] | None
+    ) -> str:
+        """Upload through the whole endpoint and return the MIME type the file is stored as."""
+        slot = _make_slot(allowed_mime=allowed)
+        workflow = SimpleNamespace(
+            id=slot.workflow_id,
+            owner_id=uuid.uuid4(),
+            nodes=[{"id": "n1", "type": "fileUploadTrigger", "data": {"label": "audio"}}],
+            edges=[],
+        )
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.execute.side_effect = [_select_result(slot), _update_result(1), _select_result(workflow)]
+        stored = SimpleNamespace(id=uuid.uuid4(), filename=filename, mime_type="", size_bytes=3)
+        store_file = AsyncMock(return_value=stored)
+        exec_result = SimpleNamespace(
+            outputs={}, node_results=[], status="success", execution_time_ms=1.0
+        )
+        with (
+            patch("app.api.file_intake.file_storage.store_file", new=store_file),
+            patch("app.api.file_intake.execute_workflow", return_value=exec_result),
+            patch("app.api.mcp.get_credentials_context_for_user", new=AsyncMock(return_value={})),
+            patch("app.api.workflows.collect_referenced_workflows", new=AsyncMock(return_value={})),
+            patch(
+                "app.services.global_variables_service.get_global_variables_context",
+                new=AsyncMock(return_value={}),
+            ),
+        ):
+            result = await upload_to_slot(
+                token="t",
+                request=_make_request(),
+                file=_make_upload(b"abc", filename, content_type),
+                db=db,
+            )
+        self.assertEqual(result["status"], "success")
+        return store_file.await_args.kwargs["mime_type"]
+
+    async def test_a_curl_upload_is_stored_with_the_type_of_its_extension(self) -> None:
+        cases = [
+            ("voice-note.mp3", "application/octet-stream", ["audio/*"], "audio/mpeg"),
+            ("voice-note.mp3", "application/octet-stream", None, "audio/mpeg"),
+            (
+                "archive.zip",
+                "application/octet-stream",
+                ["application/octet-stream"],
+                "application/zip",
+            ),
+            ("report.csv.gz", "application/octet-stream", None, "application/octet-stream"),
+            ("noextension", "application/octet-stream", None, "application/octet-stream"),
+            ("rec.mp3", "audio/mp4", None, "audio/mp4"),
+        ]
+        for filename, content_type, allowed, want in cases:
+            with self.subTest(filename=filename, allowed=allowed):
+                self.assertEqual(await self._stored_mime(filename, content_type, allowed), want)
 
     async def test_the_slots_field_values_reach_the_text_inputs(self) -> None:
         slot = _make_slot(initial_inputs={"vendor": "Acme"})
