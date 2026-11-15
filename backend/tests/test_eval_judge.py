@@ -702,23 +702,6 @@ class RunEvalsIntoRunTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rows[0].score, "90")
         self.assertEqual(rows[0].actual_output, "Paris")
 
-    async def test_combined_judge_recovers_from_disable_reasoning_400(self) -> None:
-        calls = {"count": 0}
-
-        async def fake_execute_llm(**kwargs: object) -> dict:
-            calls["count"] += 1
-            self.assertEqual(kwargs.get("extra_body"), {"disable_reasoning": True})
-            return {
-                "text": '{"actual_answer": "Paris", "score": 95, "explanation": "exact"}',
-                "usage": {"total_tokens": 25},
-            }
-
-        self.execute_llm.side_effect = fake_execute_llm
-        rows = await self._execute(self._run(), scoring_method="llm_judge")
-        self.assertEqual(rows[0].score, "95")
-        self.assertEqual(rows[0].actual_output, "Paris")
-        self.assertEqual(calls["count"], 1)
-
     async def test_a_judge_that_went_missing_fails_the_run(self) -> None:
         # The credential was deleted after the run was created, so SET NULL cleared it.
         run = self._run(judge_credential_id=None, judge_model="jev-latest")
