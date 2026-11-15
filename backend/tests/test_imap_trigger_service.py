@@ -233,3 +233,47 @@ class ImapConnectTimeoutTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ForwardedEmailAttachmentTests(unittest.TestCase):
+    """An email forwarded as an attachment (.eml) is one attachment of the outer email."""
+
+    @staticmethod
+    def _raw() -> bytes:
+        from email.message import EmailMessage
+
+        forwarded = EmailMessage()
+        forwarded["From"] = "billing@vendor.example"
+        forwarded["Subject"] = "Invoice 4411"
+        forwarded.set_content("Amount due: 1,250.00 EUR by 30 Nov.")
+        forwarded.add_attachment(
+            b"%PDF-1.4 inner", maintype="application", subtype="pdf", filename="inner.pdf"
+        )
+
+        outer = EmailMessage()
+        outer["From"] = "colleague@example.com"
+        outer["To"] = "ap@example.com"
+        outer["Subject"] = "Fwd: Invoice 4411"
+        outer["Message-ID"] = "<fwd-1@example.com>"
+        outer.set_content("Please book this one.")
+        outer.add_attachment(forwarded, filename="Invoice 4411.eml")
+        return outer.as_bytes()
+
+    def test_the_attached_email_keeps_its_bytes(self) -> None:
+        from email import message_from_bytes, policy
+
+        _message_id, attachments = imap_trigger_service.email_attachments(self._raw())
+
+        self.assertEqual([a.filename for a in attachments], ["Invoice 4411.eml"])
+        self.assertEqual(attachments[0].content_type, "message/rfc822")
+        attached = message_from_bytes(attachments[0].content, policy=policy.default)
+        self.assertEqual(attached["Subject"], "Invoice 4411")
+
+    def test_the_forwarded_body_and_files_stay_out_of_the_outer_email(self) -> None:
+        payload = imap_trigger_service._parse_email_message(self._raw(), uid=7)
+
+        self.assertEqual(payload["text"], "Please book this one.")
+        self.assertEqual(
+            [(a["filename"], a["size_bytes"] > 0) for a in payload["attachments"]],
+            [("Invoice 4411.eml", True)],
+        )

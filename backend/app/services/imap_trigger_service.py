@@ -66,12 +66,23 @@ def _serialise_addresses(raw_value: str | None) -> list[dict[str, str]]:
     return addresses
 
 
+def _walk_own_parts(message: Message) -> Iterator[Message]:
+    """Like ``Message.walk()``, but an attached email (``message/rfc822``) is one part.
+
+    Its own body and attachments belong to the forwarded email, not to this one.
+    """
+    yield message
+    if message.is_multipart() and message.get_content_type() != "message/rfc822":
+        for part in message.get_payload():
+            yield from _walk_own_parts(part)
+
+
 def _extract_email_bodies(message: Message) -> tuple[str, str]:
     """Return plain-text and HTML bodies from a parsed email message."""
     text_parts: list[str] = []
     html_parts: list[str] = []
 
-    for part in message.walk():
+    for part in _walk_own_parts(message):
         if part.get_content_maintype() == "multipart":
             continue
         if part.get_filename():
@@ -117,15 +128,20 @@ class EmailAttachment:
 def _attachment_parts(message: Message) -> list[EmailAttachment]:
     """Every part with a filename, in the order it appears in the email."""
     attachments: list[EmailAttachment] = []
-    for part in message.walk():
+    for part in _walk_own_parts(message):
         filename = part.get_filename()
         if not filename:
             continue
+        if part.get_content_type() == "message/rfc822":
+            # An attached email has no transfer-decoded payload; its bytes are the message.
+            content = part.get_payload(0).as_bytes()
+        else:
+            content = part.get_payload(decode=True) or b""
         attachments.append(
             EmailAttachment(
                 filename=_decode_header_value(filename),
                 content_type=part.get_content_type(),
-                content=part.get_payload(decode=True) or b"",
+                content=content,
             )
         )
     return attachments
