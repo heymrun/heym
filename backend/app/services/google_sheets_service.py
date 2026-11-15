@@ -11,6 +11,24 @@ from app.services.encryption import encrypt_config
 _SPREADSHEET_ID_RE = re.compile(r"/spreadsheets/d/([a-zA-Z0-9_-]+)")
 _TOKEN_URL = "https://oauth2.googleapis.com/token"
 _SHEETS_BASE = "https://sheets.googleapis.com/v4/spreadsheets"
+# Tab names that A1 notation can carry as they are; any other name is quoted.
+_PLAIN_SHEET_NAME = re.compile(r"[\w ]+")
+
+
+def _a1_range(sheet_name: str, cells: str) -> str:
+    """``Tab!A1:Z`` in A1 notation, quoting a tab name such as ``Orders #2`` or ``Q3/Q4``."""
+    if not _PLAIN_SHEET_NAME.fullmatch(sheet_name):
+        sheet_name = "'" + sheet_name.replace("'", "''") + "'"
+    return f"{sheet_name}!{cells}"
+
+
+def _values_url(spreadsheet_id: str, sheet_name: str, cells: str, action: str = "") -> str:
+    """The values endpoint for a range. The range is percent-encoded, so a "#", "?" or "/"
+    in the tab name stays part of the path instead of starting a fragment or query."""
+    encoded = quote(_a1_range(sheet_name, cells), safe="!:")
+    return f"{_SHEETS_BASE}/{spreadsheet_id}/values/{encoded}{action}"
+
+
 # Grid limit for open-ended row ranges (Google Sheets max rows per sheet).
 _SHEET_MAX_ROWS = 1048576
 
@@ -127,7 +145,7 @@ class GoogleSheetsService:
             end_row = start_row + max_rows - 1 if max_rows > 0 else ""
             range_a1 = f"A{start_row}:Z{end_row}" if end_row else f"A{start_row}:Z"
 
-        url = f"{_SHEETS_BASE}/{spreadsheet_id}/values/{sheet_name}!{range_a1}"
+        url = _values_url(spreadsheet_id, sheet_name, range_a1)
         resp = httpx.get(url, headers=self._auth_headers())
         resp.raise_for_status()
         raw: list[list] = resp.json().get("values", [])
@@ -184,7 +202,7 @@ class GoogleSheetsService:
 
     def append_rows(self, spreadsheet_id: str, sheet_name: str, values: list) -> dict:
         """Append rows below the last row with data. Returns {updatedRange, updatedRows, success}."""
-        url = f"{_SHEETS_BASE}/{spreadsheet_id}/values/{sheet_name}!A1:append"
+        url = _values_url(spreadsheet_id, sheet_name, "A1", ":append")
         resp = httpx.post(
             url,
             headers=self._auth_headers(),
@@ -246,12 +264,12 @@ class GoogleSheetsService:
             if row_count
             else f"A{row_number}:Z{row_number}"
         )
-        url = f"{_SHEETS_BASE}/{spreadsheet_id}/values/{sheet_name}!{range_a1}"
+        url = _values_url(spreadsheet_id, sheet_name, range_a1)
         resp = httpx.put(
             url,
             headers=self._auth_headers(),
             params={"valueInputOption": "USER_ENTERED"},
-            json={"range": f"{sheet_name}!{range_a1}", "values": values},
+            json={"range": _a1_range(sheet_name, range_a1), "values": values},
         )
         resp.raise_for_status()
         data = resp.json()
@@ -274,7 +292,7 @@ class GoogleSheetsService:
             range_a1 = f"A2:Z{_SHEET_MAX_ROWS}"
         else:
             range_a1 = "A:Z"
-        url = f"{_SHEETS_BASE}/{spreadsheet_id}/values/{sheet_name}!{range_a1}:clear"
+        url = _values_url(spreadsheet_id, sheet_name, range_a1, ":clear")
         resp = httpx.post(url, headers=self._auth_headers())
         resp.raise_for_status()
         data = resp.json()

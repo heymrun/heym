@@ -17,7 +17,11 @@ from app.db.session import SessionLocal, get_db
 from app.models.google_sheets_schemas import SheetColumnsResponse, SpreadsheetTabsResponse
 from app.services.credential_access import get_accessible_credential
 from app.services.encryption import decrypt_config
-from app.services.google_sheets_service import _SHEETS_BASE, GoogleSheetsService
+from app.services.google_sheets_service import (
+    _SHEETS_BASE,
+    GoogleSheetsService,
+    _values_url,
+)
 
 router = APIRouter()
 
@@ -54,11 +58,10 @@ def _read_tabs(credential_id: str, config: dict, spreadsheet_id: str) -> dict:
 
 
 def _read_header(credential_id: str, config: dict, spreadsheet_id: str, tab: str) -> list:
-    quoted = "'" + tab.replace("'", "''") + "'"
     with SessionLocal() as sync_db:
         service = GoogleSheetsService(credential_id, config, sync_db)
         response = httpx.get(
-            f"{_SHEETS_BASE}/{spreadsheet_id}/values/{quoted}!A1:Z1",
+            _values_url(spreadsheet_id, tab, "A1:Z1"),
             headers={"Authorization": f"Bearer {service.access_token()}"},
             timeout=20,
         )
