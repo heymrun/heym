@@ -92,6 +92,22 @@ class TestGoogleMeetNode(unittest.TestCase):
                     expected,
                 )
 
+    def test_legacy_agent_provided_key_takes_precedence_over_new_default(self) -> None:
+        execute(
+            context(
+                {
+                    "credentialId": "credential",
+                    "gmIncludeBusyDetails": False,
+                    "gmIncludeBusyTitles": True,
+                    "agentProvidedFields": ["gmIncludeBusyTitles"],
+                }
+            )
+        )
+        self.assertIs(
+            self.service.read_availability.call_args.kwargs["include_busy_details"],
+            True,
+        )
+
     def test_new_details_key_takes_precedence_over_legacy_key(self) -> None:
         for details_val, titles_val, expected in (
             (False, True, False),
