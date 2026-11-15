@@ -108,6 +108,7 @@ class AdminWorkflowLifecycleTests(unittest.IsolatedAsyncioTestCase):
             ("get_workflow_for_user", AsyncMock(return_value=self.workflow)),
             ("publish_event", AsyncMock()),
             ("audit", MagicMock()),
+            ("close_expired_reviews", AsyncMock(return_value=0)),
         ):
             patcher = patch.object(api, name, value)
             patcher.start()

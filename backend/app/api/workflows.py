@@ -175,6 +175,7 @@ from app.services.workflow_last_trigger import (
 )
 from app.services.workflow_lifecycle import (
     OWNER_DEACTIVATED_MARKER,
+    close_expired_reviews,
     has_unfinished_workflow_executions,
     set_automatic_triggers_paused,
 )
@@ -2046,6 +2047,9 @@ async def delete_workflow(
             detail="Only the owner or an instance administrator can delete this workflow",
         )
 
+    # Close reviews nobody can answer any more while the workflow still exists, so a
+    # board card parked on one is released instead of staying pending without it.
+    await close_expired_reviews(db, workflow_id)
     if await has_unfinished_workflow_executions(db, workflow_id):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

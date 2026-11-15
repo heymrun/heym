@@ -4,7 +4,7 @@ import copy
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select, union_all
+from sqlalchemy import func, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.selectable import CompoundSelect
 
@@ -36,14 +36,18 @@ def _unfinished_execution_query(workflow_id: UUID) -> CompoundSelect:
                 [STATUS_HELD, STATUS_QUEUED, STATUS_WAITING_FOR_MAIN, STATUS_CLAIMED]
             ),
         ),
+        # Only a review that can still be answered can still resume the run. Past
+        # expires_at every answer path refuses it, so it would block deletion forever.
         select(HITLRequest.execution_history_id).where(
             HITLRequest.workflow_id == workflow_id,
             HITLRequest.status == "pending",
+            HITLRequest.expires_at > func.now(),
             HITLRequest.execution_history_id.is_not(None),
         ),
         select(CodexFollowupRequest.execution_history_id).where(
             CodexFollowupRequest.workflow_id == workflow_id,
             CodexFollowupRequest.status == "pending",
+            CodexFollowupRequest.expires_at > func.now(),
             CodexFollowupRequest.execution_history_id.is_not(None),
         ),
     )
@@ -82,6 +86,39 @@ def set_automatic_triggers_paused(
             data["active"] = True
             data.pop(marker, None)
     return updated
+
+
+async def close_expired_reviews(db: AsyncSession, workflow_id: UUID) -> int:
+    """Cancel the workflow's runs parked on reviews nobody can answer any more.
+
+    Goes through ``cancel_pending_review_execution``, the path Cancel uses: the history
+    row becomes ``cancelled`` and a board chain parked on the review resumes, which it
+    could no longer do once the workflow is gone. Commits. Returns how many were closed.
+    """
+    from app.services.pending_review_cancel import cancel_pending_review_execution
+
+    expired = union_all(
+        select(HITLRequest.execution_history_id).where(
+            HITLRequest.workflow_id == workflow_id,
+            HITLRequest.status == "pending",
+            HITLRequest.expires_at <= func.now(),
+            HITLRequest.execution_history_id.is_not(None),
+        ),
+        select(CodexFollowupRequest.execution_history_id).where(
+            CodexFollowupRequest.workflow_id == workflow_id,
+            CodexFollowupRequest.status == "pending",
+            CodexFollowupRequest.expires_at <= func.now(),
+            CodexFollowupRequest.execution_history_id.is_not(None),
+        ),
+    )
+    execution_ids = {row[0] for row in (await db.execute(expired)).all()}
+    closed = 0
+    for execution_id in execution_ids:
+        if await cancel_pending_review_execution(
+            db, workflow_id=workflow_id, execution_id=execution_id
+        ):
+            closed += 1
+    return closed
 
 
 async def has_unfinished_workflow_executions(db: AsyncSession, workflow_id: UUID) -> bool:
