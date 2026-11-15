@@ -1033,6 +1033,16 @@ async def _auto_advance(
                     settled.run_status = "success"
                     await db.commit()
                 return
+            moved = await db.get(BoardCard, card_id)
+            if moved is None:
+                return
+            if moved.column_id != from_column_id:
+                # A person moved the card while this chain ran: it stays where they put
+                # it. Advancing from the old column would pull it back into the cascade.
+                if moved.run_status == "running":
+                    moved.run_status = "success"
+                    await db.commit()
+                return
             columns = (
                 (
                     await db.execute(

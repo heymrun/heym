@@ -952,3 +952,29 @@ class TestSyncRecoveredBoardRun(unittest.IsolatedAsyncioTestCase):
         )
         advance.assert_not_awaited()
         spawn.assert_not_called()
+
+
+class TestAutoAdvanceAfterAManualMove(unittest.IsolatedAsyncioTestCase):
+    """A card moved by a person while its chain ran is not advanced from its old column."""
+
+    async def test_a_card_moved_away_stays_where_it_was_put(self) -> None:
+        from app.db.models import BoardCard
+
+        development, backlog = uuid.uuid4(), uuid.uuid4()
+        card = SimpleNamespace(id=uuid.uuid4(), column_id=backlog, run_status="running")
+        session = _FakeSession({(BoardCard.__name__, card.id): card})
+        auto_advance_on = MagicMock()
+        auto_advance_on.scalar_one_or_none.return_value = True
+        session.execute = AsyncMock(return_value=auto_advance_on)
+
+        await board_run_service._auto_advance(
+            card_id=card.id,
+            board_id=uuid.uuid4(),
+            from_column_id=development,
+            session_factory=lambda: session,
+        )
+
+        self.assertEqual(card.column_id, backlog)
+        self.assertEqual(card.run_status, "success")
+        self.assertEqual(session.added, [])
+        session.execute.assert_awaited_once()  # only the auto-advance setting was read
