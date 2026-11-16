@@ -1649,9 +1649,9 @@ def _to_json_compatible(value: object) -> object:
 
 
 def _to_json_compatible_key(key: object) -> object:
-    if isinstance(key, str):
-        return _sanitize_json_string(str(key))
-    return key
+    if isinstance(key, DotBool):
+        return bool(key)
+    return _sanitize_json_string(str(key)) if isinstance(key, str) else key
 
 
 def _sanitize_json_string(value: str) -> str:

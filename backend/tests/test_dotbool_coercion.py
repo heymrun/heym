@@ -65,6 +65,14 @@ class DotBoolCoercionTests(unittest.TestCase):
         )
         self.assertEqual(response.result, [1, 0, 1])
 
+    def test_dotbool_dict_keys_are_json_compatible(self) -> None:
+        from app.services.workflow_executor import _to_json_compatible
+
+        dot_dict = {DotBool(True): "enabled", DotBool(False): "disabled"}
+        converted = _to_json_compatible(dot_dict)
+        self.assertEqual(converted, {True: "enabled", False: "disabled"})
+        self.assertIs(type(list(converted.keys())[0]), bool)
+
 
 if __name__ == "__main__":
     unittest.main()
