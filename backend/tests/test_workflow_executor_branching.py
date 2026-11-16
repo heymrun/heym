@@ -1008,3 +1008,885 @@ class LoopErrorHandleRoutingTests(unittest.TestCase):
 
         self.assertEqual(ran("saveResult"), [urls[0], urls[2]])
         self.assertEqual(ran("logFailure"), [urls[1]])
+
+    def test_continue_on_error_direct_error_handle_both_edge_orders(self) -> None:
+        """Issue #984 Scenario 1: HTTP error directly loops back, HTTP success goes through Set."""
+
+        def make_edge(
+            source: str, target: str, sh: str | None = None, th: str | None = None
+        ) -> dict:
+            row = {"id": f"{source}-{target}-{sh}-{th}", "source": source, "target": target}
+            if sh:
+                row["sourceHandle"] = sh
+            if th:
+                row["targetHandle"] = th
+            return row
+
+        nodes = [
+            {"id": "in", "type": "textInput", "data": {"label": "userInput"}},
+            {
+                "id": "lp",
+                "type": "loop",
+                "data": {"label": "items", "arrayExpression": "$userInput.body.urls"},
+            },
+            {
+                "id": "h",
+                "type": "http",
+                "data": {
+                    "label": "fetch",
+                    "curl": "curl -X GET $items.item",
+                    "onErrorEnabled": True,
+                },
+            },
+            {
+                "id": "ok",
+                "type": "set",
+                "data": {
+                    "label": "saveResult",
+                    "mappings": [{"key": "url", "value": "$items.item"}],
+                },
+            },
+            {"id": "o", "type": "output", "data": {"label": "out", "message": "$items.results"}},
+        ]
+        urls = ["https://example.com", "https://does-not-exist.invalid", "https://example.org"]
+
+        for reverse_edges in (False, True):
+            with self.subTest(reverse_edges=reverse_edges):
+                edges = [
+                    make_edge("in", "lp"),
+                    make_edge("lp", "h", "loop"),
+                    make_edge("h", "ok"),
+                    make_edge("h", "lp", "error", "loop"),
+                    make_edge("ok", "lp", None, "loop"),
+                    make_edge("lp", "o", "done"),
+                ]
+                if reverse_edges:
+                    edges = list(reversed(edges))
+
+                attempts: list[str] = []
+
+                def respond(method: str, url: str, **_: object) -> httpx.Response:
+                    attempts.append(str(url))
+                    if "does-not-exist.invalid" in str(url):
+                        raise httpx.ConnectError("Connection refused")
+                    return httpx.Response(
+                        200, json={"ok": True}, request=httpx.Request(method, url)
+                    )
+
+                with (
+                    patch("app.services.ssrf_guard.guard_http_url"),
+                    patch("app.services.ssrf_guard.get_guarded_http_client") as mock_get_client,
+                ):
+                    mock_get_client.return_value.request.side_effect = respond
+                    result = WorkflowExecutor(nodes=nodes, edges=edges).execute(
+                        workflow_id=uuid.uuid4(),
+                        initial_inputs={"headers": {}, "query": {}, "body": {"urls": urls}},
+                    )
+
+                self.assertEqual(result.status, "success")
+                self.assertEqual(attempts, urls)
+
+                save_ran = [
+                    row["output"]["url"]
+                    for row in result.node_results
+                    if row["node_label"] == "saveResult" and row["status"] == "success"
+                ]
+                self.assertEqual(save_ran, [urls[0], urls[2]])
+
+                loop_done = next(
+                    row["output"]
+                    for row in result.node_results
+                    if row["node_label"] == "items" and row["output"].get("branch") == "done"
+                )
+                self.assertEqual(loop_done["total"], 3)
+                self.assertEqual(len(loop_done["results"]), 3)
+                self.assertEqual(loop_done["results"][0]["url"], urls[0])
+                self.assertTrue(loop_done["results"][1].get("_errorBranch"))
+                self.assertEqual(loop_done["results"][2]["url"], urls[2])
+
+    def test_continue_on_error_direct_success_handle_both_edge_orders(self) -> None:
+        """Issue #984 Scenario 2 (mirrored): HTTP success directly loops back, HTTP error goes through Set."""
+
+        def make_edge(
+            source: str, target: str, sh: str | None = None, th: str | None = None
+        ) -> dict:
+            row = {"id": f"{source}-{target}-{sh}-{th}", "source": source, "target": target}
+            if sh:
+                row["sourceHandle"] = sh
+            if th:
+                row["targetHandle"] = th
+            return row
+
+        nodes = [
+            {"id": "in", "type": "textInput", "data": {"label": "userInput"}},
+            {
+                "id": "lp",
+                "type": "loop",
+                "data": {"label": "items", "arrayExpression": "$userInput.body.urls"},
+            },
+            {
+                "id": "h",
+                "type": "http",
+                "data": {
+                    "label": "fetch",
+                    "curl": "curl -X GET $items.item",
+                    "onErrorEnabled": True,
+                },
+            },
+            {
+                "id": "bad",
+                "type": "set",
+                "data": {
+                    "label": "logFailure",
+                    "mappings": [{"key": "url", "value": "$items.item"}],
+                },
+            },
+            {"id": "o", "type": "output", "data": {"label": "out", "message": "$items.results"}},
+        ]
+        urls = ["https://example.com", "https://does-not-exist.invalid", "https://example.org"]
+
+        for reverse_edges in (False, True):
+            with self.subTest(reverse_edges=reverse_edges):
+                edges = [
+                    make_edge("in", "lp"),
+                    make_edge("lp", "h", "loop"),
+                    make_edge("h", "lp", None, "loop"),
+                    make_edge("h", "bad", "error"),
+                    make_edge("bad", "lp", None, "loop"),
+                    make_edge("lp", "o", "done"),
+                ]
+                if reverse_edges:
+                    edges = list(reversed(edges))
+
+                attempts: list[str] = []
+
+                def respond(method: str, url: str, **_: object) -> httpx.Response:
+                    attempts.append(str(url))
+                    if "does-not-exist.invalid" in str(url):
+                        raise httpx.ConnectError("Connection refused")
+                    return httpx.Response(
+                        200, json={"ok": True}, request=httpx.Request(method, url)
+                    )
+
+                with (
+                    patch("app.services.ssrf_guard.guard_http_url"),
+                    patch("app.services.ssrf_guard.get_guarded_http_client") as mock_get_client,
+                ):
+                    mock_get_client.return_value.request.side_effect = respond
+                    result = WorkflowExecutor(nodes=nodes, edges=edges).execute(
+                        workflow_id=uuid.uuid4(),
+                        initial_inputs={"headers": {}, "query": {}, "body": {"urls": urls}},
+                    )
+
+                self.assertEqual(result.status, "success")
+                self.assertEqual(attempts, urls)
+
+                fail_ran = [
+                    row["output"]["url"]
+                    for row in result.node_results
+                    if row["node_label"] == "logFailure" and row["status"] == "success"
+                ]
+                self.assertEqual(fail_ran, [urls[1]])
+
+                loop_done = next(
+                    row["output"]
+                    for row in result.node_results
+                    if row["node_label"] == "items" and row["output"].get("branch") == "done"
+                )
+                self.assertEqual(loop_done["total"], 3)
+                self.assertEqual(len(loop_done["results"]), 3)
+                self.assertEqual(loop_done["results"][0]["status"], 200)
+                self.assertEqual(loop_done["results"][1]["url"], urls[1])
+                self.assertEqual(loop_done["results"][2]["status"], 200)
+
+    def test_condition_direct_loop_branch_both_edge_orders(self) -> None:
+        """Issue #984 Condition: True directly loops back, False runs Set then loops back."""
+
+        def make_edge(
+            source: str, target: str, sh: str | None = None, th: str | None = None
+        ) -> dict:
+            row = {"id": f"{source}-{target}-{sh}-{th}", "source": source, "target": target}
+            if sh:
+                row["sourceHandle"] = sh
+            if th:
+                row["targetHandle"] = th
+            return row
+
+        nodes = [
+            {"id": "in", "type": "textInput", "data": {"label": "userInput"}},
+            {
+                "id": "lp",
+                "type": "loop",
+                "data": {"label": "items", "arrayExpression": "$userInput.body.numbers"},
+            },
+            {
+                "id": "cond",
+                "type": "condition",
+                "data": {
+                    "label": "isEven",
+                    "condition": "$items.item % 2 == 0",
+                },
+            },
+            {
+                "id": "odd",
+                "type": "set",
+                "data": {
+                    "label": "handleOdd",
+                    "mappings": [{"key": "val", "value": "$items.item"}],
+                },
+            },
+            {"id": "o", "type": "output", "data": {"label": "out", "message": "$items.results"}},
+        ]
+        numbers = [2, 3, 4]
+
+        for reverse_edges in (False, True):
+            with self.subTest(reverse_edges=reverse_edges):
+                edges = [
+                    make_edge("in", "lp"),
+                    make_edge("lp", "cond", "loop"),
+                    make_edge("cond", "lp", "true", "loop"),
+                    make_edge("cond", "odd", "false"),
+                    make_edge("odd", "lp", None, "loop"),
+                    make_edge("lp", "o", "done"),
+                ]
+                if reverse_edges:
+                    edges = list(reversed(edges))
+
+                result = WorkflowExecutor(nodes=nodes, edges=edges).execute(
+                    workflow_id=uuid.uuid4(),
+                    initial_inputs={"headers": {}, "query": {}, "body": {"numbers": numbers}},
+                )
+
+                self.assertEqual(result.status, "success")
+                odd_ran = [
+                    row["output"]["val"]
+                    for row in result.node_results
+                    if row["node_label"] == "handleOdd" and row["status"] == "success"
+                ]
+                self.assertEqual(odd_ran, [3])
+
+                cond_branches = [
+                    row["output"]["branch"]
+                    for row in result.node_results
+                    if row["node_label"] == "isEven" and row["status"] == "success"
+                ]
+                self.assertEqual(cond_branches, ["true", "false", "true"])
+
+                loop_done = next(
+                    row["output"]
+                    for row in result.node_results
+                    if row["node_label"] == "items" and row["output"].get("branch") == "done"
+                )
+                self.assertEqual(loop_done["total"], 3)
+                self.assertEqual(len(loop_done["results"]), 3)
+                self.assertEqual(loop_done["results"][0], {"branch": "true"})
+                self.assertEqual(loop_done["results"][1], {"val": 3})
+                self.assertEqual(loop_done["results"][2], {"branch": "true"})
+
+    def test_switch_direct_loop_branch_both_edge_orders(self) -> None:
+        """Issue #984 Switch: one case directly loops back, default runs Set then loops back."""
+
+        def make_edge(
+            source: str, target: str, sh: str | None = None, th: str | None = None
+        ) -> dict:
+            row = {"id": f"{source}-{target}-{sh}-{th}", "source": source, "target": target}
+            if sh:
+                row["sourceHandle"] = sh
+            if th:
+                row["targetHandle"] = th
+            return row
+
+        nodes = [
+            {"id": "in", "type": "textInput", "data": {"label": "userInput"}},
+            {
+                "id": "lp",
+                "type": "loop",
+                "data": {"label": "items", "arrayExpression": "$userInput.body.letters"},
+            },
+            {
+                "id": "sw",
+                "type": "switch",
+                "data": {
+                    "label": "checkLetter",
+                    "expression": "$items.item",
+                    "cases": ["a"],
+                    "defaultRouting": True,
+                },
+            },
+            {
+                "id": "dflt",
+                "type": "set",
+                "data": {
+                    "label": "handleDefault",
+                    "mappings": [{"key": "val", "value": "$items.item"}],
+                },
+            },
+            {"id": "o", "type": "output", "data": {"label": "out", "message": "$items.results"}},
+        ]
+        letters = ["a", "b", "c"]
+
+        for reverse_edges in (False, True):
+            with self.subTest(reverse_edges=reverse_edges):
+                edges = [
+                    make_edge("in", "lp"),
+                    make_edge("lp", "sw", "loop"),
+                    make_edge("sw", "lp", "case-0", "loop"),
+                    make_edge("sw", "dflt", "default"),
+                    make_edge("dflt", "lp", None, "loop"),
+                    make_edge("lp", "o", "done"),
+                ]
+                if reverse_edges:
+                    edges = list(reversed(edges))
+
+                result = WorkflowExecutor(nodes=nodes, edges=edges).execute(
+                    workflow_id=uuid.uuid4(),
+                    initial_inputs={"headers": {}, "query": {}, "body": {"letters": letters}},
+                )
+
+                self.assertEqual(result.status, "success")
+                dflt_ran = [
+                    row["output"]["val"]
+                    for row in result.node_results
+                    if row["node_label"] == "handleDefault" and row["status"] == "success"
+                ]
+                self.assertEqual(dflt_ran, ["b", "c"])
+
+                sw_branches = [
+                    row["output"]["branch"]
+                    for row in result.node_results
+                    if row["node_label"] == "checkLetter" and row["status"] == "success"
+                ]
+                self.assertEqual(sw_branches, ["case-0", "default", "default"])
+
+                loop_done = next(
+                    row["output"]
+                    for row in result.node_results
+                    if row["node_label"] == "items" and row["output"].get("branch") == "done"
+                )
+                self.assertEqual(loop_done["total"], 3)
+                self.assertEqual(len(loop_done["results"]), 3)
+                self.assertEqual(loop_done["results"][0], {"branch": "case-0", "value": "a"})
+                self.assertEqual(loop_done["results"][1], {"val": "b"})
+                self.assertEqual(loop_done["results"][2], {"val": "c"})
+
+    def test_direct_loop_branch_streaming(self) -> None:
+        """Issue #984: verify streaming execution handles direct loop-back edges correctly for both edge orders."""
+        from app.services.workflow_executor import execute_workflow_streaming
+
+        def make_edge(
+            source: str, target: str, sh: str | None = None, th: str | None = None
+        ) -> dict:
+            row = {"id": f"{source}-{target}-{sh}-{th}", "source": source, "target": target}
+            if sh:
+                row["sourceHandle"] = sh
+            if th:
+                row["targetHandle"] = th
+            return row
+
+        nodes = [
+            {"id": "in", "type": "textInput", "data": {"label": "userInput"}},
+            {
+                "id": "lp",
+                "type": "loop",
+                "data": {"label": "items", "arrayExpression": "$userInput.body.numbers"},
+            },
+            {
+                "id": "cond",
+                "type": "condition",
+                "data": {
+                    "label": "isEven",
+                    "condition": "$items.item % 2 == 0",
+                },
+            },
+            {
+                "id": "odd",
+                "type": "set",
+                "data": {
+                    "label": "handleOdd",
+                    "mappings": [{"key": "val", "value": "$items.item"}],
+                },
+            },
+            {"id": "o", "type": "output", "data": {"label": "out", "message": "$items.results"}},
+        ]
+        numbers = [2, 3, 4]
+
+        for reverse_edges in (False, True):
+            with self.subTest(reverse_edges=reverse_edges):
+                edges = [
+                    make_edge("in", "lp"),
+                    make_edge("lp", "cond", "loop"),
+                    make_edge("cond", "lp", "true", "loop"),
+                    make_edge("cond", "odd", "false"),
+                    make_edge("odd", "lp", None, "loop"),
+                    make_edge("lp", "o", "done"),
+                ]
+                if reverse_edges:
+                    edges = list(reversed(edges))
+
+                events = list(
+                    execute_workflow_streaming(
+                        workflow_id=uuid.uuid4(),
+                        nodes=nodes,
+                        edges=edges,
+                        inputs={"headers": {}, "query": {}, "body": {"numbers": numbers}},
+                    )
+                )
+
+                odd_completed = [
+                    (event.get("output") or {}).get("val")
+                    for event in events
+                    if event.get("type") == "node_complete"
+                    and event.get("node_label") == "handleOdd"
+                    and event.get("status") == "success"
+                ]
+                self.assertEqual(odd_completed, [3])
+
+                loop_completed = [
+                    event.get("output")
+                    for event in events
+                    if event.get("type") == "node_complete"
+                    and event.get("node_label") == "items"
+                    and (event.get("output") or {}).get("branch") == "done"
+                ]
+                self.assertEqual(len(loop_completed), 1)
+                self.assertEqual(loop_completed[0]["total"], 3)
+                self.assertEqual(len(loop_completed[0]["results"]), 3)
+
+    def test_continue_on_error_direct_branch_streaming(self) -> None:
+        """Issue #984: streaming execution handles continue-on-error direct loop-back in both edge orders."""
+        from app.services.workflow_executor import execute_workflow_streaming
+
+        def make_edge(
+            source: str, target: str, sh: str | None = None, th: str | None = None
+        ) -> dict:
+            row = {"id": f"{source}-{target}-{sh}-{th}", "source": source, "target": target}
+            if sh:
+                row["sourceHandle"] = sh
+            if th:
+                row["targetHandle"] = th
+            return row
+
+        nodes = [
+            {"id": "in", "type": "textInput", "data": {"label": "userInput"}},
+            {
+                "id": "lp",
+                "type": "loop",
+                "data": {"label": "items", "arrayExpression": "$userInput.body.urls"},
+            },
+            {
+                "id": "h",
+                "type": "http",
+                "data": {
+                    "label": "fetch",
+                    "curl": "curl -X GET $items.item",
+                    "onErrorEnabled": True,
+                },
+            },
+            {
+                "id": "ok",
+                "type": "set",
+                "data": {
+                    "label": "saveResult",
+                    "mappings": [{"key": "url", "value": "$items.item"}],
+                },
+            },
+            {"id": "o", "type": "output", "data": {"label": "out", "message": "$items.results"}},
+        ]
+        urls = ["https://example.com", "https://does-not-exist.invalid", "https://example.org"]
+
+        for reverse_edges in (False, True):
+            with self.subTest(reverse_edges=reverse_edges):
+                edges = [
+                    make_edge("in", "lp"),
+                    make_edge("lp", "h", "loop"),
+                    make_edge("h", "ok"),
+                    make_edge("h", "lp", "error", "loop"),
+                    make_edge("ok", "lp", None, "loop"),
+                    make_edge("lp", "o", "done"),
+                ]
+                if reverse_edges:
+                    edges = list(reversed(edges))
+
+                attempts: list[str] = []
+
+                def respond(method: str, url: str, **_: object) -> httpx.Response:
+                    attempts.append(str(url))
+                    if "does-not-exist.invalid" in str(url):
+                        raise httpx.ConnectError("Connection refused")
+                    return httpx.Response(
+                        200, json={"ok": True}, request=httpx.Request(method, url)
+                    )
+
+                with (
+                    patch("app.services.ssrf_guard.guard_http_url"),
+                    patch("app.services.ssrf_guard.get_guarded_http_client") as mock_get_client,
+                ):
+                    mock_get_client.return_value.request.side_effect = respond
+                    events = list(
+                        execute_workflow_streaming(
+                            workflow_id=uuid.uuid4(),
+                            nodes=nodes,
+                            edges=edges,
+                            inputs={"headers": {}, "query": {}, "body": {"urls": urls}},
+                        )
+                    )
+
+                self.assertEqual(attempts, urls)
+                save_completed = [
+                    (event.get("output") or {}).get("url")
+                    for event in events
+                    if event.get("type") == "node_complete"
+                    and event.get("node_label") == "saveResult"
+                    and event.get("status") == "success"
+                ]
+                self.assertEqual(save_completed, [urls[0], urls[2]])
+
+                loop_completed = [
+                    event.get("output")
+                    for event in events
+                    if event.get("type") == "node_complete"
+                    and event.get("node_label") == "items"
+                    and (event.get("output") or {}).get("branch") == "done"
+                ]
+                self.assertEqual(len(loop_completed), 1)
+                self.assertEqual(loop_completed[0]["total"], 3)
+                self.assertEqual(len(loop_completed[0]["results"]), 3)
+
+    def test_background_continuation_direct_loop_branch_both_edge_orders(self) -> None:
+        """Issue #984: background continuation (allowDownstream: True) with direct loop branch."""
+
+        def make_edge(
+            source: str, target: str, sh: str | None = None, th: str | None = None
+        ) -> dict:
+            row = {"id": f"{source}-{target}-{sh}-{th}", "source": source, "target": target}
+            if sh:
+                row["sourceHandle"] = sh
+            if th:
+                row["targetHandle"] = th
+            return row
+
+        nodes = [
+            {"id": "in", "type": "textInput", "data": {"label": "userInput"}},
+            {
+                "id": "earlyOut",
+                "type": "output",
+                "data": {
+                    "label": "earlyOutput",
+                    "message": "started",
+                    "allowDownstream": True,
+                },
+            },
+            {
+                "id": "lp",
+                "type": "loop",
+                "data": {"label": "items", "arrayExpression": "$userInput.body.numbers"},
+            },
+            {
+                "id": "cond",
+                "type": "condition",
+                "data": {"label": "isEven", "condition": "$items.item % 2 == 0"},
+            },
+            {
+                "id": "odd",
+                "type": "set",
+                "data": {
+                    "label": "handleOdd",
+                    "mappings": [{"key": "val", "value": "$items.item"}],
+                },
+            },
+            {
+                "id": "o",
+                "type": "output",
+                "data": {"label": "finalOut", "message": "$items.results"},
+            },
+        ]
+        numbers = [2, 3, 4]
+
+        for reverse_edges in (False, True):
+            with self.subTest(reverse_edges=reverse_edges):
+                edges = [
+                    make_edge("in", "earlyOut"),
+                    make_edge("earlyOut", "lp"),
+                    make_edge("lp", "cond", "loop"),
+                    make_edge("cond", "lp", "true", "loop"),
+                    make_edge("cond", "odd", "false"),
+                    make_edge("odd", "lp", None, "loop"),
+                    make_edge("lp", "o", "done"),
+                ]
+                if reverse_edges:
+                    edges = list(reversed(edges))
+
+                executor = WorkflowExecutor(nodes=nodes, edges=edges)
+                result = executor.execute(
+                    workflow_id=uuid.uuid4(),
+                    initial_inputs={"headers": {}, "query": {}, "body": {"numbers": numbers}},
+                )
+
+                self.assertEqual(result.status, "success")
+                self.assertIn("earlyOutput", result.outputs)
+                self.assertTrue(result.allow_downstream_pending)
+                result.join_allow_downstream()
+
+                odd_ran = [
+                    r.output["val"]
+                    for r in result._allow_downstream_node_results
+                    if r.node_label == "handleOdd" and r.status == "success"
+                ]
+                self.assertEqual(odd_ran, [3])
+
+                loop_done = next(
+                    r.output
+                    for r in result._allow_downstream_node_results
+                    if r.node_label == "items" and r.output.get("branch") == "done"
+                )
+                self.assertEqual(loop_done["total"], 3)
+                self.assertEqual(len(loop_done["results"]), 3)
+                self.assertEqual(loop_done["results"][0], {"branch": "true"})
+                self.assertEqual(loop_done["results"][1], {"val": 3})
+                self.assertEqual(loop_done["results"][2], {"branch": "true"})
+
+    def test_background_continuation_continue_on_error_both_edge_orders(self) -> None:
+        """Issue #984: background continuation (allowDownstream: True) with continue-on-error direct loop branch."""
+
+        def make_edge(
+            source: str, target: str, sh: str | None = None, th: str | None = None
+        ) -> dict:
+            row = {"id": f"{source}-{target}-{sh}-{th}", "source": source, "target": target}
+            if sh:
+                row["sourceHandle"] = sh
+            if th:
+                row["targetHandle"] = th
+            return row
+
+        nodes = [
+            {"id": "in", "type": "textInput", "data": {"label": "userInput"}},
+            {
+                "id": "earlyOut",
+                "type": "output",
+                "data": {
+                    "label": "earlyOutput",
+                    "message": "started",
+                    "allowDownstream": True,
+                },
+            },
+            {
+                "id": "lp",
+                "type": "loop",
+                "data": {"label": "items", "arrayExpression": "$userInput.body.urls"},
+            },
+            {
+                "id": "h",
+                "type": "http",
+                "data": {
+                    "label": "fetch",
+                    "curl": "curl -X GET $items.item",
+                    "onErrorEnabled": True,
+                },
+            },
+            {
+                "id": "ok",
+                "type": "set",
+                "data": {
+                    "label": "saveResult",
+                    "mappings": [{"key": "url", "value": "$items.item"}],
+                },
+            },
+            {
+                "id": "o",
+                "type": "output",
+                "data": {"label": "finalOut", "message": "$items.results"},
+            },
+        ]
+        urls = ["https://example.com", "https://does-not-exist.invalid", "https://example.org"]
+
+        for reverse_edges in (False, True):
+            with self.subTest(reverse_edges=reverse_edges):
+                edges = [
+                    make_edge("in", "earlyOut"),
+                    make_edge("earlyOut", "lp"),
+                    make_edge("lp", "h", "loop"),
+                    make_edge("h", "ok"),
+                    make_edge("h", "lp", "error", "loop"),
+                    make_edge("ok", "lp", None, "loop"),
+                    make_edge("lp", "o", "done"),
+                ]
+                if reverse_edges:
+                    edges = list(reversed(edges))
+
+                attempts: list[str] = []
+
+                def respond(method: str, url: str, **_: object) -> httpx.Response:
+                    attempts.append(str(url))
+                    if "does-not-exist.invalid" in str(url):
+                        raise httpx.ConnectError("Connection refused")
+                    return httpx.Response(
+                        200, json={"ok": True}, request=httpx.Request(method, url)
+                    )
+
+                with (
+                    patch("app.services.ssrf_guard.guard_http_url"),
+                    patch("app.services.ssrf_guard.get_guarded_http_client") as mock_get_client,
+                ):
+                    mock_get_client.return_value.request.side_effect = respond
+                    executor = WorkflowExecutor(nodes=nodes, edges=edges)
+                    result = executor.execute(
+                        workflow_id=uuid.uuid4(),
+                        initial_inputs={"headers": {}, "query": {}, "body": {"urls": urls}},
+                    )
+                    self.assertEqual(result.status, "success")
+                    self.assertIn("earlyOutput", result.outputs)
+                    self.assertTrue(result.allow_downstream_pending)
+                    result.join_allow_downstream()
+
+                self.assertEqual(attempts, urls)
+                save_ran = [
+                    r.output["url"]
+                    for r in result._allow_downstream_node_results
+                    if r.node_label == "saveResult" and r.status == "success"
+                ]
+                self.assertEqual(save_ran, [urls[0], urls[2]])
+
+                loop_done = next(
+                    r.output
+                    for r in result._allow_downstream_node_results
+                    if r.node_label == "items" and r.output.get("branch") == "done"
+                )
+                self.assertEqual(loop_done["total"], 3)
+                self.assertEqual(len(loop_done["results"]), 3)
+
+    def test_resumed_background_continuation_direct_loop_branch_both_edge_orders(self) -> None:
+        """Issue #984: resumed execution background continuation (allowDownstream: True) with direct loop branch."""
+        from app.services.workflow_executor import resume_workflow_execution
+
+        def make_edge(
+            source: str, target: str, sh: str | None = None, th: str | None = None
+        ) -> dict:
+            row = {"id": f"{source}-{target}-{sh}-{th}", "source": source, "target": target}
+            if sh:
+                row["sourceHandle"] = sh
+            if th:
+                row["targetHandle"] = th
+            return row
+
+        nodes = [
+            {
+                "id": "ag",
+                "type": "agent",
+                "data": {"label": "agent"},
+            },
+            {
+                "id": "earlyOut",
+                "type": "output",
+                "data": {
+                    "label": "earlyOutput",
+                    "message": "resumed",
+                    "allowDownstream": True,
+                },
+            },
+            {
+                "id": "lp",
+                "type": "loop",
+                "data": {"label": "items", "arrayExpression": "$agent.numbers"},
+            },
+            {
+                "id": "cond",
+                "type": "condition",
+                "data": {"label": "isEven", "condition": "$items.item % 2 == 0"},
+            },
+            {
+                "id": "odd",
+                "type": "set",
+                "data": {
+                    "label": "handleOdd",
+                    "mappings": [{"key": "val", "value": "$items.item"}],
+                },
+            },
+            {
+                "id": "o",
+                "type": "output",
+                "data": {"label": "finalOut", "message": "$items.results"},
+            },
+        ]
+        numbers = [2, 3, 4]
+
+        for reverse_edges in (False, True):
+            with self.subTest(reverse_edges=reverse_edges):
+                edges = [
+                    make_edge("ag", "earlyOut"),
+                    make_edge("ag", "lp"),
+                    make_edge("earlyOut", "lp"),
+                    make_edge("lp", "cond", "loop"),
+                    make_edge("cond", "lp", "true", "loop"),
+                    make_edge("cond", "odd", "false"),
+                    make_edge("odd", "lp", None, "loop"),
+                    make_edge("lp", "o", "done"),
+                ]
+                if reverse_edges:
+                    edges = list(reversed(edges))
+
+                snapshot = {
+                    "workflow_id": str(uuid.uuid4()),
+                    "nodes": nodes,
+                    "edges": edges,
+                    "workflow_cache": {},
+                    "initial_inputs": {},
+                    "node_results": [
+                        {
+                            "node_id": "ag",
+                            "node_label": "agent",
+                            "node_type": "agent",
+                            "status": "pending",
+                            "output": {"summary": "paused"},
+                            "execution_time_ms": 100.0,
+                            "error": None,
+                            "metadata": {"sequence": 1},
+                        }
+                    ],
+                    "node_outputs": {},
+                    "node_execution_contexts": {},
+                    "label_to_output": {},
+                    "skipped_nodes": [],
+                    "inactive_nodes": [],
+                    "loop_states": {},
+                    "vars": {},
+                    "sub_workflow_executions": [],
+                    "completed_nodes": [],
+                    "pending_count": {
+                        "earlyOut": 1,
+                        "lp": 2,
+                        "cond": 1,
+                        "odd": 1,
+                        "o": 1,
+                    },
+                    "paused_node_id": "ag",
+                    "paused_node_label": "agent",
+                    "hitl_resume_mode": "inject_output",
+                }
+
+                result = resume_workflow_execution(
+                    snapshot=snapshot,
+                    resolved_output={"decision": "accepted", "numbers": numbers},
+                )
+
+                self.assertEqual(result.status, "success")
+                self.assertIn("earlyOutput", result.outputs)
+                self.assertTrue(result.allow_downstream_pending)
+                result.join_allow_downstream()
+
+                odd_ran = [
+                    r.output["val"]
+                    for r in result._allow_downstream_node_results
+                    if r.node_label == "handleOdd" and r.status == "success"
+                ]
+                self.assertEqual(odd_ran, [3])
+
+                loop_done = next(
+                    r.output
+                    for r in result._allow_downstream_node_results
+                    if r.node_label == "items" and r.output.get("branch") == "done"
+                )
+                self.assertEqual(loop_done["total"], 3)
+                self.assertEqual(len(loop_done["results"]), 3)
+                self.assertEqual(loop_done["results"][0], {"branch": "true"})
+                self.assertEqual(loop_done["results"][1], {"val": 3})
+                self.assertEqual(loop_done["results"][2], {"branch": "true"})
