@@ -58,7 +58,7 @@ Creating an alert walks through five steps.
 
 The Review step answers the question that actually matters before you save: *over the last 24 hours, how often would this have fired?*
 
-It reports the firing count and the highest observed value against your threshold. If it says the condition would have fired 400 times, you fix the threshold before saving instead of after being paged. You can widen the lookback to 3 or 7 days.
+It reports the firing count and the highest observed value against your threshold. With the default re-notify setting, an incident that spans several windows counts once, because the alert fires when the metric crosses the threshold and waits for it to recover before firing again. With a cooldown, it counts again every cooldown period while the breach lasts. If it says the condition would have fired 400 times, you fix the threshold before saving instead of after being paged. You can widen the lookback to 3 or 7 days.
 
 ## AI Drafting
 

@@ -92,6 +92,9 @@ async function runBacktest(): Promise<void> {
       workflow_id: props.workflowId,
       config: props.config,
       lookback_hours: Number(lookbackHours.value),
+      renotify_mode: props.renotifyMode,
+      // The same default the wizard saves with.
+      cooldown_minutes: props.renotifyMode === "cooldown" ? (props.cooldownMinutes ?? 60) : null,
     });
   } catch (err: unknown) {
     previewError.value = err instanceof Error ? err.message : "Could not run the backtest";

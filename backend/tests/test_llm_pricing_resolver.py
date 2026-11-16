@@ -28,12 +28,14 @@ def _override(
     inp: float = 0.5,
     out: float = 1.0,
     provider: str | None = None,
+    base_pricing_id: uuid.UUID | None = None,
 ) -> _Row:
     return _Row(
         provider=provider,
         model=model,
         input_per_1m_usd=Decimal(str(inp)),
         output_per_1m_usd=Decimal(str(out)),
+        base_pricing_id=base_pricing_id,
     )
 
 
@@ -128,3 +130,57 @@ class ResolverTests(unittest.IsolatedAsyncioTestCase):
         )
         out = await resolve_costs_for_user(db, self.user_id, [("gpt-4o", 1_000_000, 0)])
         self.assertEqual(out, [(Decimal("1"), True)])
+
+
+class EditedRuleTests(unittest.IsolatedAsyncioTestCase):
+    """A price set in the pricing table applies to every model that row covers."""
+
+    def setUp(self) -> None:
+        self.user_id = uuid.uuid4()
+
+    async def _cost(self, model: str, globals_=(), overrides=()) -> object:
+        db = ResolverTests._db_with(self, globals_=globals_, overrides=overrides)
+        return (await resolve_costs_for_user(db, self.user_id, [(model, 1_000_000, 0)]))[0]
+
+    async def test_an_edited_includes_row_applies_to_a_dated_model_name(self) -> None:
+        cost = await self._cost(
+            "claude-3-opus-20240229",
+            globals_=[_global("claude-3-opus", op="includes", inp=15)],
+            overrides=[_override("claude-3-opus", inp=1, base_pricing_id=uuid.uuid4())],
+        )
+        self.assertEqual(cost, (Decimal("1"), True))
+
+    async def test_an_edited_starts_with_row_applies_to_a_longer_name(self) -> None:
+        cost = await self._cost(
+            "gpt-4o-2024-08-06",
+            globals_=[_global("gpt-4o", op="startsWith", inp=5)],
+            overrides=[_override("gpt-4o", inp=2, base_pricing_id=uuid.uuid4())],
+        )
+        self.assertEqual(cost, (Decimal("2"), True))
+
+    async def test_an_unedited_rule_keeps_its_price(self) -> None:
+        cost = await self._cost(
+            "claude-3-opus-20240229",
+            globals_=[_global("claude-3-opus", op="includes", inp=15)],
+            overrides=[_override("gpt-4o", inp=2, base_pricing_id=uuid.uuid4())],
+        )
+        self.assertEqual(cost, (Decimal("15"), True))
+
+    async def test_an_exact_custom_row_still_beats_an_edited_rule(self) -> None:
+        cost = await self._cost(
+            "claude-3-opus-20240229",
+            globals_=[_global("claude-3-opus", op="includes", inp=15)],
+            overrides=[
+                _override("claude-3-opus", inp=1, base_pricing_id=uuid.uuid4()),
+                _override("claude-3-opus-20240229", inp=7),
+            ],
+        )
+        self.assertEqual(cost, (Decimal("7"), True))
+
+    async def test_a_provider_model_custom_row_prices_the_full_name(self) -> None:
+        cost = await self._cost(
+            "anthropic/claude-3-5-sonnet",
+            globals_=[_global("anthropic/claude-3-5-sonnet", inp=3)],
+            overrides=[_override("claude-3-5-sonnet", inp=1, provider="anthropic")],
+        )
+        self.assertEqual(cost, (Decimal("1"), True))

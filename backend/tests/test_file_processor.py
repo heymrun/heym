@@ -149,6 +149,24 @@ class ChunkTextTests(unittest.TestCase):
             self.assertEqual(chunk.metadata["page"], 1)
             self.assertEqual(chunk.metadata["chunk_index"], i)
 
+    def test_text_without_spaces_is_cut_at_the_chunk_size(self) -> None:
+        text = "検索拡張生成の文書です。" * 250  # 3000 characters, no spaces
+        chunks = FileProcessor(chunk_size=1000)._chunk_text(text, {})
+
+        self.assertEqual([len(c.text) for c in chunks], [1000, 1000, 1000])
+        self.assertEqual("".join(c.text for c in chunks), text)
+
+    def test_a_long_token_between_words_gets_chunks_of_its_own(self) -> None:
+        blob = "A" * 45
+        chunks = FileProcessor(chunk_size=20)._chunk_text(f"before {blob} after", {})
+
+        self.assertEqual([c.text for c in chunks], ["before", "A" * 20, "A" * 20, "AAAAA after"])
+
+    def test_a_word_of_exactly_the_chunk_size_is_not_cut(self) -> None:
+        chunks = FileProcessor(chunk_size=20)._chunk_text("B" * 20, {})
+
+        self.assertEqual([c.text for c in chunks], ["B" * 20])
+
 
 class AddContextOverlapTests(unittest.TestCase):
     def test_zero_or_one_chunks_are_returned_unchanged(self) -> None:

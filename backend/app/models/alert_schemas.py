@@ -219,6 +219,9 @@ class AlertPreviewRequest(BaseModel):
     workflow_id: uuid.UUID | None = None
     config: dict[str, Any]
     lookback_hours: int = Field(default=24, ge=1, le=168)
+    # How the alert re-notifies decides how often a long breach fires.
+    renotify_mode: RenotifyMode = "on_recovery"
+    cooldown_minutes: int | None = Field(default=None, ge=1)
 
     @model_validator(mode="after")
     def _validate(self) -> AlertPreviewRequest:

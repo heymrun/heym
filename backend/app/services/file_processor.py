@@ -534,7 +534,14 @@ class FileProcessor:
         if not text.strip():
             return []
 
-        words = text.split()
+        # A "word" longer than a chunk (text without spaces such as Chinese or Japanese, a
+        # long URL, base64) is cut into chunk-sized pieces; otherwise it is one oversized chunk.
+        size = max(self.chunk_size, 1)
+        words = [
+            word[start : start + size]
+            for word in text.split()
+            for start in range(0, len(word), size)
+        ]
         chunks = []
         current_chunk_words = []
         current_length = 0

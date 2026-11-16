@@ -1,7 +1,8 @@
 import json
 import uuid
+from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import Row, text
 
 from app.services.embedding import EMBEDDING_DIMENSIONS, EmbeddingConfig, EmbeddingService
 from app.services.vector_store import (
@@ -455,14 +456,25 @@ class PgVectorStoreService:
     ) -> tuple[list[VectorStoreSourceGroup], int]:
         if not self._table_exists():
             return [], 0
+        # ``limit`` is a page size, as in the Qdrant backend: every chunk is listed, so the
+        # totals and per-file counts match the store. Keyset pages keep each query bounded.
+        page_size = max(1, min(limit, 1000))
+        rows: list[Row[Any]] = []
+        last_id: uuid.UUID | None = None
         with self.engine.connect() as conn:
-            rows = conn.execute(
-                text(
-                    "SELECT id, text, metadata, source, file_size "
-                    f"FROM {TABLE} WHERE collection_name = :c LIMIT :k"
-                ),
-                {"c": collection_name, "k": limit},
-            ).fetchall()
+            while True:
+                after = "" if last_id is None else " AND id > :after"
+                page = conn.execute(
+                    text(
+                        "SELECT id, text, metadata, source, file_size "
+                        f"FROM {TABLE} WHERE collection_name = :c{after} ORDER BY id LIMIT :k"
+                    ),
+                    {"c": collection_name, "k": page_size, "after": last_id},
+                ).fetchall()
+                rows.extend(page)
+                if len(page) < page_size:
+                    break
+                last_id = page[-1].id
 
         source_groups: dict[str, VectorStoreSourceGroup] = {}
         total_items = 0

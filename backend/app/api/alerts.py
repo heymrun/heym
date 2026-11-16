@@ -54,7 +54,7 @@ from app.services.alert_access import (
     get_owned_alert,
 )
 from app.services.alerts.context import AlertEvaluationContext, AlertObservation
-from app.services.alerts.evaluator import observe
+from app.services.alerts.evaluator import count_firings, observe
 from app.services.alerts.registry import get_alert_handler
 from app.services.audit_log import audit
 from app.services.llm_trace import LLMTraceContext, record_llm_trace
@@ -428,7 +428,9 @@ async def preview_alert(
     step_minutes = max(config.window_minutes, total_minutes // MAX_BACKTEST_STEPS or 1)
     steps = max(1, min(MAX_BACKTEST_STEPS, total_minutes // step_minutes))
 
-    fire_count = 0
+    # Count firings the way should_fire gates them, not breached windows: under the default
+    # on_recovery mode a 3-hour incident in 15-minute windows pages once, not 12 times.
+    breached_newest_first: list[bool] = []
     max_observed = float(current.observed_value or 0.0)
     for index in range(steps):
         step_end = now - timedelta(minutes=step_minutes * index)
@@ -443,8 +445,13 @@ async def preview_alert(
         )
         if observation.observed_value is not None:
             max_observed = max(max_observed, float(observation.observed_value))
-        if observation.breached:
-            fire_count += 1
+        breached_newest_first.append(observation.breached)
+    fire_count = count_firings(
+        breached_newest_first[::-1],
+        step_minutes=step_minutes,
+        renotify_mode=payload.renotify_mode,
+        cooldown_minutes=payload.cooldown_minutes,
+    )
 
     return AlertPreviewResponse(
         observed_value=float(current.observed_value or 0.0),

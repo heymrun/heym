@@ -89,5 +89,66 @@ class TestPgVectorBackendUnavailable(unittest.TestCase):
         self.assertFalse(svc.collection_exists("col"))
 
 
+class TestPgVectorListItemsPaging(unittest.TestCase):
+    """The item browser lists every chunk; ``limit`` is a page size, as with Qdrant."""
+
+    def _service(self, chunks: list[tuple[str, str]]):
+        from types import SimpleNamespace
+
+        from app.services.vector_store_pg import PgVectorStoreService
+
+        rows = sorted(
+            (
+                SimpleNamespace(
+                    id=f"{i:08d}", text=f"chunk {i}", metadata={}, source=src, file_size=1
+                )
+                for i, (src, _name) in enumerate(chunks)
+            ),
+            key=lambda row: row.id,
+        )
+        queries: list[dict] = []
+        engine = MagicMock()
+        conn = engine.connect.return_value.__enter__.return_value
+
+        def execute(statement, params=None):  # noqa: ANN001, ANN202
+            if params is None:  # the table-exists probe
+                return MagicMock(scalar=MagicMock(return_value=True))
+            queries.append(dict(params))
+            sql = str(statement)
+            after = params.get("after")
+            page = [r for r in rows if after is None or r.id > after]
+            self.assertIn("ORDER BY id", sql)
+            result = MagicMock()
+            result.fetchall.return_value = page[: params["k"]]
+            return result
+
+        conn.execute.side_effect = execute
+        conn.exec_driver_sql.return_value.scalar.return_value = True
+        with patch("app.services.vector_store_pg.EmbeddingService"):
+            svc = PgVectorStoreService("sk-test", engine=engine)
+        return svc, queries
+
+    def test_every_chunk_past_the_limit_is_listed(self) -> None:
+        chunks = [("a.pdf", "")] * 1000 + [("b.pdf", "")] * 500 + [("c.pdf", "")] * 200
+        svc, queries = self._service(chunks)
+
+        groups, total = svc.list_items("col", limit=1000)
+
+        self.assertEqual(total, 1700)
+        self.assertEqual(
+            [(g.source, g.chunk_count) for g in groups],
+            [("a.pdf", 1000), ("b.pdf", 500), ("c.pdf", 200)],
+        )
+        self.assertEqual(len(queries), 2)
+
+    def test_a_small_store_is_read_in_one_query(self) -> None:
+        svc, queries = self._service([("a.pdf", "")] * 3)
+
+        groups, total = svc.list_items("col", limit=1000)
+
+        self.assertEqual((total, len(queries)), (3, 1))
+        self.assertEqual(groups[0].chunk_count, 3)
+
+
 if __name__ == "__main__":
     unittest.main()
