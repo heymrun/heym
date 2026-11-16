@@ -335,6 +335,44 @@ class TestPreview(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(response.would_fire_now)
         self.assertEqual(response.lookback_hours, 3)
 
+    async def _fire_count(self, breached_newest_first: list[bool]) -> int:
+        workflow_id = uuid.uuid4()
+        payload = AlertPreviewRequest(
+            alert_type="error_threshold",
+            scope="workflow",
+            workflow_id=workflow_id,
+            config={"window_minutes": 60, "threshold_count": 5},
+            lookback_hours=len(breached_newest_first),
+        )
+        current = SimpleNamespace(
+            observed_value=0.0, threshold_value=5.0, breached=False, context={}
+        )
+        steps = [
+            SimpleNamespace(
+                observed_value=9.0 if b else 1.0, threshold_value=5.0, breached=b, context={}
+            )
+            for b in breached_newest_first
+        ]
+        with patch(
+            f"{MODULE}.get_accessible_workflow_ids", new=AsyncMock(return_value=[workflow_id])
+        ):
+            with patch(f"{MODULE}.observe_config", new=AsyncMock(side_effect=[current, *steps])):
+                response = await alerts_api.preview_alert(
+                    payload, db=_empty_db(), current_user=_user()
+                )
+        return response.backtest_fire_count
+
+    async def test_one_continuous_incident_fires_once(self):
+        """on_recovery fires when the threshold is crossed, not in every breached window."""
+        self.assertEqual(await self._fire_count([False, True, True, True, True, False]), 1)
+
+    async def test_each_separate_incident_fires(self):
+        self.assertEqual(await self._fire_count([True, True, False, True, True, False]), 2)
+
+    async def test_a_breach_since_the_start_of_the_lookback_fires_once(self):
+        self.assertEqual(await self._fire_count([False, False, True, True]), 1)
+        self.assertEqual(await self._fire_count([False, False, False]), 0)
+
     async def test_preview_rejects_an_inaccessible_workflow(self):
         payload = AlertPreviewRequest(
             alert_type="error_threshold",
