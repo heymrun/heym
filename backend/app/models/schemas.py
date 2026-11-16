@@ -959,7 +959,8 @@ class GlobalVariableUpdate(BaseModel):
 class GlobalVariableResponse(BaseModel):
     id: uuid.UUID
     name: str
-    value: str | int | float | bool | list | dict
+    # null when a global Variable node's expression found nothing.
+    value: str | int | float | bool | list | dict | None
     value_type: str
     created_at: datetime
     updated_at: datetime
@@ -971,7 +972,8 @@ class GlobalVariableResponse(BaseModel):
 class GlobalVariableListResponse(BaseModel):
     id: uuid.UUID
     name: str
-    value: str | int | float | bool | list | dict
+    # null when a global Variable node's expression found nothing.
+    value: str | int | float | bool | list | dict | None
     value_type: str
     created_at: datetime
     updated_at: datetime
