@@ -104,10 +104,10 @@ def _scrubbed_playwright_subprocess_env() -> dict[str, str]:
     return env
 
 
-# Step string fields the generator compiles into the script. A whole-field reference
-# (the field is one ``$`` expression, as the executor classifies it) stays a lookup
-# against ``inputs``. Any other template is resolved here, before code generation, and
-# then written once as a literal.
+# Step string fields the generator compiles into the script. Every template in them is
+# resolved here, before code generation, with the executor's rules, and then written once
+# as a literal. A whole-field reference that resolves to nothing is left blank, so the
+# generator applies its own default as before.
 _STEP_RUNTIME_LOOKUP_FIELDS = (
     "url",
     "selector",
@@ -141,14 +141,20 @@ def _resolve_step_templates(
         resolved = dict(step)
         for field in _STEP_RUNTIME_LOOKUP_FIELDS:
             value = resolved.get(field)
-            if (
-                isinstance(value, str)
-                and "$" in value
-                and not executor._is_single_dollar_expression(value)
+            if not isinstance(value, str) or "$" not in value:
+                continue
+            # A whole-field reference used to stay a lookup in the generated script, which
+            # only follows plain keys of the direct parents' outputs: it missed `$input`,
+            # nodes further up, indexes and methods, and fell back to the placeholder.
+            if executor._is_single_dollar_expression(value) and (
+                executor.resolve_expression(value.strip(), inputs, node_id, preserve_type=True)
+                is None
             ):
-                resolved[field] = ResolvedStepValue(
-                    executor.evaluate_message_template(value, inputs, node_id)
-                )
+                resolved[field] = ResolvedStepValue("")
+                continue
+            resolved[field] = ResolvedStepValue(
+                executor.evaluate_message_template(value, inputs, node_id)
+            )
         for field in _STEP_LITERAL_FIELDS:
             value = resolved.get(field)
             if isinstance(value, str) and "$" in value:
