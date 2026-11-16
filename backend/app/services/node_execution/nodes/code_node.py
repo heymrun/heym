@@ -20,7 +20,15 @@ def _resolve_value(ctx: NodeExecutionContext, value: object) -> object:
     # stays a list and a number stays a number instead of being stringified.
     trimmed = value.strip()
     if ctx.executor._is_single_dollar_expression(trimmed):
-        return ctx.executor.resolve_expression(trimmed, ctx.inputs, ctx.node_id, preserve_type=True)
+        resolved = ctx.executor.resolve_expression(
+            trimmed, ctx.inputs, ctx.node_id, preserve_type=True
+        )
+        if (
+            resolved is not None
+            or " " not in trimmed
+            or ctx.executor._is_top_level_ternary_expression(trimmed)
+        ):
+            return resolved
     return ctx.executor.evaluate_message_template(value, ctx.inputs, ctx.node_id)
 
 
