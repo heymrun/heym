@@ -7665,8 +7665,9 @@ class WorkflowExecutor(WorkflowBranchRoutingMixin):
                 )
             ready_targets: list[str] = []
             outgoing_edges = self._order_downstream_edges(
-                [edge for edge in active_edges if edge["source"] == source_node_id]
-            , source_result)
+                [edge for edge in active_edges if edge["source"] == source_node_id],
+                source_result,
+            )
             for edge in outgoing_edges:
                 if self._source_handle_is_skipped(edge, skip_source_handles):
                     continue
@@ -7838,8 +7839,9 @@ class WorkflowExecutor(WorkflowBranchRoutingMixin):
                                                 pending_count=pending_count,
                                             )
                                         outgoing_edges = self._order_downstream_edges(
-                                            [edge for edge in active_edges if edge["source"] == nid]
-                                        , res)
+                                            [edge for edge in active_edges if edge["source"] == nid],
+                                            res,
+                                        )
                                         for edge in outgoing_edges:
                                             if self._source_handle_is_skipped(
                                                 edge, skip_source_handles
@@ -8435,8 +8437,9 @@ def resume_workflow_execution(
             )
         ready_targets: list[str] = []
         outgoing_edges = wf_executor._order_downstream_edges(
-            [edge for edge in active_edges if edge["source"] == source_node_id]
-        , source_result)
+            [edge for edge in active_edges if edge["source"] == source_node_id],
+            source_result,
+        )
         for edge in outgoing_edges:
             if wf_executor._source_handle_is_skipped(edge, skip_source_handles):
                 continue
@@ -8591,8 +8594,9 @@ def resume_workflow_execution(
                                             pending_count=pending_count,
                                         )
                                     outgoing_edges = wf_executor._order_downstream_edges(
-                                        [edge for edge in active_edges if edge["source"] == nid]
-                                    , res)
+                                        [edge for edge in active_edges if edge["source"] == nid],
+                                        res,
+                                    )
                                     for edge in outgoing_edges:
                                         if wf_executor._source_handle_is_skipped(
                                             edge, skip_source_handles
@@ -8910,8 +8914,9 @@ def execute_llm_batch_notification_branch(
                 for edge in branch_edges
                 if edge["source"] == source_id
                 and (only_source_handles is None or edge.get("sourceHandle") in only_source_handles)
-            ]
-        , source_result)
+            ],
+            source_result,
+        )
         for edge in outgoing_edges:
             if wf_executor._source_handle_is_skipped(edge, skip_source_handles):
                 continue
@@ -9120,8 +9125,9 @@ def execute_hitl_notification_branch(
                 for edge in active_edges
                 if edge["source"] == source_node_id
                 and (only_source_handles is None or edge.get("sourceHandle") in only_source_handles)
-            ]
-        , source_result)
+            ],
+            source_result,
+        )
         for edge in outgoing_edges:
             if wf_executor._source_handle_is_skipped(edge, skip_source_handles):
                 continue
@@ -9581,8 +9587,9 @@ def _execute_workflow_streaming_impl(
             )
         if hasattr(wf_executor, "_order_downstream_edges"):
             outgoing_edges = wf_executor._order_downstream_edges(
-                [edge for edge in active_edges if edge["source"] == source_node_id]
-            , source_result)
+                [edge for edge in active_edges if edge["source"] == source_node_id],
+                source_result,
+            )
         else:
             outgoing_edges = [edge for edge in active_edges if edge["source"] == source_node_id]
         for edge in outgoing_edges:
