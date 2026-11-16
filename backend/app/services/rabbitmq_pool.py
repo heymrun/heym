@@ -90,6 +90,17 @@ class RabbitMQPool:
             cls._connections.clear()
 
 
+def _encode_body(body: object) -> bytes:
+    """Encode a message body: text as it is, anything else as JSON.
+
+    The message is sent as application/json, so a list, a number or a boolean must not be
+    written with str(), which gives Python repr such as ``[{'id': 1}]`` or ``True``.
+    """
+    if isinstance(body, str):
+        return body.encode()
+    return json.dumps(body).encode()
+
+
 async def publish_message_direct(
     host: str,
     port: int,
@@ -98,7 +109,7 @@ async def publish_message_direct(
     vhost: str,
     exchange_name: str,
     routing_key: str,
-    body: dict | str,
+    body: object,
     headers: dict[str, Any] | None = None,
     delay_ms: int | None = None,
 ) -> dict[str, Any]:
@@ -112,10 +123,7 @@ async def publish_message_direct(
     try:
         channel = await connection.channel()
 
-        if isinstance(body, dict):
-            message_body = json.dumps(body).encode()
-        else:
-            message_body = str(body).encode()
+        message_body = _encode_body(body)
 
         message_headers: dict[str, Any] = headers.copy() if headers else {}
         if delay_ms and delay_ms > 0:
@@ -155,16 +163,13 @@ async def publish_message(
     vhost: str,
     exchange_name: str,
     routing_key: str,
-    body: dict | str,
+    body: object,
     headers: dict[str, Any] | None = None,
     delay_ms: int | None = None,
 ) -> dict[str, Any]:
     channel = await RabbitMQPool.get_channel(host, port, username, password, vhost)
 
-    if isinstance(body, dict):
-        message_body = json.dumps(body).encode()
-    else:
-        message_body = str(body).encode()
+    message_body = _encode_body(body)
 
     message_headers: dict[str, Any] = headers.copy() if headers else {}
     if delay_ms and delay_ms > 0:
