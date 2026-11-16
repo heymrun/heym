@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import unittest
 import uuid
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from app.db.models import ExecutionHistory
 from app.services.cluster.dispatch import _timeout_error
 from app.services.cluster.run_history import OffloadedRun, offloaded_error
 from app.services.rabbitmq_consumer import RabbitMQConsumerManager
@@ -352,6 +354,286 @@ class RabbitMQConsumerAcknowledgementTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(headers["x-death"][0]["count"], 1)
         self.assertEqual(headers["trace"], "abc")
         self.assertEqual(headers["price"], "12.50")
+
+    async def test_dispatch_exception_after_execution_id_calls_record_failed_dispatch(self) -> None:
+        """When dispatch raises an exception after execution ID creation, record_failed_dispatch is called with correct args."""
+        with (
+            patch(
+                "app.services.rabbitmq_consumer.async_session_maker",
+                return_value=self.session_ctx,
+            ),
+            patch(
+                "app.services.rabbitmq_consumer.collect_referenced_workflows",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "app.services.rabbitmq_consumer.get_credentials_context",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "app.services.rabbitmq_consumer.get_global_variables_context",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "app.services.rabbitmq_consumer.dispatch_workflow",
+                new=AsyncMock(side_effect=RuntimeError("Dispatch worker crashed")),
+            ),
+            patch(
+                "app.services.rabbitmq_consumer.record_failed_dispatch",
+                new=AsyncMock(return_value=True),
+            ) as mock_record,
+        ):
+            await self.consumer_manager._handle_message(
+                self.workflow_id, self.node_id, self.message
+            )
+
+            mock_record.assert_awaited_once()
+            call_kwargs = mock_record.await_args.kwargs
+            self.assertIsInstance(call_kwargs["execution_id"], uuid.UUID)
+            self.assertEqual(call_kwargs["workflow_id"], self.workflow_id)
+            self.assertEqual(call_kwargs["trigger_source"], "rabbitmq")
+            self.assertIn("Dispatch worker crashed", call_kwargs["message"])
+            self.assertEqual(call_kwargs["inputs"]["triggered_by"], "rabbitmq")
+            self.assertEqual(call_kwargs["inputs"]["trigger_node_id"], self.node_id)
+            self.assertEqual(call_kwargs["inputs"]["body"], {"task": "process_order"})
+
+            self.message.nack.assert_awaited_once_with(requeue=False)
+            self.message.ack.assert_not_called()
+
+    async def test_record_failed_dispatch_failure_does_not_prevent_nack_or_hide_error(self) -> None:
+        """If record_failed_dispatch itself raises, both primary and secondary errors are logged and NACK is preserved."""
+        with (
+            self.assertLogs("rabbitmq_consumer", level="ERROR") as logs,
+            patch(
+                "app.services.rabbitmq_consumer.async_session_maker",
+                return_value=self.session_ctx,
+            ),
+            patch(
+                "app.services.rabbitmq_consumer.collect_referenced_workflows",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "app.services.rabbitmq_consumer.get_credentials_context",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "app.services.rabbitmq_consumer.get_global_variables_context",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "app.services.rabbitmq_consumer.dispatch_workflow",
+                new=AsyncMock(side_effect=RuntimeError("Primary dispatch error")),
+            ),
+            patch(
+                "app.services.rabbitmq_consumer.record_failed_dispatch",
+                new=AsyncMock(side_effect=RuntimeError("Secondary database error")),
+            ),
+        ):
+            await self.consumer_manager._handle_message(
+                self.workflow_id, self.node_id, self.message
+            )
+
+            self.message.nack.assert_awaited_once_with(requeue=False)
+            self.message.ack.assert_not_called()
+
+            # Assert that the original dispatch exception is logged
+            combined_logs = "\n".join(logs.output)
+            self.assertIn("Failed to execute workflow", combined_logs)
+            self.assertIn("Primary dispatch error", combined_logs)
+
+            # Assert that the secondary record_failed_dispatch exception is logged
+            self.assertIn("Failed to record failed dispatch", combined_logs)
+            self.assertIn("Secondary database error", combined_logs)
+
+            # Assert underlying LogRecords and exception info
+            self.assertEqual(len(logs.records), 2)
+            self.assertIsNotNone(logs.records[0].exc_info)
+            self.assertIsInstance(logs.records[0].exc_info[1], RuntimeError)
+            self.assertEqual(str(logs.records[0].exc_info[1]), "Primary dispatch error")
+
+            self.assertIsNotNone(logs.records[1].exc_info)
+            self.assertIsInstance(logs.records[1].exc_info[1], RuntimeError)
+            self.assertEqual(str(logs.records[1].exc_info[1]), "Secondary database error")
+
+    async def test_exception_before_execution_id_does_not_call_record_failed_dispatch(self) -> None:
+        """When an exception occurs before execution ID exists, record_failed_dispatch is not called."""
+        bad_message = _make_mock_message()
+        bad_message.body = MagicMock()
+        bad_message.body.decode.side_effect = UnicodeDecodeError(
+            "utf-8", b"\xff\xfe", 0, 1, "invalid byte"
+        )
+
+        with (
+            patch(
+                "app.services.rabbitmq_consumer.async_session_maker",
+                return_value=self.session_ctx,
+            ),
+            patch(
+                "app.services.rabbitmq_consumer.record_failed_dispatch", new=AsyncMock()
+            ) as mock_record,
+        ):
+            await self.consumer_manager._handle_message(self.workflow_id, self.node_id, bad_message)
+
+            mock_record.assert_not_called()
+            bad_message.nack.assert_awaited_once_with(requeue=False)
+            bad_message.ack.assert_not_called()
+
+    async def test_message_body_with_nul_character_is_sanitized_and_recorded(self) -> None:
+        """A message body with NUL characters is sanitized before execution and history insert."""
+        nul_message = _make_mock_message()
+        nul_message.body = json.dumps({"task": "process\x00_order", "raw": "bad\x00string"}).encode(
+            "utf-8"
+        )
+        result = SimpleNamespace(
+            status="success",
+            outputs={"result": "ok"},
+            node_results=[],
+            sub_workflow_executions=[],
+            execution_time_ms=15.0,
+            history_written=False,
+        )
+
+        with (
+            patch(
+                "app.services.rabbitmq_consumer.async_session_maker",
+                return_value=self.session_ctx,
+            ),
+            patch(
+                "app.services.rabbitmq_consumer.collect_referenced_workflows",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "app.services.rabbitmq_consumer.get_credentials_context",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "app.services.rabbitmq_consumer.get_global_variables_context",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "app.services.rabbitmq_consumer.dispatch_workflow",
+                new=AsyncMock(return_value=result),
+            ) as mock_dispatch,
+            patch(
+                "app.services.rabbitmq_consumer.upsert_workflow_analytics_snapshot",
+                new=AsyncMock(),
+            ),
+            patch(
+                "app.services.rabbitmq_consumer._persist_global_variables_from_execution",
+                new=AsyncMock(),
+            ),
+        ):
+            await self.consumer_manager._handle_message(self.workflow_id, self.node_id, nul_message)
+
+            nul_message.ack.assert_awaited_once()
+            nul_message.nack.assert_not_called()
+
+            # Verify dispatch received sanitized inputs
+            dispatched_inputs = mock_dispatch.await_args.kwargs["inputs"]
+            self.assertNotIn("\x00", str(dispatched_inputs["body"]))
+            self.assertEqual(dispatched_inputs["body"]["task"], "process_order")
+            self.assertEqual(dispatched_inputs["body"]["raw"], "badstring")
+
+            # Verify ExecutionHistory received sanitized inputs
+            history_entry = next(
+                call.args[0]
+                for call in self.db.add.call_args_list
+                if isinstance(call.args[0], ExecutionHistory)
+            )
+            self.assertNotIn("\x00", str(history_entry.inputs["body"]))
+            self.assertEqual(history_entry.inputs["body"]["task"], "process_order")
+            self.assertEqual(history_entry.inputs["body"]["raw"], "badstring")
+
+    async def test_message_body_with_nul_character_records_failed_dispatch_on_error(self) -> None:
+        """When dispatch fails on a message with NUL characters, record_failed_dispatch receives sanitized inputs."""
+        nul_message = _make_mock_message()
+        nul_message.body = json.dumps({"task": "process\x00_order", "raw": "bad\x00string"}).encode(
+            "utf-8"
+        )
+
+        with (
+            patch(
+                "app.services.rabbitmq_consumer.async_session_maker",
+                return_value=self.session_ctx,
+            ),
+            patch(
+                "app.services.rabbitmq_consumer.collect_referenced_workflows",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "app.services.rabbitmq_consumer.get_credentials_context",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "app.services.rabbitmq_consumer.get_global_variables_context",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "app.services.rabbitmq_consumer.dispatch_workflow",
+                new=AsyncMock(side_effect=RuntimeError("Worker failed")),
+            ),
+            patch(
+                "app.services.rabbitmq_consumer.record_failed_dispatch",
+                new=AsyncMock(return_value=True),
+            ) as mock_record,
+        ):
+            await self.consumer_manager._handle_message(self.workflow_id, self.node_id, nul_message)
+
+            mock_record.assert_awaited_once()
+            call_kwargs = mock_record.await_args.kwargs
+            self.assertNotIn("\x00", str(call_kwargs["inputs"]["body"]))
+            self.assertEqual(call_kwargs["inputs"]["body"]["task"], "process_order")
+            self.assertEqual(call_kwargs["inputs"]["body"]["raw"], "badstring")
+            nul_message.nack.assert_awaited_once_with(requeue=False)
+
+    async def test_message_body_plain_text_with_nul_character_is_sanitized(self) -> None:
+        """A plain text message body with NUL characters is sanitized before execution and history."""
+        nul_message = _make_mock_message()
+        nul_message.body = b"hello\x00world"
+        result = SimpleNamespace(
+            status="success",
+            outputs={"result": "ok"},
+            node_results=[],
+            sub_workflow_executions=[],
+            execution_time_ms=10.0,
+            history_written=False,
+        )
+
+        with (
+            patch(
+                "app.services.rabbitmq_consumer.async_session_maker",
+                return_value=self.session_ctx,
+            ),
+            patch(
+                "app.services.rabbitmq_consumer.collect_referenced_workflows",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "app.services.rabbitmq_consumer.get_credentials_context",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "app.services.rabbitmq_consumer.get_global_variables_context",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "app.services.rabbitmq_consumer.dispatch_workflow",
+                new=AsyncMock(return_value=result),
+            ) as mock_dispatch,
+            patch(
+                "app.services.rabbitmq_consumer.upsert_workflow_analytics_snapshot",
+                new=AsyncMock(),
+            ),
+            patch(
+                "app.services.rabbitmq_consumer._persist_global_variables_from_execution",
+                new=AsyncMock(),
+            ),
+        ):
+            await self.consumer_manager._handle_message(self.workflow_id, self.node_id, nul_message)
+
+            nul_message.ack.assert_awaited_once()
+            dispatched_inputs = mock_dispatch.await_args.kwargs["inputs"]
+            self.assertEqual(dispatched_inputs["body"], "helloworld")
 
 
 if __name__ == "__main__":

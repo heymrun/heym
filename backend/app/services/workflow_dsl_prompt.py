@@ -3350,12 +3350,16 @@ accepts at most two nested levels of block children per request.
 - `$nodeName.delay_ms`: Delay value (if set)
 
 **Receive Operation Output properties** (trigger mode):
-- `$nodeName.body`: Message body (parsed JSON)
-- `$nodeName.headers`: Message headers object
-- `$nodeName.message_id`: Message ID
-- `$nodeName.routing_key`: Routing key
-- `$nodeName.exchange`: Exchange name
-- `$nodeName.timestamp`: Message timestamp (ISO format)
+- `$nodeName.body`: Message body (parsed JSON value, or original text if invalid JSON)
+- `$nodeName.headers`: Message headers object (dictionary; datetime/date converted to ISO strings, bytes to UTF-8 text, Decimal to strings, nested containers converted recursively)
+- `$nodeName.message_id`: Message ID string or null
+- `$nodeName.routing_key`: Routing key string
+- `$nodeName.exchange`: Exchange name string
+- `$nodeName.timestamp`: Message timestamp formatted as an ISO 8601 string or null
+
+**Dead-Letter & Retry Header Access**:
+When messages are routed from a dead-letter exchange (DLX), RabbitMQ attaches an `x-death` array to headers. Downstream nodes (e.g. `condition`) can inspect retry counts or dead-letter metadata:
+`$nodeName.headers["x-death"][0].count > 3` (or `$trigger.headers["x-death"][0].count > 3` where `trigger` is the receive node's label)
 
 **Example - Send Message to Queue**:
 ```json
