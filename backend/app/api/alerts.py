@@ -428,7 +428,12 @@ async def preview_alert(
     step_minutes = max(config.window_minutes, total_minutes // MAX_BACKTEST_STEPS or 1)
     steps = max(1, min(MAX_BACKTEST_STEPS, total_minutes // step_minutes))
 
+    # The default on_recovery mode fires when the metric crosses the threshold and stays
+    # quiet until it recovers (should_fire), so a firing is a breached window that follows
+    # one that was not. Counting every breached window reported a 3-hour incident under a
+    # 15-minute window as 12 firings.
     fire_count = 0
+    breached_newer: bool | None = None
     max_observed = float(current.observed_value or 0.0)
     for index in range(steps):
         step_end = now - timedelta(minutes=step_minutes * index)
@@ -443,8 +448,12 @@ async def preview_alert(
         )
         if observation.observed_value is not None:
             max_observed = max(max_observed, float(observation.observed_value))
-        if observation.breached:
+        # Steps walk back in time: the newer window fired if it breached and this one did not.
+        if breached_newer and not observation.breached:
             fire_count += 1
+        breached_newer = observation.breached
+    if breached_newer:  # the oldest sampled window already breached
+        fire_count += 1
 
     return AlertPreviewResponse(
         observed_value=float(current.observed_value or 0.0),
