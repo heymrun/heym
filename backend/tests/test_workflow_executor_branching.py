@@ -2004,3 +2004,79 @@ class NonBranchingLoopSideNodeRoutingTests(unittest.TestCase):
                     and event.get("status") == "success"
                 ]
                 self.assertEqual(side_b_runs, numbers)
+
+    def test_loop_body_side_node_with_execution_delay_both_edge_orders(self) -> None:
+        """A slower side node must finish before loop re-execution advances the iteration."""
+        import time
+        from unittest.mock import patch
+
+        numbers = [1, 2, 3, 4, 5]
+        for reverse_edges in (False, True):
+            with self.subTest(reverse_edges=reverse_edges):
+                nodes, edges = self._workflow(reverse_edges)
+                executor = WorkflowExecutor(nodes=nodes, edges=edges)
+                orig_exec = executor.execute_node_parallel
+
+                def slow_exec(node_id: str, *args, **kwargs):
+                    if node_id == "sideB":
+                        time.sleep(0.02)
+                    return orig_exec(node_id, *args, **kwargs)
+
+                with patch.object(executor, "execute_node_parallel", side_effect=slow_exec):
+                    result = executor.execute(
+                        workflow_id=uuid.uuid4(),
+                        initial_inputs={
+                            "headers": {},
+                            "query": {},
+                            "body": {"numbers": numbers},
+                        },
+                    )
+
+                side_b_runs = [
+                    row["output"]["val"]
+                    for row in result.node_results
+                    if row["node_label"] == "sideB" and row["status"] == "success"
+                ]
+                self.assertEqual(side_b_runs, numbers)
+
+    def test_loop_body_chained_side_nodes_both_edge_orders(self) -> None:
+        """Chained side nodes (stepA -> sideB -> sideC) must both complete for every item."""
+        numbers = [1, 2, 3]
+        for reverse_edges in (False, True):
+            with self.subTest(reverse_edges=reverse_edges):
+                nodes, edges = self._workflow(reverse_edges)
+                nodes.append(
+                    {
+                        "id": "sideC",
+                        "type": "set",
+                        "data": {
+                            "label": "sideC",
+                            "mappings": [{"key": "val", "value": "$sideB.val * 10"}],
+                        },
+                    }
+                )
+                edges.append({"id": "sideB-sideC", "source": "sideB", "target": "sideC"})
+                if reverse_edges:
+                    edges.reverse()
+
+                result = WorkflowExecutor(nodes=nodes, edges=edges).execute(
+                    workflow_id=uuid.uuid4(),
+                    initial_inputs={
+                        "headers": {},
+                        "query": {},
+                        "body": {"numbers": numbers},
+                    },
+                )
+
+                side_b_runs = [
+                    row["output"]["val"]
+                    for row in result.node_results
+                    if row["node_label"] == "sideB" and row["status"] == "success"
+                ]
+                side_c_runs = [
+                    row["output"]["val"]
+                    for row in result.node_results
+                    if row["node_label"] == "sideC" and row["status"] == "success"
+                ]
+                self.assertEqual(side_b_runs, numbers)
+                self.assertEqual(side_c_runs, [n * 10 for n in numbers])
