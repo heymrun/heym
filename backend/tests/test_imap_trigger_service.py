@@ -6,7 +6,6 @@ import threading
 import unittest
 import unittest.mock
 import uuid
-from datetime import datetime, timedelta, timezone
 from email import message_from_bytes, policy
 from email.message import EmailMessage
 from types import SimpleNamespace
@@ -17,89 +16,172 @@ from app.services.imap_trigger_service import (
     ImapCursor,
     ImapDispatchNotStartedError,
     ImapTriggerManager,
+    _CursorClaim,
 )
 
 
 class ImapTriggerManagerPollingTests(unittest.IsolatedAsyncioTestCase):
-    async def test_should_poll_respects_interval_minutes(self) -> None:
-        manager = ImapTriggerManager()
-        now = datetime.now(timezone.utc)
-        key = "wf_node"
-        node = {"data": {"pollIntervalMinutes": 5}}
-
-        manager._last_poll_at[key] = now - timedelta(minutes=4)
-        self.assertFalse(manager._should_poll_node(key, now, node))
-
-        manager._last_poll_at[key] = now - timedelta(minutes=5, seconds=1)
-        self.assertTrue(manager._should_poll_node(key, now, node))
-
-    async def test_poll_workflow_node_executes_each_new_email(self) -> None:
-        manager = ImapTriggerManager()
-        workflow = SimpleNamespace(id=uuid.uuid4())
-        node = {
+    def setUp(self) -> None:
+        self.manager = ImapTriggerManager()
+        self.workflow = SimpleNamespace(id=uuid.uuid4())
+        self.node = {
             "id": "imap-node",
             "type": "imapTrigger",
             "data": {"credentialId": str(uuid.uuid4()), "pollIntervalMinutes": 5},
         }
+        for patcher in (
+            patch.object(imap_trigger_service, "lock_service", SimpleNamespace(is_leader=True)),
+            patch.object(
+                self.manager,
+                "_load_credential_config",
+                AsyncMock(return_value={"imap_host": "imap.example.com"}),
+            ),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    async def _poll(self, claim: _CursorClaim, fetched: tuple, advance=True) -> dict:  # noqa: ANN001
+        mocks = {
+            "_claim_cursor": AsyncMock(return_value=claim),
+            "_fetch_node_messages": AsyncMock(return_value=fetched),
+            "_execute_workflow_for_email": AsyncMock(),
+            "_insert_baseline": AsyncMock(),
+            "_advance_cursor": AsyncMock(return_value=advance),
+        }
+        with patch.multiple(self.manager, **mocks):
+            await self.manager._poll_workflow_node(self.workflow, self.node)
+        return mocks
+
+    async def test_poll_workflow_node_executes_each_new_email(self) -> None:
         emails = [
             {"uid": "101", "subject": "First"},
             {"uid": "102", "subject": "Second"},
         ]
+        stored = ImapCursor(uidvalidity="1", last_uid=100)
 
-        with (
-            patch.object(
-                manager,
-                "_load_credential_config",
-                AsyncMock(return_value={"imap_host": "imap.example.com"}),
-            ),
-            patch.object(
-                manager,
-                "_fetch_node_messages",
-                AsyncMock(return_value=(ImapCursor(uidvalidity="1", last_uid=102), emails)),
-            ),
-            patch.object(manager, "_execute_workflow_for_email", AsyncMock()) as mock_execute,
-            patch.object(manager, "_load_cursor", AsyncMock(return_value=ImapCursor())),
-            patch.object(manager, "_save_cursor", AsyncMock()),
-        ):
-            await manager._poll_workflow_node(workflow, node)
-
-        self.assertEqual(
-            manager._cursors[manager._get_node_key(workflow.id, "imap-node")].last_uid,
-            102,
+        mocks = await self._poll(
+            _CursorClaim(due=True, cursor=stored), (ImapCursor("1", 102), emails)
         )
-        self.assertEqual(mock_execute.await_count, 2)
-        mock_execute.assert_any_await(workflow, "imap-node", emails[0])
-        mock_execute.assert_any_await(workflow, "imap-node", emails[1])
+
+        execute = mocks["_execute_workflow_for_email"]
+        self.assertEqual(
+            execute.await_args_list,
+            [
+                unittest.mock.call(self.workflow, "imap-node", emails[0]),
+                unittest.mock.call(self.workflow, "imap-node", emails[1]),
+            ],
+        )
+        wf, node = self.workflow.id, "imap-node"
+        self.assertEqual(
+            mocks["_advance_cursor"].await_args_list,
+            [
+                unittest.mock.call(wf, node, stored, ImapCursor("1", 101)),
+                unittest.mock.call(wf, node, ImapCursor("1", 101), ImapCursor("1", 102)),
+                unittest.mock.call(wf, node, ImapCursor("1", 102), ImapCursor("1", 102)),
+            ],
+        )
+
+    async def test_each_email_is_taken_before_its_run_starts(self) -> None:
+        order: list[str] = []
+        claim = _CursorClaim(due=True, cursor=ImapCursor("1", 100))
+        with patch.multiple(
+            self.manager,
+            _claim_cursor=AsyncMock(return_value=claim),
+            _fetch_node_messages=AsyncMock(return_value=(ImapCursor("1", 101), [{"uid": "101"}])),
+            _advance_cursor=AsyncMock(side_effect=lambda *a: order.append("take") or True),
+            _execute_workflow_for_email=AsyncMock(side_effect=lambda *a: order.append("run")),
+        ):
+            await self.manager._poll_workflow_node(self.workflow, self.node)
+
+        self.assertEqual(order, ["take", "run", "take"])
+
+    async def test_a_node_never_polled_records_a_baseline(self) -> None:
+        mocks = await self._poll(_CursorClaim(due=True), (ImapCursor("7", 55), []))
+
+        mocks["_fetch_node_messages"].assert_awaited_once_with(
+            {"imap_host": "imap.example.com"}, ImapCursor()
+        )
+        mocks["_insert_baseline"].assert_awaited_once_with(
+            self.workflow.id, "imap-node", ImapCursor("7", 55), 5
+        )
+        mocks["_execute_workflow_for_email"].assert_not_awaited()
 
     async def test_poll_workflow_node_applies_cursor_on_empty_batch(self) -> None:
-        manager = ImapTriggerManager()
-        workflow = SimpleNamespace(id=uuid.uuid4())
-        node = {
-            "id": "imap-node",
-            "type": "imapTrigger",
-            "data": {"credentialId": str(uuid.uuid4()), "pollIntervalMinutes": 5},
-        }
+        stored = ImapCursor(uidvalidity="7", last_uid=50)
 
-        with (
-            patch.object(
-                manager,
-                "_load_credential_config",
-                AsyncMock(return_value={"imap_host": "imap.example.com"}),
-            ),
-            patch.object(
-                manager,
-                "_fetch_node_messages",
-                AsyncMock(return_value=(ImapCursor(uidvalidity="7", last_uid=55), [])),
-            ),
-            patch.object(manager, "_execute_workflow_for_email", AsyncMock()) as mock_execute,
-            patch.object(manager, "_load_cursor", AsyncMock(return_value=ImapCursor())),
-            patch.object(manager, "_save_cursor", AsyncMock()),
+        mocks = await self._poll(_CursorClaim(due=True, cursor=stored), (ImapCursor("8", 3), []))
+
+        mocks["_advance_cursor"].assert_awaited_once_with(
+            self.workflow.id, "imap-node", stored, ImapCursor("8", 3)
+        )
+        mocks["_execute_workflow_for_email"].assert_not_awaited()
+
+    async def test_a_node_claimed_elsewhere_is_not_fetched(self) -> None:
+        mocks = await self._poll(_CursorClaim(due=False), (ImapCursor(), []))
+
+        mocks["_fetch_node_messages"].assert_not_awaited()
+        mocks["_claim_cursor"].assert_awaited_once_with(self.workflow.id, "imap-node", 5)
+
+    async def test_a_batch_stops_when_another_process_moved_the_cursor(self) -> None:
+        emails = [{"uid": "101"}, {"uid": "102"}]
+        mocks = await self._poll(
+            _CursorClaim(due=True, cursor=ImapCursor("1", 100)),
+            (ImapCursor("1", 102), emails),
+            advance=False,
+        )
+
+        mocks["_execute_workflow_for_email"].assert_not_awaited()
+        mocks["_advance_cursor"].assert_awaited_once()
+
+    async def test_a_batch_stops_once_the_process_is_no_longer_the_leader(self) -> None:
+        emails = [{"uid": "101"}, {"uid": "102"}]
+        with patch.object(imap_trigger_service, "lock_service", SimpleNamespace(is_leader=False)):
+            mocks = await self._poll(
+                _CursorClaim(due=True, cursor=ImapCursor("1", 100)),
+                (ImapCursor("1", 102), emails),
+            )
+
+        mocks["_execute_workflow_for_email"].assert_not_awaited()
+        mocks["_advance_cursor"].assert_not_awaited()
+
+
+class ImapParallelPollCapTests(unittest.IsolatedAsyncioTestCase):
+    async def test_polls_beyond_the_cap_wait_for_a_free_place(self) -> None:
+        with patch.object(imap_trigger_service.settings, "imap_max_parallel_polls", 1):
+            manager = ImapTriggerManager()
+        release = asyncio.Event()
+        fetching: list[str] = []
+
+        async def fetch(config: dict, _cursor: ImapCursor) -> tuple:
+            fetching.append(config["name"])
+            if config["name"] == "a":
+                await release.wait()
+            return ImapCursor("1", 1), []
+
+        workflows = [SimpleNamespace(id=uuid.uuid4()) for _ in range(2)]
+        nodes = [
+            {"id": name, "type": "imapTrigger", "data": {"credentialId": name}}
+            for name in ("a", "b")
+        ]
+        with patch.multiple(
+            manager,
+            _claim_cursor=AsyncMock(return_value=_CursorClaim(due=True)),
+            _load_credential_config=AsyncMock(side_effect=lambda cid: {"name": cid}),
+            _fetch_node_messages=AsyncMock(side_effect=fetch),
+            _insert_baseline=AsyncMock(),
         ):
-            await manager._poll_workflow_node(workflow, node)
+            polls = [
+                asyncio.create_task(manager._poll_workflow_node(wf, node))
+                for wf, node in zip(workflows, nodes, strict=True)
+            ]
+            for _ in range(10):
+                await asyncio.sleep(0)
+            self.assertEqual(fetching, ["a"])  # b waits while a's mailbox is open
 
-        key = manager._get_node_key(workflow.id, "imap-node")
-        self.assertEqual(manager._cursors[key], ImapCursor(uidvalidity="7", last_uid=55))
-        mock_execute.assert_not_awaited()
+            release.set()
+            await asyncio.wait_for(asyncio.gather(*polls), timeout=5)
+
+        self.assertEqual(fetching, ["a", "b"])
 
 
 class ImapTriggerPollIsolationTests(unittest.IsolatedAsyncioTestCase):
@@ -182,7 +264,6 @@ class ImapSlowRunTests(unittest.IsolatedAsyncioTestCase):
                 AsyncMock(return_value=self.workflows),
             )
             self._patch(self.manager, "_poll_workflow_node", side_effect=self._poll_node)
-            self._patch(self.manager, "_should_poll_node", return_value=True)
             self._patch(self.manager, "_forget_inactive_cursors", AsyncMock())
         # Before the fix the pass waited for A's run here, so this timed out.
         await asyncio.wait_for(self.manager._poll_workflows(), timeout=5)

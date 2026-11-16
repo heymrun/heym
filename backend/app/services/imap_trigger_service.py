@@ -12,10 +12,11 @@ from email.message import Message
 from email.utils import getaddresses, parsedate_to_datetime
 from typing import Any
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.db.models import Credential, CredentialType, TriggerPollState, Workflow
 from app.db.session import async_session_maker
 from app.services.distributed_lock import lock_service
@@ -35,6 +36,17 @@ IMAP_TIMEOUT_SECONDS = 30
 class ImapCursor:
     uidvalidity: str | None = None
     last_uid: int = 0
+
+
+@dataclass(frozen=True)
+class _CursorClaim:
+    """Outcome of asking to poll a node. ``due`` with no ``cursor`` means record a baseline."""
+
+    due: bool
+    cursor: ImapCursor | None = None
+
+
+_NOT_DUE = _CursorClaim(due=False)
 
 
 # Kept under its old name for existing imports; the retry loop below catches it.
@@ -351,10 +363,11 @@ class ImapTriggerManager:
     def __init__(self) -> None:
         self._running = False
         self._task: asyncio.Task | None = None
-        self._last_poll_at: dict[str, datetime] = {}
-        self._cursors: dict[str, ImapCursor] = {}
         # Each node's poll and runs, so a slow workflow holds up only its own trigger.
         self._node_polls: dict[str, asyncio.Task] = {}
+        # Each poll holds an IMAP connection and its runs a database connection, so a
+        # restart must not open every mailbox and start every run at once.
+        self._parallel_polls = asyncio.Semaphore(max(1, settings.imap_max_parallel_polls))
         self._poll_loop_seconds = 15
         self._max_pre_dispatch_attempts = 3
 
@@ -380,8 +393,6 @@ class ImapTriggerManager:
         for poll in node_polls:
             poll.cancel()
         await asyncio.gather(*node_polls, return_exceptions=True)
-        self._last_poll_at.clear()
-        self._cursors.clear()
         logger.info("IMAP trigger manager stopped")
 
     async def _run_loop(self) -> None:
@@ -395,7 +406,6 @@ class ImapTriggerManager:
             await asyncio.sleep(self._poll_loop_seconds)
 
     async def _poll_workflows(self) -> None:
-        now = datetime.now(timezone.utc)
         current_keys: set[str] = set()
 
         async with async_session_maker() as db:
@@ -410,16 +420,10 @@ class ImapTriggerManager:
                 key = self._get_node_key(workflow.id, node_id)
                 current_keys.add(key)
 
-                if key in self._node_polls or not self._should_poll_node(key, now, node):
-                    continue
+                # The node's claim in trigger_poll_states decides whether it is due.
+                if key not in self._node_polls:
+                    self._start_node_poll(key, workflow, node)
 
-                self._last_poll_at[key] = now
-                self._start_node_poll(key, workflow, node)
-
-        stale_keys = set(self._last_poll_at.keys()) - current_keys
-        for key in stale_keys:
-            self._last_poll_at.pop(key, None)
-            self._cursors.pop(key, None)
         await self._forget_inactive_cursors(current_keys)
 
     def _start_node_poll(self, key: str, workflow: Workflow, node: dict[str, Any]) -> None:
@@ -474,14 +478,6 @@ class ImapTriggerManager:
                 await db.execute(delete(TriggerPollState).where(TriggerPollState.id.in_(inactive)))
                 await db.commit()
 
-    def _should_poll_node(self, key: str, now: datetime, node: dict[str, Any]) -> bool:
-        last_polled_at = self._last_poll_at.get(key)
-        if last_polled_at is None:
-            return True
-
-        interval_minutes = self._get_poll_interval_minutes(node)
-        return now - last_polled_at >= timedelta(minutes=interval_minutes)
-
     def _get_poll_interval_minutes(self, node: dict[str, Any]) -> int:
         raw_value = node.get("data", {}).get("pollIntervalMinutes", 5)
         try:
@@ -513,70 +509,118 @@ class ImapTriggerManager:
         ]
 
     async def _poll_workflow_node(self, workflow: Workflow, node: dict[str, Any]) -> None:
+        """Claim the node for its interval, then fetch and run its new emails in order.
+
+        Leader election keeps the other processes from polling, but during a handoff two
+        can briefly both lead, and the old leader's runs may still be going. Correctness
+        rests on Postgres instead, as for the Google triggers: one process claims the node
+        per interval, and each email is taken by moving the stored cursor onto its UID
+        before its run starts, so a restart or a second poller never starts it again.
+        """
         node_id = str(node.get("id", "")).strip()
         credential_id = str(node.get("data", {}).get("credentialId", "")).strip()
         if not node_id or not credential_id:
             return
 
-        credential_config = await self._load_credential_config(credential_id)
-        if credential_config is None:
-            logger.warning(
-                "Skipping IMAP trigger for workflow %s node %s because credential is unavailable",
-                workflow.id,
-                node_id,
-            )
+        poll_minutes = self._get_poll_interval_minutes(node)
+        claim = await self._claim_cursor(workflow.id, node_id, poll_minutes)
+        if not claim.due:
             return
 
-        key = self._get_node_key(workflow.id, node_id)
-        current_cursor = await self._load_cursor(workflow.id, node_id)
-        next_cursor, emails = await self._fetch_node_messages(credential_config, current_cursor)
+        async with self._parallel_polls:
+            credential_config = await self._load_credential_config(credential_id)
+            if credential_config is None:
+                logger.warning(
+                    "Skipping IMAP trigger for workflow %s node %s because credential is "
+                    "unavailable",
+                    workflow.id,
+                    node_id,
+                )
+                return
 
-        if not emails:
-            # Still apply the returned cursor on an empty batch: it carries the
-            # first-poll baseline and any UIDVALIDITY reset.
-            self._cursors[key] = next_cursor
-            await self._save_cursor(workflow.id, node_id, next_cursor)
-            return
+            cursor = claim.cursor or ImapCursor()
+            next_cursor, emails = await self._fetch_node_messages(credential_config, cursor)
+            if claim.cursor is None:
+                await self._insert_baseline(workflow.id, node_id, next_cursor, poll_minutes)
+                return
+            if emails:
+                logger.info(
+                    "IMAP trigger found %d new email(s) for workflow %s node %s",
+                    len(emails),
+                    workflow.id,
+                    node_id,
+                )
+            for email_payload in emails:
+                if not lock_service.is_leader:
+                    logger.info(
+                        "IMAP trigger for workflow %s node %s: no longer the leader, "
+                        "leaving the rest of the batch to the next poll",
+                        workflow.id,
+                        node_id,
+                    )
+                    return
+                taken = ImapCursor(next_cursor.uidvalidity, int(email_payload["uid"]))
+                if not await self._advance_cursor(workflow.id, node_id, cursor, taken):
+                    logger.info(
+                        "IMAP trigger for workflow %s node %s: another process moved on, "
+                        "stopping this poll",
+                        workflow.id,
+                        node_id,
+                    )
+                    return
+                cursor = taken
+                await self._process_email_with_retries(workflow, node_id, email_payload)
 
-        logger.info(
-            "IMAP trigger found %d new email(s) for workflow %s node %s",
-            len(emails),
-            workflow.id,
-            node_id,
-        )
-        for email_payload in emails:
-            await self._process_email_with_retries(workflow, node_id, email_payload)
+            # Also carries the UIDVALIDITY reset, and UIDs whose fetch failed.
+            await self._advance_cursor(workflow.id, node_id, cursor, next_cursor)
 
-        self._cursors[key] = next_cursor
-        await self._save_cursor(workflow.id, node_id, next_cursor)
+    async def _claim_cursor(
+        self, workflow_id: uuid.UUID, node_id: str, poll_minutes: int
+    ) -> _CursorClaim:
+        """Claim the node for one poll interval and read its stored cursor.
 
-    async def _load_cursor(self, workflow_id: uuid.UUID, node_id: str) -> ImapCursor:
-        """The node's cursor as last stored, or none for a node never polled.
-
-        Kept in Postgres, not in this process: after a restart or a leader handoff the
-        next poll continues from it, instead of baselining the mailbox and skipping
-        mail that arrived meanwhile, or replaying mail from a stale copy.
+        ``next_poll_at`` moves forward only once it has passed, so one process polls the node
+        per interval. A node never polled has no row and is always due.
         """
         async with async_session_maker() as db:
             row = (
                 await db.execute(
-                    select(TriggerPollState.scope_fingerprint, TriggerPollState.version).where(
+                    update(TriggerPollState)
+                    .where(
                         TriggerPollState.workflow_id == workflow_id,
                         TriggerPollState.node_id == node_id,
                         TriggerPollState.node_type == _CURSOR_NODE_TYPE,
+                        TriggerPollState.next_poll_at <= func.now(),
                     )
+                    .values(next_poll_at=func.now() + timedelta(minutes=poll_minutes))
+                    .returning(TriggerPollState.scope_fingerprint, TriggerPollState.version)
+                    .execution_options(synchronize_session=False)
                 )
             ).first()
-        if row is None:
-            return ImapCursor()
-        return ImapCursor(uidvalidity=row.scope_fingerprint or None, last_uid=int(row.version))
+            if row is None:
+                exists = (
+                    await db.execute(
+                        select(TriggerPollState.id).where(
+                            TriggerPollState.workflow_id == workflow_id,
+                            TriggerPollState.node_id == node_id,
+                        )
+                    )
+                ).first()
+                await db.commit()
+                return _NOT_DUE if exists else _CursorClaim(due=True)
+            await db.commit()
+        return _CursorClaim(
+            due=True,
+            cursor=ImapCursor(uidvalidity=row.scope_fingerprint or None, last_uid=int(row.version)),
+        )
 
-    async def _save_cursor(self, workflow_id: uuid.UUID, node_id: str, cursor: ImapCursor) -> None:
-        """Store the cursor: UIDVALIDITY as the scope, the last seen UID as the version."""
-        values = {
-            "scope_fingerprint": (cursor.uidvalidity or "")[:64],
-            "version": cursor.last_uid,
-        }
+    async def _insert_baseline(
+        self, workflow_id: uuid.UUID, node_id: str, cursor: ImapCursor, poll_minutes: int
+    ) -> None:
+        """Record the first cursor: UIDVALIDITY as the scope, the last UID as the version.
+
+        A process that loses the race to record it leaves the other one's cursor alone.
+        """
         async with async_session_maker() as db:
             await db.execute(
                 pg_insert(TriggerPollState)
@@ -586,14 +630,47 @@ class ImapTriggerManager:
                     node_id=node_id,
                     node_type=_CURSOR_NODE_TYPE,
                     key_id="imap",
-                    **values,
+                    scope_fingerprint=(cursor.uidvalidity or "")[:64],
+                    version=cursor.last_uid,
+                    next_poll_at=func.now() + timedelta(minutes=poll_minutes),
                 )
-                .on_conflict_do_update(
-                    constraint="uq_trigger_poll_state_node",
-                    set_={**values, "updated_at": func.now()},
-                )
+                .on_conflict_do_nothing(constraint="uq_trigger_poll_state_node")
             )
             await db.commit()
+
+    async def _advance_cursor(
+        self,
+        workflow_id: uuid.UUID,
+        node_id: str,
+        expected: ImapCursor,
+        cursor: ImapCursor,
+    ) -> bool:
+        """Store ``cursor`` only while the stored one is still ``expected``.
+
+        False when another process has moved it, or the trigger was removed meanwhile.
+        """
+        async with async_session_maker() as db:
+            moved = (
+                await db.execute(
+                    update(TriggerPollState)
+                    .where(
+                        TriggerPollState.workflow_id == workflow_id,
+                        TriggerPollState.node_id == node_id,
+                        TriggerPollState.node_type == _CURSOR_NODE_TYPE,
+                        TriggerPollState.scope_fingerprint == (expected.uidvalidity or "")[:64],
+                        TriggerPollState.version == expected.last_uid,
+                    )
+                    .values(
+                        scope_fingerprint=(cursor.uidvalidity or "")[:64],
+                        version=cursor.last_uid,
+                        updated_at=func.now(),
+                    )
+                    .returning(TriggerPollState.id)
+                    .execution_options(synchronize_session=False)
+                )
+            ).first()
+            await db.commit()
+        return moved is not None
 
     async def _process_email_with_retries(
         self, workflow: Workflow, node_id: str, email_payload: dict[str, Any]
