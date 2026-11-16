@@ -34,17 +34,23 @@ def execute(ctx: NodeExecutionContext) -> object:
     if not operation:
         raise ValueError("BigQuery node requires an operation")
 
-    project_id = self.evaluate_message_template(
+    project_id = self.evaluate_nonempty_message_template(
         node_data.get("bqProjectId", ""), inputs, node_id
     ).strip()
+    if not project_id:
+        raise ValueError("BigQuery node requires a project ID")
 
     with SessionLocal() as db:
         service = BigQueryService(credential_id, bq_config, db)
 
         if operation == "query":
-            query = self.evaluate_message_template(node_data.get("bqQuery", ""), inputs, node_id)
+            query = self.evaluate_nonempty_message_template(
+                node_data.get("bqQuery", ""), inputs, node_id
+            ).strip()
+            if not query:
+                raise ValueError("BigQuery query requires an SQL query")
             _mr_raw = str(node_data.get("bqMaxResults", "1000") or "1000")
-            _mr_ev = self.evaluate_message_template(_mr_raw, inputs, node_id).strip()
+            _mr_ev = self.evaluate_nonempty_message_template(_mr_raw, inputs, node_id).strip()
             try:
                 _mr_int = int(float(_mr_ev or "1000"))
                 # 0 means unlimited; negative values fall back to default
@@ -54,12 +60,14 @@ def execute(ctx: NodeExecutionContext) -> object:
             output = service.run_query(project_id, query, max_results)
 
         elif operation == "insertRows":
-            dataset_id = self.evaluate_message_template(
+            dataset_id = self.evaluate_nonempty_message_template(
                 node_data.get("bqDatasetId", ""), inputs, node_id
             ).strip()
-            table_id = self.evaluate_message_template(
+            table_id = self.evaluate_nonempty_message_template(
                 node_data.get("bqTableId", ""), inputs, node_id
             ).strip()
+            if not dataset_id or not table_id:
+                raise ValueError("BigQuery insertRows requires a dataset ID and a table ID")
             input_mode = node_data.get("bqRowsInputMode", "raw")
 
             if input_mode == "selective":
@@ -67,7 +75,7 @@ def execute(ctx: NodeExecutionContext) -> object:
                 row: dict = {}
                 for mapping in mappings:
                     key = mapping.get("key", "")
-                    val = self.evaluate_message_template(
+                    val = self.evaluate_nonempty_message_template(
                         str(mapping.get("value", "")), inputs, node_id
                     )
                     if key:

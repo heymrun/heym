@@ -36,7 +36,7 @@ def execute(ctx: NodeExecutionContext) -> object:
     service = ClickHouseService(ch_config)
 
     def _resolve(field: str, default: str = "") -> str:
-        return self.evaluate_message_template(
+        return self.evaluate_nonempty_message_template(
             str(node_data.get(field, default) or default), inputs, node_id
         ).strip()
 
@@ -65,7 +65,7 @@ def execute(ctx: NodeExecutionContext) -> object:
                 key = str(mapping.get("key", "") or "")
                 if not key:
                     continue
-                row[key] = self.evaluate_message_template(
+                row[key] = self.evaluate_nonempty_message_template(
                     str(mapping.get("value", "")), inputs, node_id
                 )
             return [row]
@@ -80,7 +80,7 @@ def execute(ctx: NodeExecutionContext) -> object:
         return parsed
 
     if operation == "query":
-        sql = self.evaluate_message_template(
+        sql = self.evaluate_nonempty_message_template(
             str(node_data.get("clickhouseQuery", "") or ""), inputs, node_id
         ).strip()
         return service.query(sql)
@@ -96,7 +96,10 @@ def execute(ctx: NodeExecutionContext) -> object:
     if operation == "count":
         return service.count(_resolve("clickhouseTable"), filters=_resolve_filters())
     if operation == "getById":
-        return service.get_by_id(_resolve("clickhouseTable"), _resolve("clickhouseRowId"))
+        row_id = _resolve("clickhouseRowId")
+        if not row_id:
+            raise ValueError("ClickHouse getById requires a row ID")
+        return service.get_by_id(_resolve("clickhouseTable"), row_id)
     if operation == "insert":
         return service.insert(_resolve("clickhouseTable"), _resolve_rows())
     if operation == "upsert":
