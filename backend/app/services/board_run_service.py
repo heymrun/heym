@@ -308,6 +308,20 @@ async def _set_card_status(db, card_id: uuid.UUID, run_status: str) -> None:
         card.run_status = run_status
 
 
+def _next_link_index(links: list[dict], run: BoardCardRun) -> int:
+    """Where a paused run's chain continues in the column's chain as it is now.
+
+    People may edit the chain while a card waits on a review: removing or adding a link
+    renumbers the positions, so the paused run's old position would skip a link or run
+    one twice. Find its workflow, nearest the old position. If its link was removed, the
+    link after it has moved into the old position, so continue there.
+    """
+    matches = [i for i, link in enumerate(links) if link["workflow_id"] == run.workflow_id]
+    if not matches:
+        return min(run.chain_position, len(links))
+    return min(matches, key=lambda i: abs(i - run.chain_position)) + 1
+
+
 async def _column_links(db, column_id: uuid.UUID) -> list[dict]:
     """The column's workflow chain, in run order."""
     rows = (
@@ -769,7 +783,8 @@ async def resume_card_chain(
             board = await db.get(Board, card.board_id)
             workflow = await db.get(Workflow, run.workflow_id)
             links = await _column_links(db, column.id)
-            remaining = links[run.chain_position + 1 :]
+            next_index = _next_link_index(links, run)
+            remaining = links[next_index:]
             run.finished_at = datetime.now(timezone.utc)
 
             if history.status != "success":
@@ -785,9 +800,7 @@ async def resume_card_chain(
                         run_id=run.id,
                     )
                 )
-                await _abort_remaining(
-                    db, card.id, column.id, remaining, 0, run.chain_position + 1, run.chain_length
-                )
+                await _abort_remaining(db, card.id, column.id, remaining, 0, next_index, len(links))
                 card.run_status = "failed"
                 await db.commit()
                 return
@@ -816,8 +829,8 @@ async def resume_card_chain(
                     links=remaining,
                     move=None,
                     rerun=False,
-                    start_index=run.chain_position + 1,
-                    chain_length=run.chain_length,
+                    start_index=next_index,
+                    chain_length=len(links),
                     initial_outputs=[{"workflow_name": run.workflow_name, "output": outputs}],
                 )
                 return
@@ -1033,6 +1046,15 @@ async def _auto_advance(
                     settled.run_status = "success"
                     await db.commit()
                 return
+            moved = await db.get(BoardCard, card_id)
+            if moved is None:
+                return
+            if moved.column_id != from_column_id:
+                # A person moved the card while this chain ran: it stays where they put
+                # it. Advancing from the old column would pull it back into the cascade.
+                # Its status is left alone: this chain already settled it, and "running"
+                # now belongs to the chain its new column started.
+                return
             columns = (
                 (
                     await db.execute(
@@ -1144,7 +1166,8 @@ async def sync_recovered_board_run(
                 await db.get(Workflow, run.workflow_id) if run.workflow_id is not None else None
             )
             links = await _column_links(db, column.id)
-            remaining = links[run.chain_position + 1 :]
+            next_index = _next_link_index(links, run)
+            remaining = links[next_index:]
             run.execution_history_id = history.id
             run.active_execution_id = None
             run.finished_at = datetime.now(timezone.utc)
@@ -1177,8 +1200,8 @@ async def sync_recovered_board_run(
                     column.id,
                     remaining,
                     0,
-                    run.chain_position + 1,
-                    run.chain_length,
+                    next_index,
+                    len(links),
                 )
                 card.run_status = "idle"
                 await db.commit()
@@ -1203,8 +1226,8 @@ async def sync_recovered_board_run(
                     column.id,
                     remaining,
                     0,
-                    run.chain_position + 1,
-                    run.chain_length,
+                    next_index,
+                    len(links),
                 )
                 card.run_status = "failed"
                 await db.commit()
@@ -1245,8 +1268,8 @@ async def sync_recovered_board_run(
                     links=remaining,
                     move=None,
                     rerun=False,
-                    start_index=run.chain_position + 1,
-                    chain_length=run.chain_length,
+                    start_index=next_index,
+                    chain_length=len(links),
                     initial_outputs=previous_outputs,
                 )
                 return

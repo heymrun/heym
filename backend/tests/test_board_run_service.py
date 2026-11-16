@@ -952,3 +952,75 @@ class TestSyncRecoveredBoardRun(unittest.IsolatedAsyncioTestCase):
         )
         advance.assert_not_awaited()
         spawn.assert_not_called()
+
+
+class TestAutoAdvanceAfterAManualMove(unittest.IsolatedAsyncioTestCase):
+    """A card moved by a person while its chain ran is not advanced from its old column."""
+
+    async def test_a_card_moved_away_stays_where_it_was_put(self) -> None:
+        from app.db.models import BoardCard
+
+        development, review = uuid.uuid4(), uuid.uuid4()
+        # The review column has started its own chain on the moved card.
+        card = SimpleNamespace(id=uuid.uuid4(), column_id=review, run_status="running")
+        session = _FakeSession({(BoardCard.__name__, card.id): card})
+        auto_advance_on = MagicMock()
+        auto_advance_on.scalar_one_or_none.return_value = True
+        session.execute = AsyncMock(return_value=auto_advance_on)
+
+        await board_run_service._auto_advance(
+            card_id=card.id,
+            board_id=uuid.uuid4(),
+            from_column_id=development,
+            session_factory=lambda: session,
+        )
+
+        self.assertEqual(card.column_id, review)
+        self.assertEqual(card.run_status, "running")
+        self.assertEqual(session.added, [])
+        session.execute.assert_awaited_once()  # only the auto-advance setting was read
+
+
+class TestNextLinkIndex(unittest.TestCase):
+    """A chain edited while a card waits on a review continues after the paused link."""
+
+    def _links(self, *workflow_ids: uuid.UUID) -> list[dict]:
+        return [
+            {"workflow_id": wid, "workflow_name": "", "position": i}
+            for i, wid in enumerate(workflow_ids)
+        ]
+
+    def test_removing_an_earlier_link_keeps_the_next_one(self) -> None:
+        triage, approve, notify, archive = (uuid.uuid4() for _ in range(4))
+        run = SimpleNamespace(workflow_id=approve, chain_position=1)
+        links = self._links(approve, notify, archive)  # Triage removed during the review
+
+        self.assertEqual(links[board_run_service._next_link_index(links, run) :], links[1:])
+        self.assertIsNotNone(triage)
+
+    def test_adding_an_earlier_link_does_not_run_the_paused_one_again(self) -> None:
+        intake, approve, notify = (uuid.uuid4() for _ in range(3))
+        run = SimpleNamespace(workflow_id=approve, chain_position=0)
+        links = self._links(intake, approve, notify)
+
+        self.assertEqual(board_run_service._next_link_index(links, run), 2)
+
+    def test_a_repeated_workflow_continues_after_the_occurrence_nearest_the_pause(self) -> None:
+        check, approve = uuid.uuid4(), uuid.uuid4()
+        run = SimpleNamespace(workflow_id=check, chain_position=2)
+        links = self._links(check, approve, check, approve)
+
+        self.assertEqual(board_run_service._next_link_index(links, run), 3)
+
+    def test_a_removed_paused_workflow_continues_with_the_link_now_in_its_slot(self) -> None:
+        triage, notify, archive = (uuid.uuid4() for _ in range(3))
+        run = SimpleNamespace(workflow_id=uuid.uuid4(), chain_position=1)  # Approve, removed
+        links = self._links(triage, notify, archive)
+
+        self.assertEqual(links[board_run_service._next_link_index(links, run) :], links[1:])
+
+    def test_a_removed_last_workflow_leaves_nothing_to_run(self) -> None:
+        run = SimpleNamespace(workflow_id=uuid.uuid4(), chain_position=2)
+        links = self._links(uuid.uuid4(), uuid.uuid4())
+
+        self.assertEqual(links[board_run_service._next_link_index(links, run) :], [])

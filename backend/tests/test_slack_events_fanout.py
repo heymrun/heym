@@ -118,14 +118,6 @@ class FilesOnlyTests(unittest.TestCase):
         self.assertFalse(slack_api._is_bot_echo({"event": upload, "authorizations": not_bot}))
 
 
-class FirstDeliveryTests(unittest.TestCase):
-    def test_a_redelivered_event_is_handled_once(self) -> None:
-        event_id = uuid.uuid4().hex
-        self.assertTrue(slack_api._first_delivery(event_id))
-        self.assertFalse(slack_api._first_delivery(event_id))
-        self.assertTrue(slack_api._first_delivery(None))
-
-
 def _workflow(*nodes: dict, owner: uuid.UUID | None = None) -> SimpleNamespace:
     return SimpleNamespace(id=uuid.uuid4(), owner_id=owner or uuid.uuid4(), nodes=list(nodes))
 
@@ -159,6 +151,23 @@ class ListeningTriggerTests(unittest.IsolatedAsyncioTestCase):
 
 
 class EventsEndpointTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        # The claim itself is a Postgres row, covered in test_slack_event_claims_postgres.
+        claimed: set[tuple[str, str]] = set()
+
+        async def claim(event_id: object, scope: str) -> bool:
+            if not event_id:
+                return True
+            key = (str(event_id), scope)
+            if key in claimed:
+                return False
+            claimed.add(key)
+            return True
+
+        patcher = patch.object(slack_api, "claim_slack_event", side_effect=claim)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def _patches(self, targets: list, *, bot: bool = True) -> tuple:
         return (
             patch.object(slack_api, "_get_signing_secret", AsyncMock(return_value=SECRET)),

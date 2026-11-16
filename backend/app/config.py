@@ -65,6 +65,8 @@ class Settings(BaseSettings):
     cron_misfire_grace_seconds: int = 600
     # How many cron runs may be in flight at once; each holds a database connection.
     cron_max_parallel_runs: int = 4
+    # How many IMAP Trigger polls (with their runs) may be in flight at once.
+    imap_max_parallel_polls: int = 4
     oauth_access_token_expire_seconds: int = 3600
     oauth_refresh_token_expire_days: int = 30
     oauth_auth_code_expire_minutes: int = 10

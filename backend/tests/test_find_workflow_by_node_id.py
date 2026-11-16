@@ -7,8 +7,12 @@ import unittest
 class _FakeResult:
     """Minimal async-compatible result for capturing executed statements."""
 
-    def scalar_one_or_none(self):
-        return None
+    def scalars(self):
+        return iter([])
+
+
+async def _never_verifies(_db, _credential_id):
+    return False
 
 
 class TestSlackFindWorkflowByNodeId(unittest.IsolatedAsyncioTestCase):
@@ -35,7 +39,7 @@ class TestSlackFindWorkflowByNodeId(unittest.IsolatedAsyncioTestCase):
         db = AsyncMock()
         db.execute = capture_execute
 
-        await _find_workflow_by_node_id(db, "test-node-id")
+        await _find_workflow_by_node_id(db, "test-node-id", _never_verifies)
 
         compiled = str(captured_sql)
         # The parenthesized cast must appear in the compiled output
@@ -44,7 +48,7 @@ class TestSlackFindWorkflowByNodeId(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_slack_node_filter_value_is_valid_json(self):
-        """The node_filter bind value must be valid JSON: [{"id": "<node_id>"}]."""
+        """The node_filter bind value must be valid JSON: [{"id": "<node_id>", "type": ...}]."""
         from app.api.slack import _find_workflow_by_node_id
 
         captured_params = None
@@ -60,13 +64,13 @@ class TestSlackFindWorkflowByNodeId(unittest.IsolatedAsyncioTestCase):
         db.execute = capture_execute
 
         node_id = "my-test-node"
-        await _find_workflow_by_node_id(db, node_id)
+        await _find_workflow_by_node_id(db, node_id, _never_verifies)
 
         filter_value = captured_params["node_filter"]
         parsed = json.loads(filter_value)
         assert isinstance(parsed, list)
         assert len(parsed) == 1
-        assert parsed[0]["id"] == node_id
+        assert parsed[0] == {"id": node_id, "type": "slackTrigger"}
 
 
 class TestTelegramFindWorkflowByNodeId(unittest.IsolatedAsyncioTestCase):
@@ -88,7 +92,7 @@ class TestTelegramFindWorkflowByNodeId(unittest.IsolatedAsyncioTestCase):
         db = AsyncMock()
         db.execute = capture_execute
 
-        await _find_workflow_by_node_id(db, "test-node-id")
+        await _find_workflow_by_node_id(db, "test-node-id", _never_verifies)
 
         compiled = str(captured_sql)
         assert "(:node_filter)" in compiled, (
@@ -112,13 +116,13 @@ class TestTelegramFindWorkflowByNodeId(unittest.IsolatedAsyncioTestCase):
         db.execute = capture_execute
 
         node_id = "my-test-node"
-        await _find_workflow_by_node_id(db, node_id)
+        await _find_workflow_by_node_id(db, node_id, _never_verifies)
 
         filter_value = captured_params["node_filter"]
         parsed = json.loads(filter_value)
         assert isinstance(parsed, list)
         assert len(parsed) == 1
-        assert parsed[0]["id"] == node_id
+        assert parsed[0] == {"id": node_id, "type": "telegramTrigger"}
 
 
 class TestNodeIdSpecialChars(unittest.TestCase):
