@@ -61,7 +61,7 @@ class DataTableCsvRoundTripTests(unittest.IsolatedAsyncioTestCase):
             {"name": "Ada", "score": 42, "meta": {"plan": "pro", "seats": 3}},
             {"name": "Bob", "score": 1.5, "meta": ["a", "b"]},
             {"name": "Cem", "score": 7, "meta": "free text"},
-            {"name": "Dee", "score": 0, "meta": {"city": "İzmir"}},
+            {"name": "Dee", "score": 0, "meta": {"city": "Zürich"}},
         ]
         stored, errors = await self._import(await self._export(rows))
         self.assertEqual(errors, [])
