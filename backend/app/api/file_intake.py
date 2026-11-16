@@ -26,6 +26,7 @@ from app.services.pending_execution import needs_local_pending_persist, persist_
 from app.services.result_stream import stream_result
 from app.services.secret_tokens import hash_secret
 from app.services.upload_limits import read_upload_file_limited
+from app.services.workflow_access import user_has_workflow_access
 from app.services.workflow_executor import ExecutionResult, WorkflowCancelledError, execute_workflow
 
 router = APIRouter(prefix="/file-intake", tags=["file-intake"])
@@ -50,7 +51,16 @@ async def get_slot_status(
         raise HTTPException(status_code=404, detail="Upload slot not found")
 
     workflow = await db.get(Workflow, slot.workflow_id)
-    if workflow is None or workflow.owner_id != current_user.id:
+    # The owner, or the collaborator whose canvas run minted the slot while they can still
+    # open the workflow; anyone else gets the same 404 as an unknown slot.
+    allowed = workflow is not None and (
+        workflow.owner_id == current_user.id
+        or (
+            slot.created_by_user_id == current_user.id
+            and await user_has_workflow_access(db, workflow, current_user.id)
+        )
+    )
+    if not allowed:
         raise HTTPException(status_code=404, detail="Upload slot not found")
 
     result: dict = {"status": slot.status, "run_id": slot.run_id, "run": None}
