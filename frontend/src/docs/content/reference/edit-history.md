@@ -44,7 +44,7 @@ To restore a past version:
 3. Confirm the action
 4. The current workflow is replaced with the selected version; the page reloads
 
-Reverting creates a new "current" state—you can revert again if needed.
+Reverting is a save: the state it replaces is kept as the newest version, so you can revert to it to undo the revert. Triggers are resynced as on any save.
 
 ## Clear History
 
