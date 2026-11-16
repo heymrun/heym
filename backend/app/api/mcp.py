@@ -3,7 +3,7 @@ import json
 import logging
 import secrets
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Sequence
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, TypeVar
@@ -163,6 +163,36 @@ async def _run_mcp_protocol_limited_with_session(
 def _sanitize_workflow_tool_name(name: str) -> str:
     tool_name = name.lower().replace(" ", "_").replace("-", "_")
     return "".join(c if c.isalnum() or c == "_" else "" for c in tool_name)
+
+
+def workflow_tool_names(workflows: Sequence[Workflow]) -> dict[uuid.UUID, str]:
+    """Each workflow's MCP tool name: its sanitized name, with `_2`, `_3` on a repeat.
+
+    Workflow names are not unique, and a user's list mixes owned and shared workflows, so two
+    of them can sanitize to one name. Each keeps a name of its own, as agent node tools do.
+    The oldest keeps the plain name, so a newer workflow never renames a tool already in use.
+    """
+
+    def age(workflow: Workflow) -> tuple[float, str]:
+        created_at = getattr(workflow, "created_at", None)
+        return (created_at.timestamp() if created_at else float("inf"), str(workflow.id))
+
+    names: dict[uuid.UUID, str] = {}
+    used: set[str] = set()
+    for workflow in sorted(workflows, key=age):
+        base = _sanitize_workflow_tool_name(workflow.name)
+        name, suffix = base, 2
+        while name in used:
+            name, suffix = f"{base}_{suffix}", suffix + 1
+        used.add(name)
+        names[workflow.id] = name
+    return names
+
+
+def find_workflow_tool(workflows: Sequence[Workflow], tool_name: str) -> Workflow | None:
+    """The workflow `tools/list` offers as ``tool_name``, or None."""
+    names = workflow_tool_names(workflows)
+    return next((w for w in workflows if names[w.id] == tool_name), None)
 
 
 def _mcp_tool_result_jsonrpc_response(
@@ -615,7 +645,7 @@ async def get_all_user_workflows(db: AsyncSession, user_id: uuid.UUID) -> list[W
     return list(result.scalars().all())
 
 
-def workflow_to_mcp_tool(workflow: Workflow) -> MCPTool:
+def workflow_to_mcp_tool(workflow: Workflow, name: str | None = None) -> MCPTool:
     input_fields = extract_input_fields_from_workflow(workflow)
     properties: dict[str, MCPToolInputProperty] = {}
     required: list[str] = []
@@ -628,7 +658,7 @@ def workflow_to_mcp_tool(workflow: Workflow) -> MCPTool:
         required.append(field.key)
 
     return MCPTool(
-        name=_sanitize_workflow_tool_name(workflow.name),
+        name=name or _sanitize_workflow_tool_name(workflow.name),
         description=workflow.description or f"Execute workflow: {workflow.name}",
         inputSchema=MCPToolInputSchema(
             type="object",
@@ -643,7 +673,8 @@ async def build_tools_with_chat(
     chat_settings: agent_settings.AgentSettings,
 ) -> list[MCPTool]:
     """Workflow tools for an MCP surface, plus `heym_chat` when it is enabled."""
-    tools = [workflow_to_mcp_tool(w) for w in workflows]
+    names = workflow_tool_names(workflows)
+    tools = [workflow_to_mcp_tool(w, names[w.id]) for w in workflows]
     if mcp_execution_status.should_list(workflows):
         tools.append(mcp_execution_status.build_execution_status_tool())
     if chat_settings.enabled:
@@ -1176,13 +1207,7 @@ async def call_mcp_tool(
     if tool_name == mcp_execution_status.MCP_EXECUTION_STATUS_TOOL_NAME:
         text, is_error = await mcp_execution_status.run_execution_status_tool(workflows, arguments)
         return MCPToolResult(content=[MCPTextContent(text=text)], isError=is_error)
-    target_workflow = None
-
-    for w in workflows:
-        # Match by sanitized workflow name
-        if _sanitize_workflow_tool_name(w.name) == tool_name:
-            target_workflow = w
-            break
+    target_workflow = find_workflow_tool(workflows, tool_name)
 
     if target_workflow is None:
         return MCPToolResult(
@@ -1457,13 +1482,7 @@ async def _dispatch_mcp_jsonrpc(
                 workflows, arguments
             )
             return _mcp_tool_result_jsonrpc_response(msg.id, text, is_error=is_error)
-        target_workflow = None
-
-        for w in workflows:
-            # Match by sanitized workflow name
-            if _sanitize_workflow_tool_name(w.name) == tool_name:
-                target_workflow = w
-                break
+        target_workflow = find_workflow_tool(workflows, tool_name)
 
         if target_workflow is None:
             return {

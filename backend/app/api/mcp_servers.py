@@ -32,6 +32,7 @@ from app.api.mcp import (
     _with_client_session,
     build_tools_with_chat,
     dispatch_chat_tool_call,
+    find_workflow_tool,
     get_credentials_context_for_user,
     session_user_active,
     validate_chat_tool_credential,
@@ -135,11 +136,6 @@ def _server_response(
             a2a_enabled=bool(server.a2a_enabled),
         ),
     )
-
-
-def _sanitize_tool_name(name: str) -> str:
-    n = name.lower().replace(" ", "_").replace("-", "_")
-    return "".join(c if c.isalnum() or c == "_" else "" for c in n)
 
 
 def _session_server_from_id(server_id: uuid.UUID, user_id: uuid.UUID) -> MCPServer:
@@ -557,11 +553,7 @@ async def _dispatch_named_server_jsonrpc(
                 workflows, arguments
             )
             return _mcp_tool_result_jsonrpc_response(msg.id, text, is_error=is_error)
-        target_workflow = None
-        for w in workflows:
-            if _sanitize_tool_name(w.name) == tool_name:
-                target_workflow = w
-                break
+        target_workflow = find_workflow_tool(workflows, tool_name)
 
         if target_workflow is None:
             return {

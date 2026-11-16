@@ -63,7 +63,8 @@ class ChatToolExposureTests(unittest.IsolatedAsyncioTestCase):
         settings = AgentSettings(enabled=False, credential_id=None, model=None)
 
         with patch(
-            "app.api.mcp.workflow_to_mcp_tool", side_effect=lambda w: SimpleNamespace(name=w.name)
+            "app.api.mcp.workflow_to_mcp_tool",
+            side_effect=lambda w, _name: SimpleNamespace(name=w.name),
         ):
             tools = await build_tools_with_chat([_make_workflow()], settings)
 
@@ -73,7 +74,8 @@ class ChatToolExposureTests(unittest.IsolatedAsyncioTestCase):
         settings = AgentSettings(enabled=True, credential_id=uuid.uuid4(), model="gpt-5")
 
         with patch(
-            "app.api.mcp.workflow_to_mcp_tool", side_effect=lambda w: SimpleNamespace(name=w.name)
+            "app.api.mcp.workflow_to_mcp_tool",
+            side_effect=lambda w, _name: SimpleNamespace(name=w.name),
         ):
             tools = await build_tools_with_chat([_make_workflow()], settings)
 
@@ -87,7 +89,8 @@ class ChatToolExposureTests(unittest.IsolatedAsyncioTestCase):
         settings = AgentSettings(enabled=True, credential_id=uuid.uuid4(), model="gpt-5")
 
         with patch(
-            "app.api.mcp.workflow_to_mcp_tool", side_effect=lambda w: SimpleNamespace(name=w.name)
+            "app.api.mcp.workflow_to_mcp_tool",
+            side_effect=lambda w, _name: SimpleNamespace(name=w.name),
         ):
             tools = await build_tools_with_chat([_make_workflow()], settings)
 
