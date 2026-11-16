@@ -5235,7 +5235,11 @@ class WorkflowExecutor(WorkflowBranchRoutingMixin):
 
         from app.db.session import SessionLocal
         from app.services.encryption import decrypt_config
-        from app.services.llm_service import execute_llm, execute_llm_with_tools
+        from app.services.llm_service import (
+            execute_llm,
+            execute_llm_with_tools,
+            tool_loop_progress,
+        )
 
         if guardrails_config and guardrails_config.get("enabled"):
             from app.services.guardrails_service import (
@@ -5609,6 +5613,8 @@ class WorkflowExecutor(WorkflowBranchRoutingMixin):
         agent_last_error: Exception | None = None
         agent_last_model = model
         agent_last_trace_id: str | None = None
+        # Set when an attempt failed after running tools: the fallback continues from there.
+        continue_from = None
         for attempt_idx, (cid, mod) in enumerate(attempts):
             credential_type = None
             credential_name = ""
@@ -5739,6 +5745,7 @@ class WorkflowExecutor(WorkflowBranchRoutingMixin):
                             use_responses_api=agent_use_responses_api,
                             router=router,
                             repair_json_output=json_output_enabled,
+                            continue_from=continue_from,
                         )
                     )
                 else:
@@ -5769,6 +5776,7 @@ class WorkflowExecutor(WorkflowBranchRoutingMixin):
                 agent_last_error = e
                 agent_last_model = mod
                 agent_last_trace_id = self._latest_trace_id(trace_context) or agent_last_trace_id
+                continue_from = tool_loop_progress(e) or continue_from
                 continue
 
             result = dict(result)

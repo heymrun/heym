@@ -189,6 +189,31 @@ class HumanReviewPause:
     match_strategy: str | None = None
 
 
+@dataclass(frozen=True)
+class ToolLoopProgress:
+    """How far a tool loop got: its history in the transport's stored form, and its totals."""
+
+    transport: str
+    messages: list[dict[str, Any]]
+    tool_calls: list[dict[str, Any]]
+    elapsed_ms: float
+    prompt_tokens: int
+    completion_tokens: int
+
+
+_TOOL_LOOP_PROGRESS_ATTR = "heym_tool_loop_progress"
+
+
+def tool_loop_progress(error: BaseException) -> ToolLoopProgress | None:
+    """The progress a provider error carries when it ended a tool loop after a tool ran.
+
+    The error keeps its own type and message; an agent's fallback model reads this to
+    continue from the history instead of starting over and running the same tools again.
+    """
+    progress = getattr(error, _TOOL_LOOP_PROGRESS_ATTR, None)
+    return progress if isinstance(progress, ToolLoopProgress) else None
+
+
 def _batch_attr(batch: Any, name: str, default: Any = None) -> Any:
     value = getattr(batch, name, default)
     if value is default and isinstance(batch, dict):
@@ -1428,8 +1453,15 @@ class LLMService:
         should_abort: Callable[[], str | None] | None = None,
         extra_body: dict[str, Any] | None = None,
         repair_json_output: bool = False,
+        continue_from: ToolLoopProgress | None = None,
     ) -> dict[str, Any]:
-        """Execute LLM with tool calling loop."""
+        """Execute LLM with tool calling loop.
+
+        ``continue_from`` is an earlier model's progress (a fallback after a provider error):
+        on the same transport the loop continues from its history, so tools that already ran
+        are not run again. On another transport the stored history does not fit, and the loop
+        starts from the prompt.
+        """
         # With a router there is no credential to bind yet: every turn binds its own
         # client, provider and model from the decision model's answer. Without one this
         # is the single static binding every existing caller already gets.
@@ -1440,6 +1472,12 @@ class LLMService:
             client, provider = self._get_client()
 
         transport = self._get_transport(model)
+        if continue_from is not None and continue_from.transport == transport.name:
+            initial_messages = continue_from.messages
+            initial_tool_calls = continue_from.tool_calls
+            initial_elapsed_ms = continue_from.elapsed_ms
+            initial_prompt_tokens = continue_from.prompt_tokens
+            initial_completion_tokens = continue_from.completion_tokens
         if initial_messages is not None:
             # A resume ends with the approval text as a plain {"role": "user", "content"}
             # dict. Re-append it through the transport, so it takes the provider's own
@@ -1503,6 +1541,7 @@ class LLMService:
         tool_names = [t["name"] for t in tools]
         latest_tool_output: str | None = None
         routed_tool_cursor = len(tool_calls_collected)
+        first_new_tool_call = len(tool_calls_collected)
         # Without a router there is one window, so compression may replace the history.
         routed_view = _RoutedHistoryView(history) if self.router is not None else None
 
@@ -1736,6 +1775,24 @@ class LLMService:
                     total_tokens=inv_total if inv_total else None,
                     binding=binding,
                 )
+                # Once a tool has run, a fallback model must not start over and run it again
+                # (send the email twice): hand it the history to continue from.
+                if any(
+                    tc.get("name") != "_context_compression"
+                    for tc in tool_calls_collected[first_new_tool_call:]
+                ):
+                    progress = ToolLoopProgress(
+                        transport=run_transport.name,
+                        messages=copy.deepcopy(run_transport.dump(history)),
+                        tool_calls=copy.deepcopy(tool_calls_collected),
+                        elapsed_ms=total_elapsed_ms + elapsed_ms,
+                        prompt_tokens=total_prompt_tokens,
+                        completion_tokens=total_completion_tokens,
+                    )
+                    try:
+                        setattr(exc, _TOOL_LOOP_PROGRESS_ATTR, progress)
+                    except AttributeError:
+                        pass
                 raise
             elapsed_ms = (time.time() - start_time) * 1000
             self._record_turn_timing(
@@ -3300,6 +3357,7 @@ async def execute_llm_with_tools(
     use_responses_api: bool = False,
     router: ModelRouter | None = None,
     repair_json_output: bool = False,
+    continue_from: ToolLoopProgress | None = None,
 ) -> dict[str, Any]:
     cred_type = CredentialType(credential_type)
     service = LLMService(
@@ -3335,6 +3393,7 @@ async def execute_llm_with_tools(
         initial_completion_tokens=initial_completion_tokens,
         should_abort=should_abort,
         extra_body=extra_body,
+        continue_from=continue_from,
     )
 
 
