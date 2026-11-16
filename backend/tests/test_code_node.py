@@ -131,6 +131,13 @@ class ParameterResolutionTest(unittest.TestCase):
         ctx = _context(
             {"codeSource": "def main(params):\n    return 1\n", "codeParameters": parameters}
         )
+        from app.services.expression_evaluator import is_top_level_ternary_expression
+        from app.services.workflow_executor import _is_single_dollar_expression
+
+        ctx.executor._is_single_dollar_expression.side_effect = _is_single_dollar_expression
+        ctx.executor._is_top_level_ternary_expression.side_effect = lambda t: (
+            is_top_level_ternary_expression(t, ctx.executor)
+        )
         ctx.executor.resolve_expression.side_effect = lambda expr, *a, **k: resolved[expr]
         ctx.executor.evaluate_message_template.side_effect = lambda tpl, *a, **k: "".join(
             str(resolved.get(part, part)) for part in [tpl]
@@ -175,6 +182,95 @@ class ParameterResolutionTest(unittest.TestCase):
     def test_literal_values_are_left_alone(self) -> None:
         params = self._params_for('{"a": 1, "b": "plain", "c": true}', {})
         self.assertEqual(params, {"a": 1, "b": "plain", "c": True})
+
+    def test_expression_with_spaces_keeps_its_type(self) -> None:
+        expr = "$array('hello', 'world')"
+        params = self._params_for(
+            "{\"items\": \"$array('hello', 'world')\"}",
+            {expr: ["hello", "world"]},
+        )
+        self.assertEqual(params, {"items": ["hello", "world"]})
+        self.assertIsInstance(params["items"], list)
+
+    def test_expression_method_chain_with_spaces_keeps_type(self) -> None:
+        expr = "$items.take( 2 )"
+        params = self._params_for(
+            '{"subset": "$items.take( 2 )"}',
+            {expr: [10, 20]},
+        )
+        self.assertEqual(params, {"subset": [10, 20]})
+        self.assertIsInstance(params["subset"], list)
+
+    def test_dictionary_index_expression_with_spaces_keeps_its_type(self) -> None:
+        expr = "$data['key with spaces']"
+        params = self._params_for(
+            '{"selected": "$data[\'key with spaces\']"}',
+            {expr: {"id": 7}},
+        )
+        self.assertEqual(params, {"selected": {"id": 7}})
+        self.assertIsInstance(params["selected"], dict)
+
+    def test_text_starting_with_ref_and_space_falls_back_to_template_when_unresolved(self) -> None:
+        from app.services.workflow_executor import WorkflowExecutor
+
+        executor = WorkflowExecutor(nodes=[], edges=[])
+        ctx = NodeExecutionContext(
+            executor=executor,
+            node_id="n1",
+            inputs={"trigger": {"body": {"name": "Alice"}}},
+            allow_branch_skip=False,
+            start_time=0.0,
+            node={
+                "id": "n1",
+                "type": "code",
+                "data": {
+                    "codeSource": "def main(params):\n    return 1\n",
+                    "codeParameters": '{"msg": "$trigger.body.name, welcome"}',
+                },
+            },
+            node_type="code",
+            node_data={
+                "codeSource": "def main(params):\n    return 1\n",
+                "codeParameters": '{"msg": "$trigger.body.name, welcome"}',
+            },
+            node_label="transform",
+        )
+        with patch.object(
+            code_node, "execute_code", return_value=CodeExecutionResult(result=None)
+        ) as run_code:
+            code_node.execute(ctx)
+        self.assertEqual(run_code.call_args.kwargs["params"], {"msg": "Alice, welcome"})
+
+    def test_ternary_picking_null_returns_none(self) -> None:
+        from app.services.workflow_executor import WorkflowExecutor
+
+        executor = WorkflowExecutor(nodes=[], edges=[])
+        ctx = NodeExecutionContext(
+            executor=executor,
+            node_id="n1",
+            inputs={"condition": True},
+            allow_branch_skip=False,
+            start_time=0.0,
+            node={
+                "id": "n1",
+                "type": "code",
+                "data": {
+                    "codeSource": "def main(params):\n    return 1\n",
+                    "codeParameters": '{"val": "$condition ? null : \'fallback\'"}',
+                },
+            },
+            node_type="code",
+            node_data={
+                "codeSource": "def main(params):\n    return 1\n",
+                "codeParameters": '{"val": "$condition ? null : \'fallback\'"}',
+            },
+            node_label="transform",
+        )
+        with patch.object(
+            code_node, "execute_code", return_value=CodeExecutionResult(result=None)
+        ) as run_code:
+            code_node.execute(ctx)
+        self.assertIsNone(run_code.call_args.kwargs["params"]["val"])
 
 
 class RegistryTest(unittest.TestCase):
