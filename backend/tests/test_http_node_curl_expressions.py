@@ -6,6 +6,8 @@ have to be resolved before the curl tokens are interpreted, otherwise the
 header is dropped and the URL is not recognised.
 """
 
+import base64
+import json
 import unittest
 from unittest.mock import patch
 
@@ -133,6 +135,64 @@ class HttpNodeCurlExpressionTests(unittest.TestCase):
         )
 
         self.assertEqual(request.content.decode("utf-8"), '{"text": "line1 line2"}')
+
+
+class HttpNodeCurlUserTests(unittest.TestCase):
+    """`curl -u user:password`, as Stripe, Twilio and Mailgun document their APIs."""
+
+    @staticmethod
+    def _basic(user_pass: str) -> str:
+        return "Basic " + base64.b64encode(user_pass.encode()).decode()
+
+    def test_user_option_sends_basic_auth(self) -> None:
+        for curl, user_pass in (
+            ("curl https://api.example.com/v1/customers -u sk_test_123:", "sk_test_123:"),
+            ("curl --user 'AC123:auth token' https://api.example.com/x", "AC123:auth token"),
+            ("curl -u api https://api.example.com/x", "api:"),
+        ):
+            with self.subTest(curl=curl):
+                request = _run_curl(curl)
+                self.assertEqual(request.headers["authorization"], self._basic(user_pass))
+
+    def test_user_option_resolves_expressions(self) -> None:
+        request = _run_curl(
+            "curl -u '$credentials.stripe:' https://api.example.com/v1/charges",
+            credentials={"stripe": "sk_live_abcdef123456"},
+        )
+        self.assertEqual(request.headers["authorization"], self._basic("sk_live_abcdef123456:"))
+
+    def test_an_explicit_authorization_header_wins(self) -> None:
+        for curl in (
+            "curl -u a:b -H 'Authorization: Bearer t1' https://api.example.com/x",
+            "curl -H 'authorization: Bearer t1' -u a:b https://api.example.com/x",
+        ):
+            with self.subTest(curl=curl):
+                self.assertEqual(_run_curl(curl).headers["authorization"], "Bearer t1")
+
+
+class HttpNodeCurlJsonOptionTests(unittest.TestCase):
+    """curl 7.82+ `--json <data>`: a JSON POST with JSON Content-Type and Accept."""
+
+    def test_json_option_posts_a_json_body(self) -> None:
+        request = _run_curl(
+            """curl https://api.example.com/users --json '{"name": "$source.name"}'""",
+            inputs={"source": {"name": 'Ann "A" Lee'}},
+        )
+
+        self.assertEqual(request.method, "POST")
+        self.assertEqual(json.loads(request.content), {"name": 'Ann "A" Lee'})
+        self.assertEqual(request.headers["content-type"], "application/json")
+        self.assertEqual(request.headers["accept"], "application/json")
+
+    def test_headers_the_command_sets_win(self) -> None:
+        request = _run_curl(
+            "curl -X PUT https://api.example.com/u/1 -H 'Accept: application/vnd.api+json' "
+            """--json '{"a": 1}'"""
+        )
+
+        self.assertEqual(request.method, "PUT")
+        self.assertEqual(request.headers["accept"], "application/vnd.api+json")
+        self.assertEqual(request.headers["content-type"], "application/json")
 
 
 if __name__ == "__main__":

@@ -55,3 +55,81 @@ class HttpNodeRequestBodyTests(unittest.TestCase):
         request = received_requests[0]
         self.assertEqual(json.loads(request.content.decode("utf-8")), payload)
         self.assertEqual(request.headers["content-length"], str(len(request.content)))
+
+
+class HttpNodeJsonMediaTypeTests(unittest.TestCase):
+    """Every JSON media type gets the JSON-safe body, not only application/json."""
+
+    TITLE = 'Fix "login" bug\nseen on Safari'
+
+    def _sent_body(self, content_type: str, data: str | None = None, **source: object) -> bytes:
+        if data is None:
+            data = '{"data": {"type": "issues", "attributes": {"title": "$source.title"}}}'
+        curl = (
+            "curl -X POST https://api.example.com/issues "
+            f"-H 'Content-Type: {content_type}' -d '{data}'"
+        )
+        received: list[httpx.Request] = []
+
+        def handle_request(request: httpx.Request) -> httpx.Response:
+            received.append(request)
+            return httpx.Response(201, json={"data": {"id": "1"}}, request=request)
+
+        context = NodeExecutionContext(
+            executor=WorkflowExecutor(nodes=[], edges=[]),
+            node_id="http1",
+            inputs={"source": {"title": self.TITLE, **source}},
+            allow_branch_skip=True,
+            start_time=0.0,
+            node={},
+            node_type="http",
+            node_data={"curl": curl},
+            node_label="Create issue",
+        )
+        with httpx.Client(transport=httpx.MockTransport(handle_request)) as client:
+            with (
+                patch("app.services.ssrf_guard.guard_http_url"),
+                patch("app.services.ssrf_guard.get_guarded_http_client", return_value=client),
+            ):
+                http_node.execute(context)
+        return received[0].content
+
+    def test_json_suffix_media_types_keep_the_body_valid(self) -> None:
+        for content_type in (
+            "application/vnd.api+json",
+            "application/merge-patch+json; charset=utf-8",
+            "application/problem+json",
+        ):
+            with self.subTest(content_type=content_type):
+                self.assertEqual(
+                    json.loads(self._sent_body(content_type)),
+                    {"data": {"type": "issues", "attributes": {"title": self.TITLE}}},
+                )
+
+    def test_a_non_json_body_is_still_plain_text(self) -> None:
+        body = self._sent_body("text/plain").decode()
+        self.assertIn(self.TITLE, body)
+
+    def test_json_text_outside_quotes_goes_in_as_it_is_for_json_suffix_types(self) -> None:
+        # Existing +json workflows pass ready-made JSON through an expression.
+        text = '{"a": 1}'
+        for data, expected in (
+            ("$source.x", {"a": 1}),
+            ('{"data": $source.x}', {"data": {"a": 1}}),
+            ('{"count": $source.n}', {"count": 42}),
+        ):
+            with self.subTest(data=data):
+                sent = self._sent_body("application/vnd.api+json", data, x=text, n="42")
+                self.assertEqual(json.loads(sent), expected)
+
+    def test_text_that_is_not_json_is_still_encoded_for_json_suffix_types(self) -> None:
+        sent = self._sent_body(
+            "application/vnd.api+json", '{"note": $source.note}', note='say "hi"'
+        )
+
+        self.assertEqual(json.loads(sent), {"note": 'say "hi"'})
+
+    def test_application_json_still_encodes_json_text_as_a_string(self) -> None:
+        sent = self._sent_body("application/json", '{"data": $source.x}', x='{"a": 1}')
+
+        self.assertEqual(json.loads(sent), {"data": '{"a": 1}'})

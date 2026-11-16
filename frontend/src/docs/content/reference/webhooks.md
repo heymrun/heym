@@ -46,6 +46,7 @@ The request body is passed as `body` to [Input](../nodes/input-node.md) nodes. H
 
 - **Raw JSON** – e.g. `{"userId": "123", "action": "create"}`
 - **Wrapped format** – `{"inputs": {...}, "test_run": false}`
+- **Form-encoded** – `application/x-www-form-urlencoded`, as Twilio, Slack slash commands and Mailgun post it. The fields arrive as an object (`$input.body.From`, `$input.body.Body`); a field sent more than once is a list.
 
 When using the wrapped format, `inputs` is extracted and passed as `body`. `test_run` bypasses rate limiting and response caching. You can also send `?test_run=true` as a query parameter when posting raw JSON.
 
