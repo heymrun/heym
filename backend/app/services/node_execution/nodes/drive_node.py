@@ -264,8 +264,13 @@ def execute(ctx: NodeExecutionContext) -> object:
                 _disposition["content-disposition"] = cd
                 filename = (_disposition.get_filename() or "").strip()
             if filename:
-                filename = _normalize_storage_filename(filename)
-            else:
+                try:
+                    filename = _normalize_storage_filename(filename)
+                except ValueError:
+                    # A header name storage refuses (a slash, "..", a NUL) falls back to
+                    # the URL's name, as before filename* was read.
+                    filename = ""
+            if not filename:
                 filename = _url_file_name(_urllib_parse.urlparse(source_url).path.rstrip("/"))
             if not mime_type or mime_type == "application/octet-stream":
                 _guessed = _mimetypes.guess_type(filename)[0]
