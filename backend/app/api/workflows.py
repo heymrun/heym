@@ -23,7 +23,7 @@ from fastapi import (
     status,
 )
 from fastapi.responses import JSONResponse, StreamingResponse
-from sqlalchemy import String, cast, func, or_, select, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
@@ -139,6 +139,7 @@ from app.services.hitl_service import (
 from app.services.hitl_widget_service import ensure_saved_filter_allowed
 from app.services.html_response import build_html_response, find_sole_html_terminal
 from app.services.instance_admin import is_instance_admin
+from app.services.json_text_search import json_text_ilike
 from app.services.k8s_credentials.store import CredentialUnavailableError
 from app.services.node_analytics_rollup import pending_on_first_write
 from app.services.pending_execution import needs_local_pending_persist
@@ -3959,9 +3960,9 @@ async def get_execution_history(
             or_(
                 ExecutionHistory.status.ilike(pattern),
                 ExecutionHistory.trigger_source.ilike(pattern),
-                cast(ExecutionHistory.inputs, String).ilike(pattern),
-                cast(ExecutionHistory.outputs, String).ilike(pattern),
-                cast(ExecutionHistory.node_results, String).ilike(pattern),
+                json_text_ilike(ExecutionHistory.inputs, search),
+                json_text_ilike(ExecutionHistory.outputs, search),
+                json_text_ilike(ExecutionHistory.node_results, search),
             )
         )
     total_query = apply_instance_filter(total_query, instance_id)
@@ -3979,9 +3980,9 @@ async def get_execution_history(
             or_(
                 ExecutionHistory.status.ilike(pattern),
                 ExecutionHistory.trigger_source.ilike(pattern),
-                cast(ExecutionHistory.inputs, String).ilike(pattern),
-                cast(ExecutionHistory.outputs, String).ilike(pattern),
-                cast(ExecutionHistory.node_results, String).ilike(pattern),
+                json_text_ilike(ExecutionHistory.inputs, search),
+                json_text_ilike(ExecutionHistory.outputs, search),
+                json_text_ilike(ExecutionHistory.node_results, search),
             )
         )
     history_result = await db.execute(
