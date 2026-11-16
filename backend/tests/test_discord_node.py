@@ -138,6 +138,64 @@ class TestDiscordExecutorBranch(unittest.TestCase):
             },
         )
 
+    def test_a_message_over_the_discord_limit_is_posted_as_several(self) -> None:
+        from app.services.workflow_executor import WorkflowExecutor
+
+        nodes, edges, inputs = _make_discord_workflow(
+            {"credentialId": "cred-1", "message": "$start.body.text", "username": "Heym Bot"}
+        )
+        paragraph = "The deployment finished and every health check passed on the first try.\n"
+        inputs["body"]["text"] = paragraph * 80
+
+        mock_db = MagicMock()
+        mock_db.__enter__ = MagicMock(return_value=mock_db)
+        mock_db.__exit__ = MagicMock(return_value=False)
+        mock_db.query.return_value.filter.return_value.first.return_value = MagicMock(
+            encrypted_config="{}"
+        )
+        posted: list[dict] = []
+
+        def post(_url: str, json: dict) -> MagicMock:
+            response = MagicMock()
+            if len(json["content"]) > 2000:
+                response.status_code = 400
+                response.text = '{"message": "Invalid Form Body", "code": 50035}'
+                return response
+            posted.append(json)
+            response.status_code = 200
+            response.text = f'{{"id": "{len(posted)}"}}'
+            return response
+
+        mock_http_client = MagicMock()
+        mock_http_client.post.side_effect = post
+
+        with (
+            patch("app.db.session.SessionLocal", return_value=mock_db),
+            patch(
+                "app.services.encryption.decrypt_config",
+                return_value={"webhook_url": "https://discord.com/api/webhooks/123/abc"},
+            ),
+            patch(
+                "app.services.ssrf_guard.get_guarded_http_client",
+                return_value=mock_http_client,
+            ),
+        ):
+            executor = WorkflowExecutor(nodes=nodes, edges=edges, actor_user_id=uuid.uuid4())
+            result = executor.execute(workflow_id=uuid.uuid4(), initial_inputs=inputs)
+
+        self.assertEqual(result.status, "success")
+        discord_result = next(
+            row for row in result.node_results if row["node_label"] == "discordSend"
+        )
+        self.assertEqual(len(posted), 3)
+        self.assertEqual("\n".join(item["content"] for item in posted), inputs["body"]["text"])
+        self.assertTrue(all(item["username"] == "Heym Bot" for item in posted))
+        self.assertEqual(discord_result["output"]["response"], '{"id": "1"}')
+        self.assertEqual(
+            discord_result["output"]["responses"], ['{"id": "1"}', '{"id": "2"}', '{"id": "3"}']
+        )
+        self.assertEqual(discord_result["output"]["message"], inputs["body"]["text"])
+
 
 if __name__ == "__main__":
     unittest.main()

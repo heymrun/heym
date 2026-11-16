@@ -51,6 +51,9 @@ The **Discord** node sends a message to a Discord channel via an Incoming Webhoo
 | `$nodeLabel.message` | Message text that Heym sent |
 | `$nodeLabel.username` | Username sent with the webhook, if provided |
 | `$nodeLabel.avatar_url` | Avatar URL sent with the webhook, if provided |
+| `$nodeLabel.responses` | Response bodies of every message posted, in order |
+
+Discord accepts at most 2000 characters per webhook message. A longer `message` is posted as several messages in order, cut at a line break or a space where possible. `response` is the first of them.
 
 ## Common Patterns
 
