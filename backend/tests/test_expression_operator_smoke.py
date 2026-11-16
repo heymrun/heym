@@ -117,6 +117,9 @@ OPERATOR_CASES: list[tuple[str, str, Expected]] = [
     ("boolGreaterThanOrEqual", "$sample.flag >= true", True),
     ("boolLessThan", "$sample.flag < true", False),
     ("boolLessThanOrEqual", "$sample.flag <= false", False),
+    ("boolMapInt", "$sample.flags.map('int(item)')", [1, 0, 1]),
+    ("boolMapFloat", "$sample.flags.map('float(item)')", [1.0, 0.0, 1.0]),
+    ("boolFieldInt", "$sample.users.map('int(item.active)')", [1, 0]),
     ("intArithmetic", "$sample.num + 3", 10),
     ("floatArithmetic", "$sample.ratio - 0.5", 2.0),
     # --- DotList -----------------------------------------------------------------
