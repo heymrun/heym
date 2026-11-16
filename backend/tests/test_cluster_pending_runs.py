@@ -200,6 +200,118 @@ class OffloadedRunShapeTests(unittest.TestCase):
         )
         self.assertEqual(summary["workflow_id"], str(workflow_id))
 
+    def test_summarize_and_from_summary_preserves_throw_error_http_status_code(self) -> None:
+        from app.services.cluster.run_history import from_summary, summarize
+
+        execution_id = uuid.uuid4()
+        workflow_id = uuid.uuid4()
+        run_result = SimpleNamespace(
+            workflow_id=workflow_id,
+            status="error",
+            outputs={"error": "bad request"},
+            execution_time_ms=12.5,
+            node_results=[
+                {
+                    "node_id": "throw_1",
+                    "node_label": "Throw",
+                    "node_type": "throwError",
+                    "status": "error",
+                    "output": {"httpStatusCode": 400},
+                    "error": "bad request",
+                }
+            ],
+        )
+
+        summary = summarize(run_result, execution_id)
+        self.assertEqual(summary["http_status_code"], 400)
+
+        restored = from_summary(summary)
+        self.assertEqual(restored.http_status_code, 400)
+        self.assertEqual(restored.status, "error")
+        self.assertEqual(restored.outputs, {"error": "bad request"})
+
+    def test_summarize_and_from_summary_missing_status_code_remains_none(self) -> None:
+        from app.services.cluster.run_history import from_summary, summarize
+
+        execution_id = uuid.uuid4()
+        workflow_id = uuid.uuid4()
+
+        # Success run without error nodes
+        success_result = SimpleNamespace(
+            workflow_id=workflow_id,
+            status="success",
+            outputs={"message": "ok"},
+            execution_time_ms=5.0,
+            node_results=[],
+        )
+        summary = summarize(success_result, execution_id)
+        self.assertIsNone(summary.get("http_status_code"))
+        restored = from_summary(summary)
+        self.assertIsNone(restored.http_status_code)
+
+        # Error run from non-throwError node
+        code_error_result = SimpleNamespace(
+            workflow_id=workflow_id,
+            status="error",
+            outputs={"error": "syntax error"},
+            execution_time_ms=8.0,
+            node_results=[
+                {
+                    "node_id": "code_1",
+                    "node_label": "Code",
+                    "node_type": "code",
+                    "status": "error",
+                    "output": {},
+                    "error": "syntax error",
+                }
+            ],
+        )
+        summary = summarize(code_error_result, execution_id)
+        self.assertIsNone(summary.get("http_status_code"))
+        restored = from_summary(summary)
+        self.assertIsNone(restored.http_status_code)
+
+        # Error run from throwError node without configured httpStatusCode
+        throw_no_code_result = SimpleNamespace(
+            workflow_id=workflow_id,
+            status="error",
+            outputs={"error": "failed"},
+            execution_time_ms=8.0,
+            node_results=[
+                {
+                    "node_id": "throw_1",
+                    "node_label": "Throw",
+                    "node_type": "throwError",
+                    "status": "error",
+                    "output": {},
+                    "error": "failed",
+                }
+            ],
+        )
+        summary = summarize(throw_no_code_result, execution_id)
+        self.assertIsNone(summary.get("http_status_code"))
+        restored = from_summary(summary)
+        self.assertIsNone(restored.http_status_code)
+
+    def test_from_summary_older_summary_without_field_remains_none(self) -> None:
+        from app.services.cluster.run_history import from_summary
+
+        old_summary = {
+            "execution_id": str(uuid.uuid4()),
+            "workflow_id": "wf-old",
+            "status": "error",
+            "outputs": {"error": "boom"},
+            "execution_time_ms": 2.0,
+        }
+        restored = from_summary(old_summary)
+        self.assertIsNone(restored.http_status_code)
+
+    def test_offloaded_run_default_http_status_code_is_none(self) -> None:
+        from app.services.cluster.run_history import OffloadedRun
+
+        run = OffloadedRun(status="error", outputs={})
+        self.assertIsNone(run.http_status_code)
+
 
 if __name__ == "__main__":
     unittest.main()

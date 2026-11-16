@@ -23,6 +23,66 @@ from app.services.cluster import identity
 from app.services.cluster.attribution import attribution_fields
 
 
+def _coerce_status_code(value: Any) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        if isinstance(value, int):
+            return value if 100 <= value <= 599 else None
+        if isinstance(value, float) and value.is_integer():
+            code = int(value)
+            return code if 100 <= code <= 599 else None
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped.isdigit():
+                code = int(stripped)
+                return code if 100 <= code <= 599 else None
+    except (ValueError, TypeError):
+        return None
+    return None
+
+
+def throw_error_http_status_code(result: Any) -> int | None:
+    """Extract a failed throwError node's HTTP status code, if present.
+
+    Checks node_results first for normal local execution, then falls back to
+    http_status_code for an offloaded run.
+    """
+    if result is None:
+        return None
+
+    if isinstance(result, list):
+        node_results = result
+    else:
+        node_results = getattr(result, "node_results", None)
+        if node_results is None and isinstance(result, dict):
+            node_results = result.get("node_results")
+
+    for item in node_results or []:
+        if isinstance(item, dict):
+            if item.get("node_type") == "throwError" and item.get("status") == "error":
+                output = item.get("output")
+                if isinstance(output, dict):
+                    code = _coerce_status_code(output.get("httpStatusCode"))
+                    if code is not None:
+                        return code
+        else:
+            if (
+                getattr(item, "node_type", None) == "throwError"
+                and getattr(item, "status", None) == "error"
+            ):
+                output = getattr(item, "output", None)
+                if isinstance(output, dict):
+                    code = _coerce_status_code(output.get("httpStatusCode"))
+                    if code is not None:
+                        return code
+
+    raw_code = getattr(result, "http_status_code", None)
+    if raw_code is None and isinstance(result, dict):
+        raw_code = result.get("http_status_code")
+    return _coerce_status_code(raw_code)
+
+
 def failed_node_summary(node_results: Any) -> dict[str, Any] | None:
     """The first failing node, reduced to the fields an error context reads.
 
@@ -65,6 +125,8 @@ def summarize(result: Any, execution_id: uuid.UUID) -> dict[str, Any]:
         # The configured error workflow runs on the dispatching instance, which
         # never sees node_results, so the failing node travels with the summary.
         "failed_node": failed_node_summary(getattr(result, "node_results", None)),
+        # Preserve Throw Error's HTTP status code across cluster boundaries.
+        "http_status_code": throw_error_http_status_code(result),
         # Named so the caller's log can say where to look for the run.
         "instance": identity.instance_name(),
     }
@@ -213,6 +275,7 @@ class OffloadedRun:
     failed_node: dict | None = None
     # The executing instance already joined any allow-downstream work locally.
     allow_downstream_pending: bool = False
+    http_status_code: int | None = None
 
     def join_allow_downstream(self) -> None:
         return None
@@ -233,6 +296,7 @@ def from_summary(summary: dict[str, Any]) -> OffloadedRun:
         history_written=history_written,
         instance=str(summary.get("instance") or ""),
         failed_node=summary.get("failed_node"),
+        http_status_code=_coerce_status_code(summary.get("http_status_code")),
     )
 
 
