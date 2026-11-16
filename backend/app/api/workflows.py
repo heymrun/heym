@@ -92,6 +92,7 @@ from app.services.audit_log import OUTCOME_DENIED, audit
 from app.services.auth import create_workflow_execution_token, decode_token
 from app.services.cache_rate_limit import rate_limiter, response_cache
 from app.services.cluster.dispatch import dispatch_workflow, resolve_placement
+from app.services.cluster.run_history import throw_error_http_status_code
 from app.services.codex_followup_service import (
     is_codex_pending_execution,
     persist_pending_codex_followup_execution,
@@ -3730,15 +3731,7 @@ async def execute_workflow_endpoint(
     await db.flush()
 
     if execution_result.status == "error":
-        custom_status_code = None
-        for node_result in execution_result.node_results:
-            if (
-                node_result.get("node_type") == "throwError"
-                and node_result.get("status") == "error"
-                and node_result.get("output", {}).get("httpStatusCode")
-            ):
-                custom_status_code = node_result["output"]["httpStatusCode"]
-                break
+        custom_status_code = throw_error_http_status_code(execution_result)
 
         if custom_status_code:
             if simple_response:
@@ -3754,6 +3747,8 @@ async def execute_workflow_endpoint(
             }
             if history_entry is not None:
                 payload["execution_history_id"] = str(history_entry.id)
+            elif remote_history_id is not None:
+                payload["execution_history_id"] = str(remote_history_id)
             return JSONResponse(
                 status_code=custom_status_code,
                 content=payload,
