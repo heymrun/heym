@@ -341,8 +341,8 @@ def run_bot_operation(ctx: NodeExecutionContext, credential_id: str, config: dic
             {
                 "channel": channel,
                 "ts": _required(ctx, "slackMessageTs", "message timestamp"),
-                "text": message,
-                "blocks": [slack.section(message)],
+                "text": slack.update_text(message),
+                "blocks": slack.sections(message),
             },
         )
         return slack.message_output(body, message)

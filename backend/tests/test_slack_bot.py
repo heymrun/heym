@@ -338,6 +338,109 @@ class TestMrkdwn(unittest.TestCase):
         self.assertEqual(slack.to_slack_mrkdwn(text), text)
 
 
+class TestLongMessages(unittest.TestCase):
+    """Slack shows a message's blocks, not its text: a long message must not lose its end."""
+
+    CLAUSES = "\n".join(f"{n}. Batch {n} ships within 10 working days." for n in range(1, 121))
+    MESSAGE = f"{CLAUSES}\nTotal: 98,400 EUR"
+
+    @staticmethod
+    def _shown(blocks: list[dict]) -> str:
+        return "\n".join(b["text"]["text"] for b in blocks if b["type"] == "section")
+
+    def test_a_long_message_is_split_at_line_breaks_into_full_sections(self) -> None:
+        blocks = slack.sections(self.MESSAGE)
+
+        self.assertGreater(len(blocks), 1)
+        self.assertTrue(all(len(b["text"]["text"]) <= 3000 for b in blocks))
+        self.assertEqual(self._shown(blocks), self.MESSAGE)
+
+    def test_a_short_message_stays_one_section(self) -> None:
+        self.assertEqual(slack.sections("Ship it?"), [slack.section("Ship it?")])
+        self.assertEqual(slack.sections(""), [slack.section(" ")])
+
+    def test_one_line_longer_than_a_section_is_cut_into_pieces(self) -> None:
+        line = "x" * 7000
+        blocks = slack.sections(f"intro\n{line}")
+
+        self.assertEqual("".join(b["text"]["text"] for b in blocks), f"intro{line}")
+        self.assertTrue(all(len(b["text"]["text"]) <= 3000 for b in blocks))
+
+    def test_a_huge_message_stays_under_slacks_block_limit(self) -> None:
+        self.assertLessEqual(len(slack.sections("y" * 300_000)), 45)
+
+    def test_a_message_cut_by_the_block_limit_says_so(self) -> None:
+        blocks = slack.sections("y" * 300_000)
+
+        self.assertTrue(blocks[-1]["text"]["text"].endswith("_(message shortened)_"))
+        self.assertTrue(all(len(b["text"]["text"]) <= 3000 for b in blocks))
+
+    def test_a_message_that_fits_has_no_note(self) -> None:
+        self.assertNotIn("shortened", self._shown(slack.sections(self.MESSAGE)))
+
+    def test_every_block_message_shows_the_whole_text_before_its_controls(self) -> None:
+        buttons = [{"label": "Sign", "value": "sign", "style": ""}]
+        for blocks in (
+            slack.approval_blocks(self.MESSAGE, "k"),
+            slack.button_blocks(self.MESSAGE, "k", buttons),
+            slack.form_blocks(self.MESSAGE, "k", "Open form"),
+            slack.answered_blocks(self.MESSAGE, "Approved by Ann"),
+            slack.outcome_attachment("success", "", self.MESSAGE)["blocks"],
+        ):
+            with self.subTest(last=blocks[-1]["type"]):
+                self.assertTrue(self._shown(blocks).endswith("Total: 98,400 EUR"))
+                self.assertIn(blocks[-1]["type"], ("actions", "context", "section"))
+
+
+class TestLongUpdates(unittest.TestCase):
+    """chat.update answers msg_too_long once `text` passes ~4,000 characters."""
+
+    MESSAGE = "\n".join(f"{n}. Batch {n} ships within 10 working days." for n in range(1, 1001))
+
+    def test_update_message_sends_a_short_text_and_the_whole_message_in_blocks(self) -> None:
+        with patch.object(slack, "call_slack", return_value=_posted()) as call:
+            run_bot_operation(
+                _ctx(
+                    {
+                        "slackOperation": "updateMessage",
+                        "slackChannel": "C0123456",
+                        "slackMessageTs": "1700000000.000100",
+                        "message": "$draft",
+                    },
+                    {"$draft": self.MESSAGE},
+                ),
+                "cred",
+                CONFIG,
+            )
+
+        method, payload = call.call_args.args[1], call.call_args.args[2]
+        self.assertEqual(method, "chat.update")
+        self.assertLessEqual(len(payload["text"]), 3900)
+        self.assertTrue(self.MESSAGE.startswith(payload["text"]))
+        shown = "\n".join(b["text"]["text"] for b in payload["blocks"])
+        self.assertTrue(shown.startswith(self.MESSAGE[:20000]))
+
+    def test_an_answered_approval_update_sends_a_short_text(self) -> None:
+        from app.services import slack_interactions
+
+        request = SimpleNamespace(
+            original_agent_output={"channel": "C0123456", "ts": "1700000000.000100"},
+            agent_output={"message": self.MESSAGE},
+        )
+        with (
+            patch.object(slack_interactions, "internals", return_value={"message": self.MESSAGE}),
+            patch.object(slack, "call_slack", return_value=_posted()) as call,
+        ):
+            slack_interactions.replace_buttons("xoxb-test", request, "Approved by Ann")
+
+        payload = call.call_args.args[2]
+        self.assertLessEqual(len(payload["text"]), 3900)
+        self.assertEqual(payload["blocks"][-1]["type"], "context")
+
+    def test_a_short_update_is_unchanged(self) -> None:
+        self.assertEqual(slack.update_text("Ship it?"), "Ship it?")
+
+
 class TestFormsAndOutputs(unittest.TestCase):
     def test_form_modal_and_submitted_values(self) -> None:
         fields = slack.normalize_form_fields(

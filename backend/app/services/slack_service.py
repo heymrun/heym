@@ -244,6 +244,52 @@ def section(text: str) -> dict:
     return {"type": "section", "text": {"type": "mrkdwn", "text": (text or " ")[:_SECTION_LIMIT]}}
 
 
+# Slack allows 50 blocks in a message; leave room for the buttons and notes after the text.
+_MAX_TEXT_SECTIONS = 45
+
+
+def sections(text: str) -> list[dict]:
+    """The whole text as markdown sections, split at line breaks to fit the section limit.
+
+    When a message has blocks, Slack shows the blocks rather than `text`, so cutting the
+    text to one section hides the rest of a long message (an approver never sees it).
+    """
+    chunks: list[str] = []
+    current = ""
+    for line in (text or " ").split("\n"):
+        while len(line) > _SECTION_LIMIT:
+            if current:
+                chunks.append(current)
+                current = ""
+            chunks.append(line[:_SECTION_LIMIT])
+            line = line[_SECTION_LIMIT:]
+        candidate = f"{current}\n{line}" if current else line
+        if len(candidate) > _SECTION_LIMIT:
+            chunks.append(current)
+            candidate = line
+        current = candidate
+    chunks.append(current)
+    if len(chunks) > _MAX_TEXT_SECTIONS:
+        # The block limit cuts the message: say so at the end of what is shown.
+        chunks = chunks[:_MAX_TEXT_SECTIONS]
+        last = chunks[-1][: _SECTION_LIMIT - len(_SHORTENED_NOTE) - 1]
+        chunks[-1] = f"{last}\n{_SHORTENED_NOTE}"
+    return [section(chunk) for chunk in chunks]
+
+
+_SHORTENED_NOTE = "_(message shortened)_"
+
+# chat.update answers msg_too_long once `text` passes about 4,000 characters, even when the
+# message has blocks. The blocks carry the whole message, so `text` (the notification
+# fallback) is cut to fit.
+_UPDATE_TEXT_LIMIT = 3900
+
+
+def update_text(message: str) -> str:
+    """A message's `text` for chat.update, short enough for Slack to accept it."""
+    return message[:_UPDATE_TEXT_LIMIT]
+
+
 def context(text: str) -> dict:
     """A small grey line under a message."""
     return {"type": "context", "elements": [{"type": "mrkdwn", "text": text[:_SECTION_LIMIT]}]}
@@ -252,7 +298,7 @@ def context(text: str) -> dict:
 def approval_blocks(message: str, key: str) -> list[dict]:
     """The message with Approve, Request changes and Reject."""
     return [
-        section(message),
+        *sections(message),
         {
             "type": "actions",
             "block_id": "heym_approval",
@@ -317,7 +363,10 @@ def button_blocks(message: str, key: str, buttons: list[dict]) -> list[dict]:
         if button.get("style"):
             element["style"] = button["style"]
         elements.append(element)
-    return [section(message), {"type": "actions", "block_id": "heym_choices", "elements": elements}]
+    return [
+        *sections(message),
+        {"type": "actions", "block_id": "heym_choices", "elements": elements},
+    ]
 
 
 def field_name(label: str, index: int) -> str:
@@ -362,7 +411,7 @@ def normalize_form_fields(raw: object) -> list[dict]:
 def form_blocks(message: str, key: str, open_label: str) -> list[dict]:
     """The message with the button that opens the form."""
     return [
-        section(message),
+        *sections(message),
         {
             "type": "actions",
             "block_id": "heym_form",
@@ -470,12 +519,12 @@ def outcome_attachment(status: str, title: str, message: str) -> dict:
     emoji, color = OUTCOME_STYLES.get(status, OUTCOME_STYLES["info"])
     heading = f"{emoji} *{title.strip()}*" if title.strip() else emoji
     text = f"{heading}\n{message}" if message.strip() else heading
-    return {"color": color, "blocks": [section(text)]}
+    return {"color": color, "blocks": sections(text)}
 
 
 def answered_blocks(message: str, note: str) -> list[dict]:
     """The original message with its buttons replaced by who answered and how."""
-    return [section(message), context(note)]
+    return [*sections(message), context(note)]
 
 
 def message_output(body: dict, text: str) -> dict:

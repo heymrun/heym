@@ -146,6 +146,50 @@ class SendEmailFromHeaderTests(unittest.TestCase):
         self.assertEqual(msg["From"], "team@test.com")
         self._assert_signs_in_as_username(server)
 
+    def test_every_message_has_a_date_and_its_own_message_id(self) -> None:
+        from email.utils import parsedate_to_datetime
+
+        _, first = self._send({})
+        _, second = self._send({"smtp_from": "Acme Support <support@acme.test>"})
+
+        for msg in (first, second):
+            self.assertIsNotNone(parsedate_to_datetime(msg["Date"]).tzinfo)
+        self.assertTrue(first["Message-ID"].endswith("@test.com>"))
+        self.assertTrue(second["Message-ID"].endswith("@acme.test>"))
+        self.assertNotEqual(first["Message-ID"], second["Message-ID"])
+
+
+class SendEmailRecipientListTests(unittest.TestCase):
+    """To/Cc/Bcc are address lists: a quoted display name may hold a comma."""
+
+    def _envelope(self, **fields: str) -> tuple[list[str], object]:
+        nr, server = _run_send_email(
+            {
+                "label": "sendEmail",
+                "credentialId": str(uuid.uuid4()),
+                "subject": "Hi",
+                "emailBody": "Body text",
+                **fields,
+            },
+            uuid.uuid4(),
+            _make_db_mock([]),
+        )
+        self.assertEqual(nr["status"], "success")
+        return _sent_message(server)
+
+    def test_a_display_name_with_a_comma_is_one_recipient(self) -> None:
+        envelope, msg = self._envelope(
+            to='"Doe, John" <john@x.com>, Jane Roe <jane@x.com>',
+            cc='"M\u00fcller, Hans" <hans@y.de>',
+            bcc="audit@x.com",
+        )
+        self.assertEqual(envelope, ["john@x.com", "jane@x.com", "hans@y.de", "audit@x.com"])
+        self.assertEqual(msg["To"], '"Doe, John" <john@x.com>, Jane Roe <jane@x.com>')
+
+    def test_plain_comma_separated_addresses_are_unchanged(self) -> None:
+        envelope, _ = self._envelope(to="a@x.com, b@x.com,c@x.com,", cc=" ")
+        self.assertEqual(envelope, ["a@x.com", "b@x.com", "c@x.com"])
+
 
 class SendEmailCcBccTests(unittest.TestCase):
     def test_cc_appears_in_header_and_envelope(self) -> None:
@@ -302,6 +346,34 @@ class SendEmailBodyRenderingTests(unittest.TestCase):
         content_types = {p.get_content_type() for p in msg.walk()}
         self.assertIn("text/html", content_types)
         self.assertIn("text/plain", content_types)
+
+    def test_the_plain_part_of_an_html_body_reads_as_text(self) -> None:
+        html = (
+            "<html><head><style>body { font-family: Arial }</style></head><body>"
+            "<p>Hi Tom &amp; Jerry,</p><p>Your order #42 shipped.</p>"
+            "<ul><li>Item A &times; 2</li><li>Item B</li></ul>"
+            "<table><tr><td>Total</td><td>&euro;30</td></tr></table>"
+            '<p><a href="https://acme.test/t/42">Track it</a></p></body></html>'
+        )
+        nr, server = _run_send_email(
+            {
+                "label": "sendEmail",
+                "credentialId": str(uuid.uuid4()),
+                "to": "a@x.com",
+                "subject": "Hi",
+                "emailBody": html,
+            },
+            uuid.uuid4(),
+            _make_db_mock([]),
+        )
+        self.assertEqual(nr["status"], "success")
+        _, msg = _sent_message(server)
+        plain = next(p for p in msg.walk() if p.get_content_type() == "text/plain")
+        self.assertEqual(
+            plain.get_payload(decode=True).decode(plain.get_content_charset()),
+            "Hi Tom & Jerry,\nYour order #42 shipped.\nItem A \u00d7 2\nItem B\n"
+            "Total \u20ac30\nTrack it (https://acme.test/t/42)",
+        )
 
 
 class SendEmailAgentToolTests(unittest.TestCase):
