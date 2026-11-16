@@ -7839,7 +7839,11 @@ class WorkflowExecutor(WorkflowBranchRoutingMixin):
                                                 pending_count=pending_count,
                                             )
                                         outgoing_edges = self._order_downstream_edges(
-                                            [edge for edge in active_edges if edge["source"] == nid],
+                                            [
+                                                edge
+                                                for edge in active_edges
+                                                if edge["source"] == nid
+                                            ],
                                             res,
                                         )
                                         for edge in outgoing_edges:

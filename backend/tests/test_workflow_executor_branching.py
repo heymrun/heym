@@ -1891,6 +1891,7 @@ class LoopErrorHandleRoutingTests(unittest.TestCase):
                 self.assertEqual(loop_done["results"][1], {"val": 3})
                 self.assertEqual(loop_done["results"][2], {"branch": "true"})
 
+
 class NonBranchingLoopSideNodeRoutingTests(unittest.TestCase):
     """A non-branching node must reset a loop before scheduling its side nodes."""
 
