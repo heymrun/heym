@@ -61,19 +61,25 @@ def execute(ctx: NodeExecutionContext) -> object:
     if not operation:
         raise ValueError("Google Sheets node requires an operation")
 
-    raw_id = self.evaluate_message_template(node_data.get("gsSpreadsheetId", ""), inputs, node_id)
+    raw_id = self.evaluate_nonempty_message_template(
+        node_data.get("gsSpreadsheetId", ""), inputs, node_id
+    )
     spreadsheet_id = GoogleSheetsService.parse_spreadsheet_id(raw_id)
-    sheet_name = self.evaluate_message_template(
+    if not spreadsheet_id:
+        raise ValueError("Google Sheets node requires a spreadsheet ID")
+    sheet_name = self.evaluate_nonempty_message_template(
         node_data.get("gsSheetName", "Sheet1"), inputs, node_id
     )
-    _sr_ev = self.evaluate_message_template(
+    if not sheet_name.strip() and operation != "getSheetInfo":
+        raise ValueError(f"Google Sheets {operation} requires a sheet name")
+    _sr_ev = self.evaluate_nonempty_message_template(
         str(node_data.get("gsStartRow", "1") or "1"), inputs, node_id
     ).strip()
     try:
         start_row = max(1, int(float(_sr_ev or "1")))
     except (ValueError, TypeError):
         start_row = 1
-    _mr_ev = self.evaluate_message_template(
+    _mr_ev = self.evaluate_nonempty_message_template(
         str(node_data.get("gsMaxRows", "100") or "100"), inputs, node_id
     ).strip()
     try:
@@ -84,7 +90,7 @@ def execute(ctx: NodeExecutionContext) -> object:
         max_rows = 0
     _ur_raw = node_data.get("gsUpdateRow")
     if _ur_raw is not None and str(_ur_raw).strip() != "":
-        _ur_ev = self.evaluate_message_template(str(_ur_raw), inputs, node_id).strip()
+        _ur_ev = self.evaluate_nonempty_message_template(str(_ur_raw), inputs, node_id).strip()
     else:
         _ur_ev = _sr_ev
     try:
