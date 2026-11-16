@@ -8,7 +8,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 
 import aio_pika
 from aio_pika.abc import AbstractIncomingMessage
@@ -24,6 +24,7 @@ from app.api.workflows import (
 from app.db.models import Credential, ExecutionHistory, Workflow
 from app.db.session import async_session_maker
 from app.services.cluster.dispatch import dispatch_workflow, log_offloaded_run
+from app.services.cluster.run_history import record_failed_dispatch
 from app.services.distributed_lock import lock_service
 from app.services.encryption import decrypt_config
 from app.services.global_variables_service import get_global_variables_context
@@ -32,6 +33,7 @@ from app.services.pending_execution import (
     needs_local_pending_persist,
     persist_pending_execution,
 )
+from app.services.workflow_executor import _to_json_compatible
 
 logger = logging.getLogger("rabbitmq_consumer")
 
@@ -422,6 +424,9 @@ class RabbitMQConsumerManager:
             message.message_id,
         )
 
+        execution_id: uuid.UUID | None = None
+        inputs: dict[str, Any] | None = None
+
         try:
             async with async_session_maker() as db:
                 workflow_result = await db.execute(
@@ -489,11 +494,16 @@ class RabbitMQConsumerManager:
                 credentials_context = await get_credentials_context(db, workflow.owner_id)
                 global_variables_context = await get_global_variables_context(db, workflow.owner_id)
 
-                inputs = {
-                    "triggered_by": "rabbitmq",
-                    "trigger_node_id": node_id,
-                    **message_data,
-                }
+                inputs = cast(
+                    dict[str, Any],
+                    _to_json_compatible(
+                        {
+                            "triggered_by": "rabbitmq",
+                            "trigger_node_id": node_id,
+                            **message_data,
+                        }
+                    ),
+                )
 
                 from app.services.execution_cancellation import (
                     clear_execution,
@@ -638,6 +648,23 @@ class RabbitMQConsumerManager:
                 workflow_id,
                 e,
             )
+            if execution_id is not None:
+                try:
+                    await record_failed_dispatch(
+                        execution_id=execution_id,
+                        workflow_id=workflow_id,
+                        inputs=inputs or {},
+                        trigger_source="rabbitmq",
+                        message=str(e)
+                        or f"Failed to execute workflow {workflow_id} via RabbitMQ trigger",
+                    )
+                except Exception as record_exc:
+                    logger.exception(
+                        "Failed to record failed dispatch for execution %s (workflow %s): %s",
+                        execution_id,
+                        workflow_id,
+                        record_exc,
+                    )
             await message.nack(requeue=False)
 
 

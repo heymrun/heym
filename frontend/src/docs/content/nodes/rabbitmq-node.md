@@ -8,7 +8,7 @@ The **RabbitMQ** node sends or receives messages from RabbitMQ queues and exchan
 |----------|-------|
 | Inputs | 1 |
 | Outputs | 1 |
-| Output | `$nodeLabel.status`, `$nodeLabel.message_id`, `$nodeLabel.body` (receive) |
+| Output | `$nodeLabel.status`, `$nodeLabel.message_id` (send); `$nodeLabel.body`, `$nodeLabel.headers`, `$nodeLabel.message_id`, `$nodeLabel.routing_key`, `$nodeLabel.exchange`, `$nodeLabel.timestamp` (receive) |
 
 ## Parameters
 
@@ -40,9 +40,31 @@ Publishes a message to a queue or exchange.
 
 ### Receive
 
-Trigger mode: workflow starts when a message arrives. No incoming edge needed when used as trigger.
+Trigger mode: workflow starts when a message arrives from the configured queue. No incoming edge needed when used as trigger.
 
-**Output:** `$nodeLabel.body` (message payload), `$nodeLabel.message_id`, `$nodeLabel.queue`
+**Output fields:**
+- `$nodeLabel.body`: Message payload (parsed JSON value, or original text if invalid JSON)
+- `$nodeLabel.headers`: Message headers dictionary (values normalized for JSON compatibility)
+- `$nodeLabel.message_id`: Message ID string or `null`
+- `$nodeLabel.routing_key`: Routing key string
+- `$nodeLabel.exchange`: Exchange name string
+- `$nodeLabel.timestamp`: Message timestamp formatted as an ISO 8601 string or `null`
+
+#### Header Normalization
+
+RabbitMQ headers are normalized across message delivery to ensure full JSON compatibility:
+- **datetime / date**: Converted to ISO 8601 strings
+- **bytes / bytearray**: Decoded as UTF-8 text with invalid byte sequences replaced
+- **Decimal**: Converted to strings to preserve exact numeric precision without float rounding
+- **Nested containers**: Dictionaries, arrays, and lists are converted recursively
+
+#### Retry and Dead-Letter Handling
+
+When messages are routed from a RabbitMQ dead-letter exchange (DLX), RabbitMQ attaches an `x-death` array to the headers. Downstream nodes (such as a Condition node) can inspect retry counts or routing metadata using expressions (where `trigger` is the receive node's label):
+
+```javascript
+$trigger.headers["x-death"][0].count > 3
+```
 
 ## Example – Send
 
@@ -55,6 +77,20 @@ Trigger mode: workflow starts when a message arrives. No incoming edge needed wh
     "rabbitmqOperation": "send",
     "rabbitmqQueueName": "tasks",
     "rabbitmqMessageBody": "$userInput.body"
+  }
+}
+```
+
+## Example – Receive
+
+```json
+{
+  "type": "rabbitmq",
+  "data": {
+    "label": "incomingTask",
+    "credentialId": "rabbitmq-credential-uuid",
+    "rabbitmqOperation": "receive",
+    "rabbitmqQueueName": "tasks"
   }
 }
 ```
