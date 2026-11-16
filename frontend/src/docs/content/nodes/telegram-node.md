@@ -49,6 +49,9 @@ The **Telegram** node sends a message through the Telegram Bot API. Use it for c
 | `$nodeLabel.result` | Raw `sendMessage` result object from Telegram |
 | `$nodeLabel.result.message_id` | Telegram message ID |
 | `$nodeLabel.result.chat.id` | Destination chat ID returned by Telegram |
+| `$nodeLabel.results` | Result objects of every message sent, in order |
+
+Telegram accepts at most 4096 characters per message. A longer `message` is sent as several messages in order, cut at a line break or a space where possible. `result` is the first of them.
 
 ## Common Patterns
 

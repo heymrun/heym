@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from importlib import import_module
 
+from app.services.message_parts import split_message_text
 from app.services.node_execution.base import NodeExecutionContext
+
+# sendMessage accepts 1-4096 characters, counted in UTF-16 code units.
+TELEGRAM_MESSAGE_LIMIT = 4096
 
 
 def execute(ctx: NodeExecutionContext) -> object:
@@ -43,25 +47,32 @@ def execute(ctx: NodeExecutionContext) -> object:
         raise ValueError("Telegram credential requires bot_token")
 
     http_client = get_http_client()
-    response = http_client.post(
-        f"https://api.telegram.org/bot{bot_token}/sendMessage",
-        json={
-            "chat_id": chat_id,
-            "text": message,
-        },
-    )
-    try:
-        response_body = response.json()
-    except ValueError:
-        response_body = {"ok": False, "description": response.text}
+    # Telegram rejects a longer text outright, so a long message goes out as several.
+    parts = split_message_text(str(message), TELEGRAM_MESSAGE_LIMIT)
+    results: list[dict] = []
+    for index, part in enumerate(parts):
+        response = http_client.post(
+            f"https://api.telegram.org/bot{bot_token}/sendMessage",
+            json={
+                "chat_id": chat_id,
+                "text": part,
+            },
+        )
+        try:
+            response_body = response.json()
+        except ValueError:
+            response_body = {"ok": False, "description": response.text}
 
-    if response.status_code >= 400 or not response_body.get("ok", False):
-        error_detail = response_body.get("description") or response.text
-        raise ValueError(f"Telegram API error: {error_detail}")
+        if response.status_code >= 400 or not response_body.get("ok", False):
+            error_detail = response_body.get("description") or response.text
+            where = f" (part {index + 1} of {len(parts)})" if len(parts) > 1 else ""
+            raise ValueError(f"Telegram API error{where}: {error_detail}")
+        results.append(response_body.get("result", {}))
 
     output = {
         "status": response.status_code,
-        "ok": response_body.get("ok", False),
-        "result": response_body.get("result", {}),
+        "ok": True,
+        "result": results[0],
+        "results": results,
     }
     return output
