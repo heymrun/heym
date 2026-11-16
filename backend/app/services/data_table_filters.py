@@ -1,5 +1,21 @@
 """Translate a Data Table node's Mongo-style filter into SQLAlchemy clauses."""
 
+from decimal import Decimal
+
+# Text PostgreSQL can cast to NUMERIC; a blank or non-numeric cell compares as NULL instead.
+_NUMBER_PATTERN = r"^\s*[-+]?([0-9]+(\.[0-9]*)?|\.[0-9]+)([eE][-+]?[0-9]+)?\s*$"
+
+
+def _as_number(value: object) -> Decimal | None:
+    """Return a filter value as a number, or None when it is not one (booleans are not)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        return None
+    try:
+        number = Decimal(str(value).strip())
+    except ArithmeticError:
+        return None
+    return number if number.is_finite() else None
+
 
 def build_data_table_filter_clauses(filter_dict: dict, columns: list) -> list:
     """Build SQLAlchemy filter clauses for a DataTable Mongo-style filter.
@@ -9,13 +25,14 @@ def build_data_table_filter_clauses(filter_dict: dict, columns: list) -> list:
     substring) and ``$in`` (list membership).
 
     User-defined schema columns live in the JSON ``data`` blob and are matched as text
-    (numeric comparisons cast to ``NUMERIC`` when ``number``; booleans use ``"true"``/``"false"``).
+    (range comparisons cast to ``NUMERIC`` when ``number``, and a blank or non-numeric cell
+    never matches them; booleans use ``"true"``/``"false"``).
     Row metadata (``id``, ``created_at``, ``updated_at``, ``created_by``, ``updated_by``,
     ``table_id``) are real table columns matched directly; ``$contains`` casts them to text.
     A schema column sharing a metadata name still resolves against the JSON blob.
     Unknown operators are ignored.
     """
-    from sqlalchemy import Numeric, String, cast
+    from sqlalchemy import Numeric, String, case, cast
 
     from app.db.models import DataTableRow
 
@@ -43,6 +60,9 @@ def build_data_table_filter_clauses(filter_dict: dict, columns: list) -> list:
                 return "true" if value else "false"
             return str(value)
 
+        # Cast only text that is a number: one blank cell would otherwise fail the whole query.
+        number_field = case((field.op("~")(_NUMBER_PATTERN), cast(field, Numeric)))
+
         if isinstance(condition, dict):
             for op, raw_value in condition.items():
                 if op == "$eq":
@@ -51,7 +71,8 @@ def build_data_table_filter_clauses(filter_dict: dict, columns: list) -> list:
                     clauses.append(field != _coerce(raw_value))
                 elif op in ("$gt", "$gte", "$lt", "$lte"):
                     if is_number:
-                        left, right = cast(field, Numeric), raw_value
+                        number = _as_number(raw_value)
+                        left, right = number_field, raw_value if number is None else number
                     else:
                         left, right = field, _coerce(raw_value)
                     if op == "$gt":
