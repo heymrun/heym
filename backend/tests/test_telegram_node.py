@@ -111,6 +111,25 @@ class TestTelegramExecutorBranch(unittest.TestCase):
             json={"chat_id": 12345, "text": "Received: hello"},
         )
 
+    def test_blank_chat_id_fails_before_posting(self) -> None:
+        from app.services.workflow_executor import WorkflowExecutor
+
+        nodes, edges, inputs = _make_telegram_workflow(
+            {"credentialId": "cred-1", "chatId": "", "message": "$start.body.text"}
+        )
+        mock_http_client = MagicMock()
+
+        with patch("app.services.workflow_executor.get_http_client", return_value=mock_http_client):
+            executor = WorkflowExecutor(nodes=nodes, edges=edges)
+            result = executor.execute(workflow_id=uuid.uuid4(), initial_inputs=inputs)
+
+        telegram_result = next(
+            row for row in result.node_results if row["node_label"] == "telegramSend"
+        )
+        self.assertEqual(telegram_result["status"], "error")
+        self.assertEqual(telegram_result["error"], "Telegram node requires chatId")
+        mock_http_client.post.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
