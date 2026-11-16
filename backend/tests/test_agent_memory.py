@@ -802,5 +802,96 @@ class DeleteMemoryEdgeEndpointPostgreSqlTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(self.bob_id, remaining_nodes)
 
 
+class MemoryEdgeSpellingPostgreSqlTests(unittest.TestCase):
+    """One edge per pair and relationship type, however the type is spelled."""
+
+    def setUp(self) -> None:
+        if not _is_db_reachable():
+            self.skipTest("PostgreSQL database is not reachable")
+        self.user_id = uuid.uuid4()
+        self.workflow_id = uuid.uuid4()
+        with SessionLocal() as db:
+            db.add(
+                User(
+                    id=self.user_id,
+                    email=f"edge-spelling-{self.user_id}@example.com",
+                    hashed_password="hashed_pw",
+                    name="Edge Tester",
+                )
+            )
+            db.flush()
+            db.add(Workflow(id=self.workflow_id, name="Edge test", owner_id=self.user_id))
+            db.commit()
+
+    def tearDown(self) -> None:
+        with SessionLocal() as db:
+            db.execute(delete(Workflow).where(Workflow.id == self.workflow_id))
+            db.execute(delete(User).where(User.id == self.user_id))
+            db.commit()
+
+    def _apply(self, rel_type: str) -> None:
+        with SessionLocal() as db:
+            apply_parsed_extraction_sync(
+                db,
+                self.workflow_id,
+                "agent-1",
+                {
+                    "entities": [
+                        {"name": "Ada", "type": "person", "confidence": 0.9},
+                        {"name": "Acme", "type": "organization", "confidence": 0.9},
+                    ],
+                    "relationships": [
+                        {"source": "Ada", "target": "Acme", "type": rel_type, "confidence": 0.8}
+                    ],
+                },
+            )
+            db.commit()
+
+    def _edge_types(self) -> list[str]:
+        with SessionLocal() as db:
+            rows = db.execute(
+                select(AgentMemoryEdge.relationship_type).where(
+                    AgentMemoryEdge.workflow_id == self.workflow_id
+                )
+            )
+            return sorted(rows.scalars().all())
+
+    def test_two_spellings_of_one_type_keep_one_edge(self) -> None:
+        self._apply("works for")
+        self._apply("works_for")
+
+        self.assertEqual(self._edge_types(), ["works for"])
+
+    def test_existing_spelling_duplicates_collapse_into_one(self) -> None:
+        self._apply("works for")
+        with SessionLocal() as db:
+            edge = db.execute(
+                select(AgentMemoryEdge).where(AgentMemoryEdge.workflow_id == self.workflow_id)
+            ).scalar_one()
+            db.add(
+                AgentMemoryEdge(
+                    id=uuid.uuid4(),
+                    workflow_id=self.workflow_id,
+                    canvas_node_id="agent-1",
+                    source_node_id=edge.source_node_id,
+                    target_node_id=edge.target_node_id,
+                    relationship_type="Works_For",
+                    properties={},
+                    confidence=0.5,
+                )
+            )
+            db.commit()
+
+        self._apply("works for")
+
+        self.assertEqual(len(self._edge_types()), 1)
+
+    def test_different_types_stay_separate(self) -> None:
+        self._apply("works for")
+        self._apply("invested in")
+
+        self.assertEqual(self._edge_types(), ["invested in", "works for"])
+
+
 if __name__ == "__main__":
     unittest.main()
