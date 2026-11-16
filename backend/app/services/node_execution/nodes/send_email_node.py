@@ -1,6 +1,52 @@
 from __future__ import annotations
 
+from email.utils import formatdate, getaddresses, make_msgid, parseaddr
+
 from app.services.node_execution.base import NodeExecutionContext
+
+
+def _envelope(group: str) -> list[str]:
+    """The addresses in one To/Cc/Bcc field, read as an RFC 5322 address list.
+
+    A quoted display name may hold a comma ("Doe, John" <john@x.com>), so the field is not
+    split on commas. What the parser rejects (it returns nothing for the whole field) is
+    split on commas as before.
+    """
+    parsed = [addr for _name, addr in getaddresses([group]) if addr]
+    return parsed or [addr.strip() for addr in group.split(",") if addr.strip()]
+
+
+_BLOCK_TAGS = (
+    *("p", "div", "br", "li", "tr", "table", "ul", "ol", "blockquote", "hr"),
+    *("h1", "h2", "h3", "h4", "h5", "h6", "section", "article", "header", "footer"),
+)
+
+
+def _html_to_text(html: str) -> str:
+    """The text/plain alternative of an HTML body, as a text-only client should show it.
+
+    Style, script and head content are dropped, entities are decoded, every block element
+    starts a new line, table cells are spaced, and a link keeps its URL so a call to action
+    still works.
+    """
+    import re
+
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(html, "html.parser")
+    for tag in soup(["style", "script", "head"]):
+        tag.decompose()
+    for link in soup.find_all("a", href=True):
+        href = str(link["href"]).strip()
+        if href.startswith(("http://", "https://")) and href != link.get_text().strip():
+            link.append(f" ({href})")
+    for tag in soup.find_all(_BLOCK_TAGS):
+        tag.insert_before("\n")
+        tag.insert_after("\n")
+    for cell in soup.find_all(("td", "th")):
+        cell.insert_after(" ")
+    lines = (re.sub(r"\s+", " ", line).strip() for line in soup.get_text().splitlines())
+    return "\n".join(line for line in lines if line)
 
 
 def execute(ctx: NodeExecutionContext) -> object:
@@ -73,6 +119,10 @@ def execute(ctx: NodeExecutionContext) -> object:
 
     msg = MIMEMultipart("mixed")
     msg["From"] = smtp_from or smtp_email
+    # RFC 5322 requires Date; Gmail refuses mail without a Message-ID. Relays that do not add
+    # missing headers for remote clients (Postfix's default) pass the message on as built.
+    msg["Date"] = formatdate(localtime=True)
+    msg["Message-ID"] = make_msgid(domain=parseaddr(msg["From"])[1].rpartition("@")[2] or None)
     msg["To"] = to_address
     if cc_address:
         msg["Cc"] = cc_address
@@ -93,11 +143,7 @@ def execute(ctx: NodeExecutionContext) -> object:
 
     body_part = MIMEMultipart("alternative")
     if is_html:
-        import re
-
-        plain_text = re.sub(r"<[^>]+>", "", body)
-        plain_text = re.sub(r"\s+", " ", plain_text).strip()
-        body_part.attach(MIMEText(plain_text, "plain"))
+        body_part.attach(MIMEText(_html_to_text(body), "plain"))
         body_part.attach(MIMEText(body, "html"))
     else:
         body_part.attach(MIMEText(body, "plain"))
@@ -133,10 +179,7 @@ def execute(ctx: NodeExecutionContext) -> object:
                 attachment_count += 1
 
     all_recipients = [
-        addr.strip()
-        for group in (to_address, cc_address, bcc_address)
-        for addr in group.split(",")
-        if addr.strip()
+        addr for group in (to_address, cc_address, bcc_address) for addr in _envelope(group)
     ]
 
     try:

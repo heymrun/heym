@@ -415,6 +415,51 @@ class ResponsesTransportError(ModelProtocolError):
     """Raised when the endpoint is unavailable, with actionable text for the node."""
 
 
+def _chat_view(
+    items: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[int, list[dict[str, Any]]]]:
+    """Responses items as Chat messages, plus the items behind each message (by its id).
+
+    A function call joins the assistant message of its turn as a tool call and its output
+    becomes a tool message, so the compressor never separates a call from its result.
+    Reasoning and other items ride with the next message, which is the item they precede.
+    """
+    messages: list[dict[str, Any]] = []
+    sources: dict[int, list[dict[str, Any]]] = {}
+    pending: list[dict[str, Any]] = []
+    for item in items:
+        kind = item.get("type")
+        if kind == "function_call":
+            call = {
+                "id": item.get("call_id", ""),
+                "type": "function",
+                "function": {"name": item.get("name", ""), "arguments": item.get("arguments")},
+            }
+            last = messages[-1] if messages else None
+            if last is not None and last.get("tool_calls") and not pending:
+                last["tool_calls"].append(call)
+                sources[id(last)].append(item)
+                continue
+            message: dict[str, Any] = {"role": "assistant", "content": None, "tool_calls": [call]}
+        elif kind == "function_call_output":
+            message = {
+                "role": "tool",
+                "tool_call_id": item.get("call_id", ""),
+                "content": item.get("output", ""),
+            }
+        elif kind == "message" or "role" in item:
+            message = {"role": item.get("role", "user"), "content": item.get("content", "")}
+        else:
+            pending.append(item)
+            continue
+        messages.append(message)
+        sources[id(message)] = [*pending, item]
+        pending = []
+    if pending and messages:
+        sources[id(messages[-1])].extend(pending)
+    return messages, sources
+
+
 class ResponsesTransport:
     """OpenAI Responses API. Stateless: full input each turn, reasoning items
     carried back as encrypted blobs so a tool loop keeps its chain of thought."""
@@ -598,29 +643,31 @@ class ResponsesTransport:
         client: Any,
         context_limit_tokens: int,
     ) -> tuple[ResponsesHistory, dict[str, Any] | None]:
-        """Reuse the one compressor. Encrypted reasoning blobs cannot be summarised,
-        so they are withheld from it and dropped when compression happens."""
+        """Reuse the one compressor over a Chat-shaped view of the items.
+
+        Tool calls and their outputs are where a tool loop's tokens are, so they are part of
+        the view: the compressor counts and summarises them. Each view message remembers the
+        items it stands for, so whatever the compressor keeps goes back verbatim, encrypted
+        reasoning included, and only the summarised stretch is replaced.
+        """
         from app.services.context_compressor import maybe_compress_messages
 
-        chat_like = [
-            {"role": item.get("role", "user"), "content": item.get("content", "")}
-            for item in history.items
-            if item.get("type") == "message"
-        ]
+        chat_like, sources = _chat_view(history.items)
         compressed, info = await maybe_compress_messages(
             chat_like, model=model, client=client, context_limit_tokens=context_limit_tokens
         )
         if info is None:
             return history, None
-        return (
-            ResponsesHistory(
-                items=[
-                    {"type": "message", "role": m["role"], "content": m["content"]}
-                    for m in compressed
-                ]
-            ),
-            info,
-        )
+        items: list[dict[str, Any]] = []
+        for message in compressed:
+            kept = sources.get(id(message))
+            if kept is not None:
+                items.extend(kept)
+            else:
+                items.append(
+                    {"type": "message", "role": message["role"], "content": message["content"]}
+                )
+        return ResponsesHistory(items=items), info
 
     def final_text(self, turn: TurnResult) -> str:
         return turn.text

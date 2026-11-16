@@ -21,7 +21,8 @@ from collections import deque
 from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, CancelledError, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone, tzinfo
+from datetime import date, datetime, timedelta, timezone, tzinfo
+from decimal import Decimal
 from functools import lru_cache
 from threading import Event, Lock, Thread, local
 from typing import Any
@@ -1621,19 +1622,11 @@ def _wrap_value(value: object) -> object:
 
 def _to_json_compatible(value: object) -> object:
     """Convert wrappers and recursively sanitize values for PostgreSQL JSON fields."""
-    if isinstance(value, DotDict):
-        return {
-            _to_json_compatible_key(key): _to_json_compatible(item)
-            for key, item in dict.items(value)
-        }
-    if isinstance(value, dict):
-        return {
-            _to_json_compatible_key(key): _to_json_compatible(item) for key, item in value.items()
-        }
-    if isinstance(value, DotList):
+    if isinstance(value, (DotDict, dict)):
+        items = dict.items(value) if isinstance(value, DotDict) else value.items()
+        return {_to_json_compatible_key(k): _to_json_compatible(v) for k, v in items}
+    if isinstance(value, (DotList, list, tuple)):
         return [_to_json_compatible(item) for item in list(value)]
-    if isinstance(value, list):
-        return [_to_json_compatible(item) for item in value]
     if isinstance(value, DotBool):
         return bool(value)
     if isinstance(value, DotInt):
@@ -1644,6 +1637,12 @@ def _to_json_compatible(value: object) -> object:
         return _sanitize_json_string(str(value))
     if isinstance(value, DotDateTime):
         return value.toISO()
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, (bytes, bytearray)):
+        return _sanitize_json_string(value.decode("utf-8", errors="replace"))
     if isinstance(value, str):
         return _sanitize_json_string(value)
     return value
@@ -1652,6 +1651,8 @@ def _to_json_compatible(value: object) -> object:
 def _to_json_compatible_key(key: object) -> object:
     if isinstance(key, DotBool):
         return bool(key)
+    if isinstance(key, (bytes, bytearray)):
+        return _sanitize_json_string(key.decode("utf-8", errors="replace"))
     return _sanitize_json_string(str(key)) if isinstance(key, str) else key
 
 

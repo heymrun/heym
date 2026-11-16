@@ -11,6 +11,7 @@ with its own label.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -141,20 +142,28 @@ async def persist_run_history(
     inputs: dict,
     trigger_source: str | None,
     result: Any,
+    redact: Callable[[Any], Any] | None = None,
 ) -> None:
     """Write the run, its analytics bucket, and any sub-workflow runs.
 
     The run's own row is written last-writer-wins: the queue may already have
     given up on this execution and recorded it as failed, and the instance that
     actually ran it holds the real answer.
+
+    `redact` is the run's redactor for secrets it carried; every column and every
+    sub-workflow row goes through it.
     """
+
+    def clean(value: Any) -> Any:
+        return redact(value) if redact is not None else value
+
     async with async_session_maker() as db:
         values = {
             "id": execution_id,
             "workflow_id": workflow_id,
-            "inputs": inputs,
-            "outputs": result.outputs,
-            "node_results": result.node_results,
+            "inputs": clean(inputs),
+            "outputs": clean(result.outputs),
+            "node_results": clean(result.node_results),
             "status": result.status,
             "execution_time_ms": result.execution_time_ms,
             "trigger_source": trigger_source,
@@ -185,9 +194,9 @@ async def persist_run_history(
             db.add(
                 ExecutionHistory(
                     workflow_id=uuid.UUID(sub_exec.workflow_id),
-                    inputs=sub_exec.inputs,
-                    outputs=sub_exec.outputs,
-                    node_results=sub_exec.node_results,
+                    inputs=clean(sub_exec.inputs),
+                    outputs=clean(sub_exec.outputs),
+                    node_results=clean(sub_exec.node_results),
                     status=sub_exec.status,
                     execution_time_ms=sub_exec.execution_time_ms,
                     trigger_source=sub_exec.trigger_source,
@@ -207,12 +216,14 @@ async def persist_pending_run_history(
     trigger_source: str | None,
     credentials_owner_id: uuid.UUID | None,
     result: Any,
+    redact: Callable[[Any], Any] | None = None,
 ) -> None:
     """Mint a paused run's review request where the run actually paused.
 
     A pause is not a finished run: without the request row there is no public
     token, no link, no notification branch and no way to resume, and the run
-    sits at pending forever.
+    sits at pending forever. `redact` reaches the history row, the review request's
+    snapshot and the resume snapshot, as on a trigger's own pause.
     """
     from app.services.hitl_service import build_default_public_base_url
     from app.services.pending_execution import persist_pending_execution
@@ -231,6 +242,7 @@ async def persist_pending_run_history(
             trace_user_id=owner_id,
             public_base_url=build_default_public_base_url(),
             history_entry_id=execution_id,
+            redact=redact,
         )
         for name, value in attribution_fields().items():
             setattr(history_entry, name, value)

@@ -28,6 +28,7 @@ from app.db.models import Credential, CredentialType, ExecutionHistory, Workflow
 from app.db.session import async_session_maker
 from app.services.background_tasks import spawn_background_task
 from app.services.cluster.dispatch import dispatch_workflow, log_offloaded_run
+from app.services.cluster.run_secrets import redact_values
 from app.services.encryption import decrypt_config
 from app.services.global_variables_service import get_global_variables_context
 from app.services.hitl_service import build_default_public_base_url
@@ -206,15 +207,15 @@ def _redact_interaction_token(value: object, raw_token: str) -> object:
 
     New containers are returned rather than mutating in place, because the
     follow-up sender still reads the raw interaction after the run completes.
+    A run that goes through the queue is sealed by the dispatcher instead (see
+    `_TOKEN_INPUT_PATH`), with the same redaction on every row it writes.
     """
-    if isinstance(value, dict):
-        return {k: _redact_interaction_token(v, raw_token) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_redact_interaction_token(item, raw_token) for item in value]
-    if isinstance(value, str) and raw_token and raw_token in value:
-        # Also catches the token embedded in a rendered string, such as a URL.
-        return value.replace(raw_token, "[redacted]")
-    return value
+    # Also catches the token embedded in a rendered string, such as a URL.
+    return redact_values(value, (raw_token,))
+
+
+# Where the token sits in the run inputs, for the dispatcher to seal on the queue path.
+_TOKEN_INPUT_PATH = ("interaction", "token")
 
 
 async def _execute_workflow_background(
@@ -286,6 +287,7 @@ async def _execute_workflow_background(
                     cancel_event=cancel_event,
                     timeout_seconds=getattr(fresh_workflow, "workflow_timeout_seconds", None),
                     concurrency_limit=fresh_workflow.concurrency_limit,
+                    secret_input_paths=(_TOKEN_INPUT_PATH,),
                 )
             finally:
                 clear_execution(
@@ -297,6 +299,11 @@ async def _execute_workflow_background(
             if getattr(result, "history_written", False):
                 log_offloaded_run(
                     logger, workflow_id=workflow.id, trigger="Discord trigger", result=result
+                )
+                # Queued, rejected (queue full) or run on another instance: the user still
+                # waits on the deferred interaction for this answer.
+                await _send_discord_followup_message(
+                    interaction_body, getattr(result, "outputs", None) or {}
                 )
                 return
 
