@@ -4,6 +4,7 @@ import json
 import uuid
 from importlib import import_module
 
+from app.services.data_table_filters import build_data_table_filter_clauses
 from app.services.node_execution.base import NodeExecutionContext
 from app.services.node_execution.json_fields import resolve_json_field as _resolve_json_field
 
@@ -94,8 +95,9 @@ def _check_unique_sync(
 
 def execute(ctx: NodeExecutionContext) -> object:
     """Execute the dataTable node."""
+    from app.api.data_tables import _parse_number_text
+
     _workflow_executor = import_module("app.services.workflow_executor")
-    _build_data_table_filter_clauses = _workflow_executor._build_data_table_filter_clauses
     _coerce_row_data = _workflow_executor._coerce_row_data
     _check_unique_constraints_sync = _workflow_executor._check_unique_constraints_sync
     self = ctx.executor
@@ -133,7 +135,7 @@ def execute(ctx: NodeExecutionContext) -> object:
                 col_type = col.get("type", "string")
                 try:
                     if col_type == "number" and isinstance(value, str):
-                        result[key] = float(value) if "." in value else int(value)
+                        result[key] = _parse_number_text(value)
                     elif col_type == "boolean":
                         if isinstance(value, str):
                             result[key] = value.lower() in ("true", "1", "yes")
@@ -166,7 +168,7 @@ def execute(ctx: NodeExecutionContext) -> object:
 
             query = db.query(DataTableRow).filter(DataTableRow.table_id == data_table_id)
             if filter_dict and isinstance(filter_dict, dict):
-                clauses = _build_data_table_filter_clauses(filter_dict, columns)
+                clauses = build_data_table_filter_clauses(filter_dict, columns)
                 if clauses:
                     query = query.filter(*clauses)
 
@@ -234,7 +236,7 @@ def execute(ctx: NodeExecutionContext) -> object:
 
             query = db.query(DataTableRow).filter(DataTableRow.table_id == data_table_id)
             if isinstance(filter_dict, dict) and filter_dict:
-                clauses = _build_data_table_filter_clauses(filter_dict, columns)
+                clauses = build_data_table_filter_clauses(filter_dict, columns)
                 if clauses:
                     query = query.filter(*clauses)
             total = query.count()
@@ -400,7 +402,7 @@ def execute(ctx: NodeExecutionContext) -> object:
                 and isinstance(filter_dict, dict)
                 and not any(isinstance(v, dict) for v in filter_dict.values())
             ):
-                clauses = _build_data_table_filter_clauses(filter_dict, columns)
+                clauses = build_data_table_filter_clauses(filter_dict, columns)
                 if clauses:
                     query = db.query(DataTableRow).filter(
                         DataTableRow.table_id == data_table_id,

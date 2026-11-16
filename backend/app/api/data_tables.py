@@ -1,6 +1,7 @@
 import csv
 import io
 import json
+import math
 import re
 import uuid
 from typing import Any
@@ -191,6 +192,17 @@ def _row_sort_clause(sort_by: str, sort_direction: str) -> Any:
     return column.asc() if sort_direction == "asc" else column.desc()
 
 
+def _parse_number_text(value: str) -> int | float:
+    """Parse a number cell: an integer stays an int, `1.5` and `1e-05` become floats."""
+    try:
+        return int(value)
+    except ValueError:
+        number = float(value)
+    if not math.isfinite(number):
+        raise ValueError(f"could not convert string to a finite number: {value!r}")
+    return number
+
+
 def _coerce_row_data(data: dict, columns: list[dict]) -> tuple[dict, list[str]]:
     """Coerce row values to their declared column types, returning (coerced_data, errors)."""
     import json as _json
@@ -206,7 +218,7 @@ def _coerce_row_data(data: dict, columns: list[dict]) -> tuple[dict, list[str]]:
         try:
             if col_type == "number":
                 if isinstance(value, str):
-                    result[key] = float(value) if "." in value else int(value)
+                    result[key] = _parse_number_text(value)
                 elif isinstance(value, bool):
                     result[key] = int(value)
             elif col_type == "boolean":
@@ -1047,6 +1059,7 @@ async def export_csv(
     table = await _get_data_table_with_access(table_id, current_user.id, db)
     columns = table.columns or []
     col_names = [col["name"] for col in sorted(columns, key=lambda c: c.get("order", 0))]
+    json_cols = {col["name"] for col in columns if col.get("type") == "json"}
 
     result = await db.execute(
         select(DataTableRow)
@@ -1059,7 +1072,12 @@ async def export_csv(
     writer = csv.DictWriter(output, fieldnames=col_names, extrasaction="ignore")
     writer.writeheader()
     for row in rows:
-        writer.writerow(row.data or {})
+        data = dict(row.data or {})
+        for name in json_cols:
+            # Write JSON cells as JSON, the format import_csv reads back; str() gives Python repr.
+            if data.get(name) is not None:
+                data[name] = json.dumps(data[name], ensure_ascii=False)
+        writer.writerow(data)
 
     output.seek(0)
     filename = f"{table.name}.csv".replace(" ", "_")

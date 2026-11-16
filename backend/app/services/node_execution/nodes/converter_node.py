@@ -103,7 +103,9 @@ def _csv_to_json(text: object, delimiter: str, has_header: bool, trim_values: bo
     if text.strip() == "":
         return []
     reader = csv.reader(io.StringIO(text), delimiter=delimiter)
-    rows = list(reader)
+    # A blank line is no row (csv.DictReader skips it too); padding it would add an empty
+    # record, and a blank first line would become the header.
+    rows = [row for row in reader if row]
     if trim_values:
         rows = [[cell.strip() for cell in row] for row in rows]
     if not rows:
@@ -131,6 +133,15 @@ def _infer_fieldnames(rows: list) -> list[str]:
     return fieldnames
 
 
+def _csv_cell(value: object) -> object:
+    """A JSON value as CSV cell text: true/false, and objects and lists as JSON."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False)
+    return value
+
+
 def _json_to_csv(
     value: object, delimiter: str, include_header: bool, columns: list[str] | None
 ) -> str:
@@ -143,7 +154,7 @@ def _json_to_csv(
     if not isinstance(rows[0], dict):
         writer = csv.writer(buffer, delimiter=delimiter, lineterminator="\n")
         for row in rows:
-            writer.writerow(row if isinstance(row, list) else [row])
+            writer.writerow([_csv_cell(cell) for cell in (row if isinstance(row, list) else [row])])
         return buffer.getvalue().rstrip("\n")
 
     fieldnames = columns if columns is not None else _infer_fieldnames(rows)
@@ -158,7 +169,7 @@ def _json_to_csv(
         writer.writeheader()
     for row in rows:
         source = row if isinstance(row, dict) else {}
-        writer.writerow({name: source.get(name, "") for name in fieldnames})
+        writer.writerow({name: _csv_cell(source.get(name, "")) for name in fieldnames})
     return buffer.getvalue().rstrip("\n")
 
 

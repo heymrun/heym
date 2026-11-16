@@ -43,6 +43,20 @@ def _build_zip_bytes(
     return buf.getvalue()
 
 
+def _unique_entry_name(name: str, taken: set[str]) -> str:
+    """Return name, or name with " (2)", " (3)", ... when a sibling entry already uses it.
+
+    Workflow and folder names are not unique, and two ZIP entries with one path keep only
+    one file when extracted or imported. Case is ignored, as on Windows and macOS.
+    """
+    candidate, number = name, 2
+    while candidate.casefold() in taken:
+        candidate = f"{name} ({number})"
+        number += 1
+    taken.add(candidate.casefold())
+    return candidate
+
+
 def _write_folder_to_zip(
     zf: zipfile.ZipFile,
     folder_name: str,
@@ -53,18 +67,22 @@ def _write_folder_to_zip(
     safe_name = folder_name.replace("/", "_").replace("\\", "_")
     folder_path = f"{prefix}{safe_name}/"
 
+    workflow_files: set[str] = set()
     for wf in workflows:
         safe_wf_name = wf["name"].replace("/", "_").replace("\\", "_")
+        safe_wf_name = _unique_entry_name(safe_wf_name, workflow_files)
         content = json.dumps(
             {"name": wf["name"], "nodes": wf["nodes"], "edges": wf["edges"]},
             ensure_ascii=False,
         ).encode("utf-8")
         zf.writestr(f"{folder_path}{safe_wf_name}.json", content)
 
+    child_folders: set[str] = set()
     for child in children:
+        child_name = child["name"].replace("/", "_").replace("\\", "_")
         _write_folder_to_zip(
             zf,
-            child["name"],
+            _unique_entry_name(child_name, child_folders),
             child["workflows"],
             child["children"],
             folder_path,

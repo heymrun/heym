@@ -142,6 +142,52 @@ class CsvToJsonTests(unittest.TestCase):
         self.assertEqual(output["result"], [{"name": "Ada ", " age": " 36"}])
 
 
+class CsvBlankLineTests(unittest.TestCase):
+    """A blank line is no row, as csv.DictReader treats it."""
+
+    ROWS = [{"name": "Ada", "age": "36"}, {"name": "Bob", "age": "40"}]
+
+    def _rows(self, text: str, **data: object) -> object:
+        return converter_node.execute(_ctx({"conversion": "csvToJson", **data}, text))["result"]
+
+    def test_blank_lines_between_and_after_rows_are_skipped(self) -> None:
+        self.assertEqual(self._rows("name,age\nAda,36\n\nBob,40\n\n"), self.ROWS)
+        self.assertEqual(self._rows("name,age\r\nAda,36\r\n\r\nBob,40\r\n"), self.ROWS)
+
+    def test_a_blank_first_line_does_not_become_the_header(self) -> None:
+        self.assertEqual(self._rows("\nname,age\nAda,36\nBob,40"), self.ROWS)
+
+    def test_without_a_header_blank_lines_are_skipped(self) -> None:
+        self.assertEqual(
+            self._rows("Ada,36\n\nBob,40\n", hasHeader=False), [["Ada", "36"], ["Bob", "40"]]
+        )
+
+    def test_a_row_of_empty_cells_is_kept(self) -> None:
+        self.assertEqual(
+            self._rows("name,age\n,\nBob,40"),
+            [{"name": "", "age": ""}, {"name": "Bob", "age": "40"}],
+        )
+
+
+class JsonToCsvCellTests(unittest.TestCase):
+    """Cells hold the JSON the input holds, not Python's repr of it."""
+
+    def _csv(self, value: object) -> object:
+        return converter_node.execute(_ctx({"conversion": "jsonToCsv"}, value))["result"]
+
+    def test_booleans_objects_and_lists_are_written_as_json(self) -> None:
+        self.assertEqual(
+            self._csv([{"paid": True, "void": False, "meta": {"x": 1}, "tags": [1, "é"]}]),
+            'paid,void,meta,tags\ntrue,false,"{""x"": 1}","[1, ""é""]"',
+        )
+
+    def test_list_rows_are_written_as_json_too(self) -> None:
+        self.assertEqual(self._csv([[True, {"x": 1}], [None, 2.5]]), 'true,"{""x"": 1}"\n,2.5')
+
+    def test_text_numbers_and_null_are_unchanged(self) -> None:
+        self.assertEqual(self._csv([{"a": "x", "b": 3, "c": None}]), "a,b,c\nx,3,")
+
+
 class JsonToCsvTests(unittest.TestCase):
     def test_dicts_become_csv_with_header(self) -> None:
         output = converter_node.execute(
