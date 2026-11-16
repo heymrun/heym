@@ -112,6 +112,8 @@ export interface AlertPreviewRequest {
   workflow_id?: string | null;
   config: AlertConfig;
   lookback_hours?: number;
+  renotify_mode?: RenotifyMode;
+  cooldown_minutes?: number | null;
 }
 
 /**

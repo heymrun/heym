@@ -10,6 +10,7 @@ import asyncio
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from typing import Any
 
 from sqlalchemy import func, select, update
@@ -90,6 +91,41 @@ def should_fire(alert: Any, *, breached: bool, now: datetime) -> bool:
     if alert.cooldown_minutes is None or alert.last_triggered_at is None:
         return False
     return now - _as_utc(alert.last_triggered_at) >= timedelta(minutes=alert.cooldown_minutes)
+
+
+def count_firings(
+    breached_oldest_first: list[bool],
+    *,
+    step_minutes: int,
+    renotify_mode: str,
+    cooldown_minutes: int | None,
+) -> int:
+    """How often an alert would have fired over sampled windows, for the backtest.
+
+    Each window stands for ``step_minutes`` of its state. The real ``should_fire`` gate and
+    the state ``evaluate_alert`` writes are replayed once a minute. The default
+    ``on_recovery`` mode fires once per incident; ``cooldown`` fires again every
+    ``cooldown_minutes`` while the breach lasts.
+    """
+    alert = SimpleNamespace(
+        state="ok",
+        renotify_mode=renotify_mode,
+        cooldown_minutes=cooldown_minutes,
+        last_triggered_at=None,
+    )
+    start = datetime(2000, 1, 1, tzinfo=timezone.utc)
+    fires = 0
+    for index, breached in enumerate(breached_oldest_first):
+        if not breached:
+            alert.state = next_state(breached=False)
+            continue
+        for minute in range(step_minutes):
+            now = start + timedelta(minutes=index * step_minutes + minute)
+            if should_fire(alert, breached=True, now=now):
+                fires += 1
+                alert.last_triggered_at = now
+            alert.state = next_state(breached=True)
+    return fires
 
 
 def should_dispatch_notify(alert: Any) -> bool:

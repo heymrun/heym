@@ -335,7 +335,12 @@ class TestPreview(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(response.would_fire_now)
         self.assertEqual(response.lookback_hours, 3)
 
-    async def _fire_count(self, breached_newest_first: list[bool]) -> int:
+    async def _fire_count(
+        self,
+        breached_newest_first: list[bool],
+        renotify_mode: str = "on_recovery",
+        cooldown_minutes: int | None = None,
+    ) -> int:
         workflow_id = uuid.uuid4()
         payload = AlertPreviewRequest(
             alert_type="error_threshold",
@@ -343,6 +348,8 @@ class TestPreview(unittest.IsolatedAsyncioTestCase):
             workflow_id=workflow_id,
             config={"window_minutes": 60, "threshold_count": 5},
             lookback_hours=len(breached_newest_first),
+            renotify_mode=renotify_mode,
+            cooldown_minutes=cooldown_minutes,
         )
         current = SimpleNamespace(
             observed_value=0.0, threshold_value=5.0, breached=False, context={}
@@ -372,6 +379,21 @@ class TestPreview(unittest.IsolatedAsyncioTestCase):
     async def test_a_breach_since_the_start_of_the_lookback_fires_once(self):
         self.assertEqual(await self._fire_count([False, False, True, True]), 1)
         self.assertEqual(await self._fire_count([False, False, False]), 0)
+
+    async def test_a_cooldown_alert_fires_again_every_cooldown_while_the_breach_lasts(self):
+        # One 4-hour incident in 60-minute windows.
+        incident = [False, True, True, True, True, False]
+
+        self.assertEqual(await self._fire_count(incident, "cooldown", 60), 4)
+        self.assertEqual(await self._fire_count(incident, "cooldown", 30), 8)
+        self.assertEqual(await self._fire_count(incident, "cooldown", 90), 3)
+        self.assertEqual(await self._fire_count(incident, "cooldown", 600), 1)
+
+    async def test_a_cooldown_alert_fires_at_the_start_of_each_incident(self):
+        incidents = [True, False, True, True, False, False]
+
+        self.assertEqual(await self._fire_count(incidents, "cooldown", 60), 3)
+        self.assertEqual(await self._fire_count(incidents, "cooldown", 600), 2)
 
     async def test_preview_rejects_an_inaccessible_workflow(self):
         payload = AlertPreviewRequest(
