@@ -38,7 +38,7 @@ from app.services.llm_transport import (
     TurnResult,
     provider_detail,
 )
-from app.services.llm_transport_gemini import GeminiTransport
+from app.services.llm_transport_gemini import GEMINI_SKIP_SIGNATURE, GeminiTransport
 from app.services.llm_transport_messages import AnthropicMessagesTransport
 from app.services.opencode_catalog import is_opencode_base_url, opencode_model_protocol
 
@@ -47,9 +47,6 @@ _TRANSPORTS: dict[str, Callable[[], LLMTransport]] = {
     "messages": AnthropicMessagesTransport,
     "google": GeminiTransport,
 }
-
-# Google's documented opt-out for a function call whose signature was not kept.
-GEMINI_SKIP_SIGNATURE = "skip_thought_signature_validator"
 
 _RAW_TURN_LIMIT = 512
 

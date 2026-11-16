@@ -21,7 +21,7 @@ The **AI Agent** node is an LLM node with tool calling. It can run Python tools,
 | `fallbackCredentialId` | UUID (optional) | Fallback credential when primary fails |
 | `fallbackModel` | string (optional) | Fallback model when primary fails |
 
-Add credentials in the [Credentials](../tabs/credentials-tab.md) tab. The model list is loaded from the selected credential. If the primary credential or model returns an error, the node automatically retries with the fallback credential and model before failing.
+Add credentials in the [Credentials](../tabs/credentials-tab.md) tab. The model list is loaded from the selected credential. If the primary credential or model returns an error, the node automatically retries with the fallback credential and model before failing. When the error comes after the agent has already called tools, the fallback model continues from that point with the same conversation, so those tools are not run again. A fallback that uses a different API format (for example Chat Completions and the Responses API) starts from the prompt instead.
 
 ### Prompts
 

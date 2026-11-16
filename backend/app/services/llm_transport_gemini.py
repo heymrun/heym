@@ -30,6 +30,8 @@ from app.services.llm_transport import (
 
 # The gateway path for Google's API; the credential's own base URL points at /v1.
 GOOGLE_PATH = "/inference/go/google/v1beta/models"
+# Google's documented opt-out for a function call whose signature was not kept.
+GEMINI_SKIP_SIGNATURE = "skip_thought_signature_validator"
 _DATA_URI = re.compile(r"^data:([^;,]+);base64,(.*)$", re.DOTALL)
 _TOOL_MODES = {"auto": "AUTO", "none": "NONE", "required": "ANY"}
 # Declarations are an OpenAPI subset; the rest of JSON Schema is answered with 400.
@@ -79,6 +81,24 @@ def _response_object(output: str) -> dict[str, Any]:
     except (json.JSONDecodeError, TypeError):
         parsed = None
     return parsed if isinstance(parsed, dict) else {"result": output}
+
+
+def without_thought_signatures(contents: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """A stored history another Gemini model can continue.
+
+    A thought signature can only be validated by the model that wrote it. Function calls must
+    carry one, so they get Google's documented opt-out; other parts lose theirs.
+    """
+    contents = copy.deepcopy(contents)
+    for content in contents:
+        for part in content.get("parts") or []:
+            if "thoughtSignature" not in part:
+                continue
+            if "functionCall" in part:
+                part["thoughtSignature"] = GEMINI_SKIP_SIGNATURE
+            else:
+                del part["thoughtSignature"]
+    return contents
 
 
 class GeminiTransport:

@@ -460,6 +460,15 @@ def _chat_view(
     return messages, sources
 
 
+def without_reasoning_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """A stored Responses history another model or key can continue.
+
+    OpenAI rejects encrypted reasoning from another organization's key
+    (`invalid_encrypted_content`) and any reasoning item on a model that does not reason.
+    """
+    return [copy.deepcopy(item) for item in items if item.get("type") != "reasoning"]
+
+
 class ResponsesTransport:
     """OpenAI Responses API. Stateless: full input each turn, reasoning items
     carried back as encrypted blobs so a tool loop keeps its chain of thought."""
