@@ -66,12 +66,28 @@ def _serialise_addresses(raw_value: str | None) -> list[dict[str, str]]:
     return addresses
 
 
+def _walk_body_parts(message: Message) -> Iterator[Message]:
+    """Like ``Message.walk()``, but without the inside of an email attached as a file.
+
+    An attached email with a filename (``Invoice.eml``) is an attachment, so its text is not
+    this email's body. One without a filename (inline forwards, delivery-status bounces) is
+    still read, as before.
+    """
+    yield message
+    if not message.is_multipart():
+        return
+    if message.get_content_type() == "message/rfc822" and message.get_filename():
+        return
+    for part in message.get_payload():
+        yield from _walk_body_parts(part)
+
+
 def _extract_email_bodies(message: Message) -> tuple[str, str]:
     """Return plain-text and HTML bodies from a parsed email message."""
     text_parts: list[str] = []
     html_parts: list[str] = []
 
-    for part in message.walk():
+    for part in _walk_body_parts(message):
         if part.get_content_maintype() == "multipart":
             continue
         if part.get_filename():
@@ -114,6 +130,19 @@ class EmailAttachment:
     content: bytes
 
 
+def _attached_email_bytes(part: Message) -> bytes:
+    """The bytes of an attached email; it has no transfer-decoded payload of its own.
+
+    Re-serialising can fail on a malformed header (an encoded name with CR/LF); that one
+    attachment is then empty instead of failing the whole batch on every poll.
+    """
+    try:
+        return part.get_payload(0).as_bytes()
+    except Exception:  # noqa: BLE001 - email's generator raises several types on bad headers
+        logger.warning("Could not serialise an attached email", exc_info=True)
+        return b""
+
+
 def _attachment_parts(message: Message) -> list[EmailAttachment]:
     """Every part with a filename, in the order it appears in the email."""
     attachments: list[EmailAttachment] = []
@@ -121,11 +150,15 @@ def _attachment_parts(message: Message) -> list[EmailAttachment]:
         filename = part.get_filename()
         if not filename:
             continue
+        if part.get_content_type() == "message/rfc822":
+            content = _attached_email_bytes(part)
+        else:
+            content = part.get_payload(decode=True) or b""
         attachments.append(
             EmailAttachment(
                 filename=_decode_header_value(filename),
                 content_type=part.get_content_type(),
-                content=part.get_payload(decode=True) or b"",
+                content=content,
             )
         )
     return attachments

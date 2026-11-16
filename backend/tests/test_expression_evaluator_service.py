@@ -2448,3 +2448,209 @@ class TestTextTemplatesWithOperatorCharacters(unittest.TestCase):
                 self.assertEqual(run_output[key], expected)
                 dialog = service.evaluate(template, context, current_node_id="set1").result
                 self.assertEqual(dialog, expected)
+
+
+class TestLeadingDollarTextTemplates(unittest.TestCase):
+    """Text that starts with a $ref, in an Execute input mapping or a Console Log message,
+    renders like the dialog shows it instead of resolving to None."""
+
+    BODY = {"name": "Alice", "plan": "pro", "count": 5, "other": 2}
+    TEXT = ("$userInput.body.name signed up for $userInput.body.plan", "Alice signed up for pro")
+
+    def _run(self, mappings: list[dict], log_message: str) -> tuple[dict, object]:
+        child_id = str(uuid.uuid4())
+        child_nodes = [
+            {"id": "c1", "type": "textInput", "data": {"label": "childInput"}},
+            {
+                "id": "c2",
+                "type": "output",
+                "data": {
+                    "label": "childOutput",
+                    "outputSchema": [
+                        {"key": m["key"], "value": f"$childInput.body.{m['key']}"} for m in mappings
+                    ],
+                },
+            },
+        ]
+        nodes = [
+            {"id": "in", "type": "textInput", "data": {"label": "userInput"}},
+            {
+                "id": "call",
+                "type": "execute",
+                "data": {
+                    "label": "notify",
+                    "executeWorkflowId": child_id,
+                    "executeInputMappings": mappings,
+                },
+            },
+            {
+                "id": "log",
+                "type": "consoleLog",
+                "data": {"label": "audit", "logMessage": log_message},
+            },
+        ]
+        edges = [
+            {"id": "e1", "source": "in", "target": "call"},
+            {"id": "e2", "source": "in", "target": "log"},
+        ]
+        workflow_id = uuid.uuid4()
+        executor = WorkflowExecutor(
+            nodes=nodes,
+            edges=edges,
+            workflow_cache={
+                child_id: {
+                    "nodes": child_nodes,
+                    "edges": [{"id": "ce1", "source": "c1", "target": "c2"}],
+                    "name": "Child",
+                }
+            },
+            workflow_id=workflow_id,
+        )
+        result = executor.execute(workflow_id, {"body": self.BODY})
+        outputs = {r["node_label"]: r["output"] for r in result.node_results}
+        child = outputs["notify"]["outputs"]["childOutput"]["result"]
+        return child, outputs["audit"]["logMessage"]
+
+    def test_text_starting_with_a_ref_renders_as_text(self) -> None:
+        child, logged = self._run([{"key": "subject", "value": self.TEXT[0]}], self.TEXT[0])
+
+        self.assertEqual(child["subject"], self.TEXT[1])
+        self.assertEqual(logged, self.TEXT[1])
+
+    def test_expressions_keep_their_type(self) -> None:
+        child, logged = self._run(
+            [
+                {"key": "count", "value": "$userInput.body.count"},
+                {"key": "difference", "value": "$userInput.body.count - $userInput.body.other"},
+                {"key": "pro", "value": "$userInput.body.plan == 'pro' and $userInput.body.count"},
+            ],
+            "$userInput.body.count",
+        )
+
+        self.assertEqual(child["count"], 5)
+        self.assertEqual(child["difference"], 3)
+        self.assertEqual(child["pro"], 5)
+        self.assertEqual(logged, 5)
+
+    def test_a_ternary_whose_branch_is_null_stays_null(self) -> None:
+        child, logged = self._run(
+            [{"key": "lang", "value": "$userInput.body.lang ? $userInput.body.lang : null"}],
+            "$userInput.body.lang ? $userInput.body.lang : null",
+        )
+
+        self.assertIsNone(child["lang"])
+        self.assertIsNone(logged)
+
+    def test_a_condition_is_not_turned_into_text(self) -> None:
+        from app.services.node_execution.leading_dollar import resolve_leading_dollar_value
+
+        condition = "$userInput.body.count > 3 && $userInput.body.other < 3"
+        executor = WorkflowExecutor(nodes=[], edges=[], workflow_id=uuid.uuid4())
+        inputs = {"userInput": {"body": self.BODY}}
+
+        self.assertEqual(
+            resolve_leading_dollar_value(executor, condition, inputs, "n1"),
+            executor.resolve_expression(condition, inputs, "n1", preserve_type=True),
+        )
+
+
+class TestOutputNodeTemplatesRenderJson(unittest.TestCase):
+    """A list or object inside an Output node's text reads as JSON, as in a Set node and in
+    the dialog, not as a Python repr."""
+
+    BODY = {"name": "Alice", "tags": ["vip", "beta"], "meta": {"plan": "pro"}}
+    TAGS = ("Tags: $userInput.body.tags", 'Tags: ["vip", "beta"]')
+    META = (
+        "Customer $userInput.body.name meta=$userInput.body.meta",
+        'Customer Alice meta={"plan": "pro"}',
+    )
+
+    def test_output_fields_and_message_match_the_set_node_and_the_dialog(self) -> None:
+        nodes = [
+            {"id": "in", "type": "textInput", "data": {"label": "userInput"}},
+            {
+                "id": "set1",
+                "type": "set",
+                "data": {
+                    "label": "compose",
+                    "mappings": [
+                        {"key": "tags", "value": self.TAGS[0]},
+                        {"key": "meta", "value": self.META[0]},
+                    ],
+                },
+            },
+            {
+                "id": "out1",
+                "type": "output",
+                "data": {
+                    "label": "reply",
+                    "outputSchema": [
+                        {"key": "tags", "value": self.TAGS[0]},
+                        {"key": "meta", "value": self.META[0]},
+                    ],
+                },
+            },
+            {"id": "out2", "type": "output", "data": {"label": "note", "message": self.TAGS[0]}},
+        ]
+        edges = [
+            {"id": "e1", "source": "in", "target": "set1"},
+            {"id": "e2", "source": "in", "target": "out1"},
+            {"id": "e3", "source": "in", "target": "out2"},
+        ]
+        result = execute_workflow(
+            workflow_id=uuid.uuid4(),
+            nodes=nodes,
+            edges=edges,
+            inputs={"body": self.BODY},
+            test_run=True,
+        )
+        outputs = {r["node_id"]: r["output"] for r in result.node_results}
+        canvas = [
+            {"node_id": r["node_id"], "label": r["node_label"], "output": r["output"]}
+            for r in result.node_results
+        ]
+        context = build_eval_context(
+            nodes,
+            canvas,
+            workflow_edges=edges,
+            current_node_id="out1",
+            initial_inputs={"body": self.BODY},
+        )
+        service = ExpressionEvaluatorService(
+            workflow_nodes=nodes,
+            workflow_edges=edges,
+            vars_context=build_vars_context(
+                nodes, canvas, workflow_edges=edges, current_node_id="out1"
+            ),
+            workflow_id=uuid.uuid4(),
+        )
+
+        for key, (template, expected) in (("tags", self.TAGS), ("meta", self.META)):
+            with self.subTest(key=key):
+                self.assertEqual(outputs["set1"][key], expected)
+                self.assertEqual(outputs["out1"]["result"][key], expected)
+                dialog = service.evaluate(template, context, current_node_id="out1").result
+                self.assertEqual(dialog, expected)
+        self.assertEqual(outputs["out2"]["result"], self.TAGS[1])
+
+    def test_a_value_json_cannot_hold_keeps_the_old_text(self) -> None:
+        meta = {"plan": "pro", "at": datetime(2026, 11, 15, 9, 30)}
+        nodes = [
+            {"id": "in", "type": "textInput", "data": {"label": "userInput"}},
+            {
+                "id": "o",
+                "type": "output",
+                "data": {"label": "note", "message": "At $userInput.body.meta"},
+            },
+        ]
+        result = execute_workflow(
+            workflow_id=uuid.uuid4(),
+            nodes=nodes,
+            edges=[{"id": "e", "source": "in", "target": "o"}],
+            inputs={"body": {"meta": meta}},
+            test_run=True,
+        )
+        out = next(r for r in result.node_results if r["node_id"] == "o")
+
+        self.assertEqual(out["status"], "success")
+        self.assertEqual(out["output"]["result"], f"At {meta}")

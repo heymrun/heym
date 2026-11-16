@@ -94,6 +94,21 @@ class CleanPdfTextTests(unittest.TestCase):
         text = "Qty 1 2 3\nTotal 4 5 6"
         self.assertEqual(FileProcessor()._clean_pdf_text(text), "Qty 1 2 3 Total 4 5 6")
 
+    def test_real_text_with_doubled_letters_slashes_and_amounts_is_kept(self) -> None:
+        for text in (
+            "The Phase II trial ended after World War II.",
+            "Requires two AA batteries.",
+            "Use the and/or operator or the client/server mode.",
+            "Ein Zuschuss von 150.000 Euro.",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(FileProcessor()._clean_pdf_text(text), text)
+
+    def test_a_doubled_pair_inside_struck_text_still_collapses(self) -> None:
+        self.assertEqual(
+            FileProcessor()._clean_pdf_text("Joint mm ii ss ss ii oo nn"), "Joint mission"
+        )
+
     def test_hyphen_at_a_line_break_is_kept(self) -> None:
         self.assertEqual(
             FileProcessor()._clean_pdf_text("A self-\nservice portal"), "A self-service portal"
@@ -242,6 +257,44 @@ class ProcessJsonTests(unittest.TestCase):
 
         self.assertEqual(len(chunks), 1)
         self.assertEqual(chunks[0].text, "42")
+
+
+class TextEncodingTests(unittest.TestCase):
+    """Text files saved by Excel, Notepad or PowerShell keep every character."""
+
+    ROWS = "name,city\nJürgen Müller,München\nJoão,São Paulo\n"
+    EXPECTED = ["name: Jürgen Müller | city: München", "name: João | city: São Paulo"]
+
+    def test_csv_from_excel_in_every_save_format(self) -> None:
+        formats = {
+            "CSV UTF-8 (BOM)": b"\xef\xbb\xbf" + self.ROWS.encode("utf-8"),
+            "CSV (Comma delimited)": self.ROWS.encode("cp1252"),
+            "plain UTF-8": self.ROWS.encode("utf-8"),
+        }
+        for label, raw in formats.items():
+            with self.subTest(format=label):
+                chunks = FileProcessor().process_csv(raw, "people.csv")
+                self.assertEqual([c.text for c in chunks], self.EXPECTED)
+
+    def test_utf8_with_one_stray_single_byte_character_stays_utf8(self) -> None:
+        # A row pasted from a cp1252 tool into a UTF-8 file: only that byte is lost.
+        raw = self.ROWS.encode("utf-8") + "Zoë,Köln\n".encode("utf-8").replace(
+            "ë".encode("utf-8"), "ë".encode("cp1252")
+        )
+        chunks = FileProcessor().process_csv(raw, "people.csv")
+        self.assertEqual([c.text for c in chunks], [*self.EXPECTED, "name: Zo\ufffd | city: Köln"])
+
+    def test_json_with_a_utf8_bom(self) -> None:
+        raw = b"\xef\xbb\xbf" + json.dumps([{"name": "Kaffeemühle"}], ensure_ascii=False).encode()
+        chunks = FileProcessor().process_json(raw, "products.json")
+        self.assertEqual([c.text for c in chunks], ["name: Kaffeemühle"])
+
+    def test_utf16_text_from_notepad(self) -> None:
+        raw = "Meeting notes\nBudget approved: 12.000 €".encode("utf-16")  # BOM included
+        chunks = FileProcessor().process_text(raw, "notes.txt")
+        self.assertEqual(
+            " ".join(c.text for c in chunks), "Meeting notes Budget approved: 12.000 €"
+        )
 
 
 class ProcessFileTests(unittest.TestCase):

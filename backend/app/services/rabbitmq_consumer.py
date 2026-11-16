@@ -6,6 +6,8 @@ import logging
 import secrets
 import uuid
 from collections.abc import Awaitable, Callable
+from datetime import date, datetime
+from decimal import Decimal
 from typing import Any
 
 import aio_pika
@@ -32,6 +34,27 @@ from app.services.pending_execution import (
 )
 
 logger = logging.getLogger("rabbitmq_consumer")
+
+
+def _json_safe(value: Any) -> Any:
+    """AMQP header values as JSON: the run's inputs are stored in execution history.
+
+    The AMQP decoder turns timestamps into datetime (RabbitMQ's own ``x-death`` header
+    carries one per dead-lettering), and byte arrays and decimals into bytes and Decimal,
+    none of which JSON can hold.
+    """
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, (bytes, bytearray)):
+        return bytes(value).decode("utf-8", errors="replace")
+    if isinstance(value, Decimal):
+        return str(value)
+    return value
+
 
 # Keys only this process's consumer map, which never leaves the process; a new leader
 # starts its consumers from scratch, so revisions never need to match across processes.
@@ -442,7 +465,7 @@ class RabbitMQConsumerManager:
 
             message_data: dict[str, Any] = {
                 "body": body,
-                "headers": dict(message.headers) if message.headers else {},
+                "headers": _json_safe(dict(message.headers)) if message.headers else {},
                 "message_id": message.message_id,
                 "routing_key": message.routing_key,
                 "exchange": message.exchange,
@@ -500,6 +523,7 @@ class RabbitMQConsumerManager:
                         trace_user_id=workflow.owner_id,
                         actor_user_id=workflow.owner_id,
                         cancel_event=cancel_event,
+                        timeout_seconds=getattr(workflow, "workflow_timeout_seconds", None),
                         concurrency_limit=workflow.concurrency_limit,
                     )
                 finally:

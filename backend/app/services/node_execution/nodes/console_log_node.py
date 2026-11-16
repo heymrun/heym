@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 
 from app.services.node_execution.base import NodeExecutionContext
+from app.services.node_execution.leading_dollar import resolve_leading_dollar_value
 
 
 def execute(ctx: NodeExecutionContext) -> object:
@@ -15,9 +16,7 @@ def execute(ctx: NodeExecutionContext) -> object:
 
     log_message_template = node_data.get("logMessage", "$input")
     if log_message_template.startswith("$"):
-        resolved = self.resolve_expression(
-            log_message_template, inputs, node_id, preserve_type=True
-        )
+        resolved = resolve_leading_dollar_value(self, log_message_template, inputs, node_id)
     else:
         resolved = self.evaluate_message_template(log_message_template, inputs, node_id)
     workflow_display = self._get_workflow_name_for_log()

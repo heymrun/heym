@@ -103,9 +103,13 @@ def convert_image(src_bytes: bytes, target_format: str) -> tuple[bytes, str]:
         raise ValueError(f"Converter node: unsupported image output format '{target_format}'")
     pil_format, mime_type = _PIL_FORMATS[target_format]
     img = Image.open(io.BytesIO(src_bytes))
-    # JPEG has no alpha channel, so transparency has to be flattened first.
+    # JPEG has no alpha channel, so transparency is flattened onto white first. Dropping
+    # the channel alone shows the colour hidden under transparent pixels, which canvas
+    # and signature exports store as black.
     if pil_format == "JPEG" and img.mode in ("RGBA", "LA", "P"):
-        img = img.convert("RGB")
+        rgba = img.convert("RGBA")
+        img = Image.new("RGB", rgba.size, "white")
+        img.paste(rgba, mask=rgba.getchannel("A"))
     buffer = io.BytesIO()
     img.save(buffer, format=pil_format)
     return buffer.getvalue(), mime_type
@@ -131,7 +135,9 @@ def _json_to_csv_bytes(src_bytes: bytes) -> bytes:
     if not isinstance(data, list) or not data or not isinstance(data[0], dict):
         raise ValueError("JSON must be an array of objects for CSV conversion")
     buffer = io.StringIO()
-    writer = csv.DictWriter(buffer, fieldnames=list(data[0].keys()), extrasaction="ignore")
+    # Every key of every object, in first-seen order: later objects may add columns.
+    fieldnames = list(dict.fromkeys(key for row in data if isinstance(row, dict) for key in row))
+    writer = csv.DictWriter(buffer, fieldnames=fieldnames, extrasaction="ignore")
     writer.writeheader()
     writer.writerows(data)
     return buffer.getvalue().encode("utf-8")

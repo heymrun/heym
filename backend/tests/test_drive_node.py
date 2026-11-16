@@ -1376,39 +1376,70 @@ class DriveNodeDownloadUrlTests(unittest.TestCase):
         self.assertEqual(nr["status"], "success")
         self.assertEqual(nr["output"]["filename"], "data.csv")
 
-    def test_download_url_rejects_unsafe_content_disposition_filename(self) -> None:
-        """Remote filenames cannot escape the generated-file directory."""
-        owner_id = uuid.uuid4()
-        file_bytes = b"evil"
+    def _download_name(self, url: str, content_disposition: str = "") -> str:
         db = MagicMock()
         db.__enter__ = MagicMock(return_value=db)
         db.__exit__ = MagicMock(return_value=False)
-        db.flush = MagicMock()
-        db.commit = MagicMock()
-        db.add = MagicMock()
-
-        http_resp = self._make_http_response(
-            file_bytes,
-            content_type="text/plain",
-            content_disposition='attachment; filename="../evil.txt"',
-        )
-        storage_path = self._make_storage_path()
-
         nr = self._run_download_workflow(
-            {
-                "label": "dl",
-                "driveOperation": "downloadUrl",
-                "driveSourceUrl": "https://example.com/file.txt",
-            },
-            owner_id,
+            {"label": "dl", "driveOperation": "downloadUrl", "driveSourceUrl": url},
+            uuid.uuid4(),
             db,
-            http_resp,
-            storage_path,
+            self._make_http_response(
+                b"%PDF", content_type="application/pdf", content_disposition=content_disposition
+            ),
+            self._make_storage_path(),
         )
+        self.assertEqual(nr["status"], "success", nr.get("error"))
+        return nr["output"]["filename"]
 
-        self.assertEqual(nr["status"], "error")
-        self.assertIn("Filename cannot contain path components", nr["error"])
-        storage_path.write_bytes.assert_not_called()
+    def test_download_url_reads_an_rfc_6266_utf8_filename(self) -> None:
+        # What Starlette's FileResponse (and Django) send for a non-ASCII name.
+        name = self._download_name(
+            "https://example.com/download/42",
+            "attachment; filename*=utf-8''M%C3%BCller%20Angebot.pdf",
+        )
+        self.assertEqual(name, "Müller Angebot.pdf")
+
+    def test_download_url_decodes_a_percent_encoded_url_name(self) -> None:
+        name = self._download_name("https://example.com/files/Annual%20Report%202024.pdf")
+        self.assertEqual(name, "Annual Report 2024.pdf")
+
+    def test_download_url_keeps_the_name_after_an_encoded_slash(self) -> None:
+        # Cloud Storage / Firebase object URLs encode the object path into one segment.
+        for url in (
+            "https://storage.googleapis.com/v0/b/acme/o/invoices%2F2024%2Fjan.pdf?alt=media",
+            "https://example.com/files/invoices%5C2024%5Cjan.pdf",
+        ):
+            with self.subTest(url=url):
+                self.assertEqual(self._download_name(url), "jan.pdf")
+
+    def test_a_url_name_storage_refuses_decoded_is_saved_as_written(self) -> None:
+        # What main saves today: the segment exactly as it appears in the URL.
+        for segment in ("a%00b.pdf", "%2E%2E", "x%2F..", "C%3Areport.pdf", "%20%20"):
+            with self.subTest(segment=segment):
+                self.assertEqual(
+                    self._download_name(f"https://example.com/files/{segment}"), segment
+                )
+
+    def test_a_url_without_a_name_saves_as_downloaded_file(self) -> None:
+        self.assertEqual(self._download_name("https://example.com/"), "downloaded_file")
+
+    def test_download_url_saves_under_the_url_name_when_storage_refuses_the_header_name(
+        self,
+    ) -> None:
+        """Remote filenames cannot escape the generated-file directory, and don't fail the step."""
+        for disposition in (
+            'attachment; filename="../evil.txt"',
+            "attachment; filename*=utf-8''Rechnung%202024%2F0815.pdf",
+            "attachment; filename*=utf-8''..",
+            "attachment; filename*=utf-8''a%00b.pdf",
+            'attachment; filename="C:report.pdf"',
+        ):
+            with self.subTest(disposition=disposition):
+                self.assertEqual(
+                    self._download_name("https://example.com/files/report.pdf", disposition),
+                    "report.pdf",
+                )
 
     def test_download_url_rejects_private_ip_before_fetch(self) -> None:
         """Private/internal targets are blocked before httpx connects."""

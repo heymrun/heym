@@ -5,6 +5,7 @@ import uuid
 from importlib import import_module
 
 from app.services.node_execution.base import NodeExecutionContext
+from app.services.node_execution.json_fields import resolve_json_field as _resolve_json_field
 
 
 def _build_data_table_sort_clauses(sort_str: str, columns: list) -> list:
@@ -89,39 +90,6 @@ def _check_unique_sync(
     )
     if errors:
         raise ValueError(errors[0])
-
-
-def _resolve_json_values(executor, value: object, inputs: dict, node_id: str) -> object:
-    """Resolve ``$`` expressions in every string value of already-parsed JSON."""
-    if isinstance(value, dict):
-        return {
-            key: _resolve_json_values(executor, item, inputs, node_id)
-            for key, item in value.items()
-        }
-    if isinstance(value, list):
-        return [_resolve_json_values(executor, item, inputs, node_id) for item in value]
-    if isinstance(value, str) and "$" in value:
-        return executor.evaluate_message_template(value, inputs, node_id)
-    return value
-
-
-def _resolve_json_field(executor, template: object, inputs: dict, node_id: str) -> object:
-    """A data or filter field with its expressions resolved. Raises JSONDecodeError if invalid.
-
-    Parsed first, resolved second, like the Code node's Parameters: substituting into the
-    raw text breaks the JSON as soon as a resolved value holds a quote or a line break. A
-    template that is not JSON on its own, such as {"age": $start.age}, is still
-    substituted first and parsed after.
-    """
-    if isinstance(template, str):
-        try:
-            parsed = json.loads(template)
-        except json.JSONDecodeError:
-            pass
-        else:
-            return _resolve_json_values(executor, parsed, inputs, node_id)
-    rendered = executor.evaluate_message_template(template, inputs, node_id)
-    return json.loads(rendered) if isinstance(rendered, str) else rendered
 
 
 def execute(ctx: NodeExecutionContext) -> object:

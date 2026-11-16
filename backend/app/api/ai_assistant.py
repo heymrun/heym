@@ -180,6 +180,7 @@ from app.services.llm_transport import (
     TRUNCATED_TOOL_CALL_ERROR,
     is_truncated_turn,
     parse_tool_arguments,
+    rejects_disable_reasoning,
 )
 from app.services.mcp_progress import running_node_message
 from app.services.model_router import (
@@ -6304,7 +6305,20 @@ async def fix_transcription(
     if not is_reasoning:
         kwargs["temperature"] = 0.3
 
-    response = completion_caller(client, model)(**kwargs)
+    caller = completion_caller(client, model)
+    try:
+        response = caller(**kwargs)
+    except Exception as exc:
+        if rejects_disable_reasoning(exc, kwargs.get("extra_body")):
+            kwargs.pop("extra_body", None)
+            logger.info(
+                "Retrying fix_transcription without extra_body (disable_reasoning not supported by model %s)",
+                model,
+            )
+            response = caller(**kwargs)
+        else:
+            raise
+
     fixed_text = response.choices[0].message.content or request.text
 
     return FixTranscriptionResponse(fixed_text=fixed_text.strip())

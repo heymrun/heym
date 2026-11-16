@@ -782,6 +782,102 @@ class CronExecutorThreadingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(run_threads), 1)
         self.assertNotEqual(run_threads[0], threading.current_thread().name)
 
+    async def test_execute_workflow_runs_with_the_workflow_timeout(self) -> None:
+        """The workflow timeout applies to triggered runs, not only to API calls."""
+        scheduler = CronScheduler()
+        workflow = SimpleNamespace(
+            id=uuid.uuid4(),
+            owner_id=uuid.uuid4(),
+            name="Cron workflow",
+            nodes=[],
+            edges=[],
+            concurrency_limit=None,
+            workflow_timeout_seconds=30,
+        )
+        db = SimpleNamespace(add=lambda row: None, commit=AsyncMock())
+        executor_kwargs: list[dict] = []
+
+        def fake_execute(**kwargs: object) -> ExecutionResult:
+            executor_kwargs.append(kwargs)
+            return ExecutionResult(
+                workflow_id=workflow.id,
+                status="success",
+                outputs={},
+                execution_time_ms=1.0,
+                node_results=[],
+            )
+
+        with (
+            patch(
+                "app.services.cron_scheduler.collect_referenced_workflows",
+                AsyncMock(return_value={}),
+            ),
+            patch(
+                "app.services.cron_scheduler.get_credentials_context", AsyncMock(return_value={})
+            ),
+            patch(
+                "app.services.cron_scheduler.get_global_variables_context",
+                AsyncMock(return_value={}),
+            ),
+            patch("app.services.cluster.dispatch.execute_workflow", fake_execute),
+            patch("app.services.cron_scheduler.upsert_workflow_analytics_snapshot", AsyncMock()),
+            patch(
+                "app.services.cron_scheduler._persist_global_variables_from_execution", AsyncMock()
+            ),
+        ):
+            await scheduler._execute_workflow(db, workflow)
+
+        self.assertEqual([kw["timeout_seconds"] for kw in executor_kwargs], [30])
+
+    async def test_execute_workflow_joins_allow_downstream_off_the_event_loop(self) -> None:
+        """Joining waits for the whole branch, so it must not run on the event loop either."""
+        scheduler = CronScheduler()
+        workflow = SimpleNamespace(
+            id=uuid.uuid4(),
+            owner_id=uuid.uuid4(),
+            name="Cron workflow",
+            nodes=[],
+            edges=[],
+            concurrency_limit=None,
+        )
+        db = SimpleNamespace(add=lambda row: None, commit=AsyncMock())
+        join_threads: list[str] = []
+        execution_result = SimpleNamespace(
+            status="success",
+            outputs={"ack": True},
+            node_results=[],
+            execution_time_ms=1.0,
+            sub_workflow_executions=[],
+            allow_downstream_pending=True,
+            join_allow_downstream=lambda: join_threads.append(threading.current_thread().name),
+        )
+
+        with (
+            patch(
+                "app.services.cron_scheduler.collect_referenced_workflows",
+                AsyncMock(return_value={}),
+            ),
+            patch(
+                "app.services.cron_scheduler.get_credentials_context", AsyncMock(return_value={})
+            ),
+            patch(
+                "app.services.cron_scheduler.get_global_variables_context",
+                AsyncMock(return_value={}),
+            ),
+            patch(
+                "app.services.cron_scheduler.dispatch_workflow",
+                AsyncMock(return_value=execution_result),
+            ),
+            patch("app.services.cron_scheduler.upsert_workflow_analytics_snapshot", AsyncMock()),
+            patch(
+                "app.services.cron_scheduler._persist_global_variables_from_execution", AsyncMock()
+            ),
+        ):
+            await scheduler._execute_workflow(db, workflow)
+
+        self.assertEqual(len(join_threads), 1)
+        self.assertNotEqual(join_threads[0], threading.current_thread().name)
+
 
 class CronOffloadedRunTests(unittest.IsolatedAsyncioTestCase):
     """What the cron path hands the queue, and what it does with the answer."""

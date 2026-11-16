@@ -7,6 +7,7 @@ from threading import Event
 from app.services.cancellation_bridge import CancellationBridge
 from app.services.execution_cancellation import clear_execution, complete_execution
 from app.services.node_execution.base import NodeExecutionContext
+from app.services.node_execution.leading_dollar import resolve_leading_dollar_value
 
 
 def _finish_sub_execution(
@@ -91,8 +92,8 @@ def execute(ctx: NodeExecutionContext) -> object:
             value_template = mapping.get("value", "")
             if value_template:
                 if isinstance(value_template, str) and value_template.startswith("$"):
-                    resolved_value = self.resolve_expression(
-                        value_template, inputs, node_id, preserve_type=True
+                    resolved_value = resolve_leading_dollar_value(
+                        self, value_template, inputs, node_id
                     )
                 else:
                     resolved_value = self.evaluate_message_template(value_template, inputs, node_id)
@@ -101,8 +102,8 @@ def execute(ctx: NodeExecutionContext) -> object:
                 execute_inputs[key] = ""
     elif execute_input_template:
         if isinstance(execute_input_template, str) and execute_input_template.startswith("$"):
-            transformed_input = self.resolve_expression(
-                execute_input_template, inputs, node_id, preserve_type=True
+            transformed_input = resolve_leading_dollar_value(
+                self, execute_input_template, inputs, node_id
             )
         else:
             transformed_input = self.evaluate_message_template(

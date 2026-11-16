@@ -305,6 +305,54 @@ class RabbitMQConsumerAcknowledgementTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsInstance(handle, ExecutionCancellationHandle)
             self.assertEqual(mock_clear.call_args.args[0], handle.execution_id)
 
+    async def test_a_dead_lettered_message_is_recorded_and_acked(self) -> None:
+        """Headers the AMQP decoder returns as datetime, bytes or Decimal reach history."""
+        import json
+        from datetime import datetime, timezone
+        from decimal import Decimal
+
+        from app.db.models import ExecutionHistory
+
+        # What pamqp decodes for a message that came back through a dead-letter + TTL retry.
+        self.message.headers = {
+            "x-death": [
+                {
+                    "count": 1,
+                    "reason": "expired",
+                    "queue": "orders_retry",
+                    "time": datetime(2026, 11, 15, 12, 0, tzinfo=timezone.utc),
+                    "exchange": "",
+                    "routing-keys": ["orders_retry"],
+                }
+            ],
+            "x-first-death-reason": "expired",
+            "trace": b"abc",
+            "price": Decimal("12.50"),
+        }
+        result = SimpleNamespace(
+            status="success",
+            outputs={"result": "ok"},
+            node_results=[],
+            sub_workflow_executions=[],
+            execution_time_ms=10.0,
+            history_written=False,
+        )
+
+        await self._handle_with_dispatch_result(result)
+
+        self.message.ack.assert_awaited_once()
+        self.message.nack.assert_not_called()
+        history = next(
+            call.args[0]
+            for call in self.db.add.call_args_list
+            if isinstance(call.args[0], ExecutionHistory)
+        )
+        headers = json.loads(json.dumps(history.inputs["headers"]))
+        self.assertEqual(headers["x-death"][0]["time"], "2026-11-15T12:00:00+00:00")
+        self.assertEqual(headers["x-death"][0]["count"], 1)
+        self.assertEqual(headers["trace"], "abc")
+        self.assertEqual(headers["price"], "12.50")
+
 
 if __name__ == "__main__":
     unittest.main()

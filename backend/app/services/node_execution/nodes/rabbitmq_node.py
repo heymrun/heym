@@ -44,17 +44,20 @@ def execute(ctx: NodeExecutionContext) -> object:
         rabbitmq_password = rabbitmq_config.get("rabbitmq_password", "guest")
         rabbitmq_vhost = rabbitmq_config.get("rabbitmq_vhost", "/")
 
+        # Blank fields stay blank: evaluate_message_template turns "" into str(inputs).
         exchange_template = node_data.get("rabbitmqExchange", "")
-        exchange_name = self.evaluate_message_template(exchange_template, inputs, node_id)
+        exchange_name = self.evaluate_nonempty_message_template(exchange_template, inputs, node_id)
 
         routing_key_template = node_data.get("rabbitmqRoutingKey", "")
-        routing_key = self.evaluate_message_template(routing_key_template, inputs, node_id)
+        routing_key = self.evaluate_nonempty_message_template(routing_key_template, inputs, node_id)
 
         if not routing_key and not exchange_name:
             queue_template = node_data.get("rabbitmqQueueName", "")
-            routing_key = self.evaluate_message_template(queue_template, inputs, node_id)
+            routing_key = self.evaluate_nonempty_message_template(queue_template, inputs, node_id)
 
-        if not routing_key:
+        # A named exchange may take an empty routing key (fanout, headers); the default
+        # exchange routes by queue name, so it needs one.
+        if not routing_key and not exchange_name:
             raise ValueError("RabbitMQ Send requires routing key or queue name")
 
         message_body_template = node_data.get("rabbitmqMessageBody", "$input")

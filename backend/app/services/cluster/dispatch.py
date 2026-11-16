@@ -179,6 +179,25 @@ def log_offloaded_run(log: logging.Logger, *, workflow_id: Any, trigger: str, re
     )
 
 
+# How long past an offloaded run's own timeout to keep waiting: long enough for the
+# worker's timeout result to arrive before the dispatcher gives up on it.
+RESULT_WAIT_GRACE_SECONDS = 30.0
+
+
+def result_wait_seconds(timeout_seconds: float | None, *, held: bool) -> float | None:
+    """How long a dispatcher waits for a run's result. Not the run timeout itself.
+
+    The timeout bounds the run; the wait also covers time in the queue. A run held by
+    the concurrency gate may wait its turn for a while, so it gets at least the default
+    wait. An offloaded run gets its timeout plus a grace, so the worker reports the
+    timeout (and fires the error workflow) before the caller sees a wait error.
+    """
+    if timeout_seconds is None:
+        return None
+    budget = timeout_seconds + RESULT_WAIT_GRACE_SECONDS
+    return max(budget, DEFAULT_WAIT_SECONDS) if held else budget
+
+
 async def wait_for_result(
     execution_id: uuid.UUID, *, timeout_seconds: float | None = None
 ) -> OffloadedRun:
@@ -330,7 +349,9 @@ async def dispatch_workflow(
             if not wait_for_completion:
                 return None
             # The worker writes history and fires the error workflow for queued runs.
-            waited = await wait_for_result(run_id, timeout_seconds=timeout_seconds)
+            waited = await wait_for_result(
+                run_id, timeout_seconds=result_wait_seconds(timeout_seconds, held=True)
+            )
             if not waited.reported:
                 # Retired before any instance ran it, so nothing else will record it.
                 await record_failed_dispatch(
@@ -454,7 +475,9 @@ async def dispatch_workflow(
     if not wait_for_completion:
         run_result_bus.release(run_id)
         return None
-    result = await wait_for_result(run_id, timeout_seconds=timeout_seconds)
+    result = await wait_for_result(
+        run_id, timeout_seconds=result_wait_seconds(timeout_seconds, held=False)
+    )
     if not result.reported:
         # Nothing executed this run, so nothing else will ever record it.
         await record_failed_dispatch(

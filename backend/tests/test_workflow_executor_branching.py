@@ -925,3 +925,86 @@ class NestedLoopTests(unittest.TestCase):
         ]
 
         self.assertEqual(collected, [1, 2, 3, 4, 5, 6])
+
+
+class LoopErrorHandleRoutingTests(unittest.TestCase):
+    """Inside a Loop, each item takes only the success or the error handle of its node."""
+
+    def test_each_item_takes_one_handle(self) -> None:
+        def edge(source: str, target: str, sh: str | None = None, th: str | None = None) -> dict:
+            row = {"id": f"{source}-{target}-{sh}-{th}", "source": source, "target": target}
+            if sh:
+                row["sourceHandle"] = sh
+            if th:
+                row["targetHandle"] = th
+            return row
+
+        nodes = [
+            {"id": "in", "type": "textInput", "data": {"label": "userInput"}},
+            {
+                "id": "lp",
+                "type": "loop",
+                "data": {"label": "items", "arrayExpression": "$userInput.body.urls"},
+            },
+            {
+                "id": "h",
+                "type": "http",
+                "data": {
+                    "label": "fetch",
+                    "curl": "curl -X GET $items.item",
+                    "onErrorEnabled": True,
+                },
+            },
+            {
+                "id": "ok",
+                "type": "set",
+                "data": {
+                    "label": "saveResult",
+                    "mappings": [{"key": "url", "value": "$items.item"}],
+                },
+            },
+            {
+                "id": "bad",
+                "type": "set",
+                "data": {
+                    "label": "logFailure",
+                    "mappings": [{"key": "url", "value": "$items.item"}],
+                },
+            },
+            {"id": "o", "type": "output", "data": {"label": "out", "message": "done"}},
+        ]
+        edges = [
+            edge("in", "lp"),
+            edge("lp", "h", "loop"),
+            edge("h", "ok"),
+            edge("h", "bad", "error"),
+            edge("ok", "lp", None, "loop"),
+            edge("bad", "lp", None, "loop"),
+            edge("lp", "o", "done"),
+        ]
+        urls = ["https://example.test/a", "https://down.test/b", "https://example.test/c"]
+
+        def respond(method: str, url: str, **_: object) -> httpx.Response:
+            if "down.test" in str(url):
+                raise httpx.ConnectError("Connection refused")
+            return httpx.Response(200, json={"ok": True}, request=httpx.Request(method, url))
+
+        with (
+            patch("app.services.ssrf_guard.guard_http_url"),
+            patch("app.services.ssrf_guard.get_guarded_http_client") as mock_get_client,
+        ):
+            mock_get_client.return_value.request.side_effect = respond
+            result = WorkflowExecutor(nodes=nodes, edges=edges).execute(
+                workflow_id=uuid.uuid4(),
+                initial_inputs={"headers": {}, "query": {}, "body": {"urls": urls}},
+            )
+
+        def ran(label: str) -> list[str]:
+            return [
+                row["output"]["url"]
+                for row in result.node_results
+                if row["node_label"] == label and row["status"] == "success"
+            ]
+
+        self.assertEqual(ran("saveResult"), [urls[0], urls[2]])
+        self.assertEqual(ran("logFailure"), [urls[1]])

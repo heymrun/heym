@@ -161,6 +161,51 @@ def rejects_response_format(exc: Exception) -> bool:
     return getattr(exc, "status_code", None) in (400, 422) and "response_format" in str(exc).lower()
 
 
+def is_disable_reasoning_error(exc: Exception) -> bool:
+    """Return True if exc is an HTTP 400 or 422 specifically rejecting disable_reasoning."""
+    code = getattr(exc, "status_code", None)
+    if code is None and hasattr(exc, "response"):
+        code = getattr(getattr(exc, "response", None), "status_code", None)
+
+    parts = [str(exc)]
+    message = getattr(exc, "message", None)
+    if isinstance(message, str):
+        parts.append(message)
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict):
+        try:
+            parts.append(json.dumps(body))
+        except (TypeError, ValueError):
+            pass
+    elif isinstance(body, str):
+        parts.append(body)
+
+    err_text = " ".join(parts).lower()
+
+    if code is not None:
+        if code not in (400, 422):
+            return False
+    else:
+        if "400" not in err_text and "422" not in err_text:
+            return False
+
+    return (
+        "disable_reasoning" in err_text
+        or "disabling reasoning" in err_text
+        or "disable reasoning" in err_text
+    )
+
+
+def rejects_disable_reasoning(
+    exc: Exception,
+    extra_body: dict[str, Any] | None = None,
+) -> bool:
+    """Return True when an HTTP 400/422 explicitly rejects disable_reasoning from extra_body."""
+    if not isinstance(extra_body, dict) or "disable_reasoning" not in extra_body:
+        return False
+    return is_disable_reasoning_error(exc)
+
+
 def _weaker_response_format(response_format: dict[str, Any]) -> dict[str, Any] | None:
     """json_schema -> json_object -> none; the node prompt already carries the schema."""
     return {"type": "json_object"} if response_format.get("type") == "json_schema" else None

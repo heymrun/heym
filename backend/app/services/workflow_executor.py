@@ -3335,9 +3335,9 @@ class WorkflowExecutor:
         if not error_targets:
             return
 
-        preserved_node_ids: set[str] = set()
-        for target in success_targets:
-            preserved_node_ids.update(self.get_branch_node_ids(target, active_edges))
+        # Forward only: following a loop-back edge into the Loop node would reach the
+        # whole loop body, error branch included, and nothing would be skipped.
+        preserved_node_ids = self.get_reachable_node_ids(success_targets)
 
         exclusive_nodes = self.get_exclusive_branch_node_ids(
             root_node_id=node_id,
@@ -3362,9 +3362,8 @@ class WorkflowExecutor:
             for edge in active_edges
             if edge["source"] == node_id and edge.get("sourceHandle") != "error"
         ]
-        preserved_node_ids: set[str] = set()
-        for target in error_targets:
-            preserved_node_ids.update(self.get_branch_node_ids(target, active_edges))
+        # Forward only, as for the success branch: see _handle_success_branch_routing.
+        preserved_node_ids = self.get_reachable_node_ids(error_targets)
 
         exclusive_nodes = self.get_exclusive_branch_node_ids(
             root_node_id=node_id,
@@ -7287,6 +7286,8 @@ class WorkflowExecutor:
             tail = expr[len(core) :]
             if preserve_type and isinstance(result, str):
                 return result + tail
+            if preserve_type and isinstance(self._unwrap_value(result), (dict, list)):
+                return expression_syntax.render_in_text(self._unwrap_value(result)) + tail
             return (str(result) if result is not None else core) + tail
 
         return self._replace_expressions(template, replace_expr)

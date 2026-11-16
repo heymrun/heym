@@ -1,3 +1,4 @@
+import codecs
 import csv
 import io
 import json
@@ -5,6 +6,42 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
+
+
+def _is_struck_glyph(token: str) -> bool:
+    """A single letter or a doubled one ("m", "mm"): what faux-bold PDF text splits into."""
+    return token.isalpha() and (len(token) == 1 or (len(token) == 2 and token[0] == token[1]))
+
+
+# A well-formed UTF-8 multi-byte sequence; a single-byte code page rarely produces one.
+_UTF8_MULTIBYTE = re.compile(
+    rb"[\xc2-\xdf][\x80-\xbf]|[\xe0-\xef][\x80-\xbf]{2}|[\xf0-\xf4][\x80-\xbf]{3}"
+)
+
+
+def _decode_text(raw: bytes) -> str:
+    """Uploaded text as a string, whatever common encoding it was saved in.
+
+    UTF-8 with or without a BOM (Excel's "CSV UTF-8", Notepad "UTF-8 with BOM"), UTF-16
+    with a BOM (Notepad "Unicode", PowerShell 5 output), else cp1254 as the file
+    inspector does (Excel's default "CSV" and Notepad "ANSI" are single-byte), else latin-1.
+    UTF-8 with a stray single-byte character (a pasted row, a mixed log) stays UTF-8 and
+    loses only that byte.
+    """
+    if raw.startswith(codecs.BOM_UTF8):
+        return raw.decode("utf-8-sig", errors="replace")
+    if raw.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+        return raw.decode("utf-16", errors="replace")
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
+    if _UTF8_MULTIBYTE.search(raw):
+        return raw.decode("utf-8", errors="replace")
+    try:
+        return raw.decode("cp1254")
+    except UnicodeDecodeError:
+        return raw.decode("latin-1")
 
 
 @dataclass
@@ -80,8 +117,14 @@ class FileProcessor:
                 while j < len(parts) and parts[j] == part:
                     count += 1
                     j += 1
-                for _ in range(count):
-                    result.append(part[0])
+                # Halve only inside a run of struck glyphs ("mm ii ss ss"). On its own, a
+                # doubled pair is a real token: "Phase II", "World War II", "AA batteries".
+                neighbours = [parts[k] for k in (i - 1, j) if 0 <= k < len(parts)]
+                if count > 1 or any(_is_struck_glyph(token) for token in neighbours):
+                    for _ in range(count):
+                        result.append(part[0])
+                else:
+                    result.append(part)
                 i = j
             else:
                 result.append(part)
@@ -177,8 +220,6 @@ class FileProcessor:
 
         cleaned = re.sub(r"([a-z]+)\s*/\s*(\d+)\s*/\s*", r"\1/\2/", cleaned)
 
-        cleaned = re.sub(r"([a-z]+)\s+([a-z]+)\s*/\s*", r"\1\2/", cleaned)
-
         cleaned = re.sub(r"/\s+([a-z]+)\s+/", r"/\1/", cleaned)
 
         cleaned = re.sub(r"\?\s*nid\s*=\s*", r"?nid=", cleaned)
@@ -239,10 +280,6 @@ class FileProcessor:
 
         cleaned = re.sub(r"([a-z]+)-\s*([a-z])\s+([a-z])\s+([a-z])\s*-\s*", r"\1-\2\3\4-", cleaned)
 
-        cleaned = re.sub(r"von\s+(\d)(\d{2})\.", r"von \1 \2.", cleaned)
-
-        cleaned = re.sub(r"von\s+(\d{3})\.", r"von \1.", cleaned)
-
         cleaned = re.sub(r"\s+", " ", cleaned)
 
         return cleaned.strip()
@@ -294,7 +331,7 @@ class FileProcessor:
         self, file_content: bytes, filename: str, file_size: int | None = None
     ) -> list[TextChunk]:
         actual_size = file_size if file_size is not None else len(file_content)
-        text = file_content.decode("utf-8", errors="ignore")
+        text = _decode_text(file_content)
         chunks = self._chunk_text(
             text,
             base_metadata={
@@ -309,7 +346,7 @@ class FileProcessor:
         self, file_content: bytes, filename: str, file_size: int | None = None
     ) -> list[TextChunk]:
         actual_size = file_size if file_size is not None else len(file_content)
-        text = file_content.decode("utf-8", errors="ignore")
+        text = _decode_text(file_content)
         chunks = self._chunk_text(
             text,
             base_metadata={
@@ -398,7 +435,7 @@ class FileProcessor:
         self, file_content: bytes, filename: str, file_size: int | None = None
     ) -> list[TextChunk]:
         actual_size = file_size if file_size is not None else len(file_content)
-        text = file_content.decode("utf-8", errors="ignore")
+        text = _decode_text(file_content)
         reader = csv.DictReader(io.StringIO(text))
         chunks = []
 
@@ -425,7 +462,7 @@ class FileProcessor:
         self, file_content: bytes, filename: str, file_size: int | None = None
     ) -> list[TextChunk]:
         actual_size = file_size if file_size is not None else len(file_content)
-        text = file_content.decode("utf-8", errors="ignore")
+        text = _decode_text(file_content)
         data = json.loads(text)
         chunks = []
 
