@@ -13,6 +13,7 @@ from sqlalchemy.orm.attributes import InstrumentedAttribute
 from sqlalchemy.sql import ColumnElement, Select, Subquery
 
 from app.db.models import ExecutionHistory, RunHistory, Workflow
+from app.services.json_text_search import json_text_ilike
 from app.services.workflow_access import workflow_access_clause
 
 # A recovery that could not re-run a run after a restart stores "failed". To a reader that
@@ -108,9 +109,9 @@ def run_history_rows(
                 Workflow.name.ilike(pattern),
                 ExecutionHistory.status.ilike(pattern),
                 ExecutionHistory.trigger_source.ilike(pattern),
-                cast(ExecutionHistory.inputs, String).ilike(pattern),
-                cast(ExecutionHistory.outputs, String).ilike(pattern),
-                cast(ExecutionHistory.node_results, String).ilike(pattern),
+                json_text_ilike(ExecutionHistory.inputs, search),
+                json_text_ilike(ExecutionHistory.outputs, search),
+                json_text_ilike(ExecutionHistory.node_results, search),
             )
         )
 
@@ -149,8 +150,8 @@ def run_history_rows(
                 RunHistory.status.ilike(pattern),
                 RunHistory.trigger_source.ilike(pattern),
                 RunHistory.run_type.ilike(pattern),
-                cast(RunHistory.inputs, String).ilike(pattern),
-                cast(RunHistory.outputs, String).ilike(pattern),
+                json_text_ilike(RunHistory.inputs, search),
+                json_text_ilike(RunHistory.outputs, search),
             )
         )
     return union_all(exec_subq, run_subq).subquery()
