@@ -27,6 +27,7 @@ export type CredentialType =
   | "google_sheets"
   | "google_drive"
   | "google_meet"
+  | "gmail"
   | "bigquery"
   | "supabase"
   | "notion"
@@ -531,6 +532,7 @@ export const CREDENTIAL_TYPE_LABELS: Record<CredentialType, string> = {
   google_sheets: "Google Sheets (OAuth2)",
   google_drive: "Google Drive (OAuth2)",
   google_meet: "Google Meet (OAuth2)",
+  gmail: "Gmail (OAuth2)",
   bigquery: "BigQuery (OAuth2)",
   supabase: "Supabase",
   clickhouse: "ClickHouse",
@@ -576,6 +578,7 @@ export const CREDENTIAL_TYPE_DESCRIPTIONS: Record<CredentialType, string> = {
   google_sheets: "Connect to Google Sheets via OAuth2 — read, write, append, and query spreadsheets",
   google_drive: "Connect to Google Drive via OAuth2 — list, download, update, and delete files",
   google_meet: "Connect Google Calendar to find free times and manage Meet invitations",
+  gmail: "Connect a Gmail account to start workflows from new email, by tab, label or alias",
   bigquery: "Connect to Google BigQuery via OAuth2 — run SQL queries and insert rows",
   supabase: "Connect to Supabase PostgREST — query and mutate Postgres-backed tables",
   clickhouse:

@@ -17,6 +17,29 @@ import type { ReleaseEntry } from "@/features/release-tour/releaseTour.types";
  */
 export const RELEASE_REGISTRY: ReleaseEntry[] = [
   {
+    releaseId: "2026.34",
+    publishedAt: new Date("2026-11-16T12:00:00Z"),
+    headline: "Gmail Trigger",
+    releaseTour: {
+      label: "New in Heym", introTitle: "New in this release",
+      introDescription: "Start workflows from Gmail by tab, label or alias, and tidy each email after its run.",
+      tourEnabled: true,
+      sectionOrder: ["gmail-trigger"],
+    },
+    sections: [{
+      id: "gmail-trigger", title: "Gmail Trigger",
+      publishedAt: new Date("2026-11-16T12:00:00Z"),
+      blocks: [{ type: "prose", markdown: "The new **Gmail Trigger** starts a run for each new email in a Gmail or Google Workspace account, connected with a **Gmail (OAuth2)** credential instead of an app password. Watch the inbox, one tab such as **Primary** or **Promotions**, Important, Starred, Sent, all received mail, or one of your labels. List addresses under **Only email sent to** to react only to a Send mail as alias, a plus address or a Workspace alias. Once the run starts, Heym can mark the email read, archive it or move it to Trash; the default leaves it alone. The output matches the IMAP Trigger, with the Gmail message id, thread id and labels added, and **Download attachments to Drive** works the same way." }],
+      tour: {
+        description: "Start a run for each new Gmail email, by tab, label or alias, then mark it read, archive it or move it to Trash.",
+        useCases: ["Triage the Primary tab and mark each email read once it is handled", "Read invoice PDFs from a Gmail label and archive them", "React only to mail sent to sales@ or a plus address"],
+        tourVisual: "gmail-trigger",
+        docTarget: { categoryId: "nodes", slug: "gmail-trigger-node", title: "Gmail Trigger" },
+      },
+    }],
+  },
+
+  {
     releaseId: "2026.33",
     publishedAt: new Date("2026-11-15T00:00:00Z"),
     headline: "Standardized /mcp server endpoints",
@@ -106,29 +129,6 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
         useCases: ["Search call recordings from a RAG node", "Make photographed receipts and whiteboards searchable", "Index scanned contracts without a separate OCR step"],
         tourVisual: "rag-media-upload",
         docTarget: { categoryId: "tabs", slug: "vectorstores-tab", title: "Vectorstores" },
-      },
-    }],
-  },
-
-  {
-    releaseId: "2026.29",
-    publishedAt: new Date("2026-11-10T16:00:00Z"),
-    headline: "Rerank RAG search results with a Decision Model",
-    releaseTour: {
-      label: "New in Heym", introTitle: "New in this release",
-      introDescription: "The best answer first, scored by the model you already use for decisions.",
-      tourEnabled: true,
-      sectionOrder: ["decision-reranker"],
-    },
-    sections: [{
-      id: "decision-reranker", title: "Rerank search results with a Decision Model",
-      publishedAt: new Date("2026-11-10T16:00:00Z"),
-      blocks: [{ type: "prose", markdown: "Turn on **Enable Reranker** in a **RAG** search and the **Reranker Credential** list now offers your **Decision Model** credentials next to Cohere. Enter the model, for example `jev-latest`, and the node sends the question with each finding in its own request, several at a time: the decision model scores how relevant that finding is to the question, and the results come back ordered by that score, with `relevance_score` from 0 to 1 on each one. A failed call fails the node with the reason, so a workflow never continues with results in the wrong order, and each rerank shows up in Traces as one entry with every finding's answer and the total token usage. Cohere reranking works as before." }],
-      tour: {
-        description: "Let a decision model score every search result against the question and put the best answer first.",
-        useCases: ["Feed an Agent only the passages that answer the question", "Rerank support articles before drafting a reply", "Use one decision model for routing, judging and reranking"],
-        tourVisual: "decision-reranker",
-        docTarget: { categoryId: "nodes", slug: "rag-node", title: "RAG / Vector Store" },
       },
     }],
   },

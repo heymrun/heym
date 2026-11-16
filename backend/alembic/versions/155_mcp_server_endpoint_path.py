@@ -6,8 +6,6 @@ Revises: 154_vector_store_ingest_jobs
 
 from collections.abc import Sequence
 
-import sqlalchemy as sa
-
 from alembic import op
 
 revision: str = "155_mcp_server_endpoint_path"
@@ -17,18 +15,14 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    # Add column with server_default='sse' so all existing rows are backfilled with 'sse'
-    op.add_column(
-        "mcp_servers",
-        sa.Column("endpoint_path", sa.String(length=16), nullable=False, server_default="sse"),
+    # A database stamped back to 154 after running this revision (a rollback, or a branch
+    # without it) already has the column. Rows that existed when it was added keep 'sse'.
+    op.execute(
+        "ALTER TABLE mcp_servers ADD COLUMN IF NOT EXISTS endpoint_path VARCHAR(16) "
+        "NOT NULL DEFAULT 'sse'"
     )
-    # Update default to 'mcp' for subsequent newly created records
-    op.alter_column(
-        "mcp_servers",
-        "endpoint_path",
-        server_default="mcp",
-    )
+    op.execute("ALTER TABLE mcp_servers ALTER COLUMN endpoint_path SET DEFAULT 'mcp'")
 
 
 def downgrade() -> None:
-    op.drop_column("mcp_servers", "endpoint_path")
+    op.execute("ALTER TABLE mcp_servers DROP COLUMN IF EXISTS endpoint_path")

@@ -5,6 +5,7 @@ export default {
   safelist: [
     "border-node-input", "bg-node-input/10", "text-node-input",
     "border-node-google-meet", "bg-node-google-meet/10", "text-node-google-meet",
+    "border-node-gmail", "bg-node-gmail/10", "text-node-gmail",
     "border-node-cron", "bg-node-cron/10", "text-node-cron",
     "border-node-llm", "bg-node-llm/10", "text-node-llm",
     "border-node-agent", "bg-node-agent/10", "text-node-agent",
@@ -113,6 +114,7 @@ export default {
           input: "hsl(var(--node-input))",
           cron: "hsl(var(--node-cron))",
           "google-meet": "hsl(var(--node-google-meet))",
+          gmail: "hsl(var(--node-gmail))",
           llm: "hsl(var(--node-llm))",
           agent: "hsl(var(--node-agent))",
           codex: "hsl(var(--node-codex))",

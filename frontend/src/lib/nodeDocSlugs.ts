@@ -33,6 +33,7 @@ export const NODE_DOC_SLUGS: Record<NodeType, string> = {
   discord: "discord-node",
   discordTrigger: "discord-trigger-node",
   imapTrigger: "imap-trigger-node",
+  gmailTrigger: "gmail-trigger-node",
   googleDriveTrigger: "google-drive-trigger-node",
   googleSheetsTrigger: "google-sheets-trigger-node",
   heym: "heym-node",

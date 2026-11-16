@@ -61,6 +61,7 @@ const nodeColorMap = {
   discord: "node-discord",
   discordTrigger: "node-discord",
   imapTrigger: "node-email",
+  gmailTrigger: "node-gmail",
   heym: "node-heym",
   heymTrigger: "node-heym",
   sendEmail: "node-email",
@@ -126,6 +127,7 @@ const hasInput = computed(
     && props.type !== "slackTrigger"
     && props.type !== "discordTrigger"
     && props.type !== "imapTrigger"
+    && props.type !== "gmailTrigger"
     && props.type !== "googleDriveTrigger"
     && props.type !== "googleSheetsTrigger"
     && props.type !== "heymTrigger"

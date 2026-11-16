@@ -29,6 +29,7 @@ Some integration nodes do **not** require credentials. [WebSocket Trigger](../no
 | **Google Sheets** | [Google Sheets node](../nodes/google-sheets-node.md), [Google Sheets Trigger](../nodes/google-sheets-trigger-node.md) | `client_id`, `client_secret` + OAuth2 consent |
 | **Google Drive** | [Google Drive node](../nodes/google-drive-node.md), [Google Drive Trigger](../nodes/google-drive-trigger-node.md) | `client_id`, `client_secret` + OAuth2 consent (full Drive scope) |
 | **Google Meet** | [Google Meet node](../nodes/google-meet-node.md) | `client_id`, `client_secret` + Google OAuth consent for Calendar events and availability |
+| **Gmail** | [Gmail Trigger](../nodes/gmail-trigger-node.md) | `client_id`, `client_secret` + Google OAuth consent (`gmail.modify`) |
 | **BigQuery** | [BigQuery node](../nodes/bigquery-node.md) | `client_id`, `client_secret` + OAuth2 consent |
 | **Supabase** | [Supabase node](../nodes/supabase-node.md) | `supabase_url`, `supabase_key`, optional `supabase_schema` |
 | **ClickHouse** | [ClickHouse node](../nodes/clickhouse-node.md) | `host`, `port`, `username`, `password`, `database`, `secure` |
@@ -962,6 +963,28 @@ choose. It stores references, never a key of its own.
 
 Option names are what the decision model picks between, so they must be distinct. An
 option cannot point at another Model Router.
+
+## Gmail (OAuth2)
+
+The Gmail credential connects the [Gmail Trigger](../nodes/gmail-trigger-node.md) to the Gmail API with the same "Bring Your Own App" model as the other Google credentials.
+
+### Setup
+
+1. In [Google Cloud Console](https://console.cloud.google.com), enable the **Gmail API**.
+2. Create a **Web application** OAuth client and register `https://your-heym-domain/api/credentials/gmail/oauth/callback` as an authorized redirect URI.
+3. In Heym Dashboard, **Credentials → New → Gmail (OAuth2)**, enter a name, the Client ID and Client Secret, then click **Connect** and sign in with the Gmail account to watch.
+
+### Notes
+
+- The scope is `https://www.googleapis.com/auth/gmail.modify`: read mail, change labels, move to Trash. It cannot delete mail permanently.
+- After connecting, the credential shows the connected address. Tokens are encrypted and refreshed automatically.
+- Connecting fails with "enable the Gmail API" when the OAuth client's project has the Gmail API turned off.
+- For a Gmail account, prefer this credential over IMAP with an app password: it needs no app password and gives the trigger tabs, labels, aliases and after-run actions.
+
+### Used By
+
+- [Gmail Trigger node](../nodes/gmail-trigger-node.md)
+- [HTTP node](../nodes/http-node.md) through `$credentials.<name>`, which resolves to a fresh access token for Gmail API calls the trigger does not make
 
 ## Google Meet (OAuth2)
 

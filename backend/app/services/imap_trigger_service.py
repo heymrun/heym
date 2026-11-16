@@ -211,6 +211,11 @@ def _parse_email_message(
     ``uid`` and ``uidvalidity`` together name the message in its mailbox, so the trigger
     node can fetch it again by UID to save its attachments.
     """
+    return {"uid": str(uid), "uidvalidity": uidvalidity, **email_payload(raw_bytes)}
+
+
+def email_payload(raw_bytes: bytes) -> dict[str, Any]:
+    """The email fields every mail trigger hands its run, from raw RFC822 bytes."""
     message = message_from_bytes(raw_bytes, policy=policy.default)
     text_body, html_body = _extract_email_bodies(message)
 
@@ -229,8 +234,6 @@ def _parse_email_message(
         headers[key] = _decode_header_value(value)
 
     return {
-        "uid": str(uid),
-        "uidvalidity": uidvalidity,
         "subject": _decode_header_value(message.get("Subject")),
         "from": _decode_header_value(message.get("From")),
         "fromAddresses": _serialise_addresses(message.get("From")),

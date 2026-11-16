@@ -46,6 +46,7 @@ NODE_PLACEMENT: dict[str, Placement] = {
     "github": _ANY,
     "googleDrive": _MAIN,
     "googleMeet": _ANY,
+    "gmailTrigger": _ANY,  # narrowed to MAIN_ONLY by _gmail_placement when it saves attachments
     "googleDriveTrigger": _ANY,  # polling runs on the leader; the run keeps no local state
     "googleSheets": _ANY,
     "googleSheetsTrigger": _ANY,  # polling runs on the leader; the run keeps no local state
@@ -100,7 +101,7 @@ def _agent_placement(data: dict) -> Placement:
     sub-workflow tools have no local file dependency. The file sandbox turns on
     only for a Drive file whose content is on this instance, and the nodes that
     put Drive files into a run (upload trigger, drive, googleDrive, converter,
-    code with codeFiles, slack downloadFile, imapTrigger saving attachments) already
+    code with codeFiles, slack downloadFile, imap/gmail triggers saving attachments) already
     pin it to the main instance.
     """
     if data.get("skills"):
@@ -134,9 +135,15 @@ def _imap_placement(data: dict) -> Placement:
     return _MAIN if data.get("imapDownloadAttachments") is True else _ANY
 
 
+def _gmail_placement(data: dict) -> Placement:
+    """A Gmail Trigger pins the run only when it saves the email's attachments to Drive."""
+    return _MAIN if data.get("gmailDownloadAttachments") is True else _ANY
+
+
 _CONDITIONAL: dict[str, Callable[[dict], Placement]] = {
     "agent": _agent_placement,
     "code": _code_placement,
+    "gmailTrigger": _gmail_placement,
     "imapTrigger": _imap_placement,
     "slack": _slack_placement,
 }

@@ -480,9 +480,14 @@ def get_masked_value(credential_type: CredentialType, config: dict) -> str | Non
             return "connected"
         client_id = config.get("client_id", "")
         return mask_api_key(client_id) if client_id else None
-    elif credential_type in (CredentialType.google_drive, CredentialType.google_meet):
+    elif credential_type in (
+        CredentialType.google_drive,
+        CredentialType.google_meet,
+        CredentialType.gmail,
+    ):
         if config.get("refresh_token", "").strip():
-            return "connected"
+            email_address = str(config.get("email_address", "")).strip()
+            return f"connected ({email_address})" if email_address else "connected"
         client_id = config.get("client_id", "")
         return mask_api_key(client_id) if client_id else None
     elif credential_type == CredentialType.supabase:
@@ -2455,10 +2460,15 @@ def validate_credential_config(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="BigQuery credential requires client_secret",
             )
-    elif credential_type in (CredentialType.google_drive, CredentialType.google_meet):
-        google_label = (
-            "Google Meet" if credential_type == CredentialType.google_meet else "Google Drive"
-        )
+    elif credential_type in (
+        CredentialType.google_drive,
+        CredentialType.google_meet,
+        CredentialType.gmail,
+    ):
+        google_label = {
+            CredentialType.google_meet: "Google Meet",
+            CredentialType.gmail: "Gmail",
+        }.get(credential_type, "Google Drive")
         if "client_id" not in config or not config["client_id"]:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

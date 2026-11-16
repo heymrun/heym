@@ -521,6 +521,38 @@ Then an Agent user message such as `"Extract vendor, total and due date from the
 {"id": "n1", "type": "googleSheetsTrigger", "position": {"x": 100, "y": 100}, "data": {"label": "newLead", "credentialId": "google-sheets-credential-uuid", "gstSpreadsheetId": "https://docs.google.com/spreadsheets/d/SPREADSHEET_ID/edit", "gstSheetName": "Leads", "gstHasHeader": true, "gstKeyColumn": "Email", "gstEvents": ["created"], "pollIntervalMinutes": 1}}
 ```
 
+### 3i. gmailTrigger (Gmail Trigger)
+- **Purpose**: Poll a Gmail account through the Gmail API and start the workflow once for each new email in the watched mailbox
+- **Inputs**: 0 | **Outputs**: 1
+- **WHEN TO USE**: When the workflow should react to email in a Gmail or Google Workspace mailbox, especially when it needs a Gmail tab (Primary, Promotions...), a label, an alias, or should mark the email read, archive it, or move it to Trash afterwards. Use `imapTrigger` for other mail providers
+- **DO NOT use** `imapTrigger` with an app password for a Gmail account when a `gmail` credential is available
+- **Data fields** (plain values, not `$` expressions):
+  - `label`: Node identifier (e.g., "supportGmail")
+  - `credentialId`: UUID of a `gmail` credential (Google OAuth, scope `gmail.modify`)
+  - `pollIntervalMinutes`: Integer, minimum `1`, default `1`
+  - `gmailMailbox`: Which mail starts a run. `"inbox"` (default), `"primary"` (Primary tab), `"social"`, `"promotions"`, `"updates"`, `"forums"` (inbox mail in that tab), `"important"`, `"starred"`, `"sent"`, `"all"` (all received mail, archived included, not your own sent mail), `"label"` (one of the account's own labels)
+  - `gmailLabelId`: Gmail label id (for example `"Label_12"`) when `gmailMailbox` is `"label"`; `gmailLabelName` holds its display name
+  - `gmailAliases`: Array of addresses. When set, only email sent or delivered to one of them starts a run (To, Cc, Delivered-To, X-Original-To). Use it for a Send mail as alias, a plus address (`me+invoices@gmail.com`) or a Google Workspace alias. Empty means any address
+  - `gmailDownloadAttachments`: Boolean, default `false`. Same as `imapDownloadAttachments`: saves every attachment to the owner's Heym Drive during the run (at most 10 per email)
+  - `gmailAfterAction`: What Heym does to the email once its run has started, whatever the outcome: `"none"` (default), `"markRead"`, `"archive"`, `"markReadAndArchive"`, `"trash"` (move to Trash, recoverable for 30 days). Never a permanent delete
+- **Behavior**: The first poll records where the mailbox is and starts nothing. A message starts a run when it arrives in the mailbox or when it is moved or labelled into it later. Drafts, Spam and Trash never start runs. Each email starts at most one run, also on multi-worker and multi-instance installs
+- **Output fields available downstream**: the same as `imapTrigger` (`$<label>.email.subject`, `.from`, `.fromAddresses`, `.toAddresses`, `.ccAddresses`, `.text`, `.html`, `.attachments`, `.headers`, `.messageId`, `.date`), plus:
+  - `$<label>.email.id`: Gmail message id
+  - `$<label>.email.threadId`: Gmail thread id
+  - `$<label>.email.labelIds`: the message's Gmail labels, for example `["INBOX", "UNREAD", "CATEGORY_PERSONAL"]`
+  - `$<label>.email.snippet`: Gmail's short preview of the body
+  - `$<label>.attachments`, `$<label>.file_ids`, `$<label>.triggered_at`: as for `imapTrigger`
+
+**Example node JSON:**
+```json
+{"id": "n1", "type": "gmailTrigger", "position": {"x": 100, "y": 100}, "data": {"label": "supportGmail", "credentialId": "gmail-credential-uuid", "pollIntervalMinutes": 1, "gmailMailbox": "primary", "gmailAliases": ["support@example.com"], "gmailAfterAction": "markRead"}}
+```
+
+**Example with a label and attachments (invoices filtered into a Gmail label → Agent reads the PDFs → archive):**
+```json
+{"id": "n1", "type": "gmailTrigger", "position": {"x": 100, "y": 100}, "data": {"label": "invoiceGmail", "credentialId": "gmail-credential-uuid", "pollIntervalMinutes": 5, "gmailMailbox": "label", "gmailLabelId": "Label_12", "gmailLabelName": "Invoices", "gmailDownloadAttachments": true, "gmailAfterAction": "markReadAndArchive"}}
+```
+
 ### 4. llm (Language Model)
 - **Purpose**: Process text with AI language model or generate images
 - **Inputs**: 1 | **Outputs**: 1
@@ -5364,7 +5396,7 @@ Always include:
 21. **MULTIPLE INPUT FIELDS** - textInput nodes support multiple input fields via `inputFields` array. Define fields like `[{"key": "text"}, {"key": "base64"}]`. Access via `$nodeLabel.body.fieldKey`. Input values are sent in the `body` object.
 22. **⚠️ NO UNNECESSARY textInput!** - NEVER add textInput unless user explicitly needs to provide input data. For static URLs, scheduled tasks, or fixed operations, START DIRECTLY with http, cron, or other nodes. textInput is ONLY for workflows that receive dynamic data from users/API callers.
 23. **⚠️ PRESERVE CREDENTIALS & MODEL** - When modifying an existing workflow, ALWAYS preserve existing `credentialId` and `model` values in nodes. NEVER replace, remove, or change credential IDs or model names unless the user explicitly asks to use a different credential or model. If a node already has a `credentialId` or `model`, keep them exactly as is.
-23a. **⚠️ CREDENTIALS & INTEGRATIONS - OWNED ONLY (NO SHARED)** - For **every** node field that references a credential or secret (`credentialId`, `githubCredentialId`, `fallbackCredentialId`, `guardrailCredentialId`, Playwright `aiStep` credential, etc.), use ONLY credentials **owned** by the workflow owner. **NEVER** put shared credentials (shared with you by another user or via team share) in generated JSON—the UI labels these as shared; they must not appear in AI output. Use placeholders such as `YOUR_CREDENTIAL_ID`, `codex-credential-uuid`, `opencode-credential-uuid`, `github-credential-uuid`, `jira-credential-uuid`, `google-drive-credential-uuid`, `google-sheets-credential-uuid`, `slack-credential-uuid`, `telegram-credential-uuid`, or `imap-credential-uuid` and let the user pick an owned credential in the editor. Applies to: `llm`, `agent`, `codex`, `opencodeGo`, `slack`, `telegram`, `slackTrigger`, `telegramTrigger`, `imapTrigger`, `sendEmail`, `redis`, `grist`, `github`, `jira`, `linear`, `googleSheets`, `googleDrive`, `googleMeet`, `googleSheetsTrigger`, `googleDriveTrigger`, `bigquery`, `supabase`, `notion`, `rabbitmq`, `crawler`, `playwright` (including `aiStep`), and any other integration that stores a credential id. When modifying an existing workflow (rule 23), still preserve existing ids if they are already non-shared; when **adding** new nodes, never insert shared credential UUIDs.
+23a. **⚠️ CREDENTIALS & INTEGRATIONS - OWNED ONLY (NO SHARED)** - For **every** node field that references a credential or secret (`credentialId`, `githubCredentialId`, `fallbackCredentialId`, `guardrailCredentialId`, Playwright `aiStep` credential, etc.), use ONLY credentials **owned** by the workflow owner. **NEVER** put shared credentials (shared with you by another user or via team share) in generated JSON—the UI labels these as shared; they must not appear in AI output. Use placeholders such as `YOUR_CREDENTIAL_ID`, `codex-credential-uuid`, `opencode-credential-uuid`, `github-credential-uuid`, `jira-credential-uuid`, `google-drive-credential-uuid`, `google-sheets-credential-uuid`, `slack-credential-uuid`, `telegram-credential-uuid`, `imap-credential-uuid`, or `gmail-credential-uuid` and let the user pick an owned credential in the editor. Applies to: `llm`, `agent`, `codex`, `opencodeGo`, `slack`, `telegram`, `slackTrigger`, `telegramTrigger`, `imapTrigger`, `gmailTrigger`, `sendEmail`, `redis`, `grist`, `github`, `jira`, `linear`, `googleSheets`, `googleDrive`, `googleMeet`, `googleSheetsTrigger`, `googleDriveTrigger`, `bigquery`, `supabase`, `notion`, `rabbitmq`, `crawler`, `playwright` (including `aiStep`), and any other integration that stores a credential id. When modifying an existing workflow (rule 23), still preserve existing ids if they are already non-shared; when **adding** new nodes, never insert shared credential UUIDs.
 24. **EXECUTE NODE OUTPUT** - Execute node returns `{status, outputs, workflow_id, execution_time_ms}`. Access the called workflow's result via `$executeNodeLabel.outputs.output.result`. The `outputs.output` object contains the result from the executed workflow's output node.
 25. **EXECUTE NODE MULTIPLE INPUTS** - When calling a workflow that expects multiple input fields: (1) Add matching `inputFields` to your textInput node to collect all required data, (2) Use `executeInputMappings` array to map each field. Example: If target needs `text` and `imageUrl`, your textInput should have `inputFields: [{"key": "prompt"}, {"key": "image"}]`, then execute node uses `"executeInputMappings": [{"key": "text", "value": "$userInput.body.prompt"}, {"key": "imageUrl", "value": "$userInput.body.image"}]`
 26. **REQUEST BODY, HEADERS & QUERY** - When workflow is executed via API, textInput nodes receive `body`, `headers` and `query` objects. Access via `$textInputLabel.body.fieldName`, `$textInputLabel.headers.headerName` and `$textInputLabel.query.paramName`. Useful for accessing raw request data, authentication, and dynamic behavior.

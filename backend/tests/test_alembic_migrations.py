@@ -15,7 +15,13 @@ class AlembicMigrationGraphTest(unittest.TestCase):
         self.script = ScriptDirectory.from_config(config)
 
     def test_revision_graph_has_one_head(self) -> None:
-        self.assertEqual(self.script.get_heads(), ["155_mcp_server_endpoint_path"])
+        self.assertEqual(self.script.get_heads(), ["156_gmail_credential"])
+
+    def test_gmail_credential_follows_mcp_server_endpoint_path(self) -> None:
+        revision = self.script.get_revision("156_gmail_credential")
+
+        self.assertIsNotNone(revision)
+        self.assertEqual(revision.down_revision, "155_mcp_server_endpoint_path")
 
     def test_mcp_server_endpoint_path_follows_vector_store_ingest_jobs(self) -> None:
         revision = self.script.get_revision("155_mcp_server_endpoint_path")

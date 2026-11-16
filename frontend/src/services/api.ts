@@ -1654,6 +1654,13 @@ export const credentialsApi = {
     return response.data;
   },
 
+  gmailOAuthAuthorize: async (credentialId: string): Promise<{ auth_url: string }> => {
+    const response = await api.post<{ auth_url: string }>(
+      "/credentials/gmail/oauth/authorize", { credential_id: credentialId },
+    );
+    return response.data;
+  },
+
   googleDriveOAuthAuthorize: async (credentialId: string): Promise<{ auth_url: string }> => {
     const response = await api.post<{ auth_url: string }>(
       "/credentials/google-drive/oauth/authorize",
@@ -4462,5 +4469,23 @@ export const credentialSetupApi = {
       `/credential-setup/${requestId}/decline`,
     );
     return response.data;
+  },
+};
+
+// ---------- Gmail pickers (Gmail Trigger form) ----------
+
+import type { GmailAddress, GmailLabel } from "@/types/gmail";
+
+export const gmailApi = {
+  listLabels: async (credentialId: string): Promise<GmailLabel[]> => {
+    const response = await api.get<{ labels: GmailLabel[] }>(`/gmail/${credentialId}/labels`);
+    return response.data.labels;
+  },
+
+  listAddresses: async (credentialId: string): Promise<GmailAddress[]> => {
+    const response = await api.get<{ addresses: GmailAddress[] }>(
+      `/gmail/${credentialId}/addresses`,
+    );
+    return response.data.addresses;
   },
 };

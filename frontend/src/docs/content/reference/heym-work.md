@@ -22,17 +22,17 @@ Heym Work runs as its own container next to your Heym, with a separate license f
 
 | Part | Choices |
 |------|---------|
-| **What starts it** | On demand, on a schedule, on a Slack message, when a Google Sheets tab changes (rows added, changed or deleted), or when an email reaches an inbox. Sheet and email triggers check every 1, 5, 15 or 60 minutes. |
+| **What starts it** | On demand, on a schedule, on a Slack message, when a Google Sheets tab changes (rows added, changed or deleted), or when an email reaches a Gmail account or an IMAP inbox. A Gmail trigger can watch the inbox, one tab such as Primary, Important, Starred, Sent, all mail or a label, can react only to chosen addresses, and can mark the email read, archive it or move it to Trash once the run starts. The **Email inbox** connection lists Gmail accounts and IMAP inboxes together, and the one chosen decides which trigger the flow uses. Flows saved before Gmail keep their IMAP inbox. Sheet and email triggers check every 1, 5, 15 or 60 minutes. |
 | **AI draft** (optional) | A model and instructions turn what started the flow into text for the steps after it. A flow that does not start from a sheet or an email can first read recent Slack messages from a channel or a thread. |
 | **What happens next** | Actions in order, in any of the three tools, whatever started the flow. **Slack:** channel message, direct message, form, message with buttons, approval, thread reply, message update and final outcome. **Google Sheets:** add a row, or update the row that changed. **Email:** send an email. |
 
 - **Answers continue the run.** An approval, buttons or a form pause the run until someone answers in Slack. An approval also waits in Activity, and a decision in either place takes the buttons off the Slack message. Later Slack steps stay in the first message's thread.
-- **One Connections card.** Each flow shows the Slack workspace, the Google Sheets account and the inboxes it reads from and sends with. They are Heym credentials: **Slack Bot** (a bot token, `xoxb-…`), **Google Sheets**, **IMAP** and **SMTP**, and a missing one can be added from the flow itself.
+- **One Connections card.** Each flow shows the Slack workspace, the Google Sheets account and the inboxes it reads from and sends with. They are Heym credentials: **Slack Bot** (a bot token, `xoxb-…`), **Google Sheets**, **Gmail**, **IMAP** and **SMTP**, and a missing one can be added from the flow itself.
 - **One Slack app for every flow.** In the Slack app, set the Interactivity Request URL to `https://<your Heym>/api/slack/interactions/<credential id>` and the Event Subscriptions Request URL to `https://<your Heym>/api/slack/events/<credential id>`. Heym Work shows both for the chosen connection. Every flow on that credential shares them.
 - **Slack triggers choose what they hear:** messages in channels and DMs, direct messages to the bot, mentions of the bot, or messages in one channel. The bot's own posts never start a flow.
 - **Requirements.** Flows need Heym 0.0.131 or later.
 
-The steps a flow builds are the same nodes you can use on the canvas: [Slack](../nodes/slack-node.md), [Slack Trigger](../nodes/slack-trigger-node.md), [Google Sheets](../nodes/google-sheets-node.md), [Google Sheets Trigger](../nodes/google-sheets-trigger-node.md), [IMAP Trigger](../nodes/imap-trigger-node.md), [Send Email](../nodes/send-email-node.md) and [Cron](../nodes/cron-node.md).
+The steps a flow builds are the same nodes you can use on the canvas: [Slack](../nodes/slack-node.md), [Slack Trigger](../nodes/slack-trigger-node.md), [Google Sheets](../nodes/google-sheets-node.md), [Google Sheets Trigger](../nodes/google-sheets-trigger-node.md), [Gmail Trigger](../nodes/gmail-trigger-node.md), [IMAP Trigger](../nodes/imap-trigger-node.md), [Send Email](../nodes/send-email-node.md) and [Cron](../nodes/cron-node.md).
 
 ## Connecting Heym Work
 

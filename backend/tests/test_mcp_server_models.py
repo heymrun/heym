@@ -69,22 +69,14 @@ class MCPServerMigrationTests(unittest.TestCase):
         mig_155.op = op
 
         mig_155.upgrade()
-
-        # Added with server_default='sse' to backfill existing rows
-        added = op.add_column.call_args
-        self.assertEqual(added.args[0], "mcp_servers")
-        self.assertEqual(added.args[1].name, "endpoint_path")
-        self.assertEqual(str(added.args[1].server_default.arg), "sse")
-
-        # Altered with server_default='mcp' for subsequent new records
-        altered = op.alter_column.call_args
-        self.assertEqual(altered.args[:2], ("mcp_servers", "endpoint_path"))
-        self.assertEqual(altered.kwargs["server_default"], "mcp")
-
-        # add_column must execute before alter_column
-        names = [call[0] for call in op.method_calls]
-        self.assertLess(names.index("add_column"), names.index("alter_column"))
-
-        # Downgrade drops column
         mig_155.downgrade()
-        op.drop_column.assert_called_once_with("mcp_servers", "endpoint_path")
+
+        added, altered, dropped = [call.args[0] for call in op.execute.call_args_list]
+        # Added with 'sse' to backfill existing rows, tolerating a column that is already there
+        # (a database stamped back to 154 after running this revision).
+        self.assertIn("ALTER TABLE mcp_servers ADD COLUMN IF NOT EXISTS endpoint_path", added)
+        self.assertIn("NOT NULL DEFAULT 'sse'", added)
+        # Then 'mcp' for subsequent new records.
+        self.assertIn("ALTER COLUMN endpoint_path SET DEFAULT 'mcp'", altered)
+        self.assertIn("DROP COLUMN IF EXISTS endpoint_path", dropped)
+        op.add_column.assert_not_called()

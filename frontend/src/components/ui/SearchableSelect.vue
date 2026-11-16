@@ -263,7 +263,7 @@ function clearValue(): void {
       <span
         aria-hidden="true"
         class="invisible block h-0 overflow-hidden whitespace-nowrap text-sm"
-        :class="[clearable && hasValue ? 'pr-16' : 'pr-9', sizingSpanPadStart]"
+        :class="['pr-9', sizingSpanPadStart]"
       >
         {{ triggerSizingText }}
       </span>
@@ -281,24 +281,27 @@ function clearValue(): void {
           :placeholder="open ? searchPlaceholder : placeholder"
           :disabled="disabled"
         />
-        <button
-          v-if="clearable && hasValue && !disabled"
-          type="button"
-          :aria-label="clearAriaLabel"
-          class="mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 pointer-events-none transition-all hover:bg-muted hover:text-foreground group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto"
-          @mousedown.prevent.stop
-          @click.prevent.stop="clearValue"
-        >
-          <X class="h-3.5 w-3.5" />
-        </button>
-        <ComboboxTrigger
-          class="mr-2 flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed"
-          :class="clearable && hasValue ? 'group-hover:opacity-0 group-focus-within:opacity-0' : ''"
-          :disabled="disabled"
-          aria-label="Toggle options"
-        >
-          <ChevronDown class="h-4 w-4" />
-        </ComboboxTrigger>
+        <!-- The clear button takes the chevron's place on hover instead of sitting beside it. -->
+        <span class="relative mr-2 flex h-7 w-7 shrink-0">
+          <ComboboxTrigger
+            class="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-all hover:bg-muted hover:text-foreground disabled:cursor-not-allowed"
+            :class="clearable && hasValue && !disabled ? 'group-hover:opacity-0 group-hover:pointer-events-none group-focus-within:opacity-0 group-focus-within:pointer-events-none' : ''"
+            :disabled="disabled"
+            aria-label="Toggle options"
+          >
+            <ChevronDown class="h-4 w-4" />
+          </ComboboxTrigger>
+          <button
+            v-if="clearable && hasValue && !disabled"
+            type="button"
+            :aria-label="clearAriaLabel"
+            class="absolute inset-0 flex items-center justify-center rounded-md text-muted-foreground opacity-0 pointer-events-none transition-all hover:bg-muted hover:text-foreground group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto"
+            @mousedown.prevent.stop
+            @click.prevent.stop="clearValue"
+          >
+            <X class="h-3.5 w-3.5" />
+          </button>
+        </span>
       </div>
     </ComboboxAnchor>
 

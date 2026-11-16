@@ -86,6 +86,7 @@ export interface CredentialsPort {
   listDecision: () => Promise<CredentialListItem[]>;
   googleSheetsOAuthAuthorize: (credentialId: string) => Promise<{ auth_url: string }>;
   googleMeetOAuthAuthorize?: (credentialId: string) => Promise<{ auth_url: string }>;
+  gmailOAuthAuthorize?: (credentialId: string) => Promise<{ auth_url: string }>;
   googleDriveOAuthAuthorize: (credentialId: string) => Promise<{ auth_url: string }>;
   bigQueryOAuthAuthorize: (credentialId: string) => Promise<{ auth_url: string }>;
   notionOAuthAuthorize: (credentialId: string) => Promise<{ auth_url: string }>;
