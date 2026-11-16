@@ -70,3 +70,75 @@ class BuildZipBytesTests(unittest.TestCase):
         files = self._load_zip(data)
         self.assertIn("Multi/Alpha.json", files)
         self.assertIn("Multi/Beta.json", files)
+
+    def test_workflows_with_the_same_name_each_get_a_file(self) -> None:
+        data = _build_zip_bytes(
+            folder_name="Support",
+            workflows=[
+                {"name": "New Workflow", "nodes": [{"id": "first"}], "edges": []},
+                {"name": "New Workflow", "nodes": [{"id": "second"}], "edges": []},
+                {"name": "new workflow", "nodes": [{"id": "third"}], "edges": []},
+            ],
+            children=[],
+        )
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            names = zf.namelist()
+        files = self._load_zip(data)
+
+        self.assertEqual(
+            names,
+            [
+                "Support/New Workflow.json",
+                "Support/New Workflow (2).json",
+                "Support/new workflow (3).json",
+            ],
+        )
+        # The name inside the file is unchanged, so an import restores the original name.
+        self.assertEqual(
+            [json.loads(files[name])["name"] for name in names],
+            ["New Workflow", "New Workflow", "new workflow"],
+        )
+        self.assertEqual(
+            [json.loads(files[name])["nodes"][0]["id"] for name in names],
+            ["first", "second", "third"],
+        )
+
+    def test_sibling_folders_with_the_same_name_stay_apart(self) -> None:
+        data = _build_zip_bytes(
+            folder_name="Root",
+            workflows=[],
+            children=[
+                {
+                    "name": "Archive",
+                    "workflows": [{"name": "Daily", "nodes": [{"id": "a"}], "edges": []}],
+                    "children": [],
+                },
+                {
+                    "name": "Archive",
+                    "workflows": [{"name": "Daily", "nodes": [{"id": "b"}], "edges": []}],
+                    "children": [],
+                },
+            ],
+        )
+        files = self._load_zip(data)
+
+        self.assertEqual(sorted(files), ["Root/Archive (2)/Daily.json", "Root/Archive/Daily.json"])
+        self.assertEqual(json.loads(files["Root/Archive/Daily.json"])["nodes"], [{"id": "a"}])
+        self.assertEqual(json.loads(files["Root/Archive (2)/Daily.json"])["nodes"], [{"id": "b"}])
+
+    def test_a_workflow_and_a_folder_may_share_a_name(self) -> None:
+        data = _build_zip_bytes(
+            folder_name="Root",
+            workflows=[{"name": "Reports", "nodes": [], "edges": []}],
+            children=[
+                {
+                    "name": "Reports",
+                    "workflows": [{"name": "Weekly", "nodes": [], "edges": []}],
+                    "children": [],
+                }
+            ],
+        )
+
+        self.assertEqual(
+            sorted(self._load_zip(data)), ["Root/Reports.json", "Root/Reports/Weekly.json"]
+        )
