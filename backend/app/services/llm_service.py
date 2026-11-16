@@ -200,6 +200,7 @@ class ToolLoopProgress:
     elapsed_ms: float
     prompt_tokens: int
     completion_tokens: int
+    remaining_tool_iterations: int
 
 
 _TOOL_LOOP_PROGRESS_ATTR = "heym_tool_loop_progress"
@@ -1494,6 +1495,7 @@ class LLMService:
             initial_elapsed_ms = continue_from.elapsed_ms
             initial_prompt_tokens = continue_from.prompt_tokens
             initial_completion_tokens = continue_from.completion_tokens
+            max_tool_iterations = continue_from.remaining_tool_iterations
         if initial_messages is not None:
             # A resume ends with the approval text as a plain {"role": "user", "content"}
             # dict. Re-append it through the transport, so it takes the provider's own
@@ -1804,6 +1806,7 @@ class LLMService:
                         elapsed_ms=total_elapsed_ms + elapsed_ms,
                         prompt_tokens=total_prompt_tokens,
                         completion_tokens=total_completion_tokens,
+                        remaining_tool_iterations=max(max_tool_iterations - iteration, 1),
                     )
                     try:
                         setattr(exc, _TOOL_LOOP_PROGRESS_ATTR, progress)

@@ -10,6 +10,7 @@ starts from the prompt as before. Reasoning the provider binds to the first mode
 from __future__ import annotations
 
 import copy
+import dataclasses
 import unittest
 import uuid
 from types import SimpleNamespace
@@ -40,7 +41,10 @@ SEND_EMAIL_CALL = SimpleNamespace(
 
 class ToolLoopProgressTests(unittest.IsolatedAsyncioTestCase):
     async def _run(
-        self, replies: list[object], continue_from: ToolLoopProgress | None = None
+        self,
+        replies: list[object],
+        continue_from: ToolLoopProgress | None = None,
+        max_tool_iterations: int = 41,
     ) -> tuple[dict, list[str], list[list[dict]]]:
         requests: list[list[dict]] = []
 
@@ -69,6 +73,7 @@ class ToolLoopProgressTests(unittest.IsolatedAsyncioTestCase):
                 user_message="Tell ops the order shipped.",
                 tools=[{"name": "send_email", "parameters": {"type": "object"}}],
                 tool_executor=send_email,
+                max_tool_iterations=max_tool_iterations,
                 continue_from=continue_from,
             )
         return result, sent, requests
@@ -93,6 +98,7 @@ class ToolLoopProgressTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([m["role"] for m in progress.messages][-2:], ["assistant", "tool"])
         self.assertEqual([tc["name"] for tc in progress.tool_calls], ["send_email"])
         self.assertEqual(progress.prompt_tokens, 10)
+        self.assertEqual(progress.remaining_tool_iterations, 40)
 
     async def test_an_error_before_any_tool_raises_as_before(self) -> None:
         with self.assertRaises(RuntimeError) as caught:
@@ -113,16 +119,39 @@ class ToolLoopProgressTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([m["role"] for m in requests[0]][-2:], ["assistant", "tool"])
         self.assertEqual(result["usage"]["prompt_tokens"], 20)
 
+    async def test_the_fallback_gets_only_the_tool_iterations_the_primary_left(self) -> None:
+        def call(index: int) -> SimpleNamespace:
+            return SimpleNamespace(
+                id=f"call-{index}",
+                type="function",
+                function=SimpleNamespace(name="send_email", arguments='{"to":"ops@acme.test"}'),
+            )
+
+        with self.assertRaises(RuntimeError) as caught:
+            await self._run(
+                [
+                    _response(content=None, tool_calls=[call(1)]),
+                    _response(content=None, tool_calls=[call(2)]),
+                    RuntimeError("Error code: 500 - server_error"),
+                ],
+                max_tool_iterations=3,
+            )
+        progress = tool_loop_progress(caught.exception)
+        assert progress is not None
+        self.assertEqual(progress.remaining_tool_iterations, 1)
+
+        _result, sent, _requests = await self._run(
+            [_response(content=None, tool_calls=[call(i)]) for i in range(3, 6)]
+            + [_response(content="Done.", tool_calls=[])] * 2,
+            continue_from=progress,
+            max_tool_iterations=3,
+        )
+
+        self.assertEqual(len(sent), 1)
+
     async def test_another_transport_starts_from_the_prompt(self) -> None:
         progress = tool_loop_progress(await self._interrupted())
-        other = ToolLoopProgress(
-            transport="responses",
-            messages=progress.messages,
-            tool_calls=progress.tool_calls,
-            elapsed_ms=progress.elapsed_ms,
-            prompt_tokens=progress.prompt_tokens,
-            completion_tokens=progress.completion_tokens,
-        )
+        other = dataclasses.replace(progress, transport="responses")
 
         _result, _sent, requests = await self._run(
             [_response(content="Email sent.", tool_calls=[])], continue_from=other
@@ -325,6 +354,7 @@ class AgentFallbackTests(unittest.TestCase):
         elapsed_ms=5.0,
         prompt_tokens=10,
         completion_tokens=2,
+        remaining_tool_iterations=40,
     )
 
     def _run(self, first_error: Exception) -> tuple[dict, AsyncMock]:
