@@ -48,6 +48,15 @@ async def resolve_costs_for_user(
     )
     overrides: list[LLMPricingOverride] = list(override_result.scalars().all())
     override_by_model = {o.model: o for o in overrides}
+    # A custom row entered as "provider/model" is stored as provider + model; the pricing
+    # table shows it in place of a global "provider/model" row, so a trace under that full
+    # name uses it too.
+    for o in overrides:
+        if o.base_pricing_id is None and o.provider:
+            override_by_model.setdefault(f"{o.provider}/{o.model}", o)
+    # An edit of a global row applies wherever that row's rule matches, as the table shows,
+    # not only to a trace whose model is spelled exactly like the rule.
+    edited_rule_by_model = {o.model: o for o in overrides if o.base_pricing_id is not None}
 
     out: list[tuple[Decimal | None, bool]] = []
     for model, prompt_tok, completion_tok in model_token_pairs:
@@ -55,6 +64,10 @@ async def resolve_costs_for_user(
         completion_tok = max(0, int(completion_tok or 0))
 
         override = override_by_model.get(model)
+        if override is None:
+            matched = _match_global_rule(model, global_rules)
+            if matched is not None:
+                override = edited_rule_by_model.get(matched.model)
         if override is not None:
             cost = (
                 Decimal(prompt_tok) * override.input_per_1m_usd
