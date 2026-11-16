@@ -664,12 +664,17 @@ async def _queue_info(db: AsyncSession, workflow_id: uuid.UUID, concurrency_seq:
 async def build_status_body(
     workflow_id: uuid.UUID, execution_id: uuid.UUID
 ) -> dict[str, Any] | None:
-    """The status URL's body: the queue row when there is one, else the history row."""
+    """The status URL's body: the queue row when there is one, else the history row.
+
+    A queue row records how its run ended, but a run that paused for review ends it as
+    `pending` and finishes later in its history row alone, so a pause reads that row.
+    """
     base: dict[str, Any] = {
         "execution_id": str(execution_id),
         "workflow_id": str(workflow_id),
         "queue": None,
     }
+    paused: dict[str, Any] | None = None
     async with async_session_maker() as db:
         row = (
             await db.execute(
@@ -687,7 +692,9 @@ async def build_status_body(
             if row.status == run_queue.STATUS_HELD and row.concurrency_seq is not None:
                 info = await _queue_info(db, workflow_id, row.concurrency_seq)
                 body["queue"] = info.as_dict()
-            return body
+            if body["status"] != "pending":
+                return body
+            paused = body
         history = (
             await db.execute(
                 select(
@@ -701,7 +708,7 @@ async def build_status_body(
             )
         ).first()
     if history is None:
-        return None
+        return paused
     return {
         **base,
         **history_view(status=history[0], outputs=history[1], execution_time_ms=history[2]),
