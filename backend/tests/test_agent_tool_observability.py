@@ -531,7 +531,9 @@ class ExecuteWithToolsObservabilityTests(unittest.IsolatedAsyncioTestCase):
             function=SimpleNamespace(name="child", arguments='{"value":"ok"}'),
         )
 
-    async def _execute_with_tool_result(self, tool_result: object) -> tuple[dict, list[dict]]:
+    async def _execute_with_tool_result(
+        self, tool_result: object, source: str | None = None
+    ) -> tuple[dict, list[dict]]:
         responses = [
             self._response(content=None, tool_calls=[self._tool_call()]),
             self._response(content="done", tool_calls=[]),
@@ -552,7 +554,13 @@ class ExecuteWithToolsObservabilityTests(unittest.IsolatedAsyncioTestCase):
                 model="test-model",
                 system_instruction=None,
                 user_message="run tool",
-                tools=[{"name": "child", "parameters": {"type": "object"}}],
+                tools=[
+                    {
+                        "name": "child",
+                        "parameters": {"type": "object"},
+                        **({"_source": source} if source else {}),
+                    }
+                ],
                 tool_executor=lambda *_args: tool_result,
                 on_tool_call=events.append,
             )
@@ -664,7 +672,7 @@ class ExecuteWithToolsObservabilityTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_explicit_cancelled_status_aborts_agent_loop(self) -> None:
         result, _events = await self._execute_with_tool_result(
-            {"status": "cancelled", "error": "stopped by operator"}
+            {"status": "cancelled", "error": "stopped by operator"}, source="sub_agent"
         )
 
         self.assertEqual(result["error"], "stopped by operator")
@@ -675,12 +683,24 @@ class ExecuteWithToolsObservabilityTests(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         # Payload shape produced by `_execute_sub_workflow_tool` after a child cancel.
         result, _events = await self._execute_with_tool_result(
-            {"status": "cancelled", "error": "Workflow execution cancelled", "outputs": {}}
+            {"status": "cancelled", "error": "Workflow execution cancelled", "outputs": {}},
+            source="sub_workflow",
         )
 
         self.assertEqual(result["error"], "Workflow execution cancelled")
         self.assertEqual(result["tool_calls"][0]["status"], "cancelled")
         self.assertEqual(result["tool_metrics"]["cancelled"], 1)
+
+    async def test_a_canceled_status_in_a_tools_own_data_does_not_stop_the_agent(self) -> None:
+        # A Stripe subscription, a calendar event or an order record can be "canceled".
+        for source in (None, "node_tool", "mcp", "skill"):
+            with self.subTest(source=source):
+                result, _events = await self._execute_with_tool_result(
+                    {"id": "sub_123", "status": "canceled", "plan": "pro"}, source=source
+                )
+
+                self.assertIsNone(result.get("error"))
+                self.assertEqual(result["text"], "done")
 
     async def test_generic_value_error_with_cancel_phrase_stays_error(self) -> None:
         def boom(*_args: object) -> object:

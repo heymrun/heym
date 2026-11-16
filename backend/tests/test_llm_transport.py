@@ -491,6 +491,72 @@ class TestResponsesReasoningAndCompression(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(compressed.items[-1]["content"], "three")
 
+    @staticmethod
+    def _tool_loop_history() -> ResponsesHistory:
+        page = "Quarterly report paragraph. " * 50
+        items: list[dict] = [
+            {"type": "message", "role": "system", "content": "Summarise reports."},
+            {"type": "message", "role": "user", "content": "Read the report."},
+        ]
+        for n in (1, 2):
+            items += [
+                {"type": "reasoning", "id": f"rs_{n}", "encrypted_content": f"blob{n}"},
+                {
+                    "type": "function_call",
+                    "id": f"fc_{n}",
+                    "call_id": f"call_{n}",
+                    "name": "fetch_page",
+                    "arguments": f'{{"page": {n}}}',
+                },
+                {"type": "function_call_output", "call_id": f"call_{n}", "output": page},
+            ]
+        return ResponsesHistory(items=items)
+
+    async def test_compress_sees_tool_calls_and_their_outputs(self) -> None:
+        history = self._tool_loop_history()
+        seen: list[list[dict]] = []
+
+        async def fake_compress(messages, **kwargs):
+            del kwargs
+            seen.append(messages)
+            return messages, None
+
+        with patch("app.services.context_compressor.maybe_compress_messages", new=fake_compress):
+            await self.transport.compress(
+                history, model="gpt-4o", client=MagicMock(), context_limit_tokens=1000
+            )
+        roles = [m["role"] for m in seen[0]]
+        self.assertEqual(roles, ["system", "user", "assistant", "tool", "assistant", "tool"])
+        self.assertEqual(seen[0][2]["tool_calls"][0]["id"], "call_1")
+        self.assertEqual(seen[0][3]["tool_call_id"], "call_1")
+        self.assertIn("Quarterly report", seen[0][3]["content"])
+
+    async def test_compress_keeps_the_tail_items_verbatim(self) -> None:
+        history = self._tool_loop_history()
+        original = [dict(item) for item in history.items]
+
+        async def fake_compress(messages, **kwargs):
+            del kwargs
+            summary = {"role": "assistant", "content": "[Context compressed] page 1 read"}
+            return [messages[0], messages[1], summary, *messages[-2:]], {"messages_compressed": 2}
+
+        with patch("app.services.context_compressor.maybe_compress_messages", new=fake_compress):
+            compressed, _ = await self.transport.compress(
+                history, model="gpt-4o", client=MagicMock(), context_limit_tokens=1000
+            )
+        self.assertEqual(
+            compressed.items,
+            [
+                *original[:2],
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": "[Context compressed] page 1 read",
+                },
+                *original[-3:],
+            ],
+        )
+
     async def test_compress_returns_history_unchanged_when_compressor_declines(self) -> None:
         history = ResponsesHistory(
             items=[{"type": "reasoning", "id": "rs_1", "encrypted_content": "blob"}]
