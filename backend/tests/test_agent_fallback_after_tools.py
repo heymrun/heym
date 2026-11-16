@@ -3,19 +3,24 @@
 The fallback used to restart from the original prompt, so every tool the first model had
 already run (send an email, create a ticket, charge a card) ran a second time. The fallback
 now continues from the first model's history on the same transport; on another transport it
-starts from the prompt as before.
+starts from the prompt as before. Reasoning the provider binds to the first model and key
+(Responses `reasoning` items, Gemini thought signatures) does not reach the fallback.
 """
 
 from __future__ import annotations
 
+import copy
 import unittest
 import uuid
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import httpx
 
 from app.db.models import CredentialType
 from app.services.encryption import encrypt_config
 from app.services.llm_service import LLMService, ToolLoopProgress, tool_loop_progress
+from app.services.llm_transport_gemini import GEMINI_SKIP_SIGNATURE, without_thought_signatures
 from app.services.workflow_executor import WorkflowExecutor
 
 
@@ -124,6 +129,175 @@ class ToolLoopProgressTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual([m["role"] for m in requests[0]], ["system", "user"])
+
+
+class _ProviderBoundReasoningCase(unittest.IsolatedAsyncioTestCase):
+    """The first model runs a tool and fails with a 500; the fallback continues its history."""
+
+    async def _loop(
+        self, service: LLMService, client: object, model: str, continue_from: object = None
+    ) -> tuple[dict, list[str]]:
+        sent: list[str] = []
+
+        def send_email(_tool: dict, _name: str, _args: dict, _timeout: float) -> dict:
+            sent.append("ops")
+            return {"sent": True}
+
+        with (
+            patch.object(service, "_get_client", return_value=(client, "Test")),
+            patch("app.services.llm_service.record_llm_trace"),
+            patch("app.services.context_compressor.get_context_limit", return_value=100000),
+        ):
+            result = await service.execute_with_tools(
+                model=model,
+                system_instruction="Notify ops.",
+                user_message="Tell ops the order shipped.",
+                tools=[{"name": "send_email", "parameters": {"type": "object"}}],
+                tool_executor=send_email,
+                continue_from=continue_from,
+            )
+        return result, sent
+
+    async def _interrupted(self, service: LLMService, client: object, model: str) -> object:
+        with self.assertRaises(RuntimeError) as caught:
+            await self._loop(service, client, model)
+        progress = tool_loop_progress(caught.exception)
+        assert progress is not None
+        return progress
+
+
+def _responses_reply(items: list[dict]) -> MagicMock:
+    reply = MagicMock()
+    reply.output = items
+    reply.usage.input_tokens, reply.usage.output_tokens, reply.usage.total_tokens = 10, 2, 12
+    return reply
+
+
+class ResponsesFallbackReasoningTests(_ProviderBoundReasoningCase):
+    """Encrypted reasoning belongs to the first model's organization and model."""
+
+    REASONING = {"type": "reasoning", "id": "rs_1", "encrypted_content": "org-a-blob"}
+    CALL = {"type": "function_call", "call_id": "fc_1", "name": "send_email", "arguments": "{}"}
+
+    def _client(self, replies: list[object]) -> MagicMock:
+        client = MagicMock()
+        client.base_url = "https://api.openai.com/v1"
+        client.responses.create.side_effect = replies
+        return client
+
+    async def test_no_reasoning_item_reaches_the_fallbacks_request(self) -> None:
+        primary = self._client(
+            [
+                _responses_reply([self.REASONING, self.CALL]),
+                RuntimeError("Error code: 500 - server_error"),
+            ]
+        )
+        progress = await self._interrupted(
+            LLMService(CredentialType.openai, "sk-a", use_responses_api=True), primary, "o4-mini"
+        )
+        done = {
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": "Email sent."}],
+        }
+        fallback = self._client([_responses_reply([done])])
+
+        result, sent = await self._loop(
+            LLMService(CredentialType.openai, "sk-b", use_responses_api=True),
+            fallback,
+            "gpt-4o",
+            progress,
+        )
+
+        sent_input = fallback.responses.create.call_args_list[0].kwargs["input"]
+        self.assertNotIn("reasoning", [item.get("type") for item in sent_input])
+        self.assertEqual(
+            [item.get("type") for item in sent_input][-2:],
+            ["function_call", "function_call_output"],
+        )
+        self.assertEqual(sent, [])
+        self.assertEqual(result["text"], "Email sent.")
+
+    async def test_the_first_models_own_next_turn_keeps_its_reasoning(self) -> None:
+        primary = self._client(
+            [
+                _responses_reply([self.REASONING, self.CALL]),
+                RuntimeError("Error code: 500 - server_error"),
+            ]
+        )
+        await self._interrupted(
+            LLMService(CredentialType.openai, "sk-a", use_responses_api=True), primary, "o4-mini"
+        )
+
+        self.assertIn(self.REASONING, primary.responses.create.call_args_list[1].kwargs["input"])
+
+
+class GeminiFallbackSignatureTests(_ProviderBoundReasoningCase):
+    """A thought signature can only be validated by the Gemini model that wrote it."""
+
+    MODEL = "gemini-4-argon-contributor"
+    GATEWAY = "https://opencode.ai/inference/go/v1"
+
+    def _client(self, replies: list[object]) -> MagicMock:
+        client = MagicMock()
+        client.base_url = httpx.URL(self.GATEWAY + "/")
+        client.bodies = []
+
+        def post(_url: str, *, cast_to: object, body: dict) -> object:
+            client.bodies.append(copy.deepcopy(body))
+            reply = replies.pop(0)
+            if isinstance(reply, Exception):
+                raise reply
+            return SimpleNamespace(json=lambda: reply)
+
+        client.post.side_effect = post
+        return client
+
+    @staticmethod
+    def _payload(parts: list[dict]) -> dict:
+        return {
+            "candidates": [{"index": 0, "content": {"role": "model", "parts": parts}}],
+            "usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 2},
+        }
+
+    @staticmethod
+    def _signatures(body: dict) -> list[str]:
+        return [
+            part["thoughtSignature"]
+            for content in body["contents"]
+            for part in content.get("parts") or []
+            if "thoughtSignature" in part
+        ]
+
+    async def test_the_fallback_sends_the_opt_out_instead_of_the_first_models_signature(
+        self,
+    ) -> None:
+        call = {
+            "thoughtSignature": "sig-model-a",
+            "functionCall": {"id": "c1", "name": "send_email", "args": {}},
+        }
+        primary = self._client(
+            [self._payload([call]), RuntimeError("Error code: 500 - server_error")]
+        )
+        progress = await self._interrupted(
+            LLMService(CredentialType.custom, "key-a", self.GATEWAY), primary, self.MODEL
+        )
+        fallback = self._client([self._payload([{"text": "Email sent."}])])
+
+        result, sent = await self._loop(
+            LLMService(CredentialType.custom, "key-b", self.GATEWAY), fallback, self.MODEL, progress
+        )
+
+        self.assertEqual(self._signatures(primary.bodies[1]), ["sig-model-a"])
+        self.assertEqual(self._signatures(fallback.bodies[0]), [GEMINI_SKIP_SIGNATURE])
+        self.assertEqual(sent, [])
+        self.assertEqual(result["text"], "Email sent.")
+
+    def test_a_signature_on_a_text_part_is_dropped(self) -> None:
+        contents = [{"role": "model", "parts": [{"text": "ok", "thoughtSignature": "sig"}]}]
+
+        self.assertEqual(without_thought_signatures(contents)[0]["parts"], [{"text": "ok"}])
+        self.assertEqual(contents[0]["parts"][0]["thoughtSignature"], "sig")
 
 
 class AgentFallbackTests(unittest.TestCase):

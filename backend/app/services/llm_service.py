@@ -38,8 +38,9 @@ from app.services.llm_transport import (
     is_truncated_turn,
     parse_tool_arguments,
     rejects_disable_reasoning,
+    without_reasoning_items,
 )
-from app.services.llm_transport_gemini import GeminiTransport
+from app.services.llm_transport_gemini import GeminiTransport, without_thought_signatures
 from app.services.llm_transport_messages import DEFAULT_MAX_TOKENS, AnthropicMessagesTransport
 from app.services.model_router import (
     ModelRouter,
@@ -212,6 +213,21 @@ def tool_loop_progress(error: BaseException) -> ToolLoopProgress | None:
     """
     progress = getattr(error, _TOOL_LOOP_PROGRESS_ATTR, None)
     return progress if isinstance(progress, ToolLoopProgress) else None
+
+
+def _history_for_fallback(transport: str, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """An earlier model's stored history, without the reasoning only that model can read.
+
+    A fallback runs on another key or another model. Responses `reasoning` items and Gemini
+    thought signatures are bound to the model and key that produced them, so the fallback
+    would be refused where it starts from the prompt on `main`. Messages thinking blocks are
+    dropped by that transport when the API rejects their signature.
+    """
+    if transport == ResponsesTransport.name:
+        return without_reasoning_items(messages)
+    if transport == GeminiTransport.name:
+        return without_thought_signatures(messages)
+    return messages
 
 
 def _batch_attr(batch: Any, name: str, default: Any = None) -> Any:
@@ -1473,7 +1489,7 @@ class LLMService:
 
         transport = self._get_transport(model)
         if continue_from is not None and continue_from.transport == transport.name:
-            initial_messages = continue_from.messages
+            initial_messages = _history_for_fallback(transport.name, continue_from.messages)
             initial_tool_calls = continue_from.tool_calls
             initial_elapsed_ms = continue_from.elapsed_ms
             initial_prompt_tokens = continue_from.prompt_tokens
