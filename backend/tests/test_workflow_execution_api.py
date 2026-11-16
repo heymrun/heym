@@ -1660,9 +1660,9 @@ class DataTableFilterClauseTests(unittest.TestCase):
         )
 
     def test_plain_value_is_equality(self) -> None:
-        from app.services.workflow_executor import _build_data_table_filter_clauses
+        from app.services.data_table_filters import build_data_table_filter_clauses
 
-        clauses = _build_data_table_filter_clauses(
+        clauses = build_data_table_filter_clauses(
             {"status": "active"}, [{"name": "status", "type": "string"}]
         )
         self.assertEqual(len(clauses), 1)
@@ -1671,9 +1671,9 @@ class DataTableFilterClauseTests(unittest.TestCase):
         self.assertIn("= 'active'", sql)
 
     def test_ne_operator(self) -> None:
-        from app.services.workflow_executor import _build_data_table_filter_clauses
+        from app.services.data_table_filters import build_data_table_filter_clauses
 
-        clauses = _build_data_table_filter_clauses(
+        clauses = build_data_table_filter_clauses(
             {"status": {"$ne": "done"}}, [{"name": "status", "type": "string"}]
         )
         sql = self._sql(clauses[0])
@@ -1681,9 +1681,9 @@ class DataTableFilterClauseTests(unittest.TestCase):
         self.assertIn("!= 'done'", sql)
 
     def test_gt_on_number_column_casts_to_numeric(self) -> None:
-        from app.services.workflow_executor import _build_data_table_filter_clauses
+        from app.services.data_table_filters import build_data_table_filter_clauses
 
-        clauses = _build_data_table_filter_clauses(
+        clauses = build_data_table_filter_clauses(
             {"age": {"$gt": 18}}, [{"name": "age", "type": "number"}]
         )
         sql = self._sql(clauses[0]).upper()
@@ -1692,9 +1692,9 @@ class DataTableFilterClauseTests(unittest.TestCase):
         self.assertIn("> 18", sql)
 
     def test_gt_on_string_column_does_not_cast(self) -> None:
-        from app.services.workflow_executor import _build_data_table_filter_clauses
+        from app.services.data_table_filters import build_data_table_filter_clauses
 
-        clauses = _build_data_table_filter_clauses(
+        clauses = build_data_table_filter_clauses(
             {"name": {"$gt": "m"}}, [{"name": "name", "type": "string"}]
         )
         sql = self._sql(clauses[0])
@@ -1703,9 +1703,9 @@ class DataTableFilterClauseTests(unittest.TestCase):
         self.assertIn("> 'm'", sql)
 
     def test_contains_uses_ilike(self) -> None:
-        from app.services.workflow_executor import _build_data_table_filter_clauses
+        from app.services.data_table_filters import build_data_table_filter_clauses
 
-        clauses = _build_data_table_filter_clauses(
+        clauses = build_data_table_filter_clauses(
             {"name": {"$contains": "john"}}, [{"name": "name", "type": "string"}]
         )
         sql = self._sql(clauses[0]).upper()
@@ -1715,7 +1715,7 @@ class DataTableFilterClauseTests(unittest.TestCase):
     def test_contains_matches_like_characters_literally(self) -> None:
         from sqlalchemy.dialects import postgresql
 
-        from app.services.workflow_executor import _build_data_table_filter_clauses
+        from app.services.data_table_filters import build_data_table_filter_clauses
 
         cases = {
             "100%": "%100/%%",
@@ -1725,7 +1725,7 @@ class DataTableFilterClauseTests(unittest.TestCase):
         }
         for value, pattern in cases.items():
             with self.subTest(value=value):
-                clauses = _build_data_table_filter_clauses(
+                clauses = build_data_table_filter_clauses(
                     {"name": {"$contains": value}}, [{"name": "name", "type": "string"}]
                 )
                 compiled = clauses[0].compile(dialect=postgresql.dialect())
@@ -1734,9 +1734,9 @@ class DataTableFilterClauseTests(unittest.TestCase):
                 self.assertEqual(list(compiled.params.values())[-1], pattern)
 
     def test_in_uses_in_clause(self) -> None:
-        from app.services.workflow_executor import _build_data_table_filter_clauses
+        from app.services.data_table_filters import build_data_table_filter_clauses
 
-        clauses = _build_data_table_filter_clauses(
+        clauses = build_data_table_filter_clauses(
             {"plan": {"$in": ["pro", "team"]}}, [{"name": "plan", "type": "string"}]
         )
         sql = self._sql(clauses[0]).upper()
@@ -1745,9 +1745,9 @@ class DataTableFilterClauseTests(unittest.TestCase):
         self.assertIn("'TEAM'", sql)
 
     def test_meta_created_at_maps_to_real_column(self) -> None:
-        from app.services.workflow_executor import _build_data_table_filter_clauses
+        from app.services.data_table_filters import build_data_table_filter_clauses
 
-        clauses = _build_data_table_filter_clauses(
+        clauses = build_data_table_filter_clauses(
             {"created_at": {"$gt": "2026-06-04"}}, [{"name": "status", "type": "string"}]
         )
         sql = self._sql(clauses[0])
@@ -1756,44 +1756,44 @@ class DataTableFilterClauseTests(unittest.TestCase):
         self.assertIn("> '2026-06-04'", sql)
 
     def test_meta_created_at_contains_casts_to_text(self) -> None:
-        from app.services.workflow_executor import _build_data_table_filter_clauses
+        from app.services.data_table_filters import build_data_table_filter_clauses
 
-        clauses = _build_data_table_filter_clauses({"created_at": {"$contains": "06-04"}}, [])
+        clauses = build_data_table_filter_clauses({"created_at": {"$contains": "06-04"}}, [])
         sql = self._sql(clauses[0]).upper()
         self.assertIn("CAST", sql)
         self.assertIn("ILIKE", sql)
         self.assertIn("%06-04%", sql)
 
     def test_meta_id_plain_value_maps_to_real_column(self) -> None:
-        from app.services.workflow_executor import _build_data_table_filter_clauses
+        from app.services.data_table_filters import build_data_table_filter_clauses
 
-        clauses = _build_data_table_filter_clauses({"id": "abc-123"}, [])
+        clauses = build_data_table_filter_clauses({"id": "abc-123"}, [])
         sql = self._sql(clauses[0])
         self.assertIn("data_table_rows.id", sql)
         self.assertNotIn("->>", sql)
 
     def test_schema_column_shadowing_meta_name_uses_json(self) -> None:
-        from app.services.workflow_executor import _build_data_table_filter_clauses
+        from app.services.data_table_filters import build_data_table_filter_clauses
 
         # A user-defined data column literally named created_at must still use JSONB.
-        clauses = _build_data_table_filter_clauses(
+        clauses = build_data_table_filter_clauses(
             {"created_at": "x"}, [{"name": "created_at", "type": "string"}]
         )
         sql = self._sql(clauses[0])
         self.assertIn("->>", sql)
 
     def test_unknown_operator_is_ignored(self) -> None:
-        from app.services.workflow_executor import _build_data_table_filter_clauses
+        from app.services.data_table_filters import build_data_table_filter_clauses
 
-        clauses = _build_data_table_filter_clauses(
+        clauses = build_data_table_filter_clauses(
             {"age": {"$regex": ".*"}}, [{"name": "age", "type": "number"}]
         )
         self.assertEqual(clauses, [])
 
     def test_empty_filter_yields_no_clauses(self) -> None:
-        from app.services.workflow_executor import _build_data_table_filter_clauses
+        from app.services.data_table_filters import build_data_table_filter_clauses
 
-        self.assertEqual(_build_data_table_filter_clauses({}, []), [])
+        self.assertEqual(build_data_table_filter_clauses({}, []), [])
 
 
 class DataTableSortClauseTests(unittest.TestCase):
