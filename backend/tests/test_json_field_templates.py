@@ -87,6 +87,21 @@ class RenderJsonTemplateTests(unittest.TestCase):
         self.assertEqual(json.loads(rendered), want)
         self.assertEqual(resolve_json_field(self.executor, template, self.inputs, "n1"), want)
 
+    def test_an_expression_in_a_key_resolves_like_one_in_a_value(self) -> None:
+        template = '{"$input.kind": "x", "meta": {"$input.kind": "$input.name"}}'
+        inputs = {"input": {"kind": "bug_report", "name": TRICKY}}
+        want = {"bug_report": "x", "meta": {"bug_report": TRICKY}}
+
+        rendered = render_json_template(self.executor, template, inputs, "n1")
+        self.assertEqual(json.loads(rendered), want)
+        self.assertEqual(resolve_json_field(self.executor, template, inputs, "n1"), want)
+
+    def test_a_key_that_resolves_to_a_quote_stays_a_valid_key(self) -> None:
+        template = '{"$input.name": 1}'
+
+        rendered = render_json_template(self.executor, template, self.inputs, "n1")
+        self.assertEqual(json.loads(rendered), {TRICKY: 1})
+
 
 class NodeJsonFieldTests(unittest.TestCase):
     def test_grist_create_record_keeps_the_fields(self) -> None:
@@ -175,6 +190,37 @@ class NodeJsonFieldTests(unittest.TestCase):
 
         self.assertEqual(result.status, "success", result.error)
         self.assertEqual(sent, [[{"id": "u-1", "display_name": TRICKY}]])
+
+    def test_supabase_insert_resolves_an_expression_in_a_column_name(self) -> None:
+        client, sent = _recording_client([{"id": "u-1"}])
+        credential = SimpleNamespace(
+            type=CredentialType.supabase,
+            encrypted_config=encrypt_config(
+                {"supabase_url": "https://abcd.supabase.co", "supabase_key": "service-key"}
+            ),
+        )
+        node = {
+            "id": "s1",
+            "type": "supabase",
+            "data": {
+                "label": "saveProfile",
+                "credentialId": "cred-1",
+                "supabaseOperation": "insert",
+                "supabaseTable": "profiles",
+                "supabaseRowsInputMode": "raw",
+                "supabaseRows": '[{"id": "$input.userId", "$input.column": "$input.name"}]',
+            },
+        }
+        result = _run(
+            node,
+            {"input": {"userId": "u-1", "column": "display_name", "name": "Ada"}},
+            credential,
+            patch("app.services.supabase_service.get_guarded_http_client", return_value=client),
+            patch.object(settings, "http_allow_private_urls", True),
+        )
+
+        self.assertEqual(result.status, "success", result.error)
+        self.assertEqual(sent, [[{"id": "u-1", "display_name": "Ada"}]])
 
 
 def _credential(credential_type: CredentialType, config: dict) -> SimpleNamespace:
@@ -287,6 +333,12 @@ class MoreNodeJsonFieldTests(unittest.TestCase):
             '{"name": "$input.name", "event": "signup"}', {"input": {"name": TRICKY}}
         )
         self.assertEqual(body, {"name": TRICKY, "event": "signup"})
+
+    def test_rabbitmq_json_body_resolves_an_expression_in_a_key(self) -> None:
+        body = self._rabbitmq_body(
+            '{"$input.kind": "x", "event": "signup"}', {"input": {"kind": "bug_report"}}
+        )
+        self.assertEqual(body, {"bug_report": "x", "event": "signup"})
 
     def test_rabbitmq_text_body_is_still_published_as_text(self) -> None:
         body = self._rabbitmq_body("Hello $input.name", {"input": {"name": "Ada"}})
