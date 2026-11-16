@@ -1,7 +1,8 @@
 import json
 import uuid
+from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import Row, text
 
 from app.services.embedding import EMBEDDING_DIMENSIONS, EmbeddingConfig, EmbeddingService
 from app.services.vector_store import (
@@ -458,8 +459,8 @@ class PgVectorStoreService:
         # ``limit`` is a page size, as in the Qdrant backend: every chunk is listed, so the
         # totals and per-file counts match the store. Keyset pages keep each query bounded.
         page_size = max(1, min(limit, 1000))
-        rows: list = []
-        last_id = None
+        rows: list[Row[Any]] = []
+        last_id: uuid.UUID | None = None
         with self.engine.connect() as conn:
             while True:
                 after = "" if last_id is None else " AND id > :after"
