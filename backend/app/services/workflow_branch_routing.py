@@ -33,9 +33,40 @@ class WorkflowBranchRoutingMixin:
             return True
         return self._edge_identity(edge) in skipped_edge_ids
 
-    def _order_downstream_edges(self, edges: list[dict]) -> list[dict]:
-        """Order edges so sibling branch edges are evaluated before loop-back edges."""
-        return sorted(edges, key=lambda edge: 1 if self._is_loop_back_edge(edge) else 0)
+    def _order_downstream_edges(
+        self, edges: list[dict], source_result: Any | None = None
+    ) -> list[dict]:
+        """Order loop-back edges according to whether the source is branching.
+
+        Branching nodes must evaluate sibling edges first so inactive branches are
+        marked skipped before a loop re-execution resets the body. Non-branching
+        nodes must advance the loop first so completion state is reset before
+        sibling side nodes are scheduled for the next iteration.
+        """
+        if not edges:
+            return edges
+
+        source_node_id = edges[0]["source"]
+        source_node = self.nodes.get(source_node_id, {})
+        has_skip_metadata = bool(
+            source_result is not None
+            and (
+                source_result.metadata.get("skip_source_handles")
+                or source_result.metadata.get("skip_loop_source_handles")
+                or source_result.metadata.get("skip_loop_edge_ids")
+            )
+        )
+        is_condition_or_switch = source_node.get("type") in {"condition", "switch"}
+        has_error_branch = any(
+            edge.get("sourceHandle") == "error"
+            for edge in self.get_active_edges()
+            if edge.get("source") == source_node_id
+        )
+        is_branching = has_skip_metadata or is_condition_or_switch or has_error_branch
+
+        if is_branching:
+            return sorted(edges, key=lambda edge: 1 if self._is_loop_back_edge(edge) else 0)
+        return sorted(edges, key=lambda edge: 0 if self._is_loop_back_edge(edge) else 1)
 
     def _handle_success_branch_routing(self, node_id: str, result: Any | None = None) -> None:
         """Skip error-handle branches when the source node completed successfully."""

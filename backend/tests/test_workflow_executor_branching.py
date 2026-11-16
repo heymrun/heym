@@ -1890,3 +1890,117 @@ class LoopErrorHandleRoutingTests(unittest.TestCase):
                 self.assertEqual(loop_done["results"][0], {"branch": "true"})
                 self.assertEqual(loop_done["results"][1], {"val": 3})
                 self.assertEqual(loop_done["results"][2], {"branch": "true"})
+
+class NonBranchingLoopSideNodeRoutingTests(unittest.TestCase):
+    """A non-branching node must reset a loop before scheduling its side nodes."""
+
+    @staticmethod
+    def _workflow(reverse_edges: bool) -> tuple[list[dict], list[dict]]:
+        nodes = [
+            {"id": "in", "type": "textInput", "data": {"label": "userInput"}},
+            {
+                "id": "lp",
+                "type": "loop",
+                "data": {
+                    "label": "items",
+                    "arrayExpression": "$userInput.body.numbers",
+                },
+            },
+            {
+                "id": "stepA",
+                "type": "set",
+                "data": {
+                    "label": "stepA",
+                    "mappings": [{"key": "val", "value": "$items.item"}],
+                },
+            },
+            {
+                "id": "sideB",
+                "type": "set",
+                "data": {
+                    "label": "sideB",
+                    "mappings": [{"key": "val", "value": "$stepA.val"}],
+                },
+            },
+            {
+                "id": "out",
+                "type": "output",
+                "data": {"label": "out", "message": "$items.results"},
+            },
+        ]
+
+        edges = [
+            {"id": "in-lp", "source": "in", "target": "lp"},
+            {
+                "id": "lp-stepA-loop",
+                "source": "lp",
+                "target": "stepA",
+                "sourceHandle": "loop",
+            },
+            {
+                "id": "stepA-lp-loop",
+                "source": "stepA",
+                "target": "lp",
+                "targetHandle": "loop",
+            },
+            {"id": "stepA-sideB", "source": "stepA", "target": "sideB"},
+            {
+                "id": "lp-out-done",
+                "source": "lp",
+                "target": "out",
+                "sourceHandle": "done",
+            },
+        ]
+        if reverse_edges:
+            edges.reverse()
+        return nodes, edges
+
+    def test_loop_body_side_node_runs_for_every_item_both_edge_orders(self) -> None:
+        numbers = [1, 2, 3, 4, 5]
+        for reverse_edges in (False, True):
+            with self.subTest(reverse_edges=reverse_edges):
+                nodes, edges = self._workflow(reverse_edges)
+                result = WorkflowExecutor(nodes=nodes, edges=edges).execute(
+                    workflow_id=uuid.uuid4(),
+                    initial_inputs={
+                        "headers": {},
+                        "query": {},
+                        "body": {"numbers": numbers},
+                    },
+                )
+
+                side_b_runs = [
+                    row["output"]["val"]
+                    for row in result.node_results
+                    if row["node_label"] == "sideB" and row["status"] == "success"
+                ]
+                self.assertEqual(side_b_runs, numbers)
+
+    def test_loop_body_side_node_streaming_both_edge_orders(self) -> None:
+        from app.services.workflow_executor import execute_workflow_streaming
+
+        numbers = [1, 2, 3, 4, 5]
+        for reverse_edges in (False, True):
+            with self.subTest(reverse_edges=reverse_edges):
+                nodes, edges = self._workflow(reverse_edges)
+                events = list(
+                    execute_workflow_streaming(
+                        workflow_id=uuid.uuid4(),
+                        nodes=nodes,
+                        edges=edges,
+                        inputs={
+                            "headers": {},
+                            "query": {},
+                            "body": {"numbers": numbers},
+                        },
+                    )
+                )
+                side_b_runs = [
+                    (event.get("output") or {}).get("val")
+                    for event in events
+                    if event.get("type") == "node_complete"
+                    and event.get("node_label") == "sideB"
+                    and event.get("status") == "success"
+                ]
+                self.assertEqual(side_b_runs, numbers)
+
