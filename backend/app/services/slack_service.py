@@ -269,7 +269,25 @@ def sections(text: str) -> list[dict]:
             candidate = line
         current = candidate
     chunks.append(current)
-    return [section(chunk) for chunk in chunks[:_MAX_TEXT_SECTIONS]]
+    if len(chunks) > _MAX_TEXT_SECTIONS:
+        # The block limit cuts the message: say so at the end of what is shown.
+        chunks = chunks[:_MAX_TEXT_SECTIONS]
+        last = chunks[-1][: _SECTION_LIMIT - len(_SHORTENED_NOTE) - 1]
+        chunks[-1] = f"{last}\n{_SHORTENED_NOTE}"
+    return [section(chunk) for chunk in chunks]
+
+
+_SHORTENED_NOTE = "_(message shortened)_"
+
+# chat.update answers msg_too_long once `text` passes about 4,000 characters, even when the
+# message has blocks. The blocks carry the whole message, so `text` (the notification
+# fallback) is cut to fit.
+_UPDATE_TEXT_LIMIT = 3900
+
+
+def update_text(message: str) -> str:
+    """A message's `text` for chat.update, short enough for Slack to accept it."""
+    return message[:_UPDATE_TEXT_LIMIT]
 
 
 def context(text: str) -> dict:

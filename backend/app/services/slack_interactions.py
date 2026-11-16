@@ -197,7 +197,7 @@ def replace_buttons(token: str, hitl_request: HITLRequest, note: str) -> None:
             {
                 "channel": channel,
                 "ts": ts,
-                "text": message,
+                "text": slack.update_text(message),
                 "blocks": slack.answered_blocks(message, note),
             },
         )
