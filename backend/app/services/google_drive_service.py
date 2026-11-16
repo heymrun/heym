@@ -428,7 +428,12 @@ class GoogleDriveService:
                     **self._auth_headers(),
                     "Content-Type": meta.get("mimeType", "application/octet-stream"),
                 },
-                params={"uploadType": "media", "supportsAllDrives": True},
+                # Without fields Drive answers with kind, id, name and mimeType only.
+                params={
+                    "uploadType": "media",
+                    "fields": "id, name, mimeType, size, modifiedTime",
+                    "supportsAllDrives": True,
+                },
                 content=content,
             )
             self._raise_for_drive_error(resp, target)
