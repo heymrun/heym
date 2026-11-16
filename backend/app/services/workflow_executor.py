@@ -81,6 +81,7 @@ from app.services.trigger_inputs import receives_initial_inputs
 from app.services.websocket_utils import (
     send_websocket_message,  # noqa: F401 - public patch alias for node handlers
 )
+from app.services.workflow_branch_routing import WorkflowBranchRoutingMixin
 
 logger = logging.getLogger(__name__)
 
@@ -2032,7 +2033,7 @@ def _restore_sub_workflow_executions(executions: list[dict] | None) -> list[SubW
     return restored
 
 
-class WorkflowExecutor:
+class WorkflowExecutor(WorkflowBranchRoutingMixin):
     # Drive files this run may open in the file sandbox; a sub-workflow keeps its parent's.
     file_scope = RunFileScope()
 
@@ -3304,9 +3305,9 @@ class WorkflowExecutor:
             self.store_node_output(node_id, result.node_label, result.output, inputs)
             with self.lock:
                 if result.output.get("_errorBranch"):
-                    self._handle_error_branch_routing(node_id)
+                    self._handle_error_branch_routing(node_id, result)
                 else:
-                    self._handle_success_branch_routing(node_id)
+                    self._handle_success_branch_routing(node_id, result)
         live_result = _serialize_node_result(result)
         if self.credentials_context:
             live_result["output"] = mask_sensitive_output(
@@ -3317,113 +3318,6 @@ class WorkflowExecutor:
         with self.lock:
             self.completed_node_results.append(live_result)
         return result
-
-    def _handle_success_branch_routing(self, node_id: str) -> None:
-        """Skip error-handle branches when the source node completed successfully."""
-        active_edges = [
-            edge for edge in self.get_active_edges() if edge.get("targetHandle") != "tool-input"
-        ]
-        success_targets = [
-            edge["target"]
-            for edge in active_edges
-            if edge["source"] == node_id and edge.get("sourceHandle") != "error"
-        ]
-        error_targets = [
-            edge["target"]
-            for edge in active_edges
-            if edge["source"] == node_id and edge.get("sourceHandle") == "error"
-        ]
-        if not error_targets:
-            return
-
-        # Forward only: following a loop-back edge into the Loop node would reach the
-        # whole loop body, error branch included, and nothing would be skipped.
-        preserved_node_ids = self.get_reachable_node_ids(success_targets)
-
-        exclusive_nodes = self.get_exclusive_branch_node_ids(
-            root_node_id=node_id,
-            start_node_ids=error_targets,
-            edges=active_edges,
-            preserve_node_ids=preserved_node_ids,
-        )
-        self.skipped_nodes.update(exclusive_nodes)
-
-    def _handle_error_branch_routing(self, node_id: str) -> None:
-        """Skip only non-error downstream nodes that depend exclusively on the failed node."""
-        active_edges = [
-            edge for edge in self.get_active_edges() if edge.get("targetHandle") != "tool-input"
-        ]
-        error_targets = [
-            edge["target"]
-            for edge in active_edges
-            if edge["source"] == node_id and edge.get("sourceHandle") == "error"
-        ]
-        inactive_targets = [
-            edge["target"]
-            for edge in active_edges
-            if edge["source"] == node_id and edge.get("sourceHandle") != "error"
-        ]
-        # Forward only, as for the success branch: see _handle_success_branch_routing.
-        preserved_node_ids = self.get_reachable_node_ids(error_targets)
-
-        exclusive_nodes = self.get_exclusive_branch_node_ids(
-            root_node_id=node_id,
-            start_node_ids=inactive_targets,
-            edges=active_edges,
-            preserve_node_ids=preserved_node_ids,
-        )
-        self.skipped_nodes.update(exclusive_nodes)
-
-    def get_exclusive_branch_node_ids(
-        self,
-        *,
-        root_node_id: str,
-        start_node_ids: list[str],
-        edges: list[dict],
-        preserve_node_ids: set[str] | None = None,
-    ) -> set[str]:
-        """Return downstream nodes whose execution depends only on the branch root.
-
-        Shared downstream nodes, such as a common output reached by another parallel branch, must
-        stay active so the other branch can still complete the workflow.
-        """
-        preserved = preserve_node_ids or set()
-        branch_node_ids: set[str] = set()
-        for start_node_id in start_node_ids:
-            branch_node_ids.update(
-                self.get_branch_node_ids(
-                    start_node_id,
-                    edges,
-                    exclude_node_ids=preserved,
-                )
-            )
-
-        exclusive_node_ids: set[str] = set()
-        changed = True
-        while changed:
-            changed = False
-            for candidate in branch_node_ids - exclusive_node_ids - preserved:
-                incoming_edges = [
-                    edge
-                    for edge in edges
-                    if edge["target"] == candidate
-                    and not (
-                        self.nodes.get(candidate, {}).get("type") == "loop"
-                        and edge.get("targetHandle") == "loop"
-                    )
-                ]
-                if not incoming_edges:
-                    continue
-
-                depends_only_on_root_or_exclusive_nodes = all(
-                    edge["source"] == root_node_id or edge["source"] in exclusive_node_ids
-                    for edge in incoming_edges
-                )
-                if depends_only_on_root_or_exclusive_nodes:
-                    exclusive_node_ids.add(candidate)
-                    changed = True
-
-        return exclusive_node_ids
 
     def _record_notification_branch_results(self, results: list[NodeResult]) -> None:
         if not results:
@@ -7737,6 +7631,27 @@ class WorkflowExecutor:
             ):
                 output_nodes_with_downstream.add(node_id)
         self._downstream_global_node_ids = frozenset()
+        pending_loop_reexecutions: dict[str, tuple[str, list[dict]]] = {}
+
+        def trigger_pending_loops() -> None:
+            for loop_id in list(pending_loop_reexecutions.keys()):
+                body_ids = self.get_loop_body_node_ids(loop_id, active_edges)
+                if any(nid in body_ids for nid in running_futures.values()):
+                    continue
+                src_id, edges = pending_loop_reexecutions.pop(loop_id)
+                if self.prepare_loop_for_reexecution(
+                    loop_node_id=loop_id,
+                    active_edges=edges,
+                    completed_nodes=completed_nodes,
+                    pending_count=pending_count,
+                ):
+                    already_running = any(nid == loop_id for nid in running_futures.values())
+                    if not already_running:
+                        inputs = self.get_loop_reexecution_inputs(loop_id, src_id, edges)
+                        new_future = self._node_pool.submit(
+                            self.execute_node_parallel, loop_id, inputs
+                        )
+                        running_futures[new_future] = loop_id
 
         def schedule_downstream(
             source_node_id: str, source_result: NodeResult | None = None
@@ -7749,6 +7664,11 @@ class WorkflowExecutor:
             )
             skip_loop_source_handles = (
                 set(source_result.metadata.get("skip_loop_source_handles") or [])
+                if source_result
+                else set()
+            )
+            skip_loop_edge_ids = (
+                set(source_result.metadata.get("skip_loop_edge_ids") or [])
                 if source_result
                 else set()
             )
@@ -7766,62 +7686,53 @@ class WorkflowExecutor:
                     pending_count=pending_count,
                 )
             ready_targets: list[str] = []
-            for edge in active_edges:
-                if edge["source"] == source_node_id:
-                    if self._source_handle_is_skipped(edge, skip_source_handles):
-                        continue
-                    target = edge["target"]
-                    target_handle = edge.get("targetHandle")
-                    target_node = self.nodes.get(target, {})
+            outgoing_edges = self._order_downstream_edges(
+                [edge for edge in active_edges if edge["source"] == source_node_id],
+                source_result,
+            )
+            for edge in outgoing_edges:
+                if self._source_handle_is_skipped(edge, skip_source_handles):
+                    continue
+                target = edge["target"]
+                target_handle = edge.get("targetHandle")
+                target_node = self.nodes.get(target, {})
 
-                    if target_node.get("type") == "loop" and target_handle == "loop":
-                        if source_is_skipped:
-                            continue
-                        if self._source_handle_is_skipped(edge, skip_loop_source_handles):
-                            continue
-                        if self.prepare_loop_for_reexecution(
-                            loop_node_id=target,
-                            active_edges=active_edges,
-                            completed_nodes=completed_nodes,
-                            pending_count=pending_count,
-                        ):
-                            already_running = any(nid == target for nid in running_futures.values())
-                            if not already_running:
-                                inputs = self.get_loop_reexecution_inputs(
-                                    target, source_node_id, active_edges
-                                )
-                                new_future = self._node_pool.submit(
-                                    self.execute_node_parallel, target, inputs
-                                )
-                                running_futures[new_future] = target
+                if target_node.get("type") == "loop" and target_handle == "loop":
+                    if source_is_skipped:
                         continue
+                    if self._source_handle_is_skipped(edge, skip_loop_source_handles):
+                        continue
+                    if self._edge_matches_skipped_loop_edge(edge, skip_loop_edge_ids):
+                        continue
+                    pending_loop_reexecutions[target] = (source_node_id, active_edges)
+                    continue
 
-                    if target not in pending_count:
-                        continue
-                    if target in completed_nodes:
-                        continue
-                    pending_count[target] -= 1
-                    if pending_count[target] == 0:
-                        if target in self.skipped_nodes:
-                            node = self.nodes[target]
-                            node_label = node.get("data", {}).get("label", target)
-                            skipped_result = self._stamp_node_result(
-                                NodeResult(
-                                    node_id=target,
-                                    node_label=node_label,
-                                    node_type=node.get("type", "unknown"),
-                                    status="skipped",
-                                    output={},
-                                    execution_time_ms=0,
-                                )
+                if target not in pending_count:
+                    continue
+                if target in completed_nodes:
+                    continue
+                pending_count[target] -= 1
+                if pending_count[target] == 0:
+                    if target in self.skipped_nodes:
+                        node = self.nodes[target]
+                        node_label = node.get("data", {}).get("label", target)
+                        skipped_result = self._stamp_node_result(
+                            NodeResult(
+                                node_id=target,
+                                node_label=node_label,
+                                node_type=node.get("type", "unknown"),
+                                status="skipped",
+                                output={},
+                                execution_time_ms=0,
                             )
-                            node_results.append(skipped_result)
-                            completed_nodes.add(target)
-                            schedule_downstream(target, skipped_result)
-                        else:
-                            already_running = any(nid == target for nid in running_futures.values())
-                            if not already_running:
-                                ready_targets.append(target)
+                        )
+                        node_results.append(skipped_result)
+                        completed_nodes.add(target)
+                        schedule_downstream(target, skipped_result)
+                    else:
+                        already_running = any(nid == target for nid in running_futures.values())
+                        if not already_running:
+                            ready_targets.append(target)
 
             for target in self._prioritize_ready_node_ids(ready_targets):
                 already_running = any(nid == target for nid in running_futures.values())
@@ -7830,6 +7741,8 @@ class WorkflowExecutor:
                 inputs = self.get_node_inputs_for_edges(target, active_edges)
                 new_future = self._node_pool.submit(self.execute_node_parallel, target, inputs)
                 running_futures[new_future] = target
+
+            trigger_pending_loops()
 
         root_nodes = self._prioritize_ready_node_ids(
             [nid for nid, count in pending_count.items() if count == 0]
@@ -7902,6 +7815,32 @@ class WorkflowExecutor:
                     def run_remaining_downstream():
                         nonlocal has_error
                         remaining_futures = dict(running_futures)
+                        bg_pending_loops: dict[str, tuple[str, list[dict]]] = dict(
+                            pending_loop_reexecutions
+                        )
+
+                        def trigger_bg_pending_loops():
+                            for loop_id in list(bg_pending_loops.keys()):
+                                body_ids = self.get_loop_body_node_ids(loop_id, active_edges)
+                                if any(n in body_ids for n in remaining_futures.values()):
+                                    continue
+                                src, edges = bg_pending_loops.pop(loop_id)
+                                if self.prepare_loop_for_reexecution(
+                                    loop_node_id=loop_id,
+                                    active_edges=edges,
+                                    completed_nodes=completed_nodes,
+                                    pending_count=pending_count,
+                                ):
+                                    already = any(n == loop_id for n in remaining_futures.values())
+                                    if not already:
+                                        inp = self.get_loop_reexecution_inputs(loop_id, src, edges)
+                                        new_f = self._node_pool.submit(
+                                            self.execute_node_parallel,
+                                            loop_id,
+                                            inp,
+                                        )
+                                        remaining_futures[new_f] = loop_id
+
                         while remaining_futures:
                             done_bg, _ = wait(remaining_futures.keys(), return_when=FIRST_COMPLETED)
                             for future_bg in done_bg:
@@ -7920,6 +7859,9 @@ class WorkflowExecutor:
                                         skip_loop_source_handles = set(
                                             res.metadata.get("skip_loop_source_handles") or []
                                         )
+                                        skip_loop_edge_ids = set(
+                                            res.metadata.get("skip_loop_edge_ids") or []
+                                        )
                                         if (
                                             result_node.get("type") == "loop"
                                             and res.output.get("branch") == "done"
@@ -7932,66 +7874,58 @@ class WorkflowExecutor:
                                                 completed_nodes=completed_nodes,
                                                 pending_count=pending_count,
                                             )
-                                        for edge in active_edges:
-                                            if edge["source"] == nid:
+                                        outgoing_edges = self._order_downstream_edges(
+                                            [
+                                                edge
+                                                for edge in active_edges
+                                                if edge["source"] == nid
+                                            ],
+                                            res,
+                                        )
+                                        for edge in outgoing_edges:
+                                            if self._source_handle_is_skipped(
+                                                edge, skip_source_handles
+                                            ):
+                                                continue
+                                            tgt = edge["target"]
+                                            tgt_handle = edge.get("targetHandle")
+                                            tgt_node = self.nodes.get(tgt, {})
+                                            if (
+                                                tgt_node.get("type") == "loop"
+                                                and tgt_handle == "loop"
+                                            ):
                                                 if self._source_handle_is_skipped(
-                                                    edge, skip_source_handles
+                                                    edge, skip_loop_source_handles
                                                 ):
                                                     continue
-                                                tgt = edge["target"]
-                                                tgt_handle = edge.get("targetHandle")
-                                                tgt_node = self.nodes.get(tgt, {})
-                                                if (
-                                                    tgt_node.get("type") == "loop"
-                                                    and tgt_handle == "loop"
+                                                if self._edge_matches_skipped_loop_edge(
+                                                    edge, skip_loop_edge_ids
                                                 ):
-                                                    if self._source_handle_is_skipped(
-                                                        edge, skip_loop_source_handles
-                                                    ):
-                                                        continue
-                                                    if self.prepare_loop_for_reexecution(
-                                                        loop_node_id=tgt,
-                                                        active_edges=active_edges,
-                                                        completed_nodes=completed_nodes,
-                                                        pending_count=pending_count,
-                                                    ):
-                                                        skip_add_to_completed = True
-                                                        already = any(
-                                                            n == tgt
-                                                            for n in remaining_futures.values()
+                                                    continue
+                                                bg_pending_loops[tgt] = (nid, active_edges)
+                                                skip_add_to_completed = True
+                                                continue
+                                            if tgt not in pending_count:
+                                                continue
+                                            if tgt in completed_nodes:
+                                                continue
+                                            pending_count[tgt] -= 1
+                                            if pending_count[tgt] == 0:
+                                                if tgt not in self.skipped_nodes:
+                                                    already = any(
+                                                        n == tgt for n in remaining_futures.values()
+                                                    )
+                                                    if not already:
+                                                        inp = self.get_node_inputs_for_edges(
+                                                            tgt, active_edges
                                                         )
-                                                        if not already:
-                                                            inp = self.get_loop_reexecution_inputs(
-                                                                tgt, nid, active_edges
-                                                            )
-                                                            new_f = self._node_pool.submit(
-                                                                self.execute_node_parallel,
-                                                                tgt,
-                                                                inp,
-                                                            )
-                                                            remaining_futures[new_f] = tgt
-                                                    continue
-                                                if tgt not in pending_count:
-                                                    continue
-                                                if tgt in completed_nodes:
-                                                    continue
-                                                pending_count[tgt] -= 1
-                                                if pending_count[tgt] == 0:
-                                                    if tgt not in self.skipped_nodes:
-                                                        already = any(
-                                                            n == tgt
-                                                            for n in remaining_futures.values()
+                                                        new_f = self._node_pool.submit(
+                                                            self.execute_node_parallel,
+                                                            tgt,
+                                                            inp,
                                                         )
-                                                        if not already:
-                                                            inp = self.get_node_inputs_for_edges(
-                                                                tgt, active_edges
-                                                            )
-                                                            new_f = self._node_pool.submit(
-                                                                self.execute_node_parallel,
-                                                                tgt,
-                                                                inp,
-                                                            )
-                                                            remaining_futures[new_f] = tgt
+                                                        remaining_futures[new_f] = tgt
+                                        trigger_bg_pending_loops()
                                 if not skip_add_to_completed:
                                     completed_nodes.add(nid)
                         self.drain_bg_futures()
@@ -8498,6 +8432,30 @@ def resume_workflow_execution(
         ):
             output_nodes_with_downstream.add(node_id)
     wf_executor._downstream_global_node_ids = frozenset()
+    pending_loop_reexecutions: dict[str, tuple[str, list[dict]]] = {}
+
+    def trigger_pending_loops() -> None:
+        for loop_id in list(pending_loop_reexecutions.keys()):
+            body_ids = wf_executor.get_loop_body_node_ids(loop_id, active_edges)
+            if any(nid in body_ids for nid in running_futures.values()):
+                continue
+            src_id, edges = pending_loop_reexecutions.pop(loop_id)
+            if wf_executor.prepare_loop_for_reexecution(
+                loop_node_id=loop_id,
+                active_edges=edges,
+                completed_nodes=completed_nodes,
+                pending_count=pending_count,
+            ):
+                already_running = any(
+                    pending_node_id == loop_id for pending_node_id in running_futures.values()
+                )
+                if not already_running:
+                    new_future = wf_executor._node_pool.submit(
+                        wf_executor.execute_node_parallel,
+                        loop_id,
+                        wf_executor.get_loop_reexecution_inputs(loop_id, src_id, edges),
+                    )
+                    running_futures[new_future] = loop_id
 
     def schedule_downstream(source_node_id: str, source_result: NodeResult | None = None) -> None:
         skip_source_handles = (
@@ -8507,6 +8465,9 @@ def resume_workflow_execution(
             set(source_result.metadata.get("skip_loop_source_handles") or [])
             if source_result
             else set()
+        )
+        skip_loop_edge_ids = (
+            set(source_result.metadata.get("skip_loop_edge_ids") or []) if source_result else set()
         )
         source_is_skipped = source_result is not None and source_result.status == "skipped"
         source_node = wf_executor.nodes.get(source_node_id, {})
@@ -8522,67 +8483,53 @@ def resume_workflow_execution(
                 pending_count=pending_count,
             )
         ready_targets: list[str] = []
-        for edge in active_edges:
-            if edge["source"] == source_node_id:
-                if wf_executor._source_handle_is_skipped(edge, skip_source_handles):
-                    continue
-                target = edge["target"]
-                target_handle = edge.get("targetHandle")
-                target_node = wf_executor.nodes.get(target, {})
+        outgoing_edges = wf_executor._order_downstream_edges(
+            [edge for edge in active_edges if edge["source"] == source_node_id],
+            source_result,
+        )
+        for edge in outgoing_edges:
+            if wf_executor._source_handle_is_skipped(edge, skip_source_handles):
+                continue
+            target = edge["target"]
+            target_handle = edge.get("targetHandle")
+            target_node = wf_executor.nodes.get(target, {})
 
-                if target_node.get("type") == "loop" and target_handle == "loop":
-                    if source_is_skipped:
-                        continue
-                    if wf_executor._source_handle_is_skipped(edge, skip_loop_source_handles):
-                        continue
-                    if wf_executor.prepare_loop_for_reexecution(
-                        loop_node_id=target,
-                        active_edges=active_edges,
-                        completed_nodes=completed_nodes,
-                        pending_count=pending_count,
-                    ):
-                        already_running = any(
-                            pending_node_id == target
-                            for pending_node_id in running_futures.values()
-                        )
-                        if not already_running:
-                            new_future = wf_executor._node_pool.submit(
-                                wf_executor.execute_node_parallel,
-                                target,
-                                wf_executor.get_loop_reexecution_inputs(
-                                    target, source_node_id, active_edges
-                                ),
-                            )
-                            running_futures[new_future] = target
+            if target_node.get("type") == "loop" and target_handle == "loop":
+                if source_is_skipped:
                     continue
+                if wf_executor._source_handle_is_skipped(edge, skip_loop_source_handles):
+                    continue
+                if wf_executor._edge_matches_skipped_loop_edge(edge, skip_loop_edge_ids):
+                    continue
+                pending_loop_reexecutions[target] = (source_node_id, active_edges)
+                continue
 
-                if target not in pending_count or target in completed_nodes:
-                    continue
-                pending_count[target] -= 1
-                if pending_count[target] == 0:
-                    if target in wf_executor.skipped_nodes:
-                        node = wf_executor.nodes[target]
-                        node_label = node.get("data", {}).get("label", target)
-                        skipped_result = wf_executor._stamp_node_result(
-                            NodeResult(
-                                node_id=target,
-                                node_label=node_label,
-                                node_type=node.get("type", "unknown"),
-                                status="skipped",
-                                output={},
-                                execution_time_ms=0,
-                            )
+            if target not in pending_count or target in completed_nodes:
+                continue
+            pending_count[target] -= 1
+            if pending_count[target] == 0:
+                if target in wf_executor.skipped_nodes:
+                    node = wf_executor.nodes[target]
+                    node_label = node.get("data", {}).get("label", target)
+                    skipped_result = wf_executor._stamp_node_result(
+                        NodeResult(
+                            node_id=target,
+                            node_label=node_label,
+                            node_type=node.get("type", "unknown"),
+                            status="skipped",
+                            output={},
+                            execution_time_ms=0,
                         )
-                        node_results.append(skipped_result)
-                        completed_nodes.add(target)
-                        schedule_downstream(target, skipped_result)
-                    else:
-                        already_running = any(
-                            pending_node_id == target
-                            for pending_node_id in running_futures.values()
-                        )
-                        if not already_running:
-                            ready_targets.append(target)
+                    )
+                    node_results.append(skipped_result)
+                    completed_nodes.add(target)
+                    schedule_downstream(target, skipped_result)
+                else:
+                    already_running = any(
+                        pending_node_id == target for pending_node_id in running_futures.values()
+                    )
+                    if not already_running:
+                        ready_targets.append(target)
 
         for target in wf_executor._prioritize_ready_node_ids(ready_targets):
             already_running = any(
@@ -8596,6 +8543,8 @@ def resume_workflow_execution(
                 wf_executor.get_node_inputs_for_edges(target, active_edges),
             )
             running_futures[new_future] = target
+
+        trigger_pending_loops()
 
     with pending_lock:
         if hitl_resume_mode in {"rerun_agent", "continue_agent"}:
@@ -8644,6 +8593,36 @@ def resume_workflow_execution(
 
                 def run_remaining_downstream() -> None:
                     remaining_futures = dict(running_futures)
+                    bg_pending_loops: dict[str, tuple[str, list[dict]]] = dict(
+                        pending_loop_reexecutions
+                    )
+
+                    def trigger_bg_pending_loops() -> None:
+                        for loop_id in list(bg_pending_loops.keys()):
+                            body_ids = wf_executor.get_loop_body_node_ids(loop_id, active_edges)
+                            if any(n in body_ids for n in remaining_futures.values()):
+                                continue
+                            src, edges = bg_pending_loops.pop(loop_id)
+                            if wf_executor.prepare_loop_for_reexecution(
+                                loop_node_id=loop_id,
+                                active_edges=edges,
+                                completed_nodes=completed_nodes,
+                                pending_count=pending_count,
+                            ):
+                                already = any(
+                                    pending_node_id == loop_id
+                                    for pending_node_id in remaining_futures.values()
+                                )
+                                if not already:
+                                    new_future = wf_executor._node_pool.submit(
+                                        wf_executor.execute_node_parallel,
+                                        loop_id,
+                                        wf_executor.get_loop_reexecution_inputs(
+                                            loop_id, src, edges
+                                        ),
+                                    )
+                                    remaining_futures[new_future] = loop_id
+
                     while remaining_futures:
                         done_bg, _ = wait(remaining_futures.keys(), return_when=FIRST_COMPLETED)
                         for future_bg in done_bg:
@@ -8662,6 +8641,9 @@ def resume_workflow_execution(
                                     skip_loop_source_handles = set(
                                         res.metadata.get("skip_loop_source_handles") or []
                                     )
+                                    skip_loop_edge_ids = set(
+                                        res.metadata.get("skip_loop_edge_ids") or []
+                                    )
                                     if (
                                         result_node.get("type") == "loop"
                                         and res.output.get("branch") == "done"
@@ -8674,64 +8656,51 @@ def resume_workflow_execution(
                                             completed_nodes=completed_nodes,
                                             pending_count=pending_count,
                                         )
-                                    for edge in active_edges:
-                                        if edge["source"] == nid:
+                                    outgoing_edges = wf_executor._order_downstream_edges(
+                                        [edge for edge in active_edges if edge["source"] == nid],
+                                        res,
+                                    )
+                                    for edge in outgoing_edges:
+                                        if wf_executor._source_handle_is_skipped(
+                                            edge, skip_source_handles
+                                        ):
+                                            continue
+                                        tgt = edge["target"]
+                                        tgt_handle = edge.get("targetHandle")
+                                        tgt_node = wf_executor.nodes.get(tgt, {})
+                                        if tgt_node.get("type") == "loop" and tgt_handle == "loop":
                                             if wf_executor._source_handle_is_skipped(
-                                                edge, skip_source_handles
+                                                edge, skip_loop_source_handles
                                             ):
                                                 continue
-                                            tgt = edge["target"]
-                                            tgt_handle = edge.get("targetHandle")
-                                            tgt_node = wf_executor.nodes.get(tgt, {})
-                                            if (
-                                                tgt_node.get("type") == "loop"
-                                                and tgt_handle == "loop"
+                                            if wf_executor._edge_matches_skipped_loop_edge(
+                                                edge, skip_loop_edge_ids
                                             ):
-                                                if wf_executor._source_handle_is_skipped(
-                                                    edge, skip_loop_source_handles
-                                                ):
-                                                    continue
-                                                if wf_executor.prepare_loop_for_reexecution(
-                                                    loop_node_id=tgt,
-                                                    active_edges=active_edges,
-                                                    completed_nodes=completed_nodes,
-                                                    pending_count=pending_count,
-                                                ):
-                                                    skip_add_to_completed = True
-                                                    already = any(
-                                                        pending_node_id == tgt
-                                                        for pending_node_id in remaining_futures.values()
-                                                    )
-                                                    if not already:
-                                                        new_future = wf_executor._node_pool.submit(
-                                                            wf_executor.execute_node_parallel,
-                                                            tgt,
-                                                            wf_executor.get_loop_reexecution_inputs(
-                                                                tgt, nid, active_edges
-                                                            ),
-                                                        )
-                                                        remaining_futures[new_future] = tgt
                                                 continue
-                                            if tgt not in pending_count or tgt in completed_nodes:
-                                                continue
-                                            pending_count[tgt] -= 1
-                                            if (
-                                                pending_count[tgt] == 0
-                                                and tgt not in wf_executor.skipped_nodes
-                                            ):
-                                                already = any(
-                                                    pending_node_id == tgt
-                                                    for pending_node_id in remaining_futures.values()
+                                            bg_pending_loops[tgt] = (nid, active_edges)
+                                            skip_add_to_completed = True
+                                            continue
+                                        if tgt not in pending_count or tgt in completed_nodes:
+                                            continue
+                                        pending_count[tgt] -= 1
+                                        if (
+                                            pending_count[tgt] == 0
+                                            and tgt not in wf_executor.skipped_nodes
+                                        ):
+                                            already = any(
+                                                pending_node_id == tgt
+                                                for pending_node_id in remaining_futures.values()
+                                            )
+                                            if not already:
+                                                new_future = wf_executor._node_pool.submit(
+                                                    wf_executor.execute_node_parallel,
+                                                    tgt,
+                                                    wf_executor.get_node_inputs_for_edges(
+                                                        tgt, active_edges
+                                                    ),
                                                 )
-                                                if not already:
-                                                    new_future = wf_executor._node_pool.submit(
-                                                        wf_executor.execute_node_parallel,
-                                                        tgt,
-                                                        wf_executor.get_node_inputs_for_edges(
-                                                            tgt, active_edges
-                                                        ),
-                                                    )
-                                                    remaining_futures[new_future] = tgt
+                                                remaining_futures[new_future] = tgt
+                                    trigger_bg_pending_loops()
                             if not skip_add_to_completed:
                                 completed_nodes.add(nid)
                     wf_executor.drain_bg_futures()
@@ -8955,6 +8924,25 @@ def execute_llm_batch_notification_branch(
         )
         running_futures[new_future] = node_id
 
+    pending_loop_reexecutions: dict[str, tuple[str, list[dict]]] = {}
+
+    def trigger_pending_loops() -> None:
+        for loop_id in list(pending_loop_reexecutions.keys()):
+            body_ids = wf_executor.get_loop_body_node_ids(loop_id, branch_edges)
+            if any(nid in body_ids for nid in running_futures.values()):
+                continue
+            src_id, edges = pending_loop_reexecutions.pop(loop_id)
+            if wf_executor.prepare_loop_for_reexecution(
+                loop_node_id=loop_id,
+                active_edges=edges,
+                completed_nodes=completed_nodes,
+                pending_count=pending_count,
+            ):
+                _submit_node(
+                    loop_id,
+                    wf_executor.get_loop_reexecution_inputs(loop_id, src_id, edges),
+                )
+
     def schedule_downstream(
         source_id: str,
         source_result: NodeResult | None = None,
@@ -8969,6 +8957,9 @@ def execute_llm_batch_notification_branch(
             if source_result
             else set()
         )
+        skip_loop_edge_ids = (
+            set(source_result.metadata.get("skip_loop_edge_ids") or []) if source_result else set()
+        )
         source_is_skipped = source_result is not None and source_result.status == "skipped"
         source_node = wf_executor.nodes.get(source_id, {})
         if (
@@ -8982,12 +8973,16 @@ def execute_llm_batch_notification_branch(
                 completed_nodes=completed_nodes,
                 pending_count=pending_count,
             )
-        for edge in branch_edges:
-            if edge["source"] != source_id:
-                continue
-            source_handle = edge.get("sourceHandle")
-            if only_source_handles is not None and source_handle not in only_source_handles:
-                continue
+        outgoing_edges = wf_executor._order_downstream_edges(
+            [
+                edge
+                for edge in branch_edges
+                if edge["source"] == source_id
+                and (only_source_handles is None or edge.get("sourceHandle") in only_source_handles)
+            ],
+            source_result,
+        )
+        for edge in outgoing_edges:
             if wf_executor._source_handle_is_skipped(edge, skip_source_handles):
                 continue
 
@@ -8999,16 +8994,9 @@ def execute_llm_batch_notification_branch(
                     continue
                 if wf_executor._source_handle_is_skipped(edge, skip_loop_source_handles):
                     continue
-                if wf_executor.prepare_loop_for_reexecution(
-                    loop_node_id=target,
-                    active_edges=branch_edges,
-                    completed_nodes=completed_nodes,
-                    pending_count=pending_count,
-                ):
-                    _submit_node(
-                        target,
-                        wf_executor.get_loop_reexecution_inputs(target, source_id, branch_edges),
-                    )
+                if wf_executor._edge_matches_skipped_loop_edge(edge, skip_loop_edge_ids):
+                    continue
+                pending_loop_reexecutions[target] = (source_id, branch_edges)
                 continue
 
             if target not in pending_count or target in completed_nodes:
@@ -9035,6 +9023,8 @@ def execute_llm_batch_notification_branch(
                     schedule_downstream(target, skipped_result)
                 else:
                     _submit_node(target)
+
+        trigger_pending_loops()
 
     with pending_lock:
         schedule_downstream(source_node_id, only_source_handles={"batchStatus"})
@@ -9156,6 +9146,30 @@ def execute_hitl_notification_branch(
     branch_node_results: list[NodeResult] = []
     running_futures: dict = {}
     pending_lock = Lock()
+    pending_loop_reexecutions: dict[str, tuple[str, list[dict]]] = {}
+
+    def trigger_pending_loops() -> None:
+        for loop_id in list(pending_loop_reexecutions.keys()):
+            body_ids = wf_executor.get_loop_body_node_ids(loop_id, active_edges)
+            if any(nid in body_ids for nid in running_futures.values()):
+                continue
+            src_id, edges = pending_loop_reexecutions.pop(loop_id)
+            if wf_executor.prepare_loop_for_reexecution(
+                loop_node_id=loop_id,
+                active_edges=edges,
+                completed_nodes=completed_nodes,
+                pending_count=pending_count,
+            ):
+                already_running = any(
+                    pending_node_id == loop_id for pending_node_id in running_futures.values()
+                )
+                if not already_running:
+                    new_future = wf_executor._node_pool.submit(
+                        wf_executor.execute_node_parallel,
+                        loop_id,
+                        wf_executor.get_loop_reexecution_inputs(loop_id, src_id, edges),
+                    )
+                    running_futures[new_future] = loop_id
 
     def schedule_downstream(
         source_node_id: str,
@@ -9171,6 +9185,9 @@ def execute_hitl_notification_branch(
             if source_result
             else set()
         )
+        skip_loop_edge_ids = (
+            set(source_result.metadata.get("skip_loop_edge_ids") or []) if source_result else set()
+        )
         source_is_skipped = source_result is not None and source_result.status == "skipped"
         source_node = wf_executor.nodes.get(source_node_id, {})
         if (
@@ -9184,13 +9201,16 @@ def execute_hitl_notification_branch(
                 completed_nodes=completed_nodes,
                 pending_count=pending_count,
             )
-        for edge in active_edges:
-            if edge["source"] != source_node_id:
-                continue
-
-            source_handle = edge.get("sourceHandle")
-            if only_source_handles is not None and source_handle not in only_source_handles:
-                continue
+        outgoing_edges = wf_executor._order_downstream_edges(
+            [
+                edge
+                for edge in active_edges
+                if edge["source"] == source_node_id
+                and (only_source_handles is None or edge.get("sourceHandle") in only_source_handles)
+            ],
+            source_result,
+        )
+        for edge in outgoing_edges:
             if wf_executor._source_handle_is_skipped(edge, skip_source_handles):
                 continue
 
@@ -9203,24 +9223,9 @@ def execute_hitl_notification_branch(
                     continue
                 if wf_executor._source_handle_is_skipped(edge, skip_loop_source_handles):
                     continue
-                if wf_executor.prepare_loop_for_reexecution(
-                    loop_node_id=target,
-                    active_edges=active_edges,
-                    completed_nodes=completed_nodes,
-                    pending_count=pending_count,
-                ):
-                    already_running = any(
-                        pending_node_id == target for pending_node_id in running_futures.values()
-                    )
-                    if not already_running:
-                        new_future = wf_executor._node_pool.submit(
-                            wf_executor.execute_node_parallel,
-                            target,
-                            wf_executor.get_loop_reexecution_inputs(
-                                target, source_node_id, active_edges
-                            ),
-                        )
-                        running_futures[new_future] = target
+                if wf_executor._edge_matches_skipped_loop_edge(edge, skip_loop_edge_ids):
+                    continue
+                pending_loop_reexecutions[target] = (source_node_id, active_edges)
                 continue
 
             if target not in pending_count or target in completed_nodes:
@@ -9254,6 +9259,8 @@ def execute_hitl_notification_branch(
                             wf_executor.get_node_inputs_for_edges(target, active_edges),
                         )
                         running_futures[new_future] = target
+
+        trigger_pending_loops()
 
     with pending_lock:
         schedule_downstream(paused_node_id, only_source_handles={source_handle})
@@ -9619,6 +9626,29 @@ def _execute_workflow_streaming_impl(
 
         return result
 
+    pending_loop_reexecutions: dict[str, tuple[str, list[dict]]] = {}
+
+    def trigger_pending_loops() -> None:
+        for loop_id in list(pending_loop_reexecutions.keys()):
+            body_ids = wf_executor.get_loop_body_node_ids(loop_id, active_edges)
+            if any(nid in body_ids for nid in running_futures.values()):
+                continue
+            src_id, edges = pending_loop_reexecutions.pop(loop_id)
+            if wf_executor.prepare_loop_for_reexecution(
+                loop_node_id=loop_id,
+                active_edges=edges,
+                completed_nodes=completed_nodes,
+                pending_count=pending_count,
+            ):
+                already_running = any(nid == loop_id for nid in running_futures.values())
+                if not already_running:
+                    new_future = wf_executor._node_pool.submit(
+                        execute_and_report,
+                        loop_id,
+                        wf_executor.get_loop_reexecution_inputs(loop_id, src_id, edges),
+                    )
+                    running_futures[new_future] = loop_id
+
     def schedule_downstream(source_node_id: str, source_result: NodeResult | None = None) -> None:
         wf_executor.check_cancelled()
         skip_source_handles = (
@@ -9628,6 +9658,9 @@ def _execute_workflow_streaming_impl(
             set(source_result.metadata.get("skip_loop_source_handles") or [])
             if source_result
             else set()
+        )
+        skip_loop_edge_ids = (
+            set(source_result.metadata.get("skip_loop_edge_ids") or []) if source_result else set()
         )
         source_is_skipped = source_result is not None and source_result.status == "skipped"
         source_node = wf_executor.nodes.get(source_node_id, {})
@@ -9642,65 +9675,66 @@ def _execute_workflow_streaming_impl(
                 completed_nodes=completed_nodes,
                 pending_count=pending_count,
             )
-        for edge in active_edges:
-            if edge["source"] == source_node_id:
-                if wf_executor._source_handle_is_skipped(edge, skip_source_handles):
-                    continue
-                target = edge["target"]
-                target_handle = edge.get("targetHandle")
-                target_node = wf_executor.nodes.get(target, {})
+        if hasattr(wf_executor, "_order_downstream_edges"):
+            outgoing_edges = wf_executor._order_downstream_edges(
+                [edge for edge in active_edges if edge["source"] == source_node_id],
+                source_result,
+            )
+        else:
+            outgoing_edges = [edge for edge in active_edges if edge["source"] == source_node_id]
+        for edge in outgoing_edges:
+            if hasattr(
+                wf_executor, "_source_handle_is_skipped"
+            ) and wf_executor._source_handle_is_skipped(edge, skip_source_handles):
+                continue
+            target = edge["target"]
+            target_handle = edge.get("targetHandle")
+            target_node = wf_executor.nodes.get(target, {})
 
-                if target_node.get("type") == "loop" and target_handle == "loop":
-                    if source_is_skipped:
-                        continue
-                    if wf_executor._source_handle_is_skipped(edge, skip_loop_source_handles):
-                        continue
-                    if wf_executor.prepare_loop_for_reexecution(
-                        loop_node_id=target,
-                        active_edges=active_edges,
-                        completed_nodes=completed_nodes,
-                        pending_count=pending_count,
-                    ):
-                        already_running = any(nid == target for nid in running_futures.values())
-                        if not already_running:
-                            new_future = wf_executor._node_pool.submit(
-                                execute_and_report,
-                                target,
-                                wf_executor.get_loop_reexecution_inputs(
-                                    target, source_node_id, active_edges
-                                ),
-                            )
-                            running_futures[new_future] = target
+            if target_node.get("type") == "loop" and target_handle == "loop":
+                if source_is_skipped:
                     continue
+                if hasattr(
+                    wf_executor, "_source_handle_is_skipped"
+                ) and wf_executor._source_handle_is_skipped(edge, skip_loop_source_handles):
+                    continue
+                if hasattr(
+                    wf_executor, "_edge_matches_skipped_loop_edge"
+                ) and wf_executor._edge_matches_skipped_loop_edge(edge, skip_loop_edge_ids):
+                    continue
+                pending_loop_reexecutions[target] = (source_node_id, active_edges)
+                continue
 
-                if target not in pending_count:
-                    continue
-                if target in completed_nodes:
-                    continue
-                pending_count[target] -= 1
-                if pending_count[target] == 0:
-                    if target in wf_executor.skipped_nodes:
-                        node = wf_executor.nodes[target]
-                        node_label = node.get("data", {}).get("label", target)
-                        skipped_result = wf_executor._stamp_node_result(
-                            NodeResult(
-                                node_id=target,
-                                node_label=node_label,
-                                node_type=node.get("type", "unknown"),
-                                status="skipped",
-                                output={},
-                                execution_time_ms=0,
-                            )
+            if target not in pending_count:
+                continue
+            if target in completed_nodes:
+                continue
+            pending_count[target] -= 1
+            if pending_count[target] == 0:
+                if target in wf_executor.skipped_nodes:
+                    node = wf_executor.nodes[target]
+                    node_label = node.get("data", {}).get("label", target)
+                    skipped_result = wf_executor._stamp_node_result(
+                        NodeResult(
+                            node_id=target,
+                            node_label=node_label,
+                            node_type=node.get("type", "unknown"),
+                            status="skipped",
+                            output={},
+                            execution_time_ms=0,
                         )
-                        node_results.append(skipped_result)
-                        completed_nodes.add(target)
-                        nodes_to_schedule.append(target)
-                        schedule_downstream(target, skipped_result)
-                    else:
-                        already_running = any(nid == target for nid in running_futures.values())
-                        if not already_running:
-                            new_future = wf_executor._node_pool.submit(execute_and_report, target)
-                            running_futures[new_future] = target
+                    )
+                    node_results.append(skipped_result)
+                    completed_nodes.add(target)
+                    nodes_to_schedule.append(target)
+                    schedule_downstream(target, skipped_result)
+                else:
+                    already_running = any(nid == target for nid in running_futures.values())
+                    if not already_running:
+                        new_future = wf_executor._node_pool.submit(execute_and_report, target)
+                        running_futures[new_future] = target
+
+        trigger_pending_loops()
 
     root_nodes = [nid for nid, count in pending_count.items() if count == 0]
     for node_id in root_nodes:
