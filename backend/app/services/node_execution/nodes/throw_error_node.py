@@ -23,9 +23,20 @@ def execute(ctx: NodeExecutionContext) -> object:
     http_status_code: int | None = None
     if raw_status is not None:
         try:
-            parsed = int(raw_status)
-            if 100 <= parsed <= 599:
-                http_status_code = parsed
+            if isinstance(raw_status, bool):
+                http_status_code = None
+            elif isinstance(raw_status, int):
+                if 100 <= raw_status <= 599:
+                    http_status_code = raw_status
+            elif isinstance(raw_status, float):
+                if raw_status.is_integer() and 100 <= int(raw_status) <= 599:
+                    http_status_code = int(raw_status)
+            elif isinstance(raw_status, str):
+                s = raw_status.strip()
+                if s.isdigit():
+                    parsed = int(s)
+                    if 100 <= parsed <= 599:
+                        http_status_code = parsed
         except (ValueError, TypeError):
             http_status_code = None
 
