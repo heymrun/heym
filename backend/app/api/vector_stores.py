@@ -48,6 +48,7 @@ from app.services.audit_log import OUTCOME_FAILURE, OUTCOME_SUCCESS, audit
 from app.services.credential_access import team_shared_credential_clause
 from app.services.encryption import decrypt_config
 from app.services.upload_limits import read_upload_file_limited
+from app.services.user_lookup import find_user_by_email
 from app.services.vector_store import (
     create_vector_store_service_for_credential,
     rag_credential_backend,
@@ -879,8 +880,7 @@ async def create_vector_store_share(
             detail="Vector store not found",
         )
 
-    user_result = await db.execute(select(User).where(User.email == share_data.email))
-    target_user = user_result.scalar_one_or_none()
+    target_user = await find_user_by_email(db, share_data.email)
 
     if target_user is None:
         raise HTTPException(

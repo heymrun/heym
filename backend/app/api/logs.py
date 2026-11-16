@@ -1,3 +1,4 @@
+import asyncio
 from typing import Optional
 
 import docker
@@ -128,11 +129,21 @@ async def stream_docker_logs(
         container = client.containers.get(container_name)
 
         async def generate():
+            # docker-py reads the stream with blocking socket calls; run each read in a
+            # thread so waiting for the next line does not stop the event loop.
+            stream = None
             try:
-                for line in container.logs(stream=True, follow=True, timestamps=True):
+                stream = await asyncio.to_thread(
+                    container.logs, stream=True, follow=True, timestamps=True
+                )
+                while (line := await asyncio.to_thread(next, stream, None)) is not None:
                     yield f"data: {line.decode('utf-8', errors='replace')}\n\n"
             except Exception as e:
                 yield f"data: Error: {str(e)}\n\n"
+            finally:
+                close = getattr(stream, "close", None)
+                if close is not None:
+                    close()
 
         return StreamingResponse(
             generate(),

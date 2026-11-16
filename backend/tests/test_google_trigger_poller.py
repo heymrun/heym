@@ -1,7 +1,10 @@
 """Poller: baseline, one run per change, carryover, CAS loss, revert, skip on errors."""
 
+import asyncio
+import gc
 import unittest
 import uuid
+import warnings
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -13,7 +16,11 @@ from app.services.google_triggers.events import (
     PollSkippedError,
     TriggerEvent,
 )
-from app.services.google_triggers.poller import MAX_RUNS_PER_POLL, GoogleTriggerPoller
+from app.services.google_triggers.poller import (
+    MAX_PARALLEL_NODE_RUNS,
+    MAX_RUNS_PER_POLL,
+    GoogleTriggerPoller,
+)
 from app.services.google_triggers.state_store import Claim, ClaimedPoll
 from app.services.trigger_run_dispatch import TriggerDispatchNotStartedError
 
@@ -136,6 +143,7 @@ class PollerTests(unittest.IsolatedAsyncioTestCase):
             patch.object(poller, "_load_credential", AsyncMock(return_value={"t": 1})),
         ):
             await poller.poll_node(WORKFLOW, NODE)
+            await poller.wait_for_runs()
 
     async def _baselined(self, source: FakeSource) -> FakeStore:
         store = FakeStore()
@@ -278,3 +286,191 @@ class PollOnceTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PerNodeStore:
+    """FakeStore state per trigger node, routed by node id or state id."""
+
+    def __init__(self) -> None:
+        self.nodes: dict[str, FakeStore] = {}
+        self.states: dict[uuid.UUID, FakeStore] = {}
+
+    def node(self, node_id: str) -> FakeStore:
+        return self.nodes.setdefault(node_id, FakeStore())
+
+    async def claim(self, workflow_id, node_id, poll_minutes) -> Claim:
+        return await self.node(node_id).claim(workflow_id, node_id, poll_minutes)
+
+    async def insert_baseline(self, *, node_id, **kwargs) -> bool:
+        store = self.node(node_id)
+        await store.insert_baseline(node_id=node_id, **kwargs)
+        self.states[store.state_id] = store
+        return True
+
+    async def consume(self, state_id, expected_version, writes) -> bool:
+        return await self.states[state_id].consume(state_id, expected_version, writes)
+
+    async def delete_except(self, node_types, keep) -> int:
+        return 0
+
+
+class SlowRunTests(unittest.IsolatedAsyncioTestCase):
+    """A slow workflow run holds up only its own trigger, not the poll pass."""
+
+    async def asyncSetUp(self) -> None:
+        self.gate = asyncio.Event()
+        self.b_started = asyncio.Event()
+        self.started: list[str] = []
+        self.store = PerNodeStore()
+        self.sources = {"a1": FakeSource(), "b1": FakeSource()}
+        self.workflows = {
+            node_id: SimpleNamespace(id=uuid.uuid4(), owner_id=uuid.uuid4())
+            for node_id in ("a1", "b1")
+        }
+
+    async def _dispatch(self, *, inputs, **_kwargs) -> None:
+        node_id = inputs["trigger_node_id"]
+        self.started.append(node_id)
+        if node_id == "a1":
+            await self.gate.wait()
+        else:
+            self.b_started.set()
+
+    async def _poll(self, poller: GoogleTriggerPoller, node_id: str) -> None:
+        with (
+            patch(
+                "app.services.google_triggers.poller.build_source",
+                return_value=self.sources[node_id],
+            ),
+            patch.object(poller, "_load_credential", AsyncMock(return_value={"t": 1})),
+        ):
+            await poller.poll_node(
+                self.workflows[node_id], {"id": node_id, "type": "googleSheetsTrigger"}
+            )
+
+    async def _baselined_poller(self) -> GoogleTriggerPoller:
+        poller = GoogleTriggerPoller(store=self.store, dispatch=self._dispatch, secret=SECRET)
+        for node_id in ("a1", "b1"):
+            await self._poll(poller, node_id)
+            self.sources[node_id].changes = [_change(f"{node_id}-row")]
+        return poller
+
+    async def test_another_trigger_runs_while_a_slow_run_is_going(self) -> None:
+        poller = await self._baselined_poller()
+
+        # Before the fix the pass waited for A's run here, so this timed out.
+        await asyncio.wait_for(self._poll(poller, "a1"), timeout=5)
+        await self._poll(poller, "b1")
+        await asyncio.wait_for(self.b_started.wait(), timeout=5)
+
+        self.assertFalse(self.gate.is_set())
+        self.assertEqual(self.started, ["a1", "b1"])
+        self.gate.set()
+        await poller.wait_for_runs()
+
+    async def test_a_trigger_with_runs_in_flight_is_not_polled_again(self) -> None:
+        poller = await self._baselined_poller()
+        # Before the fix the pass waited for A's run here, so this timed out.
+        await asyncio.wait_for(self._poll(poller, "a1"), timeout=5)
+        await asyncio.sleep(0)
+        version = self.store.node("a1").version
+
+        # Before the fix the pass waited for A's run here, so this timed out.
+        await asyncio.wait_for(self._poll(poller, "a1"), timeout=5)
+
+        self.assertEqual(self.started, ["a1"])
+        self.assertEqual(self.store.node("a1").version, version)
+        self.gate.set()
+        await poller.wait_for_runs()
+
+    async def test_stop_cancels_runs_in_flight(self) -> None:
+        poller = await self._baselined_poller()
+        # Before the fix the pass waited for A's run here, so this timed out.
+        await asyncio.wait_for(self._poll(poller, "a1"), timeout=5)
+        await asyncio.sleep(0)
+
+        await poller.stop()
+
+        self.assertEqual(poller._node_runs, {})
+
+
+class ParallelNodeRunsTests(unittest.IsolatedAsyncioTestCase):
+    """Each node's runs hold a database connection, so at most four nodes run at once."""
+
+    NODES = [f"n{i}" for i in range(12)]
+
+    async def asyncSetUp(self) -> None:
+        self.gate = asyncio.Event()
+        self.in_flight = 0
+        self.peak = 0
+        self.started: list[str] = []
+        self.store = PerNodeStore()
+        self.sources = {node_id: FakeSource() for node_id in self.NODES}
+        self.workflows = {
+            node_id: SimpleNamespace(id=uuid.uuid4(), owner_id=uuid.uuid4())
+            for node_id in self.NODES
+        }
+        self.poller = GoogleTriggerPoller(store=self.store, dispatch=self._dispatch, secret=SECRET)
+        for node_id in self.NODES:
+            await self._poll(node_id)
+            self.sources[node_id].changes = [_change(f"{node_id}-row")]
+
+    async def _dispatch(self, *, inputs, **_kwargs) -> None:
+        self.started.append(inputs["trigger_node_id"])
+        self.in_flight += 1
+        self.peak = max(self.peak, self.in_flight)
+        try:
+            await self.gate.wait()
+        finally:
+            self.in_flight -= 1
+
+    async def _poll(self, node_id: str) -> None:
+        with (
+            patch(
+                "app.services.google_triggers.poller.build_source",
+                return_value=self.sources[node_id],
+            ),
+            patch.object(self.poller, "_load_credential", AsyncMock(return_value={"t": 1})),
+        ):
+            await self.poller.poll_node(
+                self.workflows[node_id], {"id": node_id, "type": "googleSheetsTrigger"}
+            )
+
+    async def _poll_every_node(self) -> None:
+        for node_id in self.NODES:
+            await self._poll(node_id)
+        for _ in range(50):
+            await asyncio.sleep(0)
+
+    async def test_at_most_four_nodes_run_at_once_and_every_node_runs(self) -> None:
+        await self._poll_every_node()
+
+        self.assertEqual(self.in_flight, MAX_PARALLEL_NODE_RUNS)
+        self.gate.set()
+        await self.poller.wait_for_runs()
+        self.assertEqual(self.peak, MAX_PARALLEL_NODE_RUNS)
+        self.assertEqual(sorted(self.started), sorted(self.NODES))
+
+    async def test_a_node_waiting_for_a_place_does_not_consume_its_changes(self) -> None:
+        await self._poll_every_node()
+
+        waiting = [n for n in self.NODES if n not in self.started]
+        self.assertEqual(len(waiting), len(self.NODES) - MAX_PARALLEL_NODE_RUNS)
+        self.assertEqual(
+            {self.store.node(n).version for n in waiting}, {self.store.node(waiting[0]).version}
+        )
+        self.gate.set()
+        await self.poller.wait_for_runs()
+
+    async def test_stop_cancels_running_and_waiting_nodes(self) -> None:
+        await self._poll_every_node()
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            await self.poller.stop()
+            await asyncio.sleep(0)  # the loop drops its last reference to the cancelled tasks
+            gc.collect()
+
+        self.assertEqual(self.poller._node_runs, {})
+        self.assertEqual(len(self.started), MAX_PARALLEL_NODE_RUNS)
+        self.assertEqual([w for w in caught if "never awaited" in str(w.message)], [])

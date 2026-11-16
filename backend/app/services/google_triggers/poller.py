@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -45,6 +45,9 @@ from app.services.trigger_run_dispatch import (
 logger = logging.getLogger("google_triggers")
 
 MAX_RUNS_PER_POLL = 50
+# A node's runs hold a database connection for each whole run (`run_trigger_workflow`), as
+# cron's and the Gmail poller's do, so the same number of nodes run at once.
+MAX_PARALLEL_NODE_RUNS = 4
 TICK_SECONDS = 15
 PRE_DISPATCH_ATTEMPTS = 3
 
@@ -98,6 +101,9 @@ class GoogleTriggerPoller:
         self._secret = secret
         self._running = False
         self._task: asyncio.Task | None = None
+        # Each node's runs for one poll, so a slow workflow holds up only its own trigger.
+        self._node_runs: dict[tuple[uuid.UUID, str], asyncio.Task] = {}
+        self._parallel_node_runs = asyncio.Semaphore(MAX_PARALLEL_NODE_RUNS)
 
     async def start(self) -> None:
         """Start the background loop."""
@@ -116,6 +122,10 @@ class GoogleTriggerPoller:
                 await self._task
             except asyncio.CancelledError:
                 pass
+        node_runs = list(self._node_runs.values())
+        for run in node_runs:
+            run.cancel()
+        await asyncio.gather(*node_runs, return_exceptions=True)
         logger.info("Google trigger poller stopped")
 
     async def _run_loop(self) -> None:
@@ -160,6 +170,9 @@ class GoogleTriggerPoller:
             )
             return
 
+        key = (workflow.id, node_id)
+        if key in self._node_runs:
+            return  # the last poll's runs are still going; poll again once they end
         claim = await self._store.claim(workflow.id, node_id, source.poll_minutes)
         if not claim.due:
             return
@@ -210,7 +223,41 @@ class GoogleTriggerPoller:
             )
             return
 
-        await self._consume_and_dispatch(workflow, node_id, source, poll, read.changes)
+        self._start_node_runs(
+            key, self._consume_and_dispatch(workflow, node_id, source, poll, read.changes)
+        )
+
+    def _start_node_runs(self, key: tuple[uuid.UUID, str], runs: Coroutine[Any, Any, None]) -> None:
+        """Run one node's changes in order without making the poll pass wait for them."""
+        task = asyncio.create_task(self._log_failure(key, runs))
+        self._node_runs[key] = task
+
+        def _forget(done: asyncio.Task) -> None:
+            if self._node_runs.get(key) is done:
+                del self._node_runs[key]
+
+        task.add_done_callback(_forget)
+
+    async def _log_failure(
+        self, key: tuple[uuid.UUID, str], runs: Coroutine[Any, Any, None]
+    ) -> None:
+        """Run one node's changes once fewer than ``MAX_PARALLEL_NODE_RUNS`` nodes are running."""
+        try:
+            async with self._parallel_node_runs:
+                await runs
+        except Exception:
+            logger.exception("Google trigger runs failed for workflow %s node %s", *key)
+        finally:
+            runs.close()  # stop() while waiting for a place: the runs never started
+
+    async def wait_for_runs(self) -> None:
+        """Wait until every node's started runs have ended."""
+        while self._node_runs:
+            await asyncio.gather(*list(self._node_runs.values()), return_exceptions=True)
+            # Awaiting finished tasks does not yield, so their done callbacks have not run yet.
+            for key, run in list(self._node_runs.items()):
+                if run.done():
+                    del self._node_runs[key]
 
     async def _consume_and_dispatch(
         self,

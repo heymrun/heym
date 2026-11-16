@@ -139,6 +139,7 @@ from app.services.hitl_service import (
 from app.services.hitl_widget_service import ensure_saved_filter_allowed
 from app.services.html_response import build_html_response, find_sole_html_terminal
 from app.services.instance_admin import is_instance_admin
+from app.services.json_text_search import json_text_ilike
 from app.services.k8s_credentials.store import CredentialUnavailableError
 from app.services.node_analytics_rollup import pending_on_first_write
 from app.services.pending_execution import needs_local_pending_persist
@@ -150,6 +151,7 @@ from app.services.run_history_list import (
     run_history_rows,
 )
 from app.services.run_history_list import filters_to_workflow_runs as filters_to_workflow_runs
+from app.services.user_lookup import find_user_by_email
 from app.services.workflow_access import (
     PERMISSION_WRITE,
     disable_alerts_without_access,
@@ -1199,8 +1201,8 @@ async def get_execution_history_entry(
 async def list_all_execution_history(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    limit: int = 50,
-    offset: int = 0,
+    limit: Annotated[int, Query(ge=0)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
     search: str | None = None,
     execution_status: str | None = Query(default=None, alias="status"),
     trigger_source: str | None = Query(default=None),
@@ -2217,8 +2219,8 @@ async def list_workflow_versions(
     workflow_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    limit: int = 50,
-    offset: int = 0,
+    limit: Annotated[int, Query(ge=0)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[WorkflowVersionResponse]:
     workflow = await get_workflow_for_user(db, workflow_id, current_user.id)
 
@@ -2538,8 +2540,7 @@ async def create_workflow_share(
             detail="Only owner can add shares",
         )
 
-    result = await db.execute(select(User).where(User.email == share_data.email))
-    target_user = result.scalar_one_or_none()
+    target_user = await find_user_by_email(db, share_data.email)
     if target_user is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -3922,8 +3923,8 @@ async def get_execution_history(
     workflow_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    limit: int = 50,
-    offset: int = 0,
+    limit: Annotated[int, Query(ge=0)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
     search: str | None = None,
     trigger_source: str | None = Query(default=None),
     instance_id: str | None = Query(default=None),
@@ -3959,9 +3960,10 @@ async def get_execution_history(
             or_(
                 ExecutionHistory.status.ilike(pattern),
                 ExecutionHistory.trigger_source.ilike(pattern),
+                # jsonb: its text holds the characters, never JSON escapes.
                 cast(ExecutionHistory.inputs, String).ilike(pattern),
                 cast(ExecutionHistory.outputs, String).ilike(pattern),
-                cast(ExecutionHistory.node_results, String).ilike(pattern),
+                json_text_ilike(ExecutionHistory.node_results, search),
             )
         )
     total_query = apply_instance_filter(total_query, instance_id)
@@ -3979,9 +3981,10 @@ async def get_execution_history(
             or_(
                 ExecutionHistory.status.ilike(pattern),
                 ExecutionHistory.trigger_source.ilike(pattern),
+                # jsonb: its text holds the characters, never JSON escapes.
                 cast(ExecutionHistory.inputs, String).ilike(pattern),
                 cast(ExecutionHistory.outputs, String).ilike(pattern),
-                cast(ExecutionHistory.node_results, String).ilike(pattern),
+                json_text_ilike(ExecutionHistory.node_results, search),
             )
         )
     history_result = await db.execute(

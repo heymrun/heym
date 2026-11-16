@@ -36,11 +36,12 @@ def _is_template_visible(
     if template.visibility == TemplateVisibility.everyone:
         return True
     if template.visibility == TemplateVisibility.specific_users:
-        user_email = getattr(user, "email", None)
+        user_email = str(getattr(user, "email", None) or "").strip().lower()
+        # Addresses are matched as sign-in matches them: in any letter case.
         if (
             user_email
             and isinstance(template.shared_with, list)
-            and user_email in template.shared_with
+            and any(str(entry).strip().lower() == user_email for entry in template.shared_with)
         ):
             return True
         if (

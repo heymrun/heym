@@ -11,10 +11,11 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
-from sqlalchemy import ColumnElement, Float, Select, String, case, cast, func, or_, select
+from sqlalchemy import ColumnElement, Float, Select, case, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Credential, LLMTrace, Workflow
+from app.services.json_text_search import json_text_ilike
 from app.services.llm_pricing import resolve_costs_for_user
 
 CostResolver = Callable[
@@ -198,8 +199,8 @@ def trace_search_clause(search: str) -> ColumnElement[bool]:
         LLMTrace.node_label.ilike(pattern),
         Workflow.name.ilike(pattern),
         Credential.name.ilike(pattern),
-        cast(LLMTrace.request, String).ilike(pattern),
-        cast(LLMTrace.response, String).ilike(pattern),
+        json_text_ilike(LLMTrace.request, search),
+        json_text_ilike(LLMTrace.response, search),
     )
 
 
