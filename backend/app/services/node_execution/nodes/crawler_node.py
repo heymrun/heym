@@ -69,7 +69,7 @@ def execute(ctx: NodeExecutionContext) -> object:
         raise ValueError("FlareSolverr credential not found or missing URL")
 
     url_template = node_data.get("crawlerUrl", "$input.text")
-    target_url = self.evaluate_message_template(url_template, inputs, node_id)
+    target_url = self.evaluate_nonempty_message_template(url_template, inputs, node_id).strip()
     if not target_url:
         raise ValueError("Crawler node requires a URL to crawl")
 

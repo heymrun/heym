@@ -45,10 +45,11 @@ def execute(ctx: NodeExecutionContext) -> object:
     client = get_grist_client(server_url, api_key)
 
     doc_id_template = node_data.get("gristDocId", "")
-    doc_id = self.evaluate_message_template(doc_id_template, inputs, node_id)
+    # Blank stays blank, so the checks below fire instead of a request named after the inputs.
+    doc_id = self.evaluate_nonempty_message_template(doc_id_template, inputs, node_id)
 
     table_id_template = node_data.get("gristTableId", "")
-    table_id = self.evaluate_message_template(table_id_template, inputs, node_id)
+    table_id = self.evaluate_nonempty_message_template(table_id_template, inputs, node_id)
 
     # Both come from workflow data or upstream input, so they are encoded before
     # they reach a path: httpx resolves "../" and would rewrite the endpoint.
@@ -83,7 +84,7 @@ def execute(ctx: NodeExecutionContext) -> object:
         if not doc_id or not table_id:
             raise ValueError("Grist getRecord requires document ID and table ID")
         record_id_template = node_data.get("gristRecordId", "")
-        record_id = self.evaluate_message_template(record_id_template, inputs, node_id)
+        record_id = self.evaluate_nonempty_message_template(record_id_template, inputs, node_id)
         if not record_id:
             raise ValueError("Grist getRecord requires a record ID")
         filter_param = json.dumps({"id": [int(record_id)]})
@@ -210,7 +211,7 @@ def execute(ctx: NodeExecutionContext) -> object:
         if not doc_id or not table_id:
             raise ValueError("Grist updateRecord requires document ID and table ID")
         record_id_template = node_data.get("gristRecordId", "")
-        record_id = self.evaluate_message_template(record_id_template, inputs, node_id)
+        record_id = self.evaluate_nonempty_message_template(record_id_template, inputs, node_id)
         if not record_id:
             raise ValueError("Grist updateRecord requires a record ID")
         record_data_template = node_data.get("gristRecordData", "{}")
@@ -273,12 +274,14 @@ def execute(ctx: NodeExecutionContext) -> object:
         record_ids_template = node_data.get("gristRecordIds", "")
         if not record_ids_template:
             record_id_template = node_data.get("gristRecordId", "")
-            record_id = self.evaluate_message_template(record_id_template, inputs, node_id)
+            record_id = self.evaluate_nonempty_message_template(record_id_template, inputs, node_id)
             if not record_id:
                 raise ValueError("Grist deleteRecord requires record ID(s)")
             record_ids = [int(record_id)]
         else:
-            record_ids_str = self.evaluate_message_template(record_ids_template, inputs, node_id)
+            record_ids_str = self.evaluate_nonempty_message_template(
+                record_ids_template, inputs, node_id
+            )
             try:
                 record_ids = (
                     json.loads(record_ids_str)
