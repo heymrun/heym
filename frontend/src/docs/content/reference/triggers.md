@@ -13,6 +13,7 @@ Start nodes (no incoming edges) that initiate execution:
 | [Telegram Trigger](../nodes/telegram-trigger-node.md) | Starts when Telegram sends a bot webhook update to the node-specific webhook URL. |
 | [Discord Trigger](../nodes/discord-trigger-node.md) | Starts when Discord sends an Interactions API webhook to the node-specific endpoint. |
 | [IMAP Trigger](../nodes/imap-trigger-node.md) | Polls an IMAP mailbox and starts once for each newly detected email. |
+| [Gmail Trigger](../nodes/gmail-trigger-node.md) | Polls a Gmail mailbox, tab or label through the Gmail API and starts once for each new email. |
 | [Google Drive Trigger](../nodes/google-drive-trigger-node.md) | Polls a Drive folder or file and starts once per created, updated, or deleted file. |
 | [Google Sheets Trigger](../nodes/google-sheets-trigger-node.md) | Polls a sheet tab and starts once per added, updated, or deleted row. |
 | [Heym Trigger](../nodes/heym-trigger-node.md) | Starts when Heym publishes a platform event. Events in one dispatch window arrive together as an array. |
@@ -31,6 +32,7 @@ Start nodes (no incoming edges) that initiate execution:
 | **Board** | [Board](../tabs/board-tab.md) card move / follow-up run into a column with a workflow chain (`trigger_source="board"`) | JWT (board owner) |
 | **Cron** | Cron scheduler (runs every 60s, evaluates cron expressions) | N/A |
 | **IMAP** | IMAP trigger manager (leader worker, per-node polling interval) | IMAP username/password |
+| **Gmail** | Gmail trigger manager (leader worker, per-node polling interval) | Gmail OAuth2 credential |
 | **Google Drive / Sheets** | Google trigger poller (leader worker, per-node polling interval) | Google OAuth2 credential |
 | **WebSocket** | Outbound WebSocket trigger manager (leader worker, persistent client connections) | Optional per-node headers |
 | **File Upload** | `POST /api/file-intake/u/{token}` after a slot is minted | Single-use capability token |
@@ -64,6 +66,10 @@ The cron scheduler runs every 60 seconds, finds workflows with active `cron` nod
 ### IMAP
 
 The IMAP trigger manager runs in the leader worker and checks active `imapTrigger` nodes on their configured `pollIntervalMinutes`. Each node stores an IMAP cursor (`UIDVALIDITY` + last seen UID). Input includes `email` (with its `uid` and `uidvalidity`), `triggered_by: "imap"`, `trigger_node_id`, and `triggered_at`. The input carries attachment metadata only, never file contents. With **Download attachments to Drive** on, the trigger node fetches the email again by UID during the run and saves its attachments to Heym Drive, so those runs stay on the [main instance](./cluster.md).
+
+### Gmail
+
+The Gmail trigger manager runs in the leader worker and checks active `gmailTrigger` nodes on their `pollIntervalMinutes`. Each node stores a cursor in the database: the Gmail history id it has read up to, and which account it belongs to. Each email is taken by moving the cursor before its run starts, so it runs once across every worker and instance. Input includes `email` (with its Gmail `id`, `threadId` and `labelIds`), `triggered_by: "gmail"`, `trigger_node_id`, and `triggered_at`. After the run has started, the node's after-run action (mark read, archive, move to Trash) is applied. With **Download attachments to Drive** on, the trigger node fetches the email again by its Gmail id during the run, so those runs stay on the [main instance](./cluster.md).
 
 ### Google Drive and Google Sheets
 
@@ -109,7 +115,7 @@ A workflow with a [concurrency limit](./webhooks.md#concurrency-limit-and-queued
 | SSE streaming, Quick Drawer, Portal chat | The stream stays open and sends `queued` events |
 | Portal without streaming | The request waits for the result |
 | MCP | A `queued` result to poll with `heym_execution_status` |
-| Cron, IMAP, Google Drive / Sheets, WebSocket, RabbitMQ, Slack, Discord, Telegram, Heym events, error workflows, Dashboard run widgets | The trigger waits for the result, as long as a run on another [instance](./cluster.md) would. The run executes either way and is written to history |
+| Cron, IMAP, Gmail, Google Drive / Sheets, WebSocket, RabbitMQ, Slack, Discord, Telegram, Heym events, error workflows, Dashboard run widgets | The trigger waits for the result, as long as a run on another [instance](./cluster.md) would. The run executes either way and is written to history |
 
 When the queue is full, the run does not start and history records it as `queue_full`. Editor test runs, sub-workflow calls ([Execute](../nodes/execute-node.md) node and agent workflow tools), [Evals](../tabs/evals-tab.md), chat build-mode test runs and review resumes are never queued. [Board](../tabs/board-tab.md) card runs, [File Upload](../nodes/file-upload-trigger-node.md) runs, runs started by the AI assistant's run-workflow tool, and alert notify workflows also start without waiting for a slot.
 
@@ -124,6 +130,7 @@ Execution history records `trigger_source` for every entry point:
 | `"Quick Drawer"` | Run from the editor quick-drawer panel, including file runs uploaded from its drop zone |
 | `"cron"` | Cron scheduler |
 | `"imap"` | IMAP trigger manager |
+| `"gmail"` | Gmail trigger manager |
 | `"google_drive"` | Google Drive Trigger poller |
 | `"google_sheets"` | Google Sheets Trigger poller |
 | `"websocket"` | Outbound WebSocket trigger manager |
@@ -146,6 +153,7 @@ Execution history records `trigger_source` for every entry point:
 - **Telegram**: `update` + `message` + optional `callback_query` + sanitized `headers` + `triggered_by: "telegram"` + `trigger_node_id` + `triggered_at`
 - **Discord**: `interaction` + `type` + `data` + sanitized `headers` + `triggered_by: "Discord"` + `trigger_node_id` + `triggered_at`
 - **IMAP**: `email` (including `uid` and `uidvalidity`) + `triggered_by: "imap"` + `trigger_node_id` + `triggered_at`
+- **Gmail**: `email` (including `id`, `threadId` and `labelIds`) + `triggered_by: "gmail"` + `trigger_node_id` + `triggered_at`
 - **Google Drive / Sheets**: `change` + `triggered_by: "google_drive"` or `"google_sheets"` + `trigger_node_id` + `triggered_at`
 - **WebSocket**: `eventName` + `url` + `triggered_by: "websocket"` + `message` / `connection` / `close`
 - **File Upload**: `file` + `uploaded_at` + `triggered_by: "file_upload"`
@@ -157,7 +165,7 @@ Execution history records `trigger_source` for every entry point:
 
 - [Webhooks](./webhooks.md) – Webhook TTL, cache, rate limit, auth
 - [Workflow Structure](./workflow-structure.md) – Nodes and edges
-- [Node Types](./node-types.md) – [Input](../nodes/input-node.md), [Cron](../nodes/cron-node.md), [Telegram Trigger](../nodes/telegram-trigger-node.md), [IMAP Trigger](../nodes/imap-trigger-node.md), [Google Drive Trigger](../nodes/google-drive-trigger-node.md), [Google Sheets Trigger](../nodes/google-sheets-trigger-node.md), [Heym Trigger](../nodes/heym-trigger-node.md), [WebSocket Trigger](../nodes/websocket-trigger-node.md), [File Upload Trigger](../nodes/file-upload-trigger-node.md), [RabbitMQ](../nodes/rabbitmq-node.md)
+- [Node Types](./node-types.md) – [Input](../nodes/input-node.md), [Cron](../nodes/cron-node.md), [Telegram Trigger](../nodes/telegram-trigger-node.md), [IMAP Trigger](../nodes/imap-trigger-node.md), [Gmail Trigger](../nodes/gmail-trigger-node.md), [Google Drive Trigger](../nodes/google-drive-trigger-node.md), [Google Sheets Trigger](../nodes/google-sheets-trigger-node.md), [Heym Trigger](../nodes/heym-trigger-node.md), [WebSocket Trigger](../nodes/websocket-trigger-node.md), [File Upload Trigger](../nodes/file-upload-trigger-node.md), [RabbitMQ](../nodes/rabbitmq-node.md)
 - [Discord Trigger](../nodes/discord-trigger-node.md) – Discord interactions webhook trigger
 - [Quick Start](../getting-started/quick-start.md) – Build a workflow with Input
 - [Portal](./portal.md) – Portal trigger and chat UI

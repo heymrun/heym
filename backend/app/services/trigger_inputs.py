@@ -8,6 +8,7 @@ it also copies the text into its value.
 INITIAL_INPUT_TRIGGER_TYPES = frozenset(
     {
         "imapTrigger",
+        "gmailTrigger",
         "websocketTrigger",
         "slackTrigger",
         "discordTrigger",

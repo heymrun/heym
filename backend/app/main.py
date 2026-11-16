@@ -48,6 +48,8 @@ from app.api import (
     files,
     folders,
     global_variables,
+    gmail,
+    gmail_oauth,
     google_drive_oauth,
     google_meet_oauth,
     google_sheets,
@@ -105,6 +107,7 @@ from app.services.execution_cancellation import (
 )
 from app.services.execution_recovery import execution_recovery_service
 from app.services.file_sandbox.chat_workspaces import run_idle_sweeper
+from app.services.gmail_trigger.poller import gmail_trigger_manager
 from app.services.google_triggers.poller import google_trigger_poller
 from app.services.grist_pool import close_all_clients as close_grist_clients
 from app.services.grist_pool import warm_up_pools as warm_up_grist_pools
@@ -256,6 +259,7 @@ async def lifespan(app: FastAPI):
     await reconcile_orphaned_board_runs()
     await imap_trigger_manager.start()
     await google_trigger_poller.start()
+    await gmail_trigger_manager.start()
     await rabbitmq_consumer_manager.start()
     await websocket_trigger_manager.start()
     await heym_event_dispatcher.start()
@@ -270,6 +274,7 @@ async def lifespan(app: FastAPI):
     await heym_event_dispatcher.stop()
     await websocket_trigger_manager.stop()
     await rabbitmq_consumer_manager.stop()
+    await gmail_trigger_manager.stop()
     await google_trigger_poller.stop()
     await imap_trigger_manager.stop()
     await RabbitMQPool.close_all()
@@ -401,6 +406,11 @@ app.include_router(
     tags=["Google Meet OAuth"],
 )
 app.include_router(
+    gmail_oauth.router,
+    prefix="/api/credentials/gmail/oauth",
+    tags=["Gmail OAuth"],
+)
+app.include_router(
     google_drive_oauth.router,
     prefix="/api/credentials/google-drive/oauth",
     tags=["Google Drive OAuth"],
@@ -466,6 +476,7 @@ app.include_router(decisions.router, prefix="/api/decisions", tags=["Decisions"]
 app.include_router(slack.router, prefix="/api/slack", tags=["Slack"])
 app.include_router(slack_bot.router, prefix="/api/slack", tags=["Slack"])
 app.include_router(google_sheets.router, prefix="/api/google-sheets", tags=["Google Sheets"])
+app.include_router(gmail.router, prefix="/api/gmail", tags=["Gmail"])
 app.include_router(discord.router, prefix="/api/discord", tags=["Discord"])
 app.include_router(telegram.router, prefix="/api/telegram", tags=["Telegram"])
 app.include_router(schedules.router, prefix="/api/schedules", tags=["Schedules"])

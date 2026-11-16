@@ -10,6 +10,7 @@ export const TRIGGER_NODE_TYPES = new Set([
   "slackTrigger",
   "discordTrigger",
   "imapTrigger",
+  "gmailTrigger",
   "googleDriveTrigger",
   "googleSheetsTrigger",
   "websocketTrigger",

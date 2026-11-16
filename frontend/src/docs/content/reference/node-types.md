@@ -12,6 +12,7 @@ Heym provides a variety of node types for building workflows. Use [expressions](
 | [Slack Trigger](../nodes/slack-trigger-node.md) | Trigger when Slack sends an Events API webhook | 1 |
 | [Discord Trigger](../nodes/discord-trigger-node.md) | Trigger when Discord sends an application interaction webhook | 1 |
 | [IMAP Trigger](../nodes/imap-trigger-node.md) | Trigger when a new email arrives in an IMAP mailbox | 1 |
+| [Gmail Trigger](../nodes/gmail-trigger-node.md) | Trigger when a new email arrives in a Gmail mailbox, tab or label; can mark it read, archive it or move it to Trash | 1 |
 | [Google Drive Trigger](../nodes/google-drive-trigger-node.md) | Trigger when a file is created, updated, or deleted in a Drive folder | 1 |
 | [Google Sheets Trigger](../nodes/google-sheets-trigger-node.md) | Trigger when a row is added, updated, or deleted in a sheet | 1 |
 | [Heym Trigger](../nodes/heym-trigger-node.md) | Trigger when Heym publishes a platform event (batched array) | 1 |

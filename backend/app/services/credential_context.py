@@ -72,12 +72,14 @@ _GOOGLE_OAUTH_TYPES = (
     CredentialType.google_sheets,
     CredentialType.google_drive,
     CredentialType.google_meet,
+    CredentialType.gmail,
 )
 
 
 def _fresh_google_access_token(credential: Credential, config: dict[str, Any]) -> str:
     """Return the credential's access token, refreshing and persisting it when expired."""
     from app.db.session import SessionLocal
+    from app.services.gmail_service import GmailService
     from app.services.google_drive_service import GoogleDriveService
     from app.services.google_meet_service import GoogleMeetService
     from app.services.google_sheets_service import GoogleSheetsService
@@ -86,6 +88,7 @@ def _fresh_google_access_token(credential: Credential, config: dict[str, Any]) -
         CredentialType.google_sheets: GoogleSheetsService,
         CredentialType.google_drive: GoogleDriveService,
         CredentialType.google_meet: GoogleMeetService,
+        CredentialType.gmail: GmailService,
     }[credential.type]
     try:
         with SessionLocal() as db:

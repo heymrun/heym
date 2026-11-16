@@ -138,6 +138,7 @@ export function usePropertiesPanelController() {
     discord: "node-discord",
     discordTrigger: "node-discord",
     imapTrigger: "node-email",
+    gmailTrigger: "node-gmail",
     googleDriveTrigger: "node-google-drive",
     googleSheetsTrigger: "node-google-sheets",
     heym: "node-heym",

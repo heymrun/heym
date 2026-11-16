@@ -5,6 +5,7 @@ import axios from "axios";
 import { buildLegacyWebhookBody, getHistoryWebhookBody, parseWebhookJson, stringifyWebhookJson } from "@/lib/webhookBody";
 import { getLatestNodeResultForNode } from "@/lib/executionLog";
 import { googleTriggerProblems } from "@/lib/googleTriggerConfig";
+import { gmailTriggerProblems } from "@/lib/gmailTriggerConfig";
 import { getSentryOperationMetadata } from "@/lib/sentryExpressionFields";
 import { replaceNodeLabelRefs } from "@/lib/utils";
 import { workflowRunNodeIds } from "@/lib/workflowRunScope";
@@ -2612,6 +2613,25 @@ export const useWorkflowStore = defineStore("workflow", () => {
             nodeLabel: node.data.label,
             nodeType: "IMAP Trigger",
             message: "Poll interval must be at least 1 minute",
+          });
+        }
+      }
+
+      if (node.type === "gmailTrigger") {
+        if (!node.data.credentialId || !isValidUUID(node.data.credentialId)) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "Gmail Trigger",
+            message: "Credential is not selected",
+          });
+        }
+        for (const message of gmailTriggerProblems(node.data)) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "Gmail Trigger",
+            message,
           });
         }
       }

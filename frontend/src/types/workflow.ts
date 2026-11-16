@@ -176,6 +176,21 @@ export interface AgentSkill {
 /** Changes a Google Drive or Google Sheets trigger can start a run for. */
 export type GoogleTriggerEvent = "created" | "updated" | "deleted";
 
+export type GmailMailbox =
+  | "inbox"
+  | "primary"
+  | "social"
+  | "promotions"
+  | "updates"
+  | "forums"
+  | "important"
+  | "starred"
+  | "sent"
+  | "all"
+  | "label";
+
+export type GmailAfterAction = "none" | "markRead" | "archive" | "markReadAndArchive" | "trash";
+
 export type NodeType =
   | "textInput"
   | "cron"
@@ -229,6 +244,7 @@ export type NodeType =
   | "throwError"
   | "rabbitmq"
   | "imapTrigger"
+  | "gmailTrigger"
   | "heym"
   | "heymTrigger"
   | "crawler"
@@ -539,6 +555,17 @@ export interface NodeData {
   pollIntervalMinutes?: number;
   /** imapTrigger: save each attachment of the email to the owner's Heym Drive during the run. */
   imapDownloadAttachments?: boolean;
+  /** gmailTrigger: which mail starts a run (inbox, a tab, a system mailbox, all mail or a label). */
+  gmailMailbox?: GmailMailbox;
+  /** gmailTrigger: Gmail label id when gmailMailbox is "label"; gmailLabelName is its display name. */
+  gmailLabelId?: string;
+  gmailLabelName?: string;
+  /** gmailTrigger: only email sent or delivered to one of these addresses starts a run. */
+  gmailAliases?: string[];
+  /** gmailTrigger: save each attachment of the email to the owner's Heym Drive during the run. */
+  gmailDownloadAttachments?: boolean;
+  /** gmailTrigger: what Heym does to the email once its run has started. */
+  gmailAfterAction?: GmailAfterAction;
   /** heymTrigger: platform events to subscribe to; empty means every event. */
   eventNames?: string[];
   /** heym: which Heym read to perform. */

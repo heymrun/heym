@@ -52,6 +52,16 @@ class TestBuildAssistantPromptNodeTemplates(unittest.TestCase):
         self.assertIn("pollIntervalMinutes", prompt)
         self.assertIn("imap-credential-uuid", prompt)
 
+    def test_includes_gmail_trigger_guidance(self) -> None:
+        prompt = build_assistant_prompt()
+
+        self.assertIn("### 3i. gmailTrigger", prompt)
+        self.assertIn("gmail-credential-uuid", prompt)
+        for field in ("gmailMailbox", "gmailLabelId", "gmailAliases", "gmailAfterAction"):
+            self.assertIn(field, prompt)
+        self.assertIn('"markReadAndArchive"', prompt)
+        self.assertIn("Never a permanent delete", prompt)
+
     def test_includes_google_trigger_guidance(self) -> None:
         prompt = build_assistant_prompt()
 

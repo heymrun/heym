@@ -1159,6 +1159,7 @@ function getDefaultNodeData(type: NodeType): WorkflowNode["data"] {
     throwError: { label: "throwError", errorMessage: "$input.text", httpStatusCode: 400 },
     rabbitmq: { label: "rabbitmq", credentialId: "", rabbitmqOperation: undefined, rabbitmqExchange: "", rabbitmqRoutingKey: "", rabbitmqQueueName: "", rabbitmqMessageBody: "$input", rabbitmqDelayMs: undefined },
     imapTrigger: { label: "imapTrigger", credentialId: "", pollIntervalMinutes: 5 },
+    gmailTrigger: { label: "gmailTrigger", credentialId: "", pollIntervalMinutes: 1, gmailMailbox: "inbox", gmailLabelId: "", gmailLabelName: "", gmailAliases: [], gmailDownloadAttachments: false, gmailAfterAction: "none" },
     googleDriveTrigger: { label: "driveTrigger", credentialId: "", gdtScope: "folder", gdtFolderId: "", gdtFileId: "", gdtEvents: ["created", "updated", "deleted"], gdtIncludeFolders: false, pollIntervalMinutes: 1 },
     googleSheetsTrigger: { label: "sheetTrigger", credentialId: "", gstSpreadsheetId: "", gstSheetName: "Sheet1", gstHasHeader: true, gstKeyColumn: "", gstEvents: ["created", "updated", "deleted"], pollIntervalMinutes: 1 },
     heymTrigger: { label: "heymTrigger", eventNames: [] },

@@ -69,7 +69,7 @@ def _skipped(item: dict[str, Any], reason: str) -> dict[str, Any]:
     }
 
 
-def _unavailable(email: dict[str, Any]) -> dict[str, Any]:
+def unavailable(email: dict[str, Any]) -> dict[str, Any]:
     items = [_skipped(item, UNAVAILABLE) for item in metadata_items(email)]
     return {"attachments": items, "file_ids": []}
 
@@ -90,7 +90,7 @@ def _load_credential_config(ctx: NodeExecutionContext) -> dict[str, Any]:
         return decrypt_config(credential.encrypted_config)
 
 
-def _plan(attachments: list[EmailAttachment], max_bytes: int) -> list[_Planned]:
+def plan_attachments(attachments: list[EmailAttachment], max_bytes: int) -> list[_Planned]:
     """Which attachments to save, in email order: too large first, then the cap of ten."""
     planned: list[_Planned] = []
     kept = 0
@@ -136,8 +136,18 @@ def _storable_name(filename: str) -> str:
         return "attachment"
 
 
-def _store(
-    ctx: NodeExecutionContext, planned: list[_Planned], email: dict[str, Any]
+def _imap_metadata(email: dict[str, Any]) -> dict[str, str]:
+    metadata = {"imap_uid": str(email.get("uid") or "")}
+    if email.get("messageId"):
+        metadata["message_id"] = str(email["messageId"])
+    return metadata
+
+
+def store_attachments(
+    ctx: NodeExecutionContext,
+    planned: list[_Planned],
+    metadata: dict[str, str],
+    context: str = "IMAP Trigger",
 ) -> list[dict[str, Any]]:
     """Every kept attachment into Drive in one transaction; on any failure none of them stays."""
     from app.db.session import SessionLocal
@@ -146,11 +156,8 @@ def _store(
     executor = ctx.executor
     owner_id = getattr(executor, "trace_user_id", None)
     if not owner_id:
-        raise ValueError("IMAP Trigger: no owner context available to store the attachments")
+        raise ValueError(f"{context}: no owner context available to store the attachments")
     workflow_id = as_uuid(getattr(executor, "workflow_id", None))
-    metadata = {"imap_uid": str(email.get("uid") or "")}
-    if email.get("messageId"):
-        metadata["message_id"] = str(email["messageId"])
 
     items: list[dict[str, Any]] = []
     written: list[Path] = []
@@ -178,7 +185,7 @@ def _store(
                     workflow_id=workflow_id,
                     source_node_id=ctx.node_id,
                     source_node_label=ctx.node_label,
-                    context="IMAP Trigger",
+                    context=context,
                 )
                 written.append(get_file_path(row))
                 row.metadata_json = dict(metadata)
@@ -214,7 +221,7 @@ def download_attachments(ctx: NodeExecutionContext, email: dict[str, Any]) -> di
     uid = str(email.get("uid") or "").strip()
     uidvalidity = str(email.get("uidvalidity") or "").strip()
     if not uid or not uidvalidity:
-        return _unavailable(email)
+        return unavailable(email)
 
     credential_config = _load_credential_config(ctx)
     try:
@@ -223,17 +230,17 @@ def download_attachments(ctx: NodeExecutionContext, email: dict[str, Any]) -> di
         )
     except Exception as exc:
         logger.warning("IMAP Trigger could not fetch uid=%s to save its attachments: %s", uid, exc)
-        return _unavailable(email)
+        return unavailable(email)
     if raw_bytes is None:
-        return _unavailable(email)
+        return unavailable(email)
 
     message_id, attachments = imap_trigger_service.email_attachments(raw_bytes)
     expected_id = str(email.get("messageId") or "")
     if expected_id and message_id and expected_id != message_id:
-        return _unavailable(email)
+        return unavailable(email)
 
     max_bytes = settings.file_max_size_mb * 1024 * 1024
-    items = _store(ctx, _plan(attachments, max_bytes), email)
+    items = store_attachments(ctx, plan_attachments(attachments, max_bytes), _imap_metadata(email))
     return {
         "attachments": items,
         "file_ids": [item["id"] for item in items if item["id"]],
