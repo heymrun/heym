@@ -45,6 +45,9 @@ from app.services.trigger_run_dispatch import (
 logger = logging.getLogger("google_triggers")
 
 MAX_RUNS_PER_POLL = 50
+# A node's runs hold a database connection for each whole run (`run_trigger_workflow`), as
+# cron's and the Gmail poller's do, so the same number of nodes run at once.
+MAX_PARALLEL_NODE_RUNS = 4
 TICK_SECONDS = 15
 PRE_DISPATCH_ATTEMPTS = 3
 
@@ -100,6 +103,7 @@ class GoogleTriggerPoller:
         self._task: asyncio.Task | None = None
         # Each node's runs for one poll, so a slow workflow holds up only its own trigger.
         self._node_runs: dict[tuple[uuid.UUID, str], asyncio.Task] = {}
+        self._parallel_node_runs = asyncio.Semaphore(MAX_PARALLEL_NODE_RUNS)
 
     async def start(self) -> None:
         """Start the background loop."""
@@ -234,12 +238,17 @@ class GoogleTriggerPoller:
 
         task.add_done_callback(_forget)
 
-    @staticmethod
-    async def _log_failure(key: tuple[uuid.UUID, str], runs: Coroutine[Any, Any, None]) -> None:
+    async def _log_failure(
+        self, key: tuple[uuid.UUID, str], runs: Coroutine[Any, Any, None]
+    ) -> None:
+        """Run one node's changes once fewer than ``MAX_PARALLEL_NODE_RUNS`` nodes are running."""
         try:
-            await runs
+            async with self._parallel_node_runs:
+                await runs
         except Exception:
             logger.exception("Google trigger runs failed for workflow %s node %s", *key)
+        finally:
+            runs.close()  # stop() while waiting for a place: the runs never started
 
     async def wait_for_runs(self) -> None:
         """Wait until every node's started runs have ended."""

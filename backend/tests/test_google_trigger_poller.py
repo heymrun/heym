@@ -1,8 +1,10 @@
 """Poller: baseline, one run per change, carryover, CAS loss, revert, skip on errors."""
 
 import asyncio
+import gc
 import unittest
 import uuid
+import warnings
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -14,7 +16,11 @@ from app.services.google_triggers.events import (
     PollSkippedError,
     TriggerEvent,
 )
-from app.services.google_triggers.poller import MAX_RUNS_PER_POLL, GoogleTriggerPoller
+from app.services.google_triggers.poller import (
+    MAX_PARALLEL_NODE_RUNS,
+    MAX_RUNS_PER_POLL,
+    GoogleTriggerPoller,
+)
 from app.services.google_triggers.state_store import Claim, ClaimedPoll
 from app.services.trigger_run_dispatch import TriggerDispatchNotStartedError
 
@@ -386,3 +392,85 @@ class SlowRunTests(unittest.IsolatedAsyncioTestCase):
         await poller.stop()
 
         self.assertEqual(poller._node_runs, {})
+
+
+class ParallelNodeRunsTests(unittest.IsolatedAsyncioTestCase):
+    """Each node's runs hold a database connection, so at most four nodes run at once."""
+
+    NODES = [f"n{i}" for i in range(12)]
+
+    async def asyncSetUp(self) -> None:
+        self.gate = asyncio.Event()
+        self.in_flight = 0
+        self.peak = 0
+        self.started: list[str] = []
+        self.store = PerNodeStore()
+        self.sources = {node_id: FakeSource() for node_id in self.NODES}
+        self.workflows = {
+            node_id: SimpleNamespace(id=uuid.uuid4(), owner_id=uuid.uuid4())
+            for node_id in self.NODES
+        }
+        self.poller = GoogleTriggerPoller(store=self.store, dispatch=self._dispatch, secret=SECRET)
+        for node_id in self.NODES:
+            await self._poll(node_id)
+            self.sources[node_id].changes = [_change(f"{node_id}-row")]
+
+    async def _dispatch(self, *, inputs, **_kwargs) -> None:
+        self.started.append(inputs["trigger_node_id"])
+        self.in_flight += 1
+        self.peak = max(self.peak, self.in_flight)
+        try:
+            await self.gate.wait()
+        finally:
+            self.in_flight -= 1
+
+    async def _poll(self, node_id: str) -> None:
+        with (
+            patch(
+                "app.services.google_triggers.poller.build_source",
+                return_value=self.sources[node_id],
+            ),
+            patch.object(self.poller, "_load_credential", AsyncMock(return_value={"t": 1})),
+        ):
+            await self.poller.poll_node(
+                self.workflows[node_id], {"id": node_id, "type": "googleSheetsTrigger"}
+            )
+
+    async def _poll_every_node(self) -> None:
+        for node_id in self.NODES:
+            await self._poll(node_id)
+        for _ in range(50):
+            await asyncio.sleep(0)
+
+    async def test_at_most_four_nodes_run_at_once_and_every_node_runs(self) -> None:
+        await self._poll_every_node()
+
+        self.assertEqual(self.in_flight, MAX_PARALLEL_NODE_RUNS)
+        self.gate.set()
+        await self.poller.wait_for_runs()
+        self.assertEqual(self.peak, MAX_PARALLEL_NODE_RUNS)
+        self.assertEqual(sorted(self.started), sorted(self.NODES))
+
+    async def test_a_node_waiting_for_a_place_does_not_consume_its_changes(self) -> None:
+        await self._poll_every_node()
+
+        waiting = [n for n in self.NODES if n not in self.started]
+        self.assertEqual(len(waiting), len(self.NODES) - MAX_PARALLEL_NODE_RUNS)
+        self.assertEqual(
+            {self.store.node(n).version for n in waiting}, {self.store.node(waiting[0]).version}
+        )
+        self.gate.set()
+        await self.poller.wait_for_runs()
+
+    async def test_stop_cancels_running_and_waiting_nodes(self) -> None:
+        await self._poll_every_node()
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            await self.poller.stop()
+            await asyncio.sleep(0)  # the loop drops its last reference to the cancelled tasks
+            gc.collect()
+
+        self.assertEqual(self.poller._node_runs, {})
+        self.assertEqual(len(self.started), MAX_PARALLEL_NODE_RUNS)
+        self.assertEqual([w for w in caught if "never awaited" in str(w.message)], [])
