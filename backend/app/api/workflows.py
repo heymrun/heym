@@ -23,7 +23,7 @@ from fastapi import (
     status,
 )
 from fastapi.responses import JSONResponse, StreamingResponse
-from sqlalchemy import func, or_, select, text
+from sqlalchemy import String, cast, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
@@ -3960,8 +3960,9 @@ async def get_execution_history(
             or_(
                 ExecutionHistory.status.ilike(pattern),
                 ExecutionHistory.trigger_source.ilike(pattern),
-                json_text_ilike(ExecutionHistory.inputs, search),
-                json_text_ilike(ExecutionHistory.outputs, search),
+                # jsonb: its text holds the characters, never JSON escapes.
+                cast(ExecutionHistory.inputs, String).ilike(pattern),
+                cast(ExecutionHistory.outputs, String).ilike(pattern),
                 json_text_ilike(ExecutionHistory.node_results, search),
             )
         )
@@ -3980,8 +3981,9 @@ async def get_execution_history(
             or_(
                 ExecutionHistory.status.ilike(pattern),
                 ExecutionHistory.trigger_source.ilike(pattern),
-                json_text_ilike(ExecutionHistory.inputs, search),
-                json_text_ilike(ExecutionHistory.outputs, search),
+                # jsonb: its text holds the characters, never JSON escapes.
+                cast(ExecutionHistory.inputs, String).ilike(pattern),
+                cast(ExecutionHistory.outputs, String).ilike(pattern),
                 json_text_ilike(ExecutionHistory.node_results, search),
             )
         )

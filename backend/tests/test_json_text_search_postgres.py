@@ -50,7 +50,7 @@ class JsonTextSearchPostgresTests(unittest.TestCase):
             db.add(
                 ExecutionHistory(
                     workflow_id=self.workflow_id,
-                    inputs={"body": {"ticket": "refund"}},
+                    inputs={"body": {"ticket": "refund", "city": "Malmö"}},
                     outputs={"reply": "sent"},
                     node_results=[{"node_label": "draft", "output": {"text": "réponse envoyée"}}],
                     status="success",
@@ -62,7 +62,7 @@ class JsonTextSearchPostgresTests(unittest.TestCase):
                 RunHistory(
                     user_id=self.user_id,
                     run_type="dashboard_chat",
-                    inputs={"message": "Müşteri iadesi nerede?"},
+                    inputs={"message": "Grüße aus Köln, wo bleibt die Erstattung?"},
                     outputs={"text": "queued"},
                     status="success",
                 )
@@ -73,7 +73,7 @@ class JsonTextSearchPostgresTests(unittest.TestCase):
                     workflow_id=self.workflow_id,
                     source="workflow",
                     request_type="chat",
-                    request={"messages": [{"role": "user", "content": "sipariş 42 nerede"}]},
+                    request={"messages": [{"role": "user", "content": "注文 42 はどこですか"}]},
                     response={"text": "Kargoda 📦"},
                 )
             )
@@ -104,17 +104,21 @@ class JsonTextSearchPostgresTests(unittest.TestCase):
 
     def test_history_finds_non_ascii_words_in_node_results_and_chat_runs(self) -> None:
         self.assertEqual(self._history_hits("réponse"), 1)
-        self.assertEqual(self._history_hits("Müşteri"), 1)
+        self.assertEqual(self._history_hits("Grüße"), 1)
         self.assertEqual(self._history_hits("refund"), 1)
 
+    def test_history_finds_non_ascii_words_in_jsonb_run_inputs(self) -> None:
+        # execution_history.inputs is jsonb: its text holds the characters, a plain ILIKE.
+        self.assertEqual(self._history_hits("Malmö"), 1)
+
     def test_traces_find_non_ascii_words_and_emoji(self) -> None:
-        self.assertEqual(self._trace_hits("sipariş"), 1)
+        self.assertEqual(self._trace_hits("注文"), 1)
         self.assertEqual(self._trace_hits("📦"), 1)
-        self.assertEqual(self._trace_hits("nerede"), 1)
+        self.assertEqual(self._trace_hits("どこ"), 1)
 
     def test_a_word_that_is_not_there_still_matches_nothing(self) -> None:
-        self.assertEqual(self._history_hits("Gülşen"), 0)
-        self.assertEqual(self._trace_hits("şehir"), 0)
+        self.assertEqual(self._history_hits("Zürich"), 0)
+        self.assertEqual(self._trace_hits("日本語"), 0)
 
 
 class JsonTextIlikeTests(unittest.TestCase):
@@ -132,10 +136,10 @@ class JsonTextIlikeTests(unittest.TestCase):
         self.assertEqual(params, ["%refund%"])
 
     def test_a_non_ascii_search_also_tries_the_escaped_spelling(self) -> None:
-        sql, params = self._sql(json_text_ilike(LLMTrace.request, "sipariş"))
+        sql, params = self._sql(json_text_ilike(LLMTrace.request, "café"))
 
         self.assertEqual(sql.count("ILIKE"), 2)
-        self.assertEqual(params, ["%sipariş%", "%sipari\\\\u015f%"])
+        self.assertEqual(params, ["%café%", "%caf\\\\u00e9%"])
 
 
 if __name__ == "__main__":

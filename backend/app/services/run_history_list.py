@@ -109,8 +109,9 @@ def run_history_rows(
                 Workflow.name.ilike(pattern),
                 ExecutionHistory.status.ilike(pattern),
                 ExecutionHistory.trigger_source.ilike(pattern),
-                json_text_ilike(ExecutionHistory.inputs, search),
-                json_text_ilike(ExecutionHistory.outputs, search),
+                # jsonb: its text holds the characters, never JSON escapes.
+                cast(ExecutionHistory.inputs, String).ilike(pattern),
+                cast(ExecutionHistory.outputs, String).ilike(pattern),
                 json_text_ilike(ExecutionHistory.node_results, search),
             )
         )
