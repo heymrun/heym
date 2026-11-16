@@ -960,8 +960,9 @@ class TestAutoAdvanceAfterAManualMove(unittest.IsolatedAsyncioTestCase):
     async def test_a_card_moved_away_stays_where_it_was_put(self) -> None:
         from app.db.models import BoardCard
 
-        development, backlog = uuid.uuid4(), uuid.uuid4()
-        card = SimpleNamespace(id=uuid.uuid4(), column_id=backlog, run_status="running")
+        development, review = uuid.uuid4(), uuid.uuid4()
+        # The review column has started its own chain on the moved card.
+        card = SimpleNamespace(id=uuid.uuid4(), column_id=review, run_status="running")
         session = _FakeSession({(BoardCard.__name__, card.id): card})
         auto_advance_on = MagicMock()
         auto_advance_on.scalar_one_or_none.return_value = True
@@ -974,8 +975,8 @@ class TestAutoAdvanceAfterAManualMove(unittest.IsolatedAsyncioTestCase):
             session_factory=lambda: session,
         )
 
-        self.assertEqual(card.column_id, backlog)
-        self.assertEqual(card.run_status, "success")
+        self.assertEqual(card.column_id, review)
+        self.assertEqual(card.run_status, "running")
         self.assertEqual(session.added, [])
         session.execute.assert_awaited_once()  # only the auto-advance setting was read
 
@@ -1011,8 +1012,15 @@ class TestNextLinkIndex(unittest.TestCase):
 
         self.assertEqual(board_run_service._next_link_index(links, run), 3)
 
-    def test_a_removed_paused_workflow_keeps_the_old_position(self) -> None:
-        run = SimpleNamespace(workflow_id=uuid.uuid4(), chain_position=1)
-        links = self._links(uuid.uuid4(), uuid.uuid4(), uuid.uuid4())
+    def test_a_removed_paused_workflow_continues_with_the_link_now_in_its_slot(self) -> None:
+        triage, notify, archive = (uuid.uuid4() for _ in range(3))
+        run = SimpleNamespace(workflow_id=uuid.uuid4(), chain_position=1)  # Approve, removed
+        links = self._links(triage, notify, archive)
 
-        self.assertEqual(board_run_service._next_link_index(links, run), 2)
+        self.assertEqual(links[board_run_service._next_link_index(links, run) :], links[1:])
+
+    def test_a_removed_last_workflow_leaves_nothing_to_run(self) -> None:
+        run = SimpleNamespace(workflow_id=uuid.uuid4(), chain_position=2)
+        links = self._links(uuid.uuid4(), uuid.uuid4())
+
+        self.assertEqual(links[board_run_service._next_link_index(links, run) :], [])

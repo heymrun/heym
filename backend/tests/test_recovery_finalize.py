@@ -201,6 +201,12 @@ class _GetSession:
         return [o for o in self.added if isinstance(o, BoardCardRun)]
 
 
+_LINKS = [
+    {"workflow_id": uuid.uuid4(), "workflow_name": "Plan", "position": 0},
+    {"workflow_id": uuid.uuid4(), "workflow_name": "Build", "position": 1},
+]
+
+
 def _board_env(history_status, *, run_status="running", execution_history_id=None):
     execution_id = uuid.uuid4()
     board = SimpleNamespace(id=uuid.uuid4(), name="Board", owner_id=uuid.uuid4())
@@ -210,7 +216,8 @@ def _board_env(history_status, *, run_status="running", execution_history_id=Non
         id=execution_id,
         card_id=card.id,
         column_id=column.id,
-        workflow_id=uuid.uuid4(),
+        # The run is the chain's first link, Plan.
+        workflow_id=_LINKS[0]["workflow_id"],
         workflow_name="Plan",
         chain_position=0,
         chain_length=2,
@@ -235,12 +242,6 @@ def _board_env(history_status, *, run_status="running", execution_history_id=Non
         }
     )
     return execution_id, run, card, session
-
-
-_LINKS = [
-    {"workflow_id": uuid.uuid4(), "workflow_name": "Plan", "position": 0},
-    {"workflow_id": uuid.uuid4(), "workflow_name": "Build", "position": 1},
-]
 
 
 class SkippedBoardRunTests(unittest.IsolatedAsyncioTestCase):

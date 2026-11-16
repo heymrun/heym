@@ -313,12 +313,12 @@ def _next_link_index(links: list[dict], run: BoardCardRun) -> int:
 
     People may edit the chain while a card waits on a review: removing or adding a link
     renumbers the positions, so the paused run's old position would skip a link or run
-    one twice. Find its workflow, nearest the old position; if it was removed, keep the
-    old position.
+    one twice. Find its workflow, nearest the old position. If its link was removed, the
+    link after it has moved into the old position, so continue there.
     """
     matches = [i for i, link in enumerate(links) if link["workflow_id"] == run.workflow_id]
     if not matches:
-        return run.chain_position + 1
+        return min(run.chain_position, len(links))
     return min(matches, key=lambda i: abs(i - run.chain_position)) + 1
 
 
@@ -1052,9 +1052,8 @@ async def _auto_advance(
             if moved.column_id != from_column_id:
                 # A person moved the card while this chain ran: it stays where they put
                 # it. Advancing from the old column would pull it back into the cascade.
-                if moved.run_status == "running":
-                    moved.run_status = "success"
-                    await db.commit()
+                # Its status is left alone: this chain already settled it, and "running"
+                # now belongs to the chain its new column started.
                 return
             columns = (
                 (
