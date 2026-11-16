@@ -7,8 +7,8 @@ from typing import Any
 from app.services.node_execution.base import NodeExecutionContext
 
 
-def _is_json_content_type(headers: dict[str, str]) -> bool:
-    """Return whether headers declare a JSON request body.
+def _json_media_type(headers: dict[str, str]) -> str | None:
+    """The request's JSON media type, or None when the body is not declared as JSON.
 
     That is `application/json` and the RFC 6839 `+json` types (`application/vnd.api+json`,
     `application/merge-patch+json`, ...), which carry the same JSON.
@@ -16,10 +16,21 @@ def _is_json_content_type(headers: dict[str, str]) -> bool:
     for key, value in headers.items():
         if key.lower() == "content-type":
             media_type = value.split(";", 1)[0].strip().lower()
-            return media_type == "application/json" or (
+            if media_type == "application/json" or (
                 media_type.startswith("application/") and media_type.endswith("+json")
-            )
-    return False
+            ):
+                return media_type
+            return None
+    return None
+
+
+def _is_json_text(value: str) -> bool:
+    """Return whether a string is a complete JSON document."""
+    try:
+        json.loads(value)
+    except ValueError:
+        return False
+    return True
 
 
 def _is_inside_json_string(text: str, position: int) -> bool:
@@ -49,8 +60,14 @@ def _render_json_body_template(
     body: str,
     inputs: dict,
     node_id: str,
+    *,
+    keep_json_text: bool = False,
 ) -> str:
-    """Resolve JSON-body expressions with JSON-safe serialization."""
+    """Resolve JSON-body expressions with JSON-safe serialization.
+
+    With ``keep_json_text``, a string outside quotes that is itself JSON goes in as it is,
+    which is how the `+json` types were rendered before they got JSON-safe values.
+    """
     rendered: list[str] = []
     last_end = 0
     for start, end, expression in executor._find_expressions(body):
@@ -59,6 +76,8 @@ def _render_json_body_template(
         if _is_inside_json_string(body, start):
             replacement = _json_literal(str(value))[1:-1]
         elif expression.endswith(".escape()") and isinstance(value, str):
+            replacement = value
+        elif keep_json_text and isinstance(value, str) and _is_json_text(value):
             replacement = value
         else:
             replacement = _json_literal(value)
@@ -105,8 +124,16 @@ def execute(ctx: NodeExecutionContext) -> object:
     # resolved IP so redirects and DNS rebinding cannot reach internal hosts.
     ssrf_guard.guard_http_url(url)
     if body:
-        if _is_json_content_type(headers):
-            body = _render_json_body_template(self, body, inputs, node_id)
+        media_type = _json_media_type(headers)
+        if media_type is not None:
+            body = _render_json_body_template(
+                self,
+                body,
+                inputs,
+                node_id,
+                # Existing `+json` workflows may pass JSON text through an expression.
+                keep_json_text=media_type != "application/json",
+            )
         else:
             body = self.evaluate_message_template(body, inputs, node_id)
     http_client = ssrf_guard.get_guarded_http_client()

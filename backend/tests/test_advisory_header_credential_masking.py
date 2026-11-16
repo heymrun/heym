@@ -6,6 +6,7 @@ string, so an http node that sent the header echoed the bare secret back in
 `request.headers` and it reached node results and history in plaintext.
 """
 
+import base64
 import json
 import unittest
 from unittest.mock import patch
@@ -55,8 +56,6 @@ class BasicAuthOutputTests(unittest.TestCase):
     """`curl -u` sends base64(user:password), which masking a secret cannot find."""
 
     def test_curl_user_credential_is_not_in_the_output(self) -> None:
-        import base64
-
         output = _http_output("curl https://api.example.com -u '$credentials.google:'")
 
         dumped = json.dumps(mask_sensitive_output(output, _CREDENTIALS))

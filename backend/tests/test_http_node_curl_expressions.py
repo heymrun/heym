@@ -6,6 +6,8 @@ have to be resolved before the curl tokens are interpreted, otherwise the
 header is dropped and the URL is not recognised.
 """
 
+import base64
+import json
 import unittest
 from unittest.mock import patch
 
@@ -135,17 +137,11 @@ class HttpNodeCurlExpressionTests(unittest.TestCase):
         self.assertEqual(request.content.decode("utf-8"), '{"text": "line1 line2"}')
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class HttpNodeCurlUserTests(unittest.TestCase):
     """`curl -u user:password`, as Stripe, Twilio and Mailgun document their APIs."""
 
     @staticmethod
     def _basic(user_pass: str) -> str:
-        import base64
-
         return "Basic " + base64.b64encode(user_pass.encode()).decode()
 
     def test_user_option_sends_basic_auth(self) -> None:
@@ -178,8 +174,6 @@ class HttpNodeCurlJsonOptionTests(unittest.TestCase):
     """curl 7.82+ `--json <data>`: a JSON POST with JSON Content-Type and Accept."""
 
     def test_json_option_posts_a_json_body(self) -> None:
-        import json
-
         request = _run_curl(
             """curl https://api.example.com/users --json '{"name": "$source.name"}'""",
             inputs={"source": {"name": 'Ann "A" Lee'}},
@@ -199,3 +193,7 @@ class HttpNodeCurlJsonOptionTests(unittest.TestCase):
         self.assertEqual(request.method, "PUT")
         self.assertEqual(request.headers["accept"], "application/vnd.api+json")
         self.assertEqual(request.headers["content-type"], "application/json")
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1483,7 +1483,7 @@ Do NOT use downstream nodes that depend on `$notifyWorkflow.outputs` when `execu
 - **⚠️ STARTING POINT**: HTTP nodes can START a workflow without any preceding node! Perfect for fetching static URLs without user input.
 - **Data fields**:
   - `label`: Node identifier
-  - `curl`: cURL command string (e.g., `curl -X GET https://api.example.com`)
+  - `curl`: cURL command string (e.g., `curl -X GET https://api.example.com`). `-u 'user:password'` sends HTTP Basic auth (e.g. `-u '$credentials.stripe:'`), and `--json '{...}'` posts a JSON body with JSON `Content-Type` and `Accept` headers.
 
 **HTTP Node Output Format**:
 The http node ALWAYS returns a structured response object:

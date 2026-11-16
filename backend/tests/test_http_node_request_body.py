@@ -62,11 +62,12 @@ class HttpNodeJsonMediaTypeTests(unittest.TestCase):
 
     TITLE = 'Fix "login" bug\nseen on Safari'
 
-    def _sent_body(self, content_type: str) -> bytes:
+    def _sent_body(self, content_type: str, data: str | None = None, **source: object) -> bytes:
+        if data is None:
+            data = '{"data": {"type": "issues", "attributes": {"title": "$source.title"}}}'
         curl = (
             "curl -X POST https://api.example.com/issues "
-            f"-H 'Content-Type: {content_type}' "
-            '-d \'{"data": {"type": "issues", "attributes": {"title": "$source.title"}}}\''
+            f"-H 'Content-Type: {content_type}' -d '{data}'"
         )
         received: list[httpx.Request] = []
 
@@ -77,7 +78,7 @@ class HttpNodeJsonMediaTypeTests(unittest.TestCase):
         context = NodeExecutionContext(
             executor=WorkflowExecutor(nodes=[], edges=[]),
             node_id="http1",
-            inputs={"source": {"title": self.TITLE}},
+            inputs={"source": {"title": self.TITLE, **source}},
             allow_branch_skip=True,
             start_time=0.0,
             node={},
@@ -108,3 +109,27 @@ class HttpNodeJsonMediaTypeTests(unittest.TestCase):
     def test_a_non_json_body_is_still_plain_text(self) -> None:
         body = self._sent_body("text/plain").decode()
         self.assertIn(self.TITLE, body)
+
+    def test_json_text_outside_quotes_goes_in_as_it_is_for_json_suffix_types(self) -> None:
+        # Existing +json workflows pass ready-made JSON through an expression.
+        text = '{"a": 1}'
+        for data, expected in (
+            ("$source.x", {"a": 1}),
+            ('{"data": $source.x}', {"data": {"a": 1}}),
+            ('{"count": $source.n}', {"count": 42}),
+        ):
+            with self.subTest(data=data):
+                sent = self._sent_body("application/vnd.api+json", data, x=text, n="42")
+                self.assertEqual(json.loads(sent), expected)
+
+    def test_text_that_is_not_json_is_still_encoded_for_json_suffix_types(self) -> None:
+        sent = self._sent_body(
+            "application/vnd.api+json", '{"note": $source.note}', note='say "hi"'
+        )
+
+        self.assertEqual(json.loads(sent), {"note": 'say "hi"'})
+
+    def test_application_json_still_encodes_json_text_as_a_string(self) -> None:
+        sent = self._sent_body("application/json", '{"data": $source.x}', x='{"a": 1}')
+
+        self.assertEqual(json.loads(sent), {"data": '{"a": 1}'})
