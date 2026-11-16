@@ -13,6 +13,7 @@ import contextlib
 import logging
 import threading
 import uuid
+from collections.abc import Sequence
 from typing import Any, Literal
 
 from sqlalchemy import select
@@ -43,6 +44,13 @@ from app.services.cluster.run_history import (
     summarize,
 )
 from app.services.cluster.run_result_bus import DEFAULT_WAIT_SECONDS, run_result_bus
+from app.services.cluster.run_secrets import (
+    SEALED_SECRETS_OPTION,
+    Redactor,
+    redactor_for,
+    seal_input_secrets,
+    unseal_input_secrets,
+)
 from app.services.execution_cancellation import (
     ExecutionCancellationHandle,
     clear_execution,
@@ -290,6 +298,7 @@ async def dispatch_workflow(
     on_queued: Literal["wait", "return"] = "wait",
     run_options: dict | None = None,
     mint_status_token: bool = False,
+    secret_input_paths: Sequence[Sequence[str]] = (),
     **executor_kwargs: Any,
 ) -> Any:
     """Run here, or enqueue and wait for whichever instance takes it.
@@ -303,6 +312,11 @@ async def dispatch_workflow(
     otherwise the dispatcher waits for it like an offloaded run. `run_options`
     travel with a held run, and `mint_status_token` asks for an anonymous caller's
     poll token.
+
+    `secret_input_paths` name capability secrets inside `inputs`. A run that runs
+    here keeps them, and its caller redacts what it persists. A queued run stores
+    them sealed (see run_secrets), and every row written on its way says
+    "[redacted]".
     """
     run_id = execution_id or uuid.uuid4()
     # Capture dispatcher handle BEFORE any async gap if provided by caller.
@@ -313,15 +327,22 @@ async def dispatch_workflow(
     )
 
     placement = resolve_placement(nodes, workflow_cache)
+    # What any row written from here on holds; `inputs` itself only ever runs.
+    stored_inputs, sealed = seal_input_secrets(inputs, secret_input_paths)
+    sealed_options = {SEALED_SECRETS_OPTION: sealed} if sealed else {}
     admission: workflow_concurrency.Admission | None = None
     if concurrency_limit is not None and not concurrency_exempt:
-        held_options = {**(run_options or {}), "run_error_workflow": run_error_workflow}
+        held_options = {
+            **(run_options or {}),
+            "run_error_workflow": run_error_workflow,
+            **sealed_options,
+        }
         admission = await workflow_concurrency.admit(
             workflow_concurrency.HeldRun(
                 workflow_id=workflow_id,
                 execution_id=run_id,
                 placement=placement,
-                inputs=inputs,
+                inputs=stored_inputs,
                 trigger_source=trigger_source,
                 actor_user_id=actor_user_id,
                 credentials_owner_id=credentials_owner_id,
@@ -336,7 +357,7 @@ async def dispatch_workflow(
             await workflow_concurrency.record_queue_full(
                 workflow_id=workflow_id,
                 execution_id=run_id,
-                inputs=inputs,
+                inputs=stored_inputs,
                 trigger_source=trigger_source,
             )
             clear_execution(run_id, handle=handle)
@@ -357,7 +378,7 @@ async def dispatch_workflow(
                 await record_failed_dispatch(
                     execution_id=run_id,
                     workflow_id=workflow_id,
-                    inputs=inputs,
+                    inputs=stored_inputs,
                     trigger_source=trigger_source,
                     message=waited.error or "The run was retired before any instance executed it",
                 )
@@ -379,7 +400,7 @@ async def dispatch_workflow(
             cancel_event = register_execution(
                 workflow_id=workflow_id,
                 execution_id=run_id,
-                inputs=inputs,
+                inputs=stored_inputs,
                 trigger_source=trigger_source,
                 actor_user_id=actor_user_id,
             )
@@ -430,7 +451,7 @@ async def dispatch_workflow(
         cancel_event = register_execution(
             workflow_id=workflow_id,
             execution_id=run_id,
-            inputs=inputs,
+            inputs=stored_inputs,
             trigger_source=trigger_source,
             actor_user_id=actor_user_id,
         )
@@ -446,7 +467,7 @@ async def dispatch_workflow(
         workflow_id=workflow_id,
         execution_id=run_id,
         placement=placement,
-        inputs=inputs,
+        inputs=stored_inputs,
         trigger_source=trigger_source,
         actor_user_id=actor_user_id,
         credentials_owner_id=credentials_owner_id,
@@ -455,7 +476,11 @@ async def dispatch_workflow(
         return_on_chart_output=bool(executor_kwargs.get("return_on_chart_output", False)),
         trace_context=tracing.capture_queue_context(),
         # An admitted run hands its slot to the worker that executes it.
-        run_options={"holds_concurrency_slot": True} if holds_slot else None,
+        run_options={
+            **({"holds_concurrency_slot": True} if holds_slot else {}),
+            **sealed_options,
+        }
+        or None,
     )
     try:
         target = await run_queue.enqueue(queued)
@@ -483,7 +508,7 @@ async def dispatch_workflow(
         await record_failed_dispatch(
             execution_id=run_id,
             workflow_id=workflow_id,
-            inputs=inputs,
+            inputs=stored_inputs,
             trigger_source=trigger_source,
             message=result.error or "The run was retired before any instance executed it",
         )
@@ -496,6 +521,12 @@ async def dispatch_workflow(
         actor_user_id=actor_user_id or credentials_owner_id,
     )
     return result
+
+
+def _summary(result: Any, execution_id: uuid.UUID, redact: Redactor | None) -> dict[str, Any]:
+    """The summary the queue row keeps and the waiting caller reads, redacted when needed."""
+    summary = summarize(result, execution_id)
+    return redact(summary) if redact else summary
 
 
 class GlobalVariablesPersistenceError(Exception):
@@ -589,6 +620,7 @@ class RunQueueWorker:
         nodes: list[dict],
         workflow_cache: dict[str, dict],
         result: Any,
+        redact: Redactor | None = None,
     ) -> None:
         """Persist one claimed run after all allowDownstream work has joined."""
         from app.api.workflows import _persist_global_variables_from_execution
@@ -603,6 +635,7 @@ class RunQueueWorker:
             inputs=row.inputs,
             trigger_source=row.trigger_source,
             result=result,
+            redact=redact,
         )
 
         # 2. Global variables transaction (separate from history)
@@ -631,6 +664,7 @@ class RunQueueWorker:
         nodes: list[dict],
         workflow_cache: dict[str, dict],
         worker_handle: ExecutionCancellationHandle | None,
+        redact: Redactor | None = None,
     ) -> None:
         """Finish an early-return run without blocking the worker's event loop."""
         history_written = False
@@ -675,6 +709,7 @@ class RunQueueWorker:
                 nodes=nodes,
                 workflow_cache=workflow_cache,
                 result=result,
+                redact=redact,
             )
         )
         try:
@@ -743,7 +778,7 @@ class RunQueueWorker:
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await run_queue.complete(
                     row.execution_id,
-                    result=summary,
+                    result=redact(summary) if redact else summary,
                     error=None,
                 )
             with contextlib.suppress(Exception):
@@ -834,6 +869,12 @@ class RunQueueWorker:
                 for key in ("conversation_history", "llm_session_id")
                 if options.get(key) is not None
             }
+            # Sealed secrets return in memory only, for the run; every row below is redacted.
+            # A run without one gets None, so its rows are written exactly as before.
+            run_inputs, secrets = unseal_input_secrets(
+                row.inputs, options.get(SEALED_SECRETS_OPTION)
+            )
+            redact = redactor_for(secrets) if secrets else None
             token = tracing.attach_queue_context(getattr(row, "trace_context", None))
             try:
                 result = await asyncio.to_thread(
@@ -841,7 +882,7 @@ class RunQueueWorker:
                     workflow_id=row.workflow_id,
                     nodes=nodes,
                     edges=edges,
-                    inputs=row.inputs,
+                    inputs=run_inputs,
                     workflow_cache=workflow_cache,
                     credentials_context=credentials_context,
                     global_variables_context=global_variables_context,
@@ -863,7 +904,7 @@ class RunQueueWorker:
             if getattr(result, "allow_downstream_pending", False):
                 worker_handle = getattr(cancel_event, "_execution_handle", None)
                 await run_queue.complete(
-                    row.execution_id, result=summarize(result, row.execution_id), error=None
+                    row.execution_id, result=_summary(result, row.execution_id, redact), error=None
                 )
                 try:
                     finalizer = asyncio.create_task(
@@ -875,6 +916,7 @@ class RunQueueWorker:
                             nodes=nodes,
                             workflow_cache=workflow_cache,
                             worker_handle=worker_handle,
+                            redact=redact,
                         )
                     )
                     self._active_finalizers.add(finalizer)
@@ -894,6 +936,7 @@ class RunQueueWorker:
                         nodes=nodes,
                         workflow_cache=workflow_cache,
                         worker_handle=worker_handle,
+                        redact=redact,
                     )
                     return
                 await run_queue.notify_done(row.execution_id)
@@ -911,6 +954,7 @@ class RunQueueWorker:
                     trigger_source=row.trigger_source,
                     credentials_owner_id=row.credentials_owner_id,
                     result=result,
+                    redact=redact,
                 )
             else:
                 await persist_run_history(
@@ -921,6 +965,7 @@ class RunQueueWorker:
                     inputs=row.inputs,
                     trigger_source=row.trigger_source,
                     result=result,
+                    redact=redact,
                 )
                 if row.credentials_owner_id is not None:
                     async with async_session_maker() as db:
@@ -934,7 +979,7 @@ class RunQueueWorker:
                         )
                         await db.commit()
             await run_queue.complete(
-                row.execution_id, result=summarize(result, row.execution_id), error=None
+                row.execution_id, result=_summary(result, row.execution_id, redact), error=None
             )
             # The caller may have stopped waiting (202, MCP), so the error workflow is
             # fired here, once, and never by the dispatcher. run_error_workflow=False is
