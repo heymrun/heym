@@ -5746,6 +5746,8 @@ class WorkflowExecutor(WorkflowBranchRoutingMixin):
                             router=router,
                             repair_json_output=json_output_enabled,
                             continue_from=continue_from,
+                            # A review resume's history was written by the primary.
+                            initial_messages_from_another_model=attempt_idx > 0,
                         )
                     )
                 else:

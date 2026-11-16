@@ -1471,6 +1471,7 @@ class LLMService:
         extra_body: dict[str, Any] | None = None,
         repair_json_output: bool = False,
         continue_from: ToolLoopProgress | None = None,
+        initial_messages_from_another_model: bool = False,
     ) -> dict[str, Any]:
         """Execute LLM with tool calling loop.
 
@@ -1478,6 +1479,10 @@ class LLMService:
         on the same transport the loop continues from its history, so tools that already ran
         are not run again. On another transport the stored history does not fit, and the loop
         starts from the prompt.
+
+        ``initial_messages_from_another_model`` marks ``initial_messages`` (a review resume) as
+        written by another model, the primary when this is its fallback: the reasoning only
+        that model can read is left out, as for ``continue_from``.
         """
         # With a router there is no credential to bind yet: every turn binds its own
         # client, provider and model from the decision model's answer. Without one this
@@ -1496,6 +1501,8 @@ class LLMService:
             initial_prompt_tokens = continue_from.prompt_tokens
             initial_completion_tokens = continue_from.completion_tokens
             max_tool_iterations = continue_from.remaining_tool_iterations
+        elif initial_messages is not None and initial_messages_from_another_model:
+            initial_messages = _history_for_fallback(transport.name, initial_messages)
         if initial_messages is not None:
             # A resume ends with the approval text as a plain {"role": "user", "content"}
             # dict. Re-append it through the transport, so it takes the provider's own
@@ -3377,6 +3384,7 @@ async def execute_llm_with_tools(
     router: ModelRouter | None = None,
     repair_json_output: bool = False,
     continue_from: ToolLoopProgress | None = None,
+    initial_messages_from_another_model: bool = False,
 ) -> dict[str, Any]:
     cred_type = CredentialType(credential_type)
     service = LLMService(
@@ -3413,6 +3421,7 @@ async def execute_llm_with_tools(
         should_abort=should_abort,
         extra_body=extra_body,
         continue_from=continue_from,
+        initial_messages_from_another_model=initial_messages_from_another_model,
     )
 
 
