@@ -2004,4 +2004,3 @@ class NonBranchingLoopSideNodeRoutingTests(unittest.TestCase):
                     and event.get("status") == "success"
                 ]
                 self.assertEqual(side_b_runs, numbers)
-
