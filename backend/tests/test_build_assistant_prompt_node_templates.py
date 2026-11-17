@@ -1,5 +1,6 @@
 """Tests for workflow assistant prompt including node templates."""
 
+import json
 import unittest
 
 from app.services.workflow_dsl_prompt import build_assistant_prompt
@@ -77,6 +78,36 @@ class TestBuildAssistantPromptNodeTemplates(unittest.TestCase):
             self.assertIn(field, prompt)
         self.assertIn('"focused"', prompt)
         self.assertIn("move to Deleted Items", prompt)
+
+    def test_includes_outlook_calendar_guidance(self) -> None:
+        prompt = build_assistant_prompt()
+
+        self.assertIn("### 42b. outlookCalendar", prompt)
+        self.assertIn("outlook-calendar-credential-uuid", prompt)
+        self.assertIn("`outlookCalendar`, `googleSheetsTrigger`", prompt)
+        for field in (
+            "ocOperation",
+            "ocCalendarId",
+            "ocTimeZone",
+            "ocStartDate",
+            "ocEndDate",
+            "ocIncludeBusyDetails",
+            "ocEventId",
+            "ocTitle",
+            "ocDescription",
+            "ocStartTime",
+            "ocEndTime",
+            "ocAttendees",
+            "ocLocation",
+            "ocTeamsMeeting",
+        ):
+            self.assertIn(field, prompt)
+        self.assertIn("Calendars.ReadWrite", prompt)
+        self.assertIn("/api/credentials/outlook-calendar/oauth/callback", prompt)
+        example = prompt.split('{"id":"teamsBooking"', 1)[1].split("\n", 1)[0]
+        node = json.loads('{"id":"teamsBooking"' + example)
+        self.assertEqual(node["type"], "outlookCalendar")
+        self.assertEqual(node["data"]["ocOperation"], "create")
 
     def test_includes_google_trigger_guidance(self) -> None:
         prompt = build_assistant_prompt()

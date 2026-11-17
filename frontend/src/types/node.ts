@@ -949,7 +949,7 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
   googleMeet: {
     type: "googleMeet",
     label: "Google Meet",
-    description: "Find available times and create, update or delete Google Meet invitations",
+    description: "Find free time in Google Calendar and create, update or delete Meet invitations",
     color: "node-google-meet",
     icon: "CalendarClock",
     inputs: 1,
@@ -960,6 +960,22 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
       gmIncludeBusyDetails: false,
       gmEventId: "", gmTitle: "", gmDescription: "", gmStartTime: "", gmEndTime: "",
       gmAttendees: "", gmLocation: "",
+    },
+  },
+  outlookCalendar: {
+    type: "outlookCalendar",
+    label: "Outlook Calendar",
+    description: "Find free time and create, update or delete Outlook invitations with Teams links",
+    color: "node-outlook",
+    icon: "CalendarDays",
+    inputs: 1,
+    outputs: 1,
+    defaultData: {
+      label: "outlookCalendar", credentialId: "", ocOperation: "read",
+      ocCalendarId: "primary", ocTimeZone: "UTC", ocStartDate: "", ocEndDate: "",
+      ocIncludeBusyDetails: false,
+      ocEventId: "", ocTitle: "", ocDescription: "", ocStartTime: "", ocEndTime: "",
+      ocAttendees: "", ocLocation: "", ocTeamsMeeting: true,
     },
   },
   googleDrive: {

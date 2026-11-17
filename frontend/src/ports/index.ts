@@ -88,6 +88,7 @@ export interface CredentialsPort {
   googleMeetOAuthAuthorize?: (credentialId: string) => Promise<{ auth_url: string }>;
   gmailOAuthAuthorize?: (credentialId: string) => Promise<{ auth_url: string }>;
   outlookOAuthAuthorize?: (credentialId: string) => Promise<{ auth_url: string }>;
+  outlookCalendarOAuthAuthorize?: (credentialId: string) => Promise<{ auth_url: string }>;
   googleDriveOAuthAuthorize: (credentialId: string) => Promise<{ auth_url: string }>;
   bigQueryOAuthAuthorize: (credentialId: string) => Promise<{ auth_url: string }>;
   notionOAuthAuthorize: (credentialId: string) => Promise<{ auth_url: string }>;

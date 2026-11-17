@@ -118,6 +118,10 @@ Sharing a [Gmail credential](../nodes/gmail-trigger-node.md) lets the workflows 
 
 Sharing an [Outlook credential](../nodes/outlook-trigger-node.md) lets the workflows of the people you share it with read every email in the connected mailbox, and mark email read or move it to Archive or Deleted Items through an Outlook Trigger's after-run action. It does not allow permanent deletion. Share it only with people you would let read that mailbox. Only the credential owner can reconnect its Microsoft authorization.
 
+## Outlook Calendar permissions
+
+Sharing an [Outlook Calendar credential](../nodes/outlook-calendar-node.md) lets workflows using it read the connected account's calendars and the free/busy of people its organization lets it see, and create, change or delete events as the connected Microsoft account, including sending invitations and cancellations. It gives no access to the mailbox. Only the credential owner can reconnect its Microsoft authorization.
+
 ## Google Meet calendar permissions
 
 Sharing a [Google Meet credential](../nodes/google-meet-node.md) lets workflows using it read accessible calendars' free/busy intervals and create, change or delete events as the connected Google account, including sending invitations and cancellations. The visitor's attendee email does not change which account owns or authorizes the event. Only the credential owner can reconnect its Google authorization.

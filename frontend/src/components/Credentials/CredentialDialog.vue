@@ -182,6 +182,8 @@ const outlookTenant = ref("common");
 const outlookOAuthConnected = ref(false);
 const outlookOAuthConnecting = ref(false);
 const outlookConnectedCredential = ref<import("@/types/credential").Credential | null>(null);
+/** Outlook Mail and Outlook Calendar share one Entra app form; only the permission differs. */
+const isOutlookType = (value: string | undefined): boolean => value === "outlook" || value === "outlook_calendar";
 const bqClientId = ref("");
 const bqClientSecret = ref("");
 const bqOAuthConnected = ref(false);
@@ -431,6 +433,7 @@ const typeOptions = [
   { value: "google_meet", label: CREDENTIAL_TYPE_LABELS.google_meet },
   { value: "gmail", label: CREDENTIAL_TYPE_LABELS.gmail },
   { value: "outlook", label: CREDENTIAL_TYPE_LABELS.outlook },
+  { value: "outlook_calendar", label: CREDENTIAL_TYPE_LABELS.outlook_calendar },
   { value: "bigquery", label: CREDENTIAL_TYPE_LABELS.bigquery },
   { value: "supabase", label: CREDENTIAL_TYPE_LABELS.supabase },
   { value: "clickhouse", label: CREDENTIAL_TYPE_LABELS.clickhouse },
@@ -679,9 +682,9 @@ watch(
         outlookClientId.value = "";
         outlookClientSecret.value = "";
         outlookTenant.value =
-          (props.credential.type === "outlook" && props.credential.public_fields?.tenant) || "common";
+          (isOutlookType(props.credential.type) && props.credential.public_fields?.tenant) || "common";
         outlookOAuthConnected.value =
-          props.credential.type === "outlook" && !!props.credential.masked_value?.startsWith("connected");
+          isOutlookType(props.credential.type) && !!props.credential.masked_value?.startsWith("connected");
         outlookConnectedCredential.value = null;
         bqClientId.value = "";
         bqClientSecret.value = "";
@@ -982,7 +985,7 @@ const isValid = computed(() => {
     return gmOAuthConnected.value || isEditing.value;
   } else if (type.value === "gmail") {
     return gmailOAuthConnected.value || isEditing.value;
-  } else if (type.value === "outlook") {
+  } else if (isOutlookType(type.value)) {
     return outlookOAuthConnected.value || isEditing.value;
   } else if (type.value === "google_drive") {
     return gdOAuthConnected.value || isEditing.value;
@@ -1226,7 +1229,7 @@ function buildConfig(): CredentialConfig {
       client_id: gmailClientId.value.trim(),
       client_secret: gmailClientSecret.value.trim(),
     };
-  } else if (type.value === "outlook") {
+  } else if (isOutlookType(type.value)) {
     return {
       client_id: outlookClientId.value.trim(),
       client_secret: outlookClientSecret.value.trim(),
@@ -1332,12 +1335,15 @@ async function startOutlookOAuth(): Promise<void> {
     return;
   }
 
-  const authorize = credentialsApi.outlookOAuthAuthorize;
+  const outlookType = type.value === "outlook_calendar" ? "outlook_calendar" : "outlook";
+  const authorize = outlookType === "outlook_calendar"
+    ? credentialsApi.outlookCalendarOAuthAuthorize
+    : credentialsApi.outlookOAuthAuthorize;
   if (!authorize) {
     error.value = "Open Heym to connect an Outlook credential.";
     return;
   }
-  await outlookOAuth.start(() => saveOAuthCredential("outlook", outlookOAuth), authorize);
+  await outlookOAuth.start(() => saveOAuthCredential(outlookType, outlookOAuth), authorize);
 }
 
 async function startGoogleSheetsOAuth(): Promise<void> {
@@ -1722,7 +1728,7 @@ async function handleSave(): Promise<void> {
         type.value !== "google_drive" &&
         type.value !== "google_meet" &&
         type.value !== "gmail" &&
-        type.value !== "outlook" &&
+        !isOutlookType(type.value) &&
         type.value !== "bigquery" &&
         !(type.value === "linear" && linearAuthMode.value === "oauth") &&
         !(type.value === "notion" && notionAuthMode.value === "oauth") &&
@@ -1803,7 +1809,7 @@ async function handleSave(): Promise<void> {
       saved = gmConnectedCredential.value;
     } else if (type.value === "gmail" && gmailConnectedCredential.value) {
       saved = gmailConnectedCredential.value;
-    } else if (type.value === "outlook" && outlookConnectedCredential.value) {
+    } else if (isOutlookType(type.value) && outlookConnectedCredential.value) {
       saved = outlookConnectedCredential.value;
     } else if (type.value === "bigquery" && bqConnectedCredential.value) {
       saved = bqConnectedCredential.value;
@@ -3738,7 +3744,7 @@ async function handleSave(): Promise<void> {
         </div>
       </template>
 
-      <template v-if="type === 'outlook'">
+      <template v-if="isOutlookType(type)">
         <div class="space-y-2">
           <Label for="cred-outlook-client-id">Application (client) ID</Label>
           <Input
@@ -3798,7 +3804,22 @@ async function handleSave(): Promise<void> {
           </p>
         </div>
 
-        <p class="text-xs text-muted-foreground">
+        <p
+          v-if="type === 'outlook_calendar'"
+          class="text-xs text-muted-foreground"
+        >
+          Add
+          <code>{{ appOrigin }}/api/credentials/outlook-calendar/oauth/callback</code>
+          as a Web redirect URI and grant the Microsoft Graph delegated permissions
+          <code>Calendars.ReadWrite</code>, <code>User.Read</code> and <code>offline_access</code>.
+          The Entra app you use for Outlook Mail works too; add this redirect URI to it. Heym
+          reads free time and creates, updates or deletes events with Teams links in your own
+          calendars. Some organizations require an administrator to consent first.
+        </p>
+        <p
+          v-else
+          class="text-xs text-muted-foreground"
+        >
           Add
           <code>{{ appOrigin }}/api/credentials/outlook/oauth/callback</code>
           as a Web redirect URI and grant the Microsoft Graph delegated permissions
@@ -3811,7 +3832,7 @@ async function handleSave(): Promise<void> {
           <div class="flex items-center justify-between">
             <div>
               <p class="text-sm font-medium">
-                Outlook Mail Account
+                {{ type === 'outlook_calendar' ? 'Outlook Calendar Account' : 'Outlook Mail Account' }}
               </p>
               <p
                 v-if="outlookOAuthConnected"
@@ -4233,7 +4254,7 @@ async function handleSave(): Promise<void> {
           :loading="saving"
           :disabled="!isValid"
         >
-          {{ isEditing ? 'Save Changes' : ((type === 'google_sheets' && gsOAuthConnected) || (type === 'google_drive' && gdOAuthConnected) || (type === 'google_meet' && gmOAuthConnected) || (type === 'gmail' && gmailOAuthConnected) || (type === 'outlook' && outlookOAuthConnected) || (type === 'bigquery' && bqOAuthConnected) ? 'Done' : 'Create') }}
+          {{ isEditing ? 'Save Changes' : ((type === 'google_sheets' && gsOAuthConnected) || (type === 'google_drive' && gdOAuthConnected) || (type === 'google_meet' && gmOAuthConnected) || (type === 'gmail' && gmailOAuthConnected) || (isOutlookType(type) && outlookOAuthConnected) || (type === 'bigquery' && bqOAuthConnected) ? 'Done' : 'Create') }}
         </Button>
       </div>
     </form>

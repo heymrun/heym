@@ -48,6 +48,7 @@ NODE_PLACEMENT: dict[str, Placement] = {
     "googleMeet": _ANY,
     "gmailTrigger": _ANY,  # narrowed to MAIN_ONLY by _gmail_placement when it saves attachments
     "outlookTrigger": _ANY,  # narrowed to MAIN_ONLY by _outlook_placement for attachments
+    "outlookCalendar": _ANY,
     "googleDriveTrigger": _ANY,  # polling runs on the leader; the run keeps no local state
     "googleSheets": _ANY,
     "googleSheetsTrigger": _ANY,  # polling runs on the leader; the run keeps no local state

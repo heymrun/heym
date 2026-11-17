@@ -129,6 +129,7 @@ Use `$Availability.available_slots` or `$Booking.meet_url` in downstream nodes. 
 
 ## Related
 
+- [Outlook Calendar](outlook-calendar-node.md) for Outlook and Microsoft 365
 - [Credentials](../reference/credentials.md)
 - [Integrations](../reference/integrations.md)
 - [Credentials Sharing](../reference/credentials-sharing.md)

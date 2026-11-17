@@ -54,6 +54,7 @@ export const NODE_DOC_SLUGS: Record<NodeType, string> = {
   linear: "linear-node",
   googleSheets: "google-sheets-node",
   googleMeet: "google-meet-node",
+  outlookCalendar: "outlook-calendar-node",
   googleDrive: "google-drive-node",
   bigquery: "bigquery-node",
   supabase: "supabase-node",

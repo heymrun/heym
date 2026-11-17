@@ -487,6 +487,7 @@ def get_masked_value(credential_type: CredentialType, config: dict) -> str | Non
         CredentialType.google_meet,
         CredentialType.gmail,
         CredentialType.outlook,
+        CredentialType.outlook_calendar,
     ):
         if config.get("refresh_token", "").strip():
             email_address = str(config.get("email_address", "")).strip()
@@ -625,7 +626,7 @@ def get_public_credential_fields(
             "supabase_url": supabase_url,
             "supabase_schema": supabase_schema,
         }
-    if credential_type == CredentialType.outlook:
+    if credential_type in (CredentialType.outlook, CredentialType.outlook_calendar):
         return {"tenant": str(config.get("tenant") or "").strip() or "common"}
     if credential_type == CredentialType.notion:
         auth_mode = str(config.get("auth_mode", "token")).strip() or "token"
@@ -2484,12 +2485,15 @@ def validate_credential_config(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"{google_label} credential requires client_secret",
             )
-    elif credential_type == CredentialType.outlook:
+    elif credential_type in (CredentialType.outlook, CredentialType.outlook_calendar):
+        outlook_label = (
+            "Outlook Calendar" if credential_type == CredentialType.outlook_calendar else "Outlook"
+        )
         for key in ("client_id", "client_secret"):
             if not str(config.get(key) or "").strip():
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Outlook credential requires {key}",
+                    detail=f"{outlook_label} credential requires {key}",
                 )
         try:
             oauth_tenant(config)

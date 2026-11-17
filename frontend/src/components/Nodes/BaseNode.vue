@@ -80,6 +80,7 @@ const nodeColorMap = {
   linear: "node-linear",
   googleSheets: "node-google-sheets",
   googleMeet: "node-google-meet",
+  outlookCalendar: "node-outlook",
   googleDrive: "node-google-drive",
   googleDriveTrigger: "node-google-drive",
   googleSheetsTrigger: "node-google-sheets",

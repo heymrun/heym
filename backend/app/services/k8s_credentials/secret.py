@@ -25,6 +25,7 @@ _WRITE_BACK_TYPES = frozenset(
         CredentialType.google_meet,
         CredentialType.gmail,
         CredentialType.outlook,
+        CredentialType.outlook_calendar,
         CredentialType.bigquery,
     }
 )

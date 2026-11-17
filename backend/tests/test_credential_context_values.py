@@ -79,6 +79,17 @@ class GoogleOAuthCredentialValueTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(value, "")
 
+    async def test_expired_outlook_calendar_token_is_refreshed_with_calendar_scopes(self) -> None:
+        response = _token_response("eyJ.calendar-token")
+        with patch("httpx.post", return_value=response) as token_request:
+            value = await credential_context_value(
+                _credential(CredentialType.outlook_calendar), _google_config(expired=True)
+            )
+
+        self.assertEqual(value, "eyJ.calendar-token")
+        self.assertIn("Calendars.ReadWrite", token_request.call_args.kwargs["data"]["scope"])
+        self.db.commit.assert_called_once()
+
 
 class CredentialValueShapeTests(unittest.IsolatedAsyncioTestCase):
     async def test_bearer_value_carries_the_prefix(self) -> None:

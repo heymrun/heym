@@ -87,6 +87,7 @@ import {
   supabaseOperationOptions,
 } from "./operationOptions";
 import { useGoogleMeetExpressionFields } from "./nodes/googleMeetExpressionFields";
+import { useOutlookCalendarExpressionFields } from "./nodes/outlookCalendarExpressionFields";
 import { useCodeExpressionFields } from "./nodes/codeExpressionFields";
 import { randomUUID } from "@/lib/uuid";
 
@@ -140,6 +141,7 @@ export function usePropertiesPanelController() {
     imapTrigger: "node-email",
     gmailTrigger: "node-gmail",
     outlookTrigger: "node-outlook",
+    outlookCalendar: "node-outlook",
     googleDriveTrigger: "node-google-drive",
     googleSheetsTrigger: "node-google-sheets",
     heym: "node-heym",
@@ -606,6 +608,7 @@ export function usePropertiesPanelController() {
   const crawlerUrlInputRef = ref<ExpandableFieldRef | null>(null);
   const consoleLogMessageInputRef = ref<ExpandableFieldRef | null>(null);
   const googleMeetExpressionFields = useGoogleMeetExpressionFields(computed(() => workflowStore.selectedNode));
+  const outlookCalendarExpressionFields = useOutlookCalendarExpressionFields(computed(() => workflowStore.selectedNode));
   const codeParametersInputRef = ref<ExpandableFieldRef | null>(null);
   const codeExpressionFields = useCodeExpressionFields(codeParametersInputRef);
   const codeFilesInputRef = codeExpressionFields.filesRef;
@@ -2197,6 +2200,7 @@ export function usePropertiesPanelController() {
     crawlerUrlInputRef.value?.closeExpandDialog();
     consoleLogMessageInputRef.value?.closeExpandDialog();
     googleMeetExpressionFields.closeAll();
+    outlookCalendarExpressionFields.closeAll();
     codeExpressionFields.closeAll();
     closeConverterExpressionDialogs();
     closeHeymExpressionDialogs();
@@ -2850,6 +2854,14 @@ export function usePropertiesPanelController() {
         const focus = workflowStore.focusField;
         const index = Math.max(0, googleMeetExpressionFields.fields.value.findIndex((field) => field.key === focus));
         if (!googleMeetExpressionFields.openAt(index)) setTimeout(() => tryOpenDialog(attempts + 1), 100);
+      };
+      nextTick(() => tryOpenDialog());
+    } else if (nodeType === "outlookCalendar") {
+      const tryOpenDialog = (attempts = 0): void => {
+        if (attempts > 20 || workflowStore.selectedNode?.type !== "outlookCalendar") return;
+        const focus = workflowStore.focusField;
+        const index = Math.max(0, outlookCalendarExpressionFields.fields.value.findIndex((field) => field.key === focus));
+        if (!outlookCalendarExpressionFields.openAt(index)) setTimeout(() => tryOpenDialog(attempts + 1), 100);
       };
       nextTick(() => tryOpenDialog());
     } else if (nodeType === "code") {
@@ -9293,6 +9305,7 @@ export function usePropertiesPanelController() {
     codeFilesInputRef,
     codeExpressionFields,
     googleMeetExpressionFields,
+    outlookCalendarExpressionFields,
     converterExpressionFieldCount,
     converterExpressionFieldIndex,
     setConverterExpressionInputRef,
