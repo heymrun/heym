@@ -531,6 +531,49 @@ class TestUpdateFile(unittest.TestCase):
         self.assertIn("size limit", str(ctx.exception).lower())
 
 
+class TestUpdateFileContentFields(unittest.TestCase):
+    """A content upload asks Drive for the size and time it reports."""
+
+    @staticmethod
+    def _drive_patch(url: str, headers=None, params=None, **_kwargs) -> MagicMock:  # noqa: ANN001
+        # Drive answers a request without `fields` with kind, id, name and mimeType only.
+        full = {
+            "kind": "drive#file",
+            "id": "file-1",
+            "name": "report.csv",
+            "mimeType": "text/csv",
+            "size": "11",
+            "modifiedTime": "2026-11-16T10:00:00.000Z",
+        }
+        fields = [f.strip() for f in str((params or {}).get("fields") or "").split(",") if f]
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = (
+            {k: v for k, v in full.items() if k in fields}
+            if fields
+            else {k: full[k] for k in ("kind", "id", "name", "mimeType")}
+        )
+        return resp
+
+    def test_a_content_upload_reports_the_new_size_and_time(self) -> None:
+        service = _valid_service()
+        with (
+            patch(
+                "app.services.google_drive_service.httpx.get",
+                return_value=_meta_response("text/csv", "report.csv", size="4"),
+            ),
+            patch(
+                "app.services.google_drive_service.httpx.patch", side_effect=self._drive_patch
+            ) as do_patch,
+        ):
+            result = service.update_file("file-1", content=b"a,b\n1,2\n3,4")
+
+        self.assertEqual(do_patch.call_args.kwargs["params"]["uploadType"], "media")
+        self.assertEqual(result["updated"], ["content"])
+        self.assertEqual(result["size_bytes"], 11)
+        self.assertEqual(result["modified_time"], "2026-11-16T10:00:00.000Z")
+
+
 class TestRemove(unittest.TestCase):
     def test_remove_file_trashes_by_default(self) -> None:
         service = _valid_service()

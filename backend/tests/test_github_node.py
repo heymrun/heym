@@ -2191,3 +2191,92 @@ class GitHubReturnAllTests(_GitHubExecutorHarness, unittest.TestCase):
 
         self.assertEqual(result.status, "success")  # type: ignore[attr-defined]
         self.assertEqual(client.request.call_count, 1)
+
+
+class GitHubNodeBlankFieldTests(unittest.TestCase):
+    """A blank optional field stays blank instead of becoming the whole input context."""
+
+    def _run(self, operation: str, fields: dict) -> dict:
+        from app.services.workflow_executor import WorkflowExecutor
+
+        calls: dict = {}
+
+        def recorder(name: str, result: object):  # noqa: ANN202
+            def call(_self: object, *args: object, **kwargs: object) -> object:
+                calls[name] = {"args": args, "kwargs": kwargs}
+                return result
+
+            return call
+
+        nodes = [
+            {
+                "id": "start",
+                "type": "textInput",
+                "position": {"x": 0, "y": 0},
+                "data": {"label": "start", "inputFields": [{"key": "title"}]},
+            },
+            {
+                "id": "gh",
+                "type": "github",
+                "position": {"x": 200, "y": 0},
+                "data": {
+                    "label": "gh",
+                    "credentialId": "cred-1",
+                    "githubOperation": operation,
+                    "githubOwner": "acme",
+                    "githubRepo": "site",
+                    **fields,
+                },
+            },
+        ]
+        edges = [{"id": "e1", "source": "start", "target": "gh"}]
+        db = MagicMock()
+        db.__enter__ = MagicMock(return_value=db)
+        db.__exit__ = MagicMock(return_value=False)
+        cred = MagicMock(encrypted_config="{}")
+        cred.type = CredentialType.github
+        db.query.return_value.filter.return_value.first.return_value = cred
+        with (
+            patch("app.db.session.SessionLocal", return_value=db),
+            patch("app.services.encryption.decrypt_config", return_value=_make_config()),
+            patch.object(GitHubService, "create_issue", recorder("create_issue", {"number": 1})),
+            patch.object(GitHubService, "create_release", recorder("create_release", {"id": 1})),
+            patch.object(GitHubService, "list_files", recorder("list_files", {"items": []})),
+            patch.object(GitHubService, "get_file", recorder("get_file", {"content": "x"})),
+        ):
+            result = WorkflowExecutor(nodes=nodes, edges=edges, actor_user_id=uuid.uuid4()).execute(
+                workflow_id=uuid.uuid4(),
+                initial_inputs={
+                    "headers": {"x-signature": "whsec_test"},
+                    "query": {},
+                    "body": {"title": "Checkout fails"},
+                },
+            )
+        row = next(r for r in result.node_results if r["node_label"] == "gh")
+        self.assertEqual(row["status"], "success", row.get("error"))
+        return calls
+
+    def test_an_issue_without_a_body_is_created_without_one(self) -> None:
+        calls = self._run("createIssue", {"githubTitle": "$start.body.title"})
+
+        self.assertEqual(calls["create_issue"]["args"][2], "Checkout fails")
+        self.assertIsNone(calls["create_issue"]["kwargs"]["body"])
+
+    def test_a_release_without_name_body_or_branch_leaves_them_unset(self) -> None:
+        calls = self._run("createRelease", {"githubTagName": "v1.2.0"})
+
+        kwargs = calls["create_release"]["kwargs"]
+        self.assertIsNone(kwargs["name"])
+        self.assertIsNone(kwargs["body"])
+        self.assertIsNone(kwargs["target_commitish"])
+
+    def test_list_files_without_a_path_lists_the_root(self) -> None:
+        calls = self._run("listFiles", {})
+
+        self.assertEqual(calls["list_files"]["kwargs"]["path"], "")
+        self.assertIsNone(calls["list_files"]["kwargs"]["ref"])
+
+    def test_get_file_without_a_branch_reads_the_default_branch(self) -> None:
+        calls = self._run("getFile", {"githubFilePath": "README.md"})
+
+        self.assertIsNone(calls["get_file"]["kwargs"]["ref"])

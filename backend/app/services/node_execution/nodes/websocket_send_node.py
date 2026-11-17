@@ -4,6 +4,7 @@ from importlib import import_module
 from typing import Any
 
 from app.services.node_execution.base import NodeExecutionContext
+from app.services.node_execution.json_fields import render_json_template
 
 
 def execute(ctx: NodeExecutionContext) -> object:
@@ -67,6 +68,10 @@ def execute(ctx: NodeExecutionContext) -> object:
             node_id,
             preserve_type=True,
         )
+    elif "$" in str(message_template):
+        # A JSON message is resolved per value, so a quote or a line break in a value
+        # stays inside its string instead of turning the frame into broken JSON.
+        resolved_message = render_json_template(self, str(message_template), inputs, node_id)
     else:
         resolved_message = self.evaluate_message_template(
             str(message_template),

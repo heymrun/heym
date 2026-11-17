@@ -15,6 +15,7 @@ def execute(ctx: NodeExecutionContext) -> object:
     from app.db.session import SessionLocal
     from app.services.bigquery_service import BigQueryService
     from app.services.encryption import decrypt_config
+    from app.services.node_execution.json_fields import render_json_template
 
     credential_id = node_data.get("credentialId")
     if not credential_id:
@@ -33,7 +34,7 @@ def execute(ctx: NodeExecutionContext) -> object:
     if not operation:
         raise ValueError("BigQuery node requires an operation")
 
-    project_id = self.evaluate_message_template(
+    project_id = self.evaluate_nonempty_message_template(
         node_data.get("bqProjectId", ""), inputs, node_id
     ).strip()
 
@@ -41,9 +42,11 @@ def execute(ctx: NodeExecutionContext) -> object:
         service = BigQueryService(credential_id, bq_config, db)
 
         if operation == "query":
-            query = self.evaluate_message_template(node_data.get("bqQuery", ""), inputs, node_id)
+            query = self.evaluate_nonempty_message_template(
+                node_data.get("bqQuery", ""), inputs, node_id
+            ).strip()
             _mr_raw = str(node_data.get("bqMaxResults", "1000") or "1000")
-            _mr_ev = self.evaluate_message_template(_mr_raw, inputs, node_id).strip()
+            _mr_ev = self.evaluate_nonempty_message_template(_mr_raw, inputs, node_id).strip()
             try:
                 _mr_int = int(float(_mr_ev or "1000"))
                 # 0 means unlimited; negative values fall back to default
@@ -53,10 +56,10 @@ def execute(ctx: NodeExecutionContext) -> object:
             output = service.run_query(project_id, query, max_results)
 
         elif operation == "insertRows":
-            dataset_id = self.evaluate_message_template(
+            dataset_id = self.evaluate_nonempty_message_template(
                 node_data.get("bqDatasetId", ""), inputs, node_id
             ).strip()
-            table_id = self.evaluate_message_template(
+            table_id = self.evaluate_nonempty_message_template(
                 node_data.get("bqTableId", ""), inputs, node_id
             ).strip()
             input_mode = node_data.get("bqRowsInputMode", "raw")
@@ -66,15 +69,15 @@ def execute(ctx: NodeExecutionContext) -> object:
                 row: dict = {}
                 for mapping in mappings:
                     key = mapping.get("key", "")
-                    val = self.evaluate_message_template(
+                    val = self.evaluate_nonempty_message_template(
                         str(mapping.get("value", "")), inputs, node_id
                     )
                     if key:
                         row[key] = val
                 rows = [row]
             else:
-                raw_rows = self.evaluate_message_template(
-                    node_data.get("bqRows", "[]"), inputs, node_id
+                raw_rows = render_json_template(
+                    self, node_data.get("bqRows", "[]"), inputs, node_id
                 )
                 rows = _json.loads(raw_rows)
 
