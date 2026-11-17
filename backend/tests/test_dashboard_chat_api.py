@@ -58,7 +58,7 @@ _MINIMAL_BUILDER_CONTENT = """
 
 
 def _stub_credential_catalog(test: unittest.TestCase) -> tuple[AsyncMock, AsyncMock]:
-    """Stub the credential and data table catalog queries a bare AsyncMock db cannot answer.
+    """Stub the credential, data table and knowledge base queries a bare AsyncMock db cannot answer.
 
     The user can use the catalog's credentials plus the ids a test adds to
     `test.accessible_ids`, like the selected chat credential.
@@ -71,6 +71,11 @@ def _stub_credential_catalog(test: unittest.TestCase) -> tuple[AsyncMock, AsyncM
     tables_patcher = patch(
         "app.api.ai_assistant.load_data_table_catalog", AsyncMock(return_value=[])
     )
+    knowledge_bases_patcher = patch(
+        "app.api.ai_assistant.knowledge_bases_prompt_block", AsyncMock(return_value="")
+    )
+    test.addCleanup(knowledge_bases_patcher.stop)
+    test.knowledge_bases_block = knowledge_bases_patcher.start()  # type: ignore[attr-defined]
     test.accessible_ids = set()  # type: ignore[attr-defined]
     accessible_patcher = patch(
         "app.api.ai_assistant.load_accessible_credential_ids",
@@ -652,6 +657,65 @@ class DashboardChatApiTests(unittest.IsolatedAsyncioTestCase):
         self.credentials_prompt.assert_awaited_once_with(
             db, current_user.id, CredentialPromptMode.ASK_AND_CREATE
         )
+
+    async def test_dashboard_chat_lists_knowledge_bases_after_the_workflows(self) -> None:
+        block = "\n\nKnowledge bases (search these first):\n- Policies (id 1): Refund policy"
+        self.knowledge_bases_block.return_value = block
+        self.credentials_prompt.return_value = _HTTP_CREDENTIALS_SECTION
+        credential = MagicMock()
+        credential.id = uuid.uuid4()
+        credential.type = CredentialType.openai
+        current_user = MagicMock()
+        current_user.id = uuid.uuid4()
+        http_request = MagicMock()
+        http_request.is_disconnected = AsyncMock(return_value=False)
+        db = AsyncMock()
+        captured: dict[str, str] = {}
+
+        async def fake_stream_dashboard_chat(
+            _client: object, _model: str, system_prompt: str, *_args: object, **_kwargs: object
+        ):
+            captured["system_prompt"] = system_prompt
+            yield 'data: {"type":"done"}\n\n'
+
+        workflows = [{"id": str(uuid.uuid4()), "name": "Weather", "description": "", "inputs": []}]
+        with (
+            patch(
+                "app.api.ai_assistant.get_credential_for_user",
+                AsyncMock(return_value=credential),
+            ),
+            patch("app.api.ai_assistant.decrypt_config", return_value={"api_key": "test"}),
+            patch(
+                "app.api.ai_assistant.get_openai_client",
+                return_value=(MagicMock(), "openai"),
+            ),
+            patch(
+                "app.api.ai_assistant.get_workflows_for_user_with_inputs",
+                AsyncMock(return_value=workflows),
+            ),
+            patch("app.api.ai_assistant._load_agents_md_content", return_value=""),
+            patch("app.api.ai_assistant.build_public_base_url", return_value="http://localhost"),
+            patch(
+                "app.api.ai_assistant.stream_dashboard_chat",
+                side_effect=fake_stream_dashboard_chat,
+            ),
+        ):
+            response = await dashboard_chat_stream(
+                http_request=http_request,
+                request=DashboardChatRequest(
+                    credential_id=credential.id,
+                    model="gpt-4o-mini",
+                    message="What is our refund policy?",
+                ),
+                current_user=current_user,
+                db=db,
+            )
+            _ = [chunk async for chunk in response.body_iterator]
+
+        prompt = captured["system_prompt"]
+        self.knowledge_bases_block.assert_awaited_once_with(db, current_user.id)
+        self.assertLess(prompt.index("Available workflows"), prompt.index(block))
+        self.assertLess(prompt.index(block), prompt.index(_HTTP_CREDENTIALS_SECTION))
 
 
 class DashboardChatWorkflowBuilderTests(unittest.IsolatedAsyncioTestCase):

@@ -56,6 +56,15 @@ from app.api.chat_data_tables import (
     data_table_tool_label,
     summarize_data_table_tool,
 )
+from app.api.chat_knowledge_bases import (
+    KNOWLEDGE_BASE_PROMPT,
+    KNOWLEDGE_BASE_TOOL_NAMES,
+    KNOWLEDGE_BASE_TOOL_SCHEMAS,
+    call_knowledge_base_tool,
+    knowledge_base_tool_label,
+    knowledge_bases_prompt_block,
+    summarize_knowledge_base_tool,
+)
 from app.api.chat_memory import (
     USER_MEMORY_PROMPT,
     USER_MEMORY_TOOL_NAMES,
@@ -632,7 +641,7 @@ DASHBOARD_CHAT_SYSTEM_PROMPT = """You are an assistant that helps the user with 
    - For Codex follow-up pauses (kind "codex", with answer_url): explain that Codex needs user input to continue, quote the question asked by Codex, direct the user to the answer link (answer_url) as a markdown link to provide the answer or continue, and do NOT show approve/edit/reject options.
 10. Never say you cannot approve, edit, reject, or continue a pending HITL workflow from chat when resolve_hitl_review can handle it. If a recent assistant message contains a review link, you can reuse that link to resolve the review on the next user turn. For Codex pauses, always direct the user to the Codex answer link instead.
 
-CRITICAL - Workflow-first behavior: You receive a list of available workflows at the start. When the user asks for ANY information (sports, weather, news, match schedules, birthdays, etc.), FIRST check if a workflow can answer. Match user intent to workflow names and descriptions (e.g. "when is the next match" / "Fenerbahce match" -> workflow named "Fenerbahce next match" or similar; "weather" -> weather workflow). If a workflow matches, call execute_workflow immediately with appropriate inputs (often empty {} for workflows with no required inputs). NEVER say "I don't have access" without first checking workflows—many questions can be answered by running a workflow.
+CRITICAL - Workflow-first behavior: You receive a list of available workflows at the start, and a list of the user's knowledge bases when they have any. When the user asks for ANY information (sports, weather, news, match schedules, birthdays, policies, documents, etc.), FIRST check whether a knowledge base's name or description covers it: if one does, call search_knowledge_base before anything else (see Knowledge bases). Otherwise, or when the search finds nothing relevant, check if a workflow can answer. Match user intent to workflow names and descriptions (e.g. "when is the next match" / "Fenerbahce match" -> workflow named "Fenerbahce next match" or similar; "weather" -> weather workflow). If a workflow matches, call execute_workflow immediately with appropriate inputs (often empty {} for workflows with no required inputs). NEVER say "I don't have access" without first checking knowledge bases and workflows—many questions can be answered by searching a knowledge base or running a workflow.
 
 When you do not know the answer, or the answer may require current/external web information, you may call internal workflows that can search the internet, load websites, browse pages, crawl sites, fetch URLs, or read online content. Look for matching workflow names, descriptions, and input fields, then run the most relevant workflow with the user's query or URL instead of saying you cannot access the internet.
 
@@ -644,7 +653,7 @@ Respond in the same language the user uses. Be concise and helpful. When you run
 
 If a tool returns an error or no relevant data, do not invent an answer. Say clearly that you do not have that information (e.g. "I don't have this information"). Base your answers only on data from the tools (workflows, analytics, execution results); when you do not know something, say so.
 
-When the user asks for something you cannot do with your tools (e.g. console logs, server logs) AND no workflow matches, say clearly that you do not have access to that, then offer what you can do in a short numbered list. Always include: (1) I can show recent runs, (2) I can show what is running right now (with elapsed time and current node), (3) I can show analytics stats and where workflows fail or slow down, (4) I can show scheduled cron times (day/week/month), (5) I can run a workflow and show its result, (6) I can list workflows and you can talk about them or ask me to run one, (7) I can list your teams, (8) I can inspect your data tables, add or remove columns, and read, add, update or delete rows, (9) I can list your dashboards and the widgets on each, and add, rename, delete or tidy widgets, (10) I can show, add, assign, move and update tasks on your kanban boards. End with something like: Which would you like?
+When the user asks for something you cannot do with your tools (e.g. console logs, server logs) AND no workflow matches, say clearly that you do not have access to that, then offer what you can do in a short numbered list. Always include: (1) I can show recent runs, (2) I can show what is running right now (with elapsed time and current node), (3) I can show analytics stats and where workflows fail or slow down, (4) I can show scheduled cron times (day/week/month), (5) I can run a workflow and show its result, (6) I can list workflows and you can talk about them or ask me to run one, (7) I can list your teams, (8) I can inspect your data tables, add or remove columns, and read, add, update or delete rows, (9) I can list your dashboards and the widgets on each, and add, rename, delete or tidy widgets, (10) I can show, add, assign, move and update tasks on your kanban boards, (11) I can list your knowledge bases and search what is in them. End with something like: Which would you like?
 
 11. When the user asks about teams (e.g. "my teams", "which teams am I in?", "who is in team X?"), use get_teams. Optionally pass team_name to filter by name.
 12. When the user asks about Heym features, nodes, expressions, workflows, or how to use the platform, use search_documentation. Call search_documentation at most 2 times per user message. Use one focused topic query first (e.g. "canvas features", "portal", "L0"). Long results are marked excerpted; call again with a more specific query if the first returns no relevant docs or the excerpts omit the requested detail. In your response, cite the documentation with markdown links: [Document Title](/docs/category/slug). Example: [LLM Node](/docs/nodes/llm-node). When the documentation contains a video tag (e.g. `<video src="/features/showcase/..."`), include it in your response so the user can watch a demo directly in chat. Respond in the user's language.
@@ -656,7 +665,10 @@ When the user asks for something you cannot do with your tools (e.g. console log
 17. Dashboards hold widgets, and Heym Work shows each dashboard as a page. When the user asks which dashboards or pages exist, what is on one, or which dashboard or page a widget or workflow is on, call list_dashboards (dashboard_id to read one, workflow_id to find where a workflow is placed) and answer from it, linking each dashboard's url. When the user asks for a new dashboard or page, call create_dashboard with a short name and then fill it in the same turn. When the user asks for new widgets, charts or metrics on a dashboard or page, resolve the dashboard with list_dashboards (or use the one create_dashboard returned) and the data tables the widgets read with list_data_tables, then call build_dashboard_widgets once with every widget: a short title, a prompt that says what it shows from which data, and the data_table_ids. It builds them in parallel, checks their data, fixes a widget that shows nothing or an error up to twice, and returns what was built and what failed. When a result of build_dashboard_widgets or refine_dashboard_widgets lists still_failing, call refine_dashboard_widgets once more for those widgets with an instruction that builds each a different way and avoids what its error names; if one still fails, tell the user which widget and why. If the user did not say what the page should show and no data table fits, ask with one heym-clarify question first. If build_dashboard_widgets says the chat's model cannot build widgets, call add_dashboard_widget without workflow_id, with a short title and the chart_type: it puts an empty widget on the dashboard. Then follow its next_step: write the widget's graph with save_workflow and the widget's workflow_id, test it with run_workflow_test and finish. Never build a separate workflow to copy onto a dashboard. When the user asks to put, add or place an existing workflow on a dashboard or page, resolve the workflow with list_workflows and call add_dashboard_widget with its workflow_id. Call add_dashboard_widget once per widget. If the user names no dashboard and several have permission owner or write, emit one heym-clarify question of type single whose options are those dashboard names, then stop and wait. A dashboard with permission read cannot take widgets: say so. After adding, say whether it became a chart widget or a run widget and link the dashboard url. Changes to a chart widget go to the widget's workflow_id from the result, never to the workflow it was copied from. When the user asks to change what one or more widgets show or how they draw it, call refine_dashboard_widgets once with every change. A message from Heym Work's page view lists the user's notes on a page's widgets, each with its widget_id: apply every note in that one call, except a note that asks to rename or delete a widget, which goes to those tools. Afterwards say per widget what changed, and what could not be changed and why. To rename a widget, call rename_dashboard_widget with its id from list_dashboards. Call delete_dashboard_widget only when the user asked to delete or remove that widget; if their words match more than one widget, ask which with one heym-clarify question first. Deleting a chart widget deletes its workflow too. When the user asks to tidy, arrange or clean up a dashboard or page, also when they ask in the same message as adding widgets, call tidy_dashboard once the widgets are added, with per_row when they name how many widgets go in a row; another call gives another arrangement. tidy_dashboard arranges the dashboard in Heym. A Heym Work page keeps its own arrangement, which the Tidy up button on that page changes: say so when the user means a page in Heym Work."""
 
 DASHBOARD_CHAT_SYSTEM_PROMPT = (
-    DASHBOARD_CHAT_SYSTEM_PROMPT + CLARIFY_PROTOCOL_PROMPT + USER_MEMORY_PROMPT
+    DASHBOARD_CHAT_SYSTEM_PROMPT
+    + CLARIFY_PROTOCOL_PROMPT
+    + USER_MEMORY_PROMPT
+    + KNOWLEDGE_BASE_PROMPT
 )
 
 _CREDENTIAL_CHOICES_SCHEMA: dict[str, Any] = {
@@ -1187,6 +1199,7 @@ DASHBOARD_CHAT_TOOLS = [
     *DASHBOARD_TOOL_SCHEMAS,
     *DASHBOARD_BUILD_TOOL_SCHEMAS,
     *DATA_TABLE_TOOL_SCHEMAS,
+    *KNOWLEDGE_BASE_TOOL_SCHEMAS,
     *BOARD_TOOL_SCHEMAS,
     *USER_MEMORY_TOOL_SCHEMAS,
 ]
@@ -3453,6 +3466,8 @@ def _summarize_tool_result(tool_name: str, result_json: str) -> str:
         return summarize_dashboard_build_tool(tool_name, data)
     if tool_name in DATA_TABLE_TOOL_NAMES:
         return summarize_data_table_tool(tool_name, data)
+    if tool_name in KNOWLEDGE_BASE_TOOL_NAMES:
+        return summarize_knowledge_base_tool(tool_name, data if isinstance(data, dict) else {})
     if tool_name in USER_MEMORY_TOOL_NAMES:
         return summarize_user_memory_tool(tool_name, data)
     if tool_name in BOARD_TOOL_NAMES:
@@ -3695,7 +3710,8 @@ async def stream_dashboard_chat(
                 base_system_prompt=system_prompt_parts.base_system_prompt
                 + getattr(system_prompt_parts, "build_reference", "")
                 + getattr(system_prompt_parts, "credentials_block", "")
-                + getattr(system_prompt_parts, "build_block", ""),
+                + getattr(system_prompt_parts, "build_block", "")
+                + getattr(system_prompt_parts, "knowledge_bases_block", ""),
                 agents_md=system_prompt_parts.agents_md,
                 workflows_block=system_prompt_parts.workflows_block,
                 user_rules=system_prompt_parts.user_rules,
@@ -5412,6 +5428,39 @@ async def stream_dashboard_chat(
                         step_ms,
                         status=_chat_tool_lifecycle_status(name, result),
                     )
+                elif name in KNOWLEDGE_BASE_TOOL_NAMES:
+                    step_label = knowledge_base_tool_label(name)
+                    yield (
+                        "data: "
+                        + json.dumps(
+                            {
+                                "type": "tool_start",
+                                "id": tc.id,
+                                "name": name,
+                                "label": step_label,
+                                "args": args,
+                            }
+                        )
+                        + "\n\n"
+                    )
+                    step_start = time.time()
+                    result = json.dumps(await call_knowledge_base_tool(db, user, name, args))
+                    step_ms = round((time.time() - step_start) * 1000, 2)
+                    run_steps.append(
+                        {
+                            "label": step_label,
+                            "tool": name,
+                            "request": args,
+                            "response_summary": _summarize_tool_result(name, result),
+                            "execution_time_ms": step_ms,
+                        }
+                    )
+                    yield _tool_end_yield(
+                        tc.id,
+                        run_steps[-1]["response_summary"],
+                        step_ms,
+                        status=_chat_tool_lifecycle_status(name, result),
+                    )
                 elif name in DASHBOARD_TOOL_NAMES:
                     step_label = dashboard_tool_label(name)
                     yield (
@@ -6133,6 +6182,7 @@ async def dashboard_chat_stream(
             + "\n\nAvailable workflows (always check these first when user asks for information):\n"
             + workflows_block
         )
+    system_prompt += await knowledge_bases_prompt_block(db, current_user.id)
     system_prompt += await build_credentials_prompt(
         db, current_user.id, CredentialPromptMode.ASK_AND_CREATE
     )
