@@ -176,6 +176,12 @@ const gmailClientSecret = ref("");
 const gmailOAuthConnected = ref(false);
 const gmailOAuthConnecting = ref(false);
 const gmailConnectedCredential = ref<import("@/types/credential").Credential | null>(null);
+const outlookClientId = ref("");
+const outlookClientSecret = ref("");
+const outlookTenant = ref("common");
+const outlookOAuthConnected = ref(false);
+const outlookOAuthConnecting = ref(false);
+const outlookConnectedCredential = ref<import("@/types/credential").Credential | null>(null);
 const bqClientId = ref("");
 const bqClientSecret = ref("");
 const bqOAuthConnected = ref(false);
@@ -267,6 +273,15 @@ const gmailOAuth = useOAuthPopup(
   },
   { ...googleFlowConfig, windowName: "google-oauth" },
 );
+const outlookOAuth = useOAuthPopup(
+  {
+    connecting: outlookOAuthConnecting,
+    connected: outlookOAuthConnected,
+    connectedCredential: outlookConnectedCredential,
+    error,
+  },
+  { ...googleFlowConfig, windowName: "microsoft-oauth" },
+);
 const bqOAuth = useOAuthPopup(
   {
     connecting: bqOAuthConnecting,
@@ -310,7 +325,7 @@ const notionOAuth = useOAuthPopup(
 );
 
 function resetOAuthFlows(): void {
-  for (const flow of [gsOAuth, gdOAuth, gmOAuth, gmailOAuth, bqOAuth, linearOAuth, notionOAuth]) {
+  for (const flow of [gsOAuth, gdOAuth, gmOAuth, gmailOAuth, outlookOAuth, bqOAuth, linearOAuth, notionOAuth]) {
     flow.reset();
   }
 }
@@ -415,6 +430,7 @@ const typeOptions = [
   { value: "google_drive", label: CREDENTIAL_TYPE_LABELS.google_drive },
   { value: "google_meet", label: CREDENTIAL_TYPE_LABELS.google_meet },
   { value: "gmail", label: CREDENTIAL_TYPE_LABELS.gmail },
+  { value: "outlook", label: CREDENTIAL_TYPE_LABELS.outlook },
   { value: "bigquery", label: CREDENTIAL_TYPE_LABELS.bigquery },
   { value: "supabase", label: CREDENTIAL_TYPE_LABELS.supabase },
   { value: "clickhouse", label: CREDENTIAL_TYPE_LABELS.clickhouse },
@@ -660,6 +676,13 @@ watch(
         gmailOAuthConnected.value =
           props.credential.type === "gmail" && !!props.credential.masked_value?.startsWith("connected");
         gmailConnectedCredential.value = null;
+        outlookClientId.value = "";
+        outlookClientSecret.value = "";
+        outlookTenant.value =
+          (props.credential.type === "outlook" && props.credential.public_fields?.tenant) || "common";
+        outlookOAuthConnected.value =
+          props.credential.type === "outlook" && !!props.credential.masked_value?.startsWith("connected");
+        outlookConnectedCredential.value = null;
         bqClientId.value = "";
         bqClientSecret.value = "";
         bqOAuthConnected.value = props.credential.masked_value === "connected" && props.credential.type === "bigquery";
@@ -789,6 +812,11 @@ watch(
         gmailClientSecret.value = "";
         gmailOAuthConnected.value = false;
         gmailConnectedCredential.value = null;
+        outlookClientId.value = "";
+        outlookClientSecret.value = "";
+        outlookTenant.value = "common";
+        outlookOAuthConnected.value = false;
+        outlookConnectedCredential.value = null;
         bqClientId.value = "";
         bqClientSecret.value = "";
         bqOAuthConnected.value = false;
@@ -954,6 +982,8 @@ const isValid = computed(() => {
     return gmOAuthConnected.value || isEditing.value;
   } else if (type.value === "gmail") {
     return gmailOAuthConnected.value || isEditing.value;
+  } else if (type.value === "outlook") {
+    return outlookOAuthConnected.value || isEditing.value;
   } else if (type.value === "google_drive") {
     return gdOAuthConnected.value || isEditing.value;
   } else if (type.value === "bigquery") {
@@ -1196,6 +1226,12 @@ function buildConfig(): CredentialConfig {
       client_id: gmailClientId.value.trim(),
       client_secret: gmailClientSecret.value.trim(),
     };
+  } else if (type.value === "outlook") {
+    return {
+      client_id: outlookClientId.value.trim(),
+      client_secret: outlookClientSecret.value.trim(),
+      tenant: outlookTenant.value.trim() || "common",
+    };
   } else if (type.value === "bigquery") {
     return {
       client_id: bqClientId.value.trim(),
@@ -1284,6 +1320,24 @@ async function startGmailOAuth(): Promise<void> {
     return;
   }
   await gmailOAuth.start(() => saveOAuthCredential("gmail", gmailOAuth), authorize);
+}
+
+async function startOutlookOAuth(): Promise<void> {
+  if (!outlookClientId.value.trim() || !outlookClientSecret.value.trim()) {
+    error.value = "Enter Client ID and Client Secret before connecting.";
+    return;
+  }
+  if (!name.value.trim()) {
+    error.value = "Enter a name for this credential before connecting.";
+    return;
+  }
+
+  const authorize = credentialsApi.outlookOAuthAuthorize;
+  if (!authorize) {
+    error.value = "Open Heym to connect an Outlook credential.";
+    return;
+  }
+  await outlookOAuth.start(() => saveOAuthCredential("outlook", outlookOAuth), authorize);
 }
 
 async function startGoogleSheetsOAuth(): Promise<void> {
@@ -1668,6 +1722,7 @@ async function handleSave(): Promise<void> {
         type.value !== "google_drive" &&
         type.value !== "google_meet" &&
         type.value !== "gmail" &&
+        type.value !== "outlook" &&
         type.value !== "bigquery" &&
         !(type.value === "linear" && linearAuthMode.value === "oauth") &&
         !(type.value === "notion" && notionAuthMode.value === "oauth") &&
@@ -1748,6 +1803,8 @@ async function handleSave(): Promise<void> {
       saved = gmConnectedCredential.value;
     } else if (type.value === "gmail" && gmailConnectedCredential.value) {
       saved = gmailConnectedCredential.value;
+    } else if (type.value === "outlook" && outlookConnectedCredential.value) {
+      saved = outlookConnectedCredential.value;
     } else if (type.value === "bigquery" && bqConnectedCredential.value) {
       saved = bqConnectedCredential.value;
     } else if (type.value === "notion" && notionConnectedCredential.value) {
@@ -3681,6 +3738,113 @@ async function handleSave(): Promise<void> {
         </div>
       </template>
 
+      <template v-if="type === 'outlook'">
+        <div class="space-y-2">
+          <Label for="cred-outlook-client-id">Application (client) ID</Label>
+          <Input
+            id="cred-outlook-client-id"
+            v-model="outlookClientId"
+            :placeholder="isEditing ? '(re-enter to update)' : '00000000-0000-0000-0000-000000000000'"
+            :disabled="saving || outlookOAuthConnecting"
+          />
+          <p class="text-xs text-muted-foreground">
+            From your app registration in Microsoft Entra ID (App registrations).
+          </p>
+        </div>
+
+        <div class="space-y-2">
+          <Label for="cred-outlook-client-secret">Client Secret</Label>
+          <div class="relative">
+            <Input
+              id="cred-outlook-client-secret"
+              v-model="outlookClientSecret"
+              :type="showApiKey ? 'text' : 'password'"
+              :placeholder="isEditing ? '••••••• (re-enter to update)' : 'Client secret value'"
+              :disabled="saving || outlookOAuthConnecting"
+              class="pr-10"
+            />
+            <button
+              type="button"
+              class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              @click="showApiKey = !showApiKey"
+            >
+              <EyeOff
+                v-if="showApiKey"
+                class="w-4 h-4"
+              />
+              <Eye
+                v-else
+                class="w-4 h-4"
+              />
+            </button>
+          </div>
+          <p class="text-xs text-muted-foreground">
+            The secret's Value from Certificates &amp; secrets, not its ID.
+          </p>
+        </div>
+
+        <div class="space-y-2">
+          <Label for="cred-outlook-tenant">Tenant</Label>
+          <Input
+            id="cred-outlook-tenant"
+            v-model="outlookTenant"
+            placeholder="common"
+            :disabled="saving || outlookOAuthConnecting"
+          />
+          <p class="text-xs text-muted-foreground">
+            <code>common</code> accepts work, school and personal accounts. For one organization's
+            mailboxes, enter its tenant ID or domain (for example <code>contoso.com</code>);
+            <code>consumers</code> allows only Outlook.com accounts.
+          </p>
+        </div>
+
+        <p class="text-xs text-muted-foreground">
+          Add
+          <code>{{ appOrigin }}/api/credentials/outlook/oauth/callback</code>
+          as a Web redirect URI and grant the Microsoft Graph delegated permissions
+          <code>Mail.ReadWrite</code>, <code>User.Read</code> and <code>offline_access</code>.
+          Heym can then mark email as read or move it to Archive or Deleted Items. It never
+          deletes mail permanently. Some organizations require an administrator to consent first.
+        </p>
+
+        <div class="rounded-md border p-3 space-y-2">
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-sm font-medium">
+                Outlook Mail Account
+              </p>
+              <p
+                v-if="outlookOAuthConnected"
+                class="text-xs text-green-600 dark:text-green-400"
+              >
+                Connected
+              </p>
+              <p
+                v-else
+                class="text-xs text-muted-foreground"
+              >
+                Not connected. Click Connect to authorize.
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              :loading="outlookOAuthConnecting"
+              :disabled="saving || outlookOAuthConnecting || !outlookClientId.trim() || !outlookClientSecret.trim() || (outlookOAuthConnected && !isEditing)"
+              @click="startOutlookOAuth"
+            >
+              {{ outlookOAuthConnected ? (isEditing ? 'Reconnect' : 'Connected') : 'Connect' }}
+            </Button>
+          </div>
+          <OAuthAuthorizeLink
+            v-if="outlookOAuth.authUrl.value && !outlookOAuthConnected"
+            :auth-url="outlookOAuth.authUrl.value"
+            @open="outlookOAuth.openAuthPage()"
+          />
+        </div>
+      </template>
+
       <template v-if="type === 'bigquery'">
         <div class="space-y-2">
           <Label for="cred-bq-client-id">Google Client ID</Label>
@@ -4069,7 +4233,7 @@ async function handleSave(): Promise<void> {
           :loading="saving"
           :disabled="!isValid"
         >
-          {{ isEditing ? 'Save Changes' : ((type === 'google_sheets' && gsOAuthConnected) || (type === 'google_drive' && gdOAuthConnected) || (type === 'google_meet' && gmOAuthConnected) || (type === 'gmail' && gmailOAuthConnected) || (type === 'bigquery' && bqOAuthConnected) ? 'Done' : 'Create') }}
+          {{ isEditing ? 'Save Changes' : ((type === 'google_sheets' && gsOAuthConnected) || (type === 'google_drive' && gdOAuthConnected) || (type === 'google_meet' && gmOAuthConnected) || (type === 'gmail' && gmailOAuthConnected) || (type === 'outlook' && outlookOAuthConnected) || (type === 'bigquery' && bqOAuthConnected) ? 'Done' : 'Create') }}
         </Button>
       </div>
     </form>

@@ -46,6 +46,7 @@ export const DOCS_MANIFEST: Record<string, DocCategory> = {
       { slug: "discord-trigger-node", title: "Discord Trigger" },
       { slug: "imap-trigger-node", title: "IMAP Trigger" },
       { slug: "gmail-trigger-node", title: "Gmail Trigger" },
+      { slug: "outlook-trigger-node", title: "Outlook Trigger" },
       { slug: "google-drive-trigger-node", title: "Google Drive Trigger" },
       { slug: "google-sheets-trigger-node", title: "Google Sheets Trigger" },
       { slug: "heym-trigger-node", title: "Heym Trigger" },

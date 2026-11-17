@@ -381,11 +381,11 @@ describe("shipped release registry", () => {
     const catalog = buildReleaseTourCatalog(RELEASE_REGISTRY);
 
     expect(catalog?.slides.map((slide) => slide.id)).toEqual([
+      "outlook-trigger",
       "gmail-trigger",
       "mcp-endpoint",
       "imap-attachments",
       "chat-widget-revert",
-      "rag-media-upload",
     ]);
   });
 
@@ -398,10 +398,10 @@ describe("shipped release registry", () => {
       section.tour ? [section.tour] : [],
     );
 
+    expect(tours.map((tour) => tour.tourVisual)).toContain("outlook-trigger");
     expect(tours.map((tour) => tour.tourVisual)).toContain("gmail-trigger");
     expect(tours.map((tour) => tour.tourVisual)).toContain("chat-widget-revert");
     expect(tours.map((tour) => tour.tourVisual)).toContain("imap-attachments");
-    expect(tours.map((tour) => tour.tourVisual)).toContain("rag-media-upload");
     expect(tours.map((tour) => tour.tourVisual)).toContain("mcp-endpoint");
     for (const tour of tours) {
       expect(TOUR_VISUALS[tour.tourVisual], `missing visual for "${tour.tourVisual}"`)

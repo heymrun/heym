@@ -28,6 +28,7 @@ export type CredentialType =
   | "google_drive"
   | "google_meet"
   | "gmail"
+  | "outlook"
   | "bigquery"
   | "supabase"
   | "notion"
@@ -325,6 +326,13 @@ export interface CredentialConfigFlaresolverr {
   flaresolverr_url: string;
 }
 
+export interface CredentialConfigOutlook {
+  client_id: string;
+  client_secret: string;
+  /** Microsoft sign-in tenant: common, organizations, consumers, a tenant id or a domain. */
+  tenant: string;
+}
+
 export interface CredentialConfigGoogleSheets {
   client_id: string;
   client_secret: string;
@@ -400,6 +408,7 @@ export type CredentialConfig =
   | CredentialConfigCohere
   | CredentialConfigFlaresolverr
   | CredentialConfigGoogleSheets
+  | CredentialConfigOutlook
   | CredentialConfigSupabase
   | CredentialConfigClickHouse
   | CredentialConfigNotion
@@ -533,6 +542,7 @@ export const CREDENTIAL_TYPE_LABELS: Record<CredentialType, string> = {
   google_drive: "Google Drive (OAuth2)",
   google_meet: "Google Meet (OAuth2)",
   gmail: "Gmail (OAuth2)",
+  outlook: "Outlook Mail (OAuth2)",
   bigquery: "BigQuery (OAuth2)",
   supabase: "Supabase",
   clickhouse: "ClickHouse",
@@ -579,6 +589,8 @@ export const CREDENTIAL_TYPE_DESCRIPTIONS: Record<CredentialType, string> = {
   google_drive: "Connect to Google Drive via OAuth2 — list, download, update, and delete files",
   google_meet: "Connect Google Calendar to find free times and manage Meet invitations",
   gmail: "Connect a Gmail account to start workflows from new email, by tab, label or alias",
+  outlook:
+    "Connect an Outlook.com or Microsoft 365 mailbox to start workflows from new or flagged email",
   bigquery: "Connect to Google BigQuery via OAuth2 — run SQL queries and insert rows",
   supabase: "Connect to Supabase PostgREST — query and mutate Postgres-backed tables",
   clickhouse:

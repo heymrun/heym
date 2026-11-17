@@ -63,6 +63,8 @@ from app.api import (
     notion_oauth,
     oauth,
     opencode_go,
+    outlook,
+    outlook_oauth,
     page_views,
     playwright,
     plugins,
@@ -122,6 +124,7 @@ from app.services.imap_trigger_service import imap_trigger_manager
 from app.services.k8s_credentials import lifecycle as k8s_credentials_lifecycle
 from app.services.key_rotation import key_rotation_service
 from app.services.notion_service import NotionService
+from app.services.outlook_trigger.poller import outlook_trigger_manager
 from app.services.qdrant_pool import close_all_clients as close_qdrant_clients
 from app.services.qdrant_pool import warm_up_pools as warm_up_qdrant_pools
 from app.services.rabbitmq_consumer import rabbitmq_consumer_manager
@@ -260,6 +263,7 @@ async def lifespan(app: FastAPI):
     await imap_trigger_manager.start()
     await google_trigger_poller.start()
     await gmail_trigger_manager.start()
+    await outlook_trigger_manager.start()
     await rabbitmq_consumer_manager.start()
     await websocket_trigger_manager.start()
     await heym_event_dispatcher.start()
@@ -274,6 +278,7 @@ async def lifespan(app: FastAPI):
     await heym_event_dispatcher.stop()
     await websocket_trigger_manager.stop()
     await rabbitmq_consumer_manager.stop()
+    await outlook_trigger_manager.stop()
     await gmail_trigger_manager.stop()
     await google_trigger_poller.stop()
     await imap_trigger_manager.stop()
@@ -411,6 +416,11 @@ app.include_router(
     tags=["Gmail OAuth"],
 )
 app.include_router(
+    outlook_oauth.router,
+    prefix="/api/credentials/outlook/oauth",
+    tags=["Outlook OAuth"],
+)
+app.include_router(
     google_drive_oauth.router,
     prefix="/api/credentials/google-drive/oauth",
     tags=["Google Drive OAuth"],
@@ -477,6 +487,7 @@ app.include_router(slack.router, prefix="/api/slack", tags=["Slack"])
 app.include_router(slack_bot.router, prefix="/api/slack", tags=["Slack"])
 app.include_router(google_sheets.router, prefix="/api/google-sheets", tags=["Google Sheets"])
 app.include_router(gmail.router, prefix="/api/gmail", tags=["Gmail"])
+app.include_router(outlook.router, prefix="/api/outlook", tags=["Outlook"])
 app.include_router(discord.router, prefix="/api/discord", tags=["Discord"])
 app.include_router(telegram.router, prefix="/api/telegram", tags=["Telegram"])
 app.include_router(schedules.router, prefix="/api/schedules", tags=["Schedules"])

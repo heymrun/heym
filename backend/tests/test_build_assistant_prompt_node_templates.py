@@ -62,6 +62,22 @@ class TestBuildAssistantPromptNodeTemplates(unittest.TestCase):
         self.assertIn('"markReadAndArchive"', prompt)
         self.assertIn("Never a permanent delete", prompt)
 
+    def test_includes_outlook_trigger_guidance(self) -> None:
+        prompt = build_assistant_prompt()
+
+        self.assertIn("### 3j. outlookTrigger", prompt)
+        self.assertIn("outlook-credential-uuid", prompt)
+        for field in (
+            "outlookMailbox",
+            "outlookFolderId",
+            "outlookFlaggedOnly",
+            "outlookAliases",
+            "outlookAfterAction",
+        ):
+            self.assertIn(field, prompt)
+        self.assertIn('"focused"', prompt)
+        self.assertIn("move to Deleted Items", prompt)
+
     def test_includes_google_trigger_guidance(self) -> None:
         prompt = build_assistant_prompt()
 

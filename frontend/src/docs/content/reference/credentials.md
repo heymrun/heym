@@ -28,6 +28,7 @@ Credentials store API keys and secrets used by workflow nodes. You add them in t
 | [Slack](../nodes/slack-node.md) | Slack Webhook, Slack Bot (Token) | Incoming webhook URL, or a bot token and signing secret for every operation |
 | [IMAP Trigger](../nodes/imap-trigger-node.md) | IMAP | Inbound mailbox connection |
 | [Gmail Trigger](../nodes/gmail-trigger-node.md) | Gmail (OAuth2) | Client ID + Client Secret + OAuth2 consent |
+| [Outlook Trigger](../nodes/outlook-trigger-node.md) | Outlook Mail (OAuth2) | Application (client) ID + Client Secret + Tenant + OAuth2 consent |
 | [Send Email](../nodes/send-email-node.md) | SMTP | Mail server |
 | [Redis](../nodes/redis-node.md) | Redis | Connection |
 | [Grist](../nodes/grist-node.md) | Grist | API key + server URL |

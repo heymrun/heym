@@ -58,6 +58,7 @@ from app.services.encryption import decrypt_config, encrypt_config, mask_api_key
 from app.services.k8s_credentials.store import CredentialUnavailableError
 from app.services.model_router import ModelRouterConfigError, parse_router_config
 from app.services.opencode_usage_service import fetch_opencode_usage
+from app.services.outlook_service import oauth_tenant
 from app.services.user_lookup import find_user_by_email
 from app.services.vector_store import VECTOR_STORE_BACKENDS
 from app.services.vector_store_pg import pgvector_dimension_message
@@ -485,6 +486,7 @@ def get_masked_value(credential_type: CredentialType, config: dict) -> str | Non
         CredentialType.google_drive,
         CredentialType.google_meet,
         CredentialType.gmail,
+        CredentialType.outlook,
     ):
         if config.get("refresh_token", "").strip():
             email_address = str(config.get("email_address", "")).strip()
@@ -623,6 +625,8 @@ def get_public_credential_fields(
             "supabase_url": supabase_url,
             "supabase_schema": supabase_schema,
         }
+    if credential_type == CredentialType.outlook:
+        return {"tenant": str(config.get("tenant") or "").strip() or "common"}
     if credential_type == CredentialType.notion:
         auth_mode = str(config.get("auth_mode", "token")).strip() or "token"
         fields: dict[str, str | None] = {"auth_mode": auth_mode}
@@ -2480,6 +2484,17 @@ def validate_credential_config(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"{google_label} credential requires client_secret",
             )
+    elif credential_type == CredentialType.outlook:
+        for key in ("client_id", "client_secret"):
+            if not str(config.get(key) or "").strip():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Outlook credential requires {key}",
+                )
+        try:
+            oauth_tenant(config)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     elif credential_type == CredentialType.supabase:
         if "supabase_url" not in config or not str(config["supabase_url"]).strip():
             raise HTTPException(

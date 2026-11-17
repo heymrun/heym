@@ -32,7 +32,7 @@ MAILBOXES: tuple[str, ...] = (
 AFTER_ACTIONS: tuple[str, ...] = ("none", "markRead", "archive", "markReadAndArchive", "trash")
 
 
-def _parse_aliases(raw: Any) -> tuple[str, ...]:
+def parse_aliases(raw: Any) -> tuple[str, ...]:
     """Addresses as typed, lowercased and deduplicated; a list or comma/space separated text."""
     if isinstance(raw, str):
         items: list[Any] = re.split(r"[,;\s]+", raw)
@@ -48,7 +48,8 @@ def _parse_aliases(raw: Any) -> tuple[str, ...]:
     return tuple(aliases)
 
 
-def _parse_poll_minutes(raw: Any) -> int:
+def parse_poll_minutes(raw: Any) -> int:
+    """The poll interval in whole minutes, at least 1."""
     try:
         return max(1, int(raw))
     except (TypeError, ValueError):
@@ -83,7 +84,7 @@ def parse_gmail_config(data: dict[str, Any]) -> GmailTriggerConfig:
         credential_id=str(data.get("credentialId") or "").strip(),
         mailbox=mailbox if mailbox in MAILBOXES else "inbox",
         label_id=str(data.get("gmailLabelId") or "").strip() if mailbox == "label" else "",
-        aliases=_parse_aliases(data.get("gmailAliases")),
+        aliases=parse_aliases(data.get("gmailAliases")),
         after_action=after_action if after_action in AFTER_ACTIONS else "none",
-        poll_minutes=_parse_poll_minutes(data.get("pollIntervalMinutes")),
+        poll_minutes=parse_poll_minutes(data.get("pollIntervalMinutes")),
     )

@@ -114,6 +114,10 @@ After execution, `mask_sensitive_output()` masks credential values in outputs, k
 
 Sharing a [Gmail credential](../nodes/gmail-trigger-node.md) lets the workflows of the people you share it with read every email in the connected mailbox, and mark email read, archive it or move it to Trash through a Gmail Trigger's after-run action. It does not allow permanent deletion. Share it only with people you would let read that mailbox. Only the credential owner can reconnect its Google authorization.
 
+## Outlook mailbox access
+
+Sharing an [Outlook credential](../nodes/outlook-trigger-node.md) lets the workflows of the people you share it with read every email in the connected mailbox, and mark email read or move it to Archive or Deleted Items through an Outlook Trigger's after-run action. It does not allow permanent deletion. Share it only with people you would let read that mailbox. Only the credential owner can reconnect its Microsoft authorization.
+
 ## Google Meet calendar permissions
 
 Sharing a [Google Meet credential](../nodes/google-meet-node.md) lets workflows using it read accessible calendars' free/busy intervals and create, change or delete events as the connected Google account, including sending invitations and cancellations. The visitor's attendee email does not change which account owns or authorizes the event. Only the credential owner can reconnect its Google authorization.
