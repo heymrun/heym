@@ -1,11 +1,12 @@
-"""Microsoft Graph mail client for the Outlook Trigger, with OAuth2 token refresh."""
+"""Microsoft Graph mail client for the Outlook Trigger and Outlook Send, with token refresh."""
 
 from __future__ import annotations
 
+import base64
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import httpx
 from sqlalchemy.orm import Session
@@ -16,19 +17,34 @@ from app.services.encryption import encrypt_config
 GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
 GRAPH_BASE = f"{GRAPH_ROOT}/me"
 LOGIN_BASE = "https://login.microsoftonline.com"
-# Read mail, mark it read and move it between folders. Heym never deletes permanently.
-OUTLOOK_SCOPES: tuple[str, ...] = ("offline_access", "User.Read", "Mail.ReadWrite")
+# Read mail, mark it read and move it between folders. Heym never deletes mail permanently.
+_READ_SCOPES: tuple[str, ...] = ("offline_access", "User.Read", "Mail.ReadWrite")
+# Mail.Send lets Outlook Send send as the account. Mail.ReadWrite alone cannot send.
+_SEND_SCOPE = "Mail.Send"
+OUTLOOK_SCOPES: tuple[str, ...] = (*_READ_SCOPES, _SEND_SCOPE)
 DEFAULT_TENANT = "common"
 _TENANT_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.-]{0,99}$")
 _TIMEOUT_SECONDS = 30
 # Immutable ids stay the same when a message moves between folders.
 _PREFER_IMMUTABLE_IDS = 'IdType="ImmutableId"'
 PAGE_SIZE = 100
+# One Graph request may carry 4 MB. Attachments go inline up to this much encoded content;
+# a larger message is sent as a draft whose big files are uploaded in chunks.
+INLINE_MESSAGE_LIMIT = 3_500_000
+# Graph's POST .../attachments takes a file below 3 MB; larger ones need an upload session.
+_SMALL_ATTACHMENT_LIMIT = 3 * 1024 * 1024
+# Upload session chunks must be a multiple of 320 KiB.
+_UPLOAD_CHUNK_BYTES = 10 * 320 * 1024
+_SEND_TIMEOUT_SECONDS = 120
+_PROVIDER_MESSAGE_LIMIT = 200
+# Hosts an attachment upload session may point at (Exchange Online, Outlook.com).
+_UPLOAD_HOST_SUFFIXES = (".office.com", ".office365.com", ".outlook.com")
 
 _STATUS_DETAIL = {
     401: "credential expired; reconnect it in Credentials",
     403: "Outlook access denied; check the app's Mail.ReadWrite permission",
     404: "not found",
+    413: "the message is larger than Microsoft accepts",
     429: "Microsoft Graph rate limit reached; retry later",
 }
 
@@ -53,11 +69,60 @@ def token_url(tenant: str) -> str:
     return f"{LOGIN_BASE}/{tenant}/oauth2/v2.0/token"
 
 
+def _has_scope(scope: object, name: str) -> bool:
+    """Whether a granted scope string includes ``name``, short or full form."""
+    return any(item.rsplit("/", 1)[-1].lower() == name for item in str(scope or "").split())
+
+
 def has_mail_scope(scope: str) -> bool:
     """Whether a granted scope string includes Mail.ReadWrite, short or full form."""
-    return any(
-        item.rsplit("/", 1)[-1].lower() == "mail.readwrite" for item in str(scope or "").split()
+    return _has_scope(scope, "mail.readwrite")
+
+
+def has_send_scope(scope: object) -> bool:
+    """Whether a granted scope string includes Mail.Send, short or full form."""
+    return _has_scope(scope, "mail.send")
+
+
+def refresh_scopes(
+    config: dict[str, Any], scopes: tuple[str, ...] = OUTLOOK_SCOPES
+) -> tuple[str, ...]:
+    """The scopes a token refresh asks for: Mail.Send only when the sign-in granted it.
+
+    Microsoft refuses a refresh that asks for more than the sign-in requested, so a
+    credential connected before Outlook Send keeps refreshing for its trigger. It can send
+    once it is reconnected. Scope sets without Mail.Send (Outlook Calendar) pass unchanged.
+    """
+    if has_send_scope(config.get("scope")):
+        return scopes
+    return tuple(scope for scope in scopes if scope != _SEND_SCOPE)
+
+
+def _rejection_reason(response: httpx.Response) -> str:
+    """Microsoft's own reason for refusing a message, such as an unresolved recipient."""
+    try:
+        message = response.json().get("error", {}).get("message")
+    except (ValueError, AttributeError):
+        return ""
+    return str(message or "").strip()[:_PROVIDER_MESSAGE_LIMIT]
+
+
+def _upload_url_allowed(url: str) -> bool:
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    return parsed.scheme == "https" and any(
+        host.endswith(suffix) for suffix in _UPLOAD_HOST_SUFFIXES
     )
+
+
+def file_attachment(name: str, content_type: str, content: bytes) -> dict[str, Any]:
+    """A Graph fileAttachment with its bytes inline."""
+    return {
+        "@odata.type": "#microsoft.graph.fileAttachment",
+        "name": name,
+        "contentType": content_type,
+        "contentBytes": base64.b64encode(content).decode("ascii"),
+    }
 
 
 def account_address(profile: dict[str, Any]) -> str:
@@ -100,7 +165,7 @@ class OutlookService:
                     "refresh_token": self._config["refresh_token"],
                     "client_id": self._config["client_id"],
                     "client_secret": self._config["client_secret"],
-                    "scope": " ".join(self.scopes),
+                    "scope": " ".join(refresh_scopes(self._config, self.scopes)),
                 },
                 timeout=_TIMEOUT_SECONDS,
             )
@@ -138,6 +203,7 @@ class OutlookService:
         *,
         params: dict[str, Any] | None = None,
         json: dict[str, Any] | None = None,
+        sending: bool = False,
     ) -> httpx.Response:
         if not url.startswith(f"{GRAPH_ROOT}/"):
             raise OutlookApiError(502, f"{self.label}: unexpected Microsoft Graph address")
@@ -151,12 +217,17 @@ class OutlookService:
                 },
                 params=params,
                 json=json,
-                timeout=_TIMEOUT_SECONDS,
+                timeout=_SEND_TIMEOUT_SECONDS if sending else _TIMEOUT_SECONDS,
             )
         except httpx.HTTPError as exc:
             raise OutlookApiError(
                 502, f"{self.label}: Microsoft Graph could not be reached"
             ) from exc
+        if sending and response.status_code in (400, 403):
+            # A refused message says why (an unresolved recipient, a From address the
+            # account may not send as); that names only what the node itself sent.
+            reason = _rejection_reason(response) or "Microsoft refused the message"
+            raise OutlookApiError(response.status_code, f"{self.label}: {reason}")
         if response.is_error:
             # Provider bodies can echo addresses or tokens, so only the status is kept.
             detail = self.status_detail.get(
@@ -172,8 +243,9 @@ class OutlookService:
         *,
         params: dict[str, Any] | None = None,
         json: dict[str, Any] | None = None,
+        sending: bool = False,
     ) -> dict[str, Any]:
-        response = self._send(method, url, params=params, json=json)
+        response = self._send(method, url, params=params, json=json, sending=sending)
         if response.status_code == 204 or not response.content:
             return {}
         try:
@@ -274,3 +346,94 @@ class OutlookService:
             f"{GRAPH_BASE}/messages/{quote(message_id, safe='')}/move",
             json={"destinationId": destination},
         )
+
+    def send_message(
+        self, message: dict[str, Any], attachments: list[tuple[str, str, bytes]]
+    ) -> None:
+        """Send a Graph message with its attachments (name, content type, bytes) as the account.
+
+        A message that fits in one request goes through ``sendMail``. A larger one is saved
+        as a draft, its attachments are added one by one (files of 3 MB and more through an
+        upload session) and the draft is sent; a draft that cannot be completed is removed
+        again. Either way the sent copy lands in Sent Items.
+        """
+        encoded = sum((len(content) + 2) // 3 * 4 for _name, _type, content in attachments)
+        body = str((message.get("body") or {}).get("content") or "")
+        if encoded + len(body.encode("utf-8")) <= INLINE_MESSAGE_LIMIT:
+            inline = dict(message)
+            if attachments:
+                inline["attachments"] = [file_attachment(*item) for item in attachments]
+            self._json(
+                "POST",
+                f"{GRAPH_BASE}/sendMail",
+                json={"message": inline, "saveToSentItems": True},
+                sending=True,
+            )
+            return
+
+        draft = self._json("POST", f"{GRAPH_BASE}/messages", json=message, sending=True)
+        draft_id = str(draft.get("id") or "")
+        if not draft_id:
+            raise OutlookApiError(502, f"{self.label}: Microsoft Graph did not save the draft")
+        path = f"{GRAPH_BASE}/messages/{quote(draft_id, safe='')}"
+        try:
+            for name, content_type, content in attachments:
+                if len(content) < _SMALL_ATTACHMENT_LIMIT:
+                    self._json(
+                        "POST",
+                        f"{path}/attachments",
+                        json=file_attachment(name, content_type, content),
+                        sending=True,
+                    )
+                else:
+                    self._upload_attachment(path, name, content_type, content)
+            self._json("POST", f"{path}/send", sending=True)
+        except OutlookApiError:
+            try:
+                self._send("DELETE", path)
+            except OutlookApiError:
+                pass
+            raise
+
+    def _upload_attachment(self, path: str, name: str, content_type: str, content: bytes) -> None:
+        """Upload one large attachment to a draft in chunks through an upload session."""
+        session = self._json(
+            "POST",
+            f"{path}/attachments/createUploadSession",
+            json={
+                "AttachmentItem": {
+                    "attachmentType": "file",
+                    "name": name,
+                    "size": len(content),
+                    "contentType": content_type,
+                }
+            },
+            sending=True,
+        )
+        upload_url = str(session.get("uploadUrl") or "")
+        if not _upload_url_allowed(upload_url):
+            raise OutlookApiError(502, f"{self.label}: unexpected attachment upload address")
+        total = len(content)
+        for start in range(0, total, _UPLOAD_CHUNK_BYTES):
+            chunk = content[start : start + _UPLOAD_CHUNK_BYTES]
+            end = start + len(chunk) - 1
+            try:
+                # The upload URL carries its own token; Graph refuses an Authorization header.
+                response = httpx.put(
+                    upload_url,
+                    headers={
+                        "Content-Range": f"bytes {start}-{end}/{total}",
+                        "Content-Type": "application/octet-stream",
+                    },
+                    content=chunk,
+                    timeout=_SEND_TIMEOUT_SECONDS,
+                )
+            except httpx.HTTPError as exc:
+                raise OutlookApiError(
+                    502, f"{self.label}: the attachment upload could not be completed"
+                ) from exc
+            if response.is_error:
+                detail = self.status_detail.get(
+                    response.status_code, "the attachment upload failed"
+                )
+                raise OutlookApiError(response.status_code, f"{self.label}: {detail}")

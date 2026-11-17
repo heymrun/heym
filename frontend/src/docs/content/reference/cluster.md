@@ -34,6 +34,7 @@ Placement is decided from the workflow's nodes before the run starts. A run stay
 | IMAP Trigger with **Download attachments to Drive** on | The attachments are saved to Heym Drive during the run |
 | Gmail Trigger with **Download attachments to Drive** on | The attachments are saved to Heym Drive during the run |
 | Outlook Trigger with **Download attachments to Drive** on | The attachments are saved to Heym Drive during the run |
+| Gmail Send or Outlook Send with **Attachments** set (or left to an agent) | The attachments are read from Heym Drive on main's disk |
 
 **Everything else is distributed** — including the Code node, Playwright and Agent Python tools. Every instance runs the same image with its own sandbox backend (a Docker socket, or Kubernetes API access), so a sandbox is not a reason to keep a run on main, and those are the most CPU-hungry nodes in the product.
 

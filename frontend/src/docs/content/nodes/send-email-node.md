@@ -1,6 +1,6 @@
 # Send Email
 
-The **Send Email** node sends emails via SMTP. Use it for notifications, alerts, and transactional emails.
+The **Send Email** node sends emails via SMTP. Use it for notifications, alerts, and transactional emails. To send from a Gmail account or an Outlook or Microsoft 365 mailbox without an SMTP password, use [Gmail Send](./gmail-send-node.md) or [Outlook Send](./outlook-send-node.md): they have the same fields.
 
 ## Overview
 
@@ -33,8 +33,8 @@ inaccessible ID fails the node rather than sending a partial email.
 
 Add an SMTP credential with server, port, email, and password. The visible sender is the credential's optional **From**; a blank From sends as the username. Common SMTP servers:
 
-- Gmail: `smtp.gmail.com`, port 587 (App Password required)
-- Outlook: `smtp.office365.com`, port 587
+- Gmail: `smtp.gmail.com`, port 587 (App Password required). [Gmail Send](./gmail-send-node.md) needs none.
+- Outlook: `smtp.office365.com`, port 587. [Outlook Send](./outlook-send-node.md) signs in with OAuth instead.
 
 ## Example
 
@@ -60,6 +60,8 @@ attaching the file it produced.
 ## Related
 
 - [Node Types](../reference/node-types.md) – Overview of all node types
+- [Gmail Send](./gmail-send-node.md) – Send from a Gmail account
+- [Outlook Send](./outlook-send-node.md) – Send from an Outlook or Microsoft 365 mailbox
 - [Error Handler](./error-handler-node.md) – Send email on failure
 - [Credentials Tab](../tabs/credentials-tab.md) – Add SMTP credentials
 - [Third-Party Integrations](../reference/integrations.md#smtp-email) – SMTP provider setup (Gmail, Outlook, Mailgun, SendGrid)

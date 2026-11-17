@@ -40,6 +40,8 @@ export const NODE_DOC_SLUGS: Record<NodeType, string> = {
   heym: "heym-node",
   heymTrigger: "heym-trigger-node",
   sendEmail: "send-email-node",
+  gmailSend: "gmail-send-node",
+  outlookSend: "outlook-send-node",
   errorHandler: "error-handler-node",
   variable: "variable-node",
   loop: "loop-node",

@@ -31,7 +31,7 @@ These fields hold plain values, not expressions: the poller reads them before an
 
 1. In the [Microsoft Entra admin center](https://entra.microsoft.com), open **App registrations → New registration**. Under **Supported account types**, pick the accounts that should connect: any organization plus personal Microsoft accounts, or only your organization.
 2. Add a **Web** redirect URI: `https://your-heym-domain/api/credentials/outlook/oauth/callback`. For local development, use your browser's Heym origin with the same path.
-3. Under **API permissions**, add the Microsoft Graph delegated permissions `Mail.ReadWrite`, `User.Read` and `offline_access`. If your organization does not let users consent to apps, an administrator clicks **Grant admin consent**.
+3. Under **API permissions**, add the Microsoft Graph delegated permissions `Mail.ReadWrite`, `Mail.Send`, `User.Read` and `offline_access`. If your organization does not let users consent to apps, an administrator clicks **Grant admin consent**.
 4. Under **Certificates & secrets**, create a client secret and copy its **Value**.
 5. Open **Dashboard → Credentials → New → Outlook Mail (OAuth2)**, enter a name, the **Application (client) ID**, the client secret and the **Tenant**, then click **Connect** and sign in with the mailbox to watch.
 
@@ -42,7 +42,7 @@ These fields hold plain values, not expressions: the poller reads them before an
 | `consumers` | Outlook.com, Hotmail and Live accounts only |
 | A tenant id or domain, such as `contoso.com` | Accounts of that one organization |
 
-Tokens are encrypted in storage and refreshed automatically. `Mail.ReadWrite` lets Heym read mail, mark it read and move it between folders. Heym never deletes mail permanently. The credential shows the connected address once connected.
+Tokens are encrypted in storage and refreshed automatically. `Mail.ReadWrite` lets Heym read mail, mark it read and move it between folders, and `Mail.Send` lets [Outlook Send](./outlook-send-node.md) send from the mailbox. Heym never deletes mail permanently. The credential shows the connected address once connected.
 
 ### 2. Add the Node to Your Workflow
 
@@ -172,4 +172,5 @@ outlookTrigger (Download attachments to Drive) → agent → dataTable
 - [Triggers](../reference/triggers.md): every workflow entry point
 - [Third-Party Integrations](../reference/integrations.md#outlook-mail-oauth2): Outlook credential setup
 - [Credentials Sharing](../reference/credentials-sharing.md#outlook-mailbox-access): what sharing an Outlook credential allows
-- [Send Email](./send-email-node.md): reply to or forward inbound email
+- [Outlook Send](./outlook-send-node.md): answer from the same Outlook mailbox
+- [Send Email](./send-email-node.md): reply to or forward inbound email over SMTP

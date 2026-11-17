@@ -1,4 +1,4 @@
-"""Gmail API client for the Gmail Trigger, with OAuth2 token refresh."""
+"""Gmail API client for the Gmail Trigger and Gmail Send, with OAuth2 token refresh."""
 
 from __future__ import annotations
 
@@ -14,15 +14,21 @@ from app.db.models import Credential
 from app.services.encryption import encrypt_config
 
 GMAIL_BASE = "https://gmail.googleapis.com/gmail/v1/users/me"
-# Read mail, change labels and move to Trash. Never permanent deletion.
+# Media upload takes the RFC 5322 message as is, up to Gmail's 35 MB limit.
+GMAIL_UPLOAD_BASE = "https://gmail.googleapis.com/upload/gmail/v1/users/me"
+# Read mail, send mail, change labels and move to Trash. Never permanent deletion.
 GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.modify"
 _TOKEN_URL = "https://oauth2.googleapis.com/token"
 _TIMEOUT_SECONDS = 30
+# An upload with attachments can take longer than a read.
+_SEND_TIMEOUT_SECONDS = 120
+_PROVIDER_MESSAGE_LIMIT = 200
 
 _STATUS_DETAIL = {
     401: "credential expired; reconnect it in Credentials",
     403: "Gmail access denied; check the Gmail API and OAuth permissions",
     404: "not found",
+    413: "the message is larger than Gmail accepts (35 MB)",
     429: "Gmail rate limit reached; retry later",
 }
 
@@ -33,6 +39,15 @@ class GmailApiError(Exception):
     def __init__(self, status_code: int, message: str) -> None:
         super().__init__(message)
         self.status_code = status_code
+
+
+def _rejection_reason(response: httpx.Response) -> str:
+    """Google's own reason for refusing a message, such as "Invalid To header"."""
+    try:
+        message = response.json().get("error", {}).get("message")
+    except (ValueError, AttributeError):
+        return ""
+    return str(message or "").strip()[:_PROVIDER_MESSAGE_LIMIT]
 
 
 def decode_raw_message(raw: str) -> bytes:
@@ -173,6 +188,39 @@ class GmailService:
             f"messages/{quote(message_id, safe='')}/modify",
             json={"addLabelIds": add or [], "removeLabelIds": remove or []},
         )
+
+    def send_message(self, mime: bytes) -> dict[str, Any]:
+        """Send an RFC 5322 message as the account; Gmail returns its ``id`` and ``threadId``.
+
+        Gmail delivers to every To, Cc and Bcc address in the headers and leaves the Bcc
+        header out of what the other recipients receive. The sent copy lands in Sent.
+        """
+        try:
+            response = httpx.post(
+                f"{GMAIL_UPLOAD_BASE}/messages/send",
+                params={"uploadType": "media"},
+                headers={
+                    "Authorization": f"Bearer {self.access_token()}",
+                    "Content-Type": "message/rfc822",
+                },
+                content=mime,
+                timeout=_SEND_TIMEOUT_SECONDS,
+            )
+        except httpx.HTTPError as exc:
+            raise GmailApiError(502, "Gmail: Google could not be reached") from exc
+        if response.status_code == 400:
+            # A refused message says why (a malformed address, no recipient); that names
+            # only what the node itself sent.
+            reason = _rejection_reason(response) or "Gmail refused the message"
+            raise GmailApiError(400, f"Gmail: {reason}")
+        if response.is_error:
+            detail = _STATUS_DETAIL.get(response.status_code, "Gmail rejected the request")
+            raise GmailApiError(response.status_code, f"Gmail: {detail}")
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise GmailApiError(502, "Gmail: invalid response from Google") from exc
+        return data if isinstance(data, dict) else {}
 
     def trash_message(self, message_id: str) -> None:
         """Move one message to Trash, where Gmail keeps it for 30 days."""

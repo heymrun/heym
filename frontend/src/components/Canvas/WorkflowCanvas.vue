@@ -1126,6 +1126,8 @@ function getDefaultNodeData(type: NodeType): WorkflowNode["data"] {
     discord: { label: "discord", credentialId: "", message: "$input.text", username: "", avatarUrl: "" },
     telegram: { label: "telegram", credentialId: "", chatId: "", message: "$input.text" },
     sendEmail: { label: "sendEmail", credentialId: "", to: "", subject: "", emailBody: "$input.text" },
+    gmailSend: { label: "gmailSend", credentialId: "", fromAddress: "", to: "", subject: "", emailBody: "$input.text" },
+    outlookSend: { label: "outlookSend", credentialId: "", fromAddress: "", to: "", subject: "", emailBody: "$input.text" },
     errorHandler: { label: "errorHandler", message: "$error.message" },
     variable: { label: "variable", variableName: "myVariable", variableValue: "$input.text", variableType: "auto", isGlobal: false },
     loop: { label: "loop", arrayExpression: "$input.items" },

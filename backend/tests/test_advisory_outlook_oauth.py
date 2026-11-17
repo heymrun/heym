@@ -42,9 +42,25 @@ class TestOutlookOAuthState(unittest.TestCase):
             get_masked_value(CredentialType.outlook, config), "connected (me@contoso.com)"
         )
         public = get_public_credential_fields(CredentialType.outlook, config)
-        self.assertEqual(public, {"tenant": "contoso.com"})
+        self.assertEqual(public, {"tenant": "contoso.com", "can_send": None})
         for secret in ("client_secret", "access_token", "refresh_token"):
             self.assertNotIn(secret, public)
+
+    def test_public_fields_say_whether_the_sign_in_allows_sending(self) -> None:
+        from app.api.credentials import get_public_credential_fields
+        from app.db.models import CredentialType
+
+        connected = {"refresh_token": "dummy-refresh", "scope": "Mail.ReadWrite Mail.Send"}
+        self.assertEqual(
+            get_public_credential_fields(CredentialType.outlook, connected)["can_send"], "true"
+        )
+        for config in (
+            {"refresh_token": "dummy-refresh", "scope": "Mail.ReadWrite User.Read"},
+            {"scope": "Mail.ReadWrite Mail.Send"},
+        ):
+            with self.subTest(config=config):
+                public = get_public_credential_fields(CredentialType.outlook, config)
+                self.assertIsNone(public["can_send"])
 
     def test_state_and_auth_url_contain_no_client_secret(self) -> None:
         state = oauth.create_oauth_state(
@@ -61,8 +77,12 @@ class TestOutlookOAuthState(unittest.TestCase):
         self.assertEqual(query["scope"], [" ".join(OUTLOOK_SCOPES)])
         self.assertNotIn("client_secret", query)
 
-    def test_the_scopes_ask_for_a_refresh_token_and_no_more_than_mail_read_write(self) -> None:
-        self.assertEqual(set(OUTLOOK_SCOPES), {"offline_access", "User.Read", "Mail.ReadWrite"})
+    def test_the_scopes_ask_for_a_refresh_token_mail_read_write_and_send_only(self) -> None:
+        # Mail.Send is for Outlook Send; nothing broader (no Mail.ReadWrite.Shared, no
+        # Mail.Send.Shared, no application permissions) is ever requested.
+        self.assertEqual(
+            set(OUTLOOK_SCOPES), {"offline_access", "User.Read", "Mail.ReadWrite", "Mail.Send"}
+        )
 
     def test_expired_foreign_malformed_and_bad_tenant_states_are_rejected(self) -> None:
         good = {

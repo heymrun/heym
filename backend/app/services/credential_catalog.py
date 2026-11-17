@@ -64,7 +64,9 @@ NODE_CREDENTIAL_FIELDS: dict[str, tuple[CredentialField, ...]] = {
     "github": (_field("credentialId", CredentialType.github),),
     "googleDrive": (_field("credentialId", CredentialType.google_drive),),
     "googleMeet": (_field("credentialId", CredentialType.google_meet),),
+    "gmailSend": (_field("credentialId", CredentialType.gmail),),
     "gmailTrigger": (_field("credentialId", CredentialType.gmail),),
+    "outlookSend": (_field("credentialId", CredentialType.outlook),),
     "outlookTrigger": (_field("credentialId", CredentialType.outlook),),
     "outlookCalendar": (_field("credentialId", CredentialType.outlook_calendar),),
     "googleDriveTrigger": (_field("credentialId", CredentialType.google_drive),),
@@ -155,12 +157,12 @@ CREDENTIAL_TYPE_PURPOSE: dict[CredentialType, str] = {
     ),
     CredentialType.google_meet: "Google OAuth client for Calendar events and availability; Google Meet node",
     CredentialType.gmail: (
-        "Google OAuth client for Gmail; Gmail Trigger node, Gmail API over http for "
-        "operations the node lacks"
+        "Google OAuth client for Gmail; Gmail Trigger and Gmail Send nodes, Gmail API over "
+        "http for operations the nodes lack"
     ),
     CredentialType.outlook: (
-        "Microsoft OAuth app for Outlook and Microsoft 365 mail; Outlook Trigger node, "
-        "Microsoft Graph mail API over http for operations the node lacks"
+        "Microsoft OAuth app for Outlook and Microsoft 365 mail; Outlook Trigger and Outlook "
+        "Send nodes, Microsoft Graph mail API over http for operations the nodes lack"
     ),
     CredentialType.outlook_calendar: (
         "Microsoft OAuth app for Outlook and Microsoft 365 calendars; Outlook Calendar node, "

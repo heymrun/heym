@@ -66,6 +66,8 @@ const nodeColorMap = {
   heym: "node-heym",
   heymTrigger: "node-heym",
   sendEmail: "node-email",
+  gmailSend: "node-gmail",
+  outlookSend: "node-outlook",
   errorHandler: "node-error",
   variable: "node-variable",
   loop: "node-loop",

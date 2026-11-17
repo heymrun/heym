@@ -46,7 +46,9 @@ NODE_PLACEMENT: dict[str, Placement] = {
     "github": _ANY,
     "googleDrive": _MAIN,
     "googleMeet": _ANY,
+    "gmailSend": _ANY,  # narrowed to MAIN_ONLY by _attachments_placement for Drive attachments
     "gmailTrigger": _ANY,  # narrowed to MAIN_ONLY by _gmail_placement when it saves attachments
+    "outlookSend": _ANY,  # narrowed to MAIN_ONLY by _attachments_placement for Drive attachments
     "outlookTrigger": _ANY,  # narrowed to MAIN_ONLY by _outlook_placement for attachments
     "outlookCalendar": _ANY,
     "googleDriveTrigger": _ANY,  # polling runs on the leader; the run keeps no local state
@@ -147,11 +149,28 @@ def _outlook_placement(data: dict) -> Placement:
     return _MAIN if data.get("outlookDownloadAttachments") is True else _ANY
 
 
+def _attachments_placement(data: dict) -> Placement:
+    """Gmail Send and Outlook Send pin the run only when they attach Drive files.
+
+    Unlike SMTP (sendEmail), they call an HTTPS API that needs no fixed source address, so
+    only reading the attachments from FILE_STORAGE_DIR ties them to the main instance. As an
+    agent tool the agent may fill Attachments itself, which counts as attaching files.
+    """
+    if str(data.get("attachments") or "").strip():
+        return _MAIN
+    agent_fields = data.get("agentProvidedFields")
+    if isinstance(agent_fields, list) and "attachments" in agent_fields:
+        return _MAIN
+    return _ANY
+
+
 _CONDITIONAL: dict[str, Callable[[dict], Placement]] = {
     "agent": _agent_placement,
     "code": _code_placement,
+    "gmailSend": _attachments_placement,
     "gmailTrigger": _gmail_placement,
     "imapTrigger": _imap_placement,
+    "outlookSend": _attachments_placement,
     "outlookTrigger": _outlook_placement,
     "slack": _slack_placement,
 }

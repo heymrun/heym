@@ -626,7 +626,16 @@ def get_public_credential_fields(
             "supabase_url": supabase_url,
             "supabase_schema": supabase_schema,
         }
-    if credential_type in (CredentialType.outlook, CredentialType.outlook_calendar):
+    if credential_type == CredentialType.outlook:
+        from app.services.outlook_service import has_send_scope
+
+        # Outlook Send warns before a run when the sign-in predates Mail.Send.
+        connected = bool(str(config.get("refresh_token") or "").strip())
+        return {
+            "tenant": str(config.get("tenant") or "").strip() or "common",
+            "can_send": "true" if connected and has_send_scope(config.get("scope")) else None,
+        }
+    if credential_type == CredentialType.outlook_calendar:
         return {"tenant": str(config.get("tenant") or "").strip() or "common"}
     if credential_type == CredentialType.notion:
         auth_mode = str(config.get("auth_mode", "token")).strip() or "token"

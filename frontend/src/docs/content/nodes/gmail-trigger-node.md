@@ -32,9 +32,9 @@ These fields hold plain values, not expressions: the poller reads them before an
 2. Configure the OAuth consent screen and create a **Web application** OAuth client. Add your Google account as a test user if the app is in testing mode.
 3. Register `https://your-heym-domain/api/credentials/gmail/oauth/callback` as an authorized redirect URI. For local development, use your browser's Heym origin with the same path.
 4. Open **Dashboard → Credentials → New → Gmail (OAuth2)**, enter a name, Client ID and Client Secret, then click **Connect** and sign in with the Gmail account to watch.
-5. Allow Heym to read and organize your mail (`gmail.modify`). The credential then shows the connected address.
+5. Allow Heym to read, send and organize your mail (`gmail.modify`). The credential then shows the connected address.
 
-Tokens are encrypted in storage and refreshed automatically. `gmail.modify` lets Heym read mail, change labels and move mail to Trash. It cannot delete mail permanently.
+Tokens are encrypted in storage and refreshed automatically. `gmail.modify` lets Heym read mail, change labels and move mail to Trash, and lets [Gmail Send](./gmail-send-node.md) send from the account. It cannot delete mail permanently.
 
 ### 2. Add the Node to Your Workflow
 
@@ -138,4 +138,5 @@ gmailTrigger (Download attachments to Drive) → agent → dataTable
 - [Triggers](../reference/triggers.md): every workflow entry point
 - [Third-Party Integrations](../reference/integrations.md#gmail-oauth2): Gmail credential setup
 - [Credentials Sharing](../reference/credentials-sharing.md#gmail-mailbox-access): what sharing a Gmail credential allows
-- [Send Email](./send-email-node.md): reply to or forward inbound email
+- [Gmail Send](./gmail-send-node.md): answer from the same Gmail account
+- [Send Email](./send-email-node.md): reply to or forward inbound email over SMTP
