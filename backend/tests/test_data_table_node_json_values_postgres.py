@@ -72,9 +72,11 @@ class DataTableNodeJsonValuesPostgresTests(unittest.TestCase):
             db.execute(delete(User).where(User.id == self.user_id))
             db.commit()
 
-    def _run(self, operation: str, inputs: dict[str, Any], **fields: str) -> dict[str, Any]:
+    def _run(
+        self, operation: str, inputs: dict[str, Any], upstream: str = "start", **fields: str
+    ) -> dict[str, Any]:
         nodes = [
-            {"id": "start", "type": "textInput", "data": {"label": "start"}},
+            {"id": "start", "type": "textInput", "data": {"label": upstream}},
             {
                 "id": "dt",
                 "type": "dataTable",
@@ -134,6 +136,27 @@ class DataTableNodeJsonValuesPostgresTests(unittest.TestCase):
         found = self._run("find", {"text": "x"}, dataTableFilter='{"age": {"$gt": 18}}')
 
         self.assertEqual(sorted(row["data"]["name"] for row in found["rows"]), ["Ada", "Cy"])
+
+    def test_an_operator_key_stays_an_operator_next_to_a_node_of_that_name(self) -> None:
+        cases = (
+            ("gt", '{"age": {"$gt": 18}}', ["Ada", "Cy"]),
+            ("in", '{"name": {"$in": ["Ben", "Cy"]}}', ["Ben", "Cy"]),
+            ("contains", '{"name": {"$contains": "d"}}', ["Ada"]),
+        )
+        for upstream, filter_template, want in cases:
+            with self.subTest(upstream=upstream):
+                found = self._run(
+                    "find", {"text": "x"}, upstream=upstream, dataTableFilter=filter_template
+                )
+                names = sorted(row["data"]["name"] for row in found["rows"])
+                self.assertEqual(names, want)
+
+    def test_a_key_with_a_path_still_resolves(self) -> None:
+        found = self._run(
+            "find", {"text": "x", "column": "name"}, dataTableFilter='{"$start.column": "Ben"}'
+        )
+
+        self.assertEqual([row["data"]["name"] for row in found["rows"]], ["Ben"])
 
 
 if __name__ == "__main__":

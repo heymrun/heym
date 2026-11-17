@@ -3,7 +3,8 @@
 Substituting resolved values into the raw JSON text breaks the JSON as soon as a value
 holds a double quote or a line break, which text from chat, email, forms and LLMs does
 all the time. When the field is valid JSON on its own, it is parsed first and each key and
-string value is resolved in place. A template that is not JSON yet, such as
+string value is resolved in place. A key that is only ``$`` plus a name, such as the data
+table operators ``$gt`` and ``$in``, is kept as written. A template that is not JSON yet, such as
 ``{"age": $start.age}`` with an unquoted expression, is still substituted first, exactly
 as before. The Code node's Parameters, the Google Sheets values and the RAG node's
 metadata follow the same rule.
@@ -17,6 +18,9 @@ whole field back to substitution, which is what it did before.
 from __future__ import annotations
 
 import json
+import re
+
+_OPERATOR_KEY = re.compile(r"\$[A-Za-z_][A-Za-z0-9_]*")
 
 
 class _UnresolvedLineBreakError(Exception):
@@ -32,11 +36,23 @@ def _resolve_string(executor, value: str, inputs: dict, node_id: str) -> str:
     return resolved
 
 
+def _resolve_key(executor, key: str, inputs: dict, node_id: str) -> str:
+    # A key that is only `$` plus a name is an operator such as `$gt` or `$in` in a data
+    # table filter. Resolving it would turn it into the output of a node labelled `gt`.
+    if _OPERATOR_KEY.fullmatch(key):
+        return key
+    return _resolve_string(executor, key, inputs, node_id)
+
+
 def resolve_json_values(executor, value: object, inputs: dict, node_id: str) -> object:
-    """Resolve ``$`` expressions in every key and string value of already-parsed JSON."""
+    """Resolve ``$`` expressions in every key and string value of already-parsed JSON.
+
+    A key that is only ``$`` plus a name, such as ``$gt``, is kept as written; a key with a
+    path, such as ``$start.body.kind``, resolves.
+    """
     if isinstance(value, dict):
         return {
-            _resolve_string(executor, key, inputs, node_id): resolve_json_values(
+            _resolve_key(executor, key, inputs, node_id): resolve_json_values(
                 executor, item, inputs, node_id
             )
             for key, item in value.items()
