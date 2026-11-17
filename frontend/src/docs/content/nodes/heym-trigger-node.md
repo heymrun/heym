@@ -82,7 +82,7 @@ Events are kept for **7 days** and then deleted.
 { "version": "1.4.2", "started_at": "2026-08-11T09:30:00+00:00" }
 ```
 
-`workflow.deleted` carries the name captured just before deletion, since the workflow row is gone by the time you read the event.
+`workflow.deleted` carries the name captured just before deletion, since the workflow row is gone by the time you read the event. When the deletion is a scheduled one, run by the nightly cleanup rather than by a person, `actor_user_id` is `null`; use `owner_id` to see whose workflow it was.
 
 ## Example Workflow
 
