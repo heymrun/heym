@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, StringConstraints, field_validator
 
 from app.services.chat_attachments import MAX_CHAT_ATTACHMENTS
 
@@ -13,8 +13,14 @@ class ConversationCreate(BaseModel):
     title: str = "New Chat"
 
 
+# dashboard_conversations.title is String(255).
+ConversationTitle = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)
+]
+
+
 class ConversationUpdate(BaseModel):
-    title: str | None = None
+    title: ConversationTitle | None = None
     is_pinned: bool | None = None
 
 

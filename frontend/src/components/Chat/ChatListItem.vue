@@ -122,6 +122,7 @@ function handleSelect(): void {
         <input
           ref="editInputRef"
           v-model="editTitle"
+          maxlength="255"
           class="w-full text-sm bg-background border border-border rounded px-1 py-0.5 outline-none"
           @keydown="onEditKeydown"
           @blur="onEditBlur"
