@@ -154,6 +154,7 @@ test("creates a conversation and renames it", async ({ page }) => {
   await item.getByTitle("Rename").click();
   const renameInput = item.locator("input");
   await expect(renameInput).toBeVisible();
+  await expect(renameInput).toHaveAttribute("maxlength", "255");
   await renameInput.fill(renamedTitle);
   await renameInput.press("Enter");
   await renameResponsePromise;

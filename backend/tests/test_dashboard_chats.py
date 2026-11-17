@@ -9,6 +9,7 @@ from types import TracebackType
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 from app.api.chats import (
     clear_conversations,
@@ -282,6 +283,22 @@ class TestUpdateConversation(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(ctx.exception.status_code, 404)
+
+    def test_title_is_stored_trimmed(self) -> None:
+        self.assertEqual(ConversationUpdate(title="  Weekly report  ").title, "Weekly report")
+
+    def test_refuses_titles_the_column_cannot_hold(self) -> None:
+        for title in ("", "   ", "x" * 256):
+            with self.subTest(length=len(title)), self.assertRaises(ValidationError):
+                ConversationUpdate(title=title)
+
+    def test_accepts_a_255_character_title(self) -> None:
+        self.assertEqual(ConversationUpdate(title="x" * 255).title, "x" * 255)
+
+    def test_pin_toggle_leaves_the_title_alone(self) -> None:
+        body = ConversationUpdate(is_pinned=True)
+        self.assertIsNone(body.title)
+        self.assertTrue(body.is_pinned)
 
 
 class TestDeleteConversation(unittest.IsolatedAsyncioTestCase):
