@@ -47,6 +47,7 @@ from app.services import rag_ingest, rag_ingest_jobs
 from app.services.audit_log import OUTCOME_FAILURE, OUTCOME_SUCCESS, audit
 from app.services.credential_access import team_shared_credential_clause
 from app.services.encryption import decrypt_config
+from app.services.k8s_credentials.store import CredentialUnavailableError
 from app.services.upload_limits import read_upload_file_limited
 from app.services.user_lookup import find_user_by_email
 from app.services.vector_store import (
@@ -120,6 +121,19 @@ async def get_credential_config(
 
 def get_vector_store_service_from_config(config: dict, credential_type: object):
     return create_vector_store_service_for_credential(credential_type, config)
+
+
+def _store_service(credential: Credential):
+    """The backend for a store's credential.
+
+    A Secret-backed credential with no value in this process is a 503 with the reason, so a
+    caller that searches several stores can report this one and keep the others.
+    """
+    try:
+        config = decrypt_config(credential.encrypted_config)
+    except CredentialUnavailableError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
+    return get_vector_store_service_from_config(config, credential.type)
 
 
 def _backend_for_credential_type(credential_type: object, config: dict | None = None) -> str:
@@ -1180,8 +1194,7 @@ async def list_vector_store_items(
             detail="Credential not found",
         )
 
-    config = decrypt_config(credential.encrypted_config)
-    service = get_vector_store_service_from_config(config, credential.type)
+    service = _store_service(credential)
 
     # Every chunk is read, page by page; keep the event loop free meanwhile.
     source_groups, total_items = await asyncio.to_thread(
@@ -1231,8 +1244,7 @@ async def search_vector_store(
             detail="Credential not found",
         )
 
-    config = decrypt_config(credential.encrypted_config)
-    service = get_vector_store_service_from_config(config, credential.type)
+    service = _store_service(credential)
     try:
         # Embedding the query calls the provider; keep the event loop free meanwhile.
         results = await asyncio.to_thread(

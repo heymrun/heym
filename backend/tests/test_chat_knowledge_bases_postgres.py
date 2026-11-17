@@ -17,17 +17,26 @@ from app.db.models import (
     VectorStoreShare,
     VectorStoreTeamShare,
 )
+from app.services.encryption import encrypt_config
 from app.services.vector_store import SearchResult
 from tests.board_pg_support import cleanup, connect_or_skip, make_user
 
 
-async def _make_store(engine: AsyncEngine, owner: User, name: str, description: str) -> VectorStore:
+async def _make_store(
+    engine: AsyncEngine,
+    owner: User,
+    name: str,
+    description: str,
+    encrypted_config: str = "unused",
+) -> VectorStore:
     async with AsyncSession(engine, expire_on_commit=False) as db:
         credential = Credential(
             owner_id=owner.id,
             name=f"qdrant-{uuid.uuid4()}",
             type=CredentialType.qdrant,
-            encrypted_config="unused",
+            encrypted_config=encrypted_config,
+            # A Kubernetes Secret pointer is stored as the credential's source too.
+            source=encrypted_config if encrypted_config.startswith("k8s:") else None,
         )
         db.add(credential)
         await db.flush()
@@ -144,3 +153,39 @@ class ChatKnowledgeBaseAccessTests(unittest.IsolatedAsyncioTestCase):
             result["errors"],
             [{"knowledge_base_id": str(self.private.id), "error": "Knowledge base not found"}],
         )
+
+    async def test_a_store_whose_secret_is_not_synced_is_reported_and_the_others_answer(
+        self,
+    ) -> None:
+        healthy = await _make_store(
+            self.engine, self.owner, "Benefits", "Benefits", encrypt_config({"k": "v"})
+        )
+        unsynced = await _make_store(
+            self.engine, self.owner, "Contracts", "Contracts", "k8s:heym/contracts-qdrant"
+        )
+        service = MagicMock()
+        service.search.return_value = [
+            SearchResult(id="b1", text="Dental is covered.", score=0.7, metadata={})
+        ]
+        service.list_items.return_value = ([], 0)
+        with patch(
+            "app.api.vector_stores.get_vector_store_service_from_config", return_value=service
+        ):
+            result = await self._call(
+                self.owner,
+                "search_knowledge_base",
+                query="dental",
+                knowledge_base_ids=[str(healthy.id), str(unsynced.id)],
+            )
+            documents = await self._call(
+                self.owner, "list_knowledge_bases", knowledge_base_id=str(unsynced.id)
+            )
+
+        self.assertEqual(
+            [group["knowledge_base_name"] for group in result["knowledge_bases"]], ["Benefits"]
+        )
+        self.assertEqual(len(result["errors"]), 1)
+        self.assertEqual(result["errors"][0]["knowledge_base_name"], "Contracts")
+        self.assertIn("not synced from Kubernetes", result["errors"][0]["error"])
+        self.assertIn("not synced from Kubernetes", documents["error"])
+        service.list_items.assert_not_called()
