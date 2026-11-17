@@ -64,6 +64,7 @@ from app.api import (
     oauth,
     opencode_go,
     outlook,
+    outlook_calendar_oauth,
     outlook_oauth,
     page_views,
     playwright,
@@ -419,6 +420,11 @@ app.include_router(
     outlook_oauth.router,
     prefix="/api/credentials/outlook/oauth",
     tags=["Outlook OAuth"],
+)
+app.include_router(
+    outlook_calendar_oauth.router,
+    prefix="/api/credentials/outlook-calendar/oauth",
+    tags=["Outlook Calendar OAuth"],
 )
 app.include_router(
     google_drive_oauth.router,

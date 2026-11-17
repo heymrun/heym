@@ -31,6 +31,7 @@ Some integration nodes do **not** require credentials. [WebSocket Trigger](../no
 | **Google Meet** | [Google Meet node](../nodes/google-meet-node.md) | `client_id`, `client_secret` + Google OAuth consent for Calendar events and availability |
 | **Gmail** | [Gmail Trigger](../nodes/gmail-trigger-node.md) | `client_id`, `client_secret` + Google OAuth consent (`gmail.modify`) |
 | **Outlook Mail** | [Outlook Trigger](../nodes/outlook-trigger-node.md) | `client_id`, `client_secret`, `tenant` + Microsoft OAuth consent (`Mail.ReadWrite`, `User.Read`, `offline_access`) |
+| **Outlook Calendar** | [Outlook Calendar node](../nodes/outlook-calendar-node.md) | `client_id`, `client_secret`, `tenant` + Microsoft OAuth consent (`Calendars.ReadWrite`, `User.Read`, `offline_access`) |
 | **BigQuery** | [BigQuery node](../nodes/bigquery-node.md) | `client_id`, `client_secret` + OAuth2 consent |
 | **Supabase** | [Supabase node](../nodes/supabase-node.md) | `supabase_url`, `supabase_key`, optional `supabase_schema` |
 | **ClickHouse** | [ClickHouse node](../nodes/clickhouse-node.md) | `host`, `port`, `username`, `password`, `database`, `secure` |
@@ -1011,6 +1012,31 @@ The Outlook Mail credential connects the [Outlook Trigger](../nodes/outlook-trig
 
 - [Outlook Trigger node](../nodes/outlook-trigger-node.md)
 - [HTTP node](../nodes/http-node.md) through `$credentials.<name>`, which resolves to a fresh access token for Microsoft Graph mail calls the trigger does not make
+
+## Outlook Calendar (OAuth2)
+
+The Outlook Calendar credential connects the [Outlook Calendar node](../nodes/outlook-calendar-node.md) to Microsoft Graph with your own app registration. It works for Outlook.com, Hotmail and Live accounts and for Microsoft 365 work or school calendars. It is a separate credential from Outlook Mail, but the same app registration can serve both.
+
+### Setup
+
+1. In the [Microsoft Entra admin center](https://entra.microsoft.com), open **App registrations** and select your Outlook Mail app or create a new registration.
+2. Add a **Web** redirect URI `https://your-heym-domain/api/credentials/outlook-calendar/oauth/callback`.
+3. Under **API permissions**, add the Microsoft Graph delegated permissions `Calendars.ReadWrite`, `User.Read` and `offline_access`. Grant admin consent when your organization requires it.
+4. Under **Certificates & secrets**, create a client secret and copy its **Value**.
+5. In Heym Dashboard, **Credentials → New → Outlook Calendar (OAuth2)**, enter a name, the Application (client) ID, the client secret and the tenant, then click **Connect** and sign in with the calendar's account.
+
+### Notes
+
+- **Tenant** is `common` by default (work, school and personal accounts). Use `organizations`, `consumers`, or your organization's tenant id or domain to narrow who can connect.
+- `Calendars.ReadWrite` lets Heym read your calendars, read the free/busy of people your organization shares it with, and create, update or delete events in your own calendars. It does not reach the mailbox or other people's calendars for writing.
+- Teams links need a work or school account; personal accounts create events without one.
+- Connecting fails with "Allow Heym to read and edit your Outlook calendar" when `Calendars.ReadWrite` was not granted.
+- After connecting, the credential shows the connected address. Tokens are encrypted and refreshed automatically; Microsoft rotates refresh tokens and Heym keeps the newest one.
+
+### Used By
+
+- [Outlook Calendar node](../nodes/outlook-calendar-node.md)
+- [HTTP node](../nodes/http-node.md) through `$credentials.<name>`, which resolves to a fresh access token for Microsoft Graph calendar calls the node does not make
 
 ## Google Meet (OAuth2)
 

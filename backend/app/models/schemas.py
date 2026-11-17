@@ -700,6 +700,7 @@ class CredentialType(str, Enum):
     google_meet = "google_meet"
     gmail = "gmail"
     outlook = "outlook"
+    outlook_calendar = "outlook_calendar"
     rag = "rag"
     decision = "decision"
     model_router = "model_router"

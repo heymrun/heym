@@ -245,6 +245,7 @@ export type NodeType =
   | "googleSheets"
   | "googleDrive"
   | "googleMeet"
+  | "outlookCalendar"
   | "googleDriveTrigger"
   | "googleSheetsTrigger"
   | "bigquery"
@@ -1157,6 +1158,22 @@ export interface NodeData {
   gmEndTime?: string;
   gmAttendees?: string | string[];
   gmLocation?: string;
+  ocOperation?: "read" | "create" | "update" | "delete";
+  /** outlookCalendar: primary, a calendar name or ID, or (read only) another person's email. */
+  ocCalendarId?: string;
+  ocTimeZone?: string;
+  ocStartDate?: string;
+  ocEndDate?: string;
+  ocIncludeBusyDetails?: boolean;
+  ocEventId?: string;
+  ocTitle?: string;
+  ocDescription?: string;
+  ocStartTime?: string;
+  ocEndTime?: string;
+  ocAttendees?: string | string[];
+  ocLocation?: string;
+  /** outlookCalendar create: add a Teams meeting when the calendar allows it. */
+  ocTeamsMeeting?: boolean;
   gdOperation?: string;
   gdFolderId?: string;
   gdFileId?: string;

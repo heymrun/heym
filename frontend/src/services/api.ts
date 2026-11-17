@@ -1668,6 +1668,13 @@ export const credentialsApi = {
     return response.data;
   },
 
+  outlookCalendarOAuthAuthorize: async (credentialId: string): Promise<{ auth_url: string }> => {
+    const response = await api.post<{ auth_url: string }>(
+      "/credentials/outlook-calendar/oauth/authorize", { credential_id: credentialId },
+    );
+    return response.data;
+  },
+
   googleDriveOAuthAuthorize: async (credentialId: string): Promise<{ auth_url: string }> => {
     const response = await api.post<{ auth_url: string }>(
       "/credentials/google-drive/oauth/authorize",

@@ -66,6 +66,7 @@ NODE_CREDENTIAL_FIELDS: dict[str, tuple[CredentialField, ...]] = {
     "googleMeet": (_field("credentialId", CredentialType.google_meet),),
     "gmailTrigger": (_field("credentialId", CredentialType.gmail),),
     "outlookTrigger": (_field("credentialId", CredentialType.outlook),),
+    "outlookCalendar": (_field("credentialId", CredentialType.outlook_calendar),),
     "googleDriveTrigger": (_field("credentialId", CredentialType.google_drive),),
     "googleSheets": (_field("credentialId", CredentialType.google_sheets),),
     "googleSheetsTrigger": (_field("credentialId", CredentialType.google_sheets),),
@@ -161,6 +162,10 @@ CREDENTIAL_TYPE_PURPOSE: dict[CredentialType, str] = {
         "Microsoft OAuth app for Outlook and Microsoft 365 mail; Outlook Trigger node, "
         "Microsoft Graph mail API over http for operations the node lacks"
     ),
+    CredentialType.outlook_calendar: (
+        "Microsoft OAuth app for Outlook and Microsoft 365 calendars; Outlook Calendar node, "
+        "Microsoft Graph calendar API over http for operations the node lacks"
+    ),
     CredentialType.bigquery: "Google OAuth client for BigQuery; BigQuery node",
     CredentialType.supabase: "Supabase project URL and key; Supabase node",
     CredentialType.notion: (
@@ -195,6 +200,7 @@ _DEFAULT_HEADER_KEYS: dict[CredentialType, str | None] = {
     CredentialType.google_meet: "Authorization",
     CredentialType.gmail: "Authorization",
     CredentialType.outlook: "Authorization",
+    CredentialType.outlook_calendar: "Authorization",
     CredentialType.github: "Authorization",
     CredentialType.notion: "Authorization",
     CredentialType.sentry: "Authorization",

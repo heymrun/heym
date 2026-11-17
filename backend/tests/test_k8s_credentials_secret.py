@@ -86,6 +86,7 @@ class ParseSecretTests(unittest.TestCase):
             "google_meet",
             "gmail",
             "outlook",
+            "outlook_calendar",
             "bigquery",
         ):
             with self.subTest(credential_type):

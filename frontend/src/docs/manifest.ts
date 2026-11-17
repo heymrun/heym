@@ -81,6 +81,7 @@ export const DOCS_MANIFEST: Record<string, DocCategory> = {
       { slug: "google-sheets-node", title: "Google Sheets" },
       { slug: "google-drive-node", title: "Google Drive" },
       { slug: "google-meet-node", title: "Google Meet" },
+      { slug: "outlook-calendar-node", title: "Outlook Calendar" },
       { slug: "bigquery-node", title: "BigQuery" },
       { slug: "supabase-node", title: "Supabase" },
       { slug: "clickhouse-node", title: "ClickHouse" },

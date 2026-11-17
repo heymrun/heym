@@ -68,6 +68,11 @@ def account_address(profile: dict[str, Any]) -> str:
 class OutlookService:
     """Synchronous Graph v1.0 client for the signed-in mailbox; refreshed tokens are saved."""
 
+    scopes: tuple[str, ...] = OUTLOOK_SCOPES
+    label = "Outlook"
+    status_detail: dict[int, str] = _STATUS_DETAIL
+    prefer = _PREFER_IMMUTABLE_IDS
+
     def __init__(self, credential_id: str, config: dict[str, Any], db: Session) -> None:
         self._credential_id = credential_id
         self._config = dict(config)
@@ -86,7 +91,7 @@ class OutlookService:
         if not all(
             self._config.get(key) for key in ("refresh_token", "client_id", "client_secret")
         ):
-            raise OutlookApiError(401, "Outlook: reconnect the credential in Credentials")
+            raise OutlookApiError(401, f"{self.label}: reconnect the credential in Credentials")
         try:
             response = httpx.post(
                 token_url(oauth_tenant(self._config)),
@@ -95,7 +100,7 @@ class OutlookService:
                     "refresh_token": self._config["refresh_token"],
                     "client_id": self._config["client_id"],
                     "client_secret": self._config["client_secret"],
-                    "scope": " ".join(OUTLOOK_SCOPES),
+                    "scope": " ".join(self.scopes),
                 },
                 timeout=_TIMEOUT_SECONDS,
             )
@@ -110,7 +115,7 @@ class OutlookService:
                 self._config["refresh_token"] = tokens["refresh_token"]
         except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
             raise OutlookApiError(
-                401, "Outlook: token refresh failed; reconnect the credential"
+                401, f"{self.label}: token refresh failed; reconnect the credential"
             ) from exc
         credential = self._db.query(Credential).filter(Credential.id == self._credential_id).first()
         if credential:
@@ -123,7 +128,7 @@ class OutlookService:
             self._refresh()
         token = str(self._config.get("access_token") or "").strip()
         if not token:
-            raise OutlookApiError(401, "Outlook: reconnect the credential in Credentials")
+            raise OutlookApiError(401, f"{self.label}: reconnect the credential in Credentials")
         return token
 
     def _send(
@@ -135,27 +140,29 @@ class OutlookService:
         json: dict[str, Any] | None = None,
     ) -> httpx.Response:
         if not url.startswith(f"{GRAPH_ROOT}/"):
-            raise OutlookApiError(502, "Outlook: unexpected Microsoft Graph address")
+            raise OutlookApiError(502, f"{self.label}: unexpected Microsoft Graph address")
         try:
             response = httpx.request(
                 method,
                 url,
                 headers={
                     "Authorization": f"Bearer {self.access_token()}",
-                    "Prefer": _PREFER_IMMUTABLE_IDS,
+                    "Prefer": self.prefer,
                 },
                 params=params,
                 json=json,
                 timeout=_TIMEOUT_SECONDS,
             )
         except httpx.HTTPError as exc:
-            raise OutlookApiError(502, "Outlook: Microsoft Graph could not be reached") from exc
+            raise OutlookApiError(
+                502, f"{self.label}: Microsoft Graph could not be reached"
+            ) from exc
         if response.is_error:
             # Provider bodies can echo addresses or tokens, so only the status is kept.
-            detail = _STATUS_DETAIL.get(
+            detail = self.status_detail.get(
                 response.status_code, "Microsoft Graph rejected the request"
             )
-            raise OutlookApiError(response.status_code, f"Outlook: {detail}")
+            raise OutlookApiError(response.status_code, f"{self.label}: {detail}")
         return response
 
     def _json(
@@ -172,9 +179,11 @@ class OutlookService:
         try:
             data = response.json()
         except ValueError as exc:
-            raise OutlookApiError(502, "Outlook: invalid response from Microsoft Graph") from exc
+            raise OutlookApiError(
+                502, f"{self.label}: invalid response from Microsoft Graph"
+            ) from exc
         if not isinstance(data, dict):
-            raise OutlookApiError(502, "Outlook: invalid response from Microsoft Graph")
+            raise OutlookApiError(502, f"{self.label}: invalid response from Microsoft Graph")
         return data
 
     def get_profile(self) -> dict[str, Any]:

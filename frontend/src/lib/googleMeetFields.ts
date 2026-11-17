@@ -31,8 +31,8 @@ export const GOOGLE_MEET_BUSY_DETAILS_OPTION = {
 const fields: Record<GoogleMeetFieldKey, GoogleMeetField> = {
   gmCalendarId: { key: "gmCalendarId", label: "Calendar ID or Email", placeholder: "primary", help: "Use primary for your calendar, or a calendar email you have permission to access." },
   gmTimeZone: { key: "gmTimeZone", label: "Time Zone", placeholder: "UTC", help: "IANA time zone, such as Europe/Berlin. Dates without an offset use this zone." },
-  gmStartDate: { key: "gmStartDate", label: "Availability Start (optional)", placeholder: "Now, or $input.startDate" },
-  gmEndDate: { key: "gmEndDate", label: "Availability End (optional)", placeholder: "Next month's first day, or $input.endDate", help: "Exclusive end. ISO date or datetime; the range must be no longer than 60 days." },
+  gmStartDate: { key: "gmStartDate", label: "Availability Start (optional)", placeholder: "2026-11-18T09:00:00Z", help: "ISO date or datetime, such as $now.toISO(). Empty starts now." },
+  gmEndDate: { key: "gmEndDate", label: "Availability End (optional)", placeholder: "2026-12-01T00:00:00Z", help: "Exclusive ISO end, such as $now.addDays(14).toISO(), at most 60 days after start. Empty ends on the first day of next month." },
   gmEventId: { key: "gmEventId", label: "Event ID", placeholder: "$booking.event_id" },
   gmTitle: { key: "gmTitle", label: "Title", placeholder: "$input.title" },
   gmDescription: { key: "gmDescription", label: "Description (optional)", placeholder: "$input.description" },

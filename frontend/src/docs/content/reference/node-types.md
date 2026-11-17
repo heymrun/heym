@@ -74,6 +74,7 @@ See [Triggers](./triggers.md) for all entry points.
 | [Google Sheets](../nodes/google-sheets-node.md) | Read/write Google Sheets via OAuth2 | 1 | 1 |
 | [Google Drive](../nodes/google-drive-node.md) | List, download, update, and delete Google Drive files via OAuth2 | 1 | 1 |
 | [Google Meet](../nodes/google-meet-node.md) | Read availability and create, update or delete Meet invitations | 1 | 1 |
+| [Outlook Calendar](../nodes/outlook-calendar-node.md) | Read Outlook or Microsoft 365 availability and create, update or delete invitations with Teams links | 1 | 1 |
 | [BigQuery](../nodes/bigquery-node.md) | Run SQL queries and insert rows in BigQuery | 1 | 1 |
 | [Supabase](../nodes/supabase-node.md) | Query and mutate Supabase tables through PostgREST | 1 | 1 |
 | [ClickHouse](../nodes/clickhouse-node.md) | Run SQL, CRUD, and count operations against ClickHouse | 1 | 1 |

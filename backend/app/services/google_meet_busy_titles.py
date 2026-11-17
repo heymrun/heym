@@ -1,23 +1,15 @@
 """Opt-in event details layered over authoritative Calendar free/busy intervals."""
 
 from collections.abc import Callable
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import quote
-from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
 
+from app.services.calendar_slots import BusyEvent, label_busy_intervals
 
-@dataclass(frozen=True)
-class BusyEvent:
-    """An event occurrence with only the data needed to label a busy interval."""
-
-    start: datetime
-    end: datetime
-    title: str | None
-    attendees: list[str] | None = None
+__all__ = ["BusyEvent", "label_busy_intervals", "read_busy_events"]
 
 
 def read_busy_events(
@@ -107,38 +99,3 @@ def read_busy_events(
         if not isinstance(page_token, str) or page_token in seen_tokens:
             raise HTTPException(502, "Google Meet: invalid Calendar events pagination")
         seen_tokens.add(page_token)
-
-
-def label_busy_intervals(
-    busy: list[tuple[datetime, datetime]], events: list[BusyEvent], zone: ZoneInfo
-) -> list[dict[str, Any]]:
-    """Keep each event's details and retain any unlabelled busy time with null details."""
-    slots: list[BusyEvent] = []
-
-    def append(
-        left: datetime, right: datetime, title: str | None, attendees: list[str] | None
-    ) -> None:
-        slots.append(BusyEvent(left, right, title, attendees))
-
-    ordered_events = sorted(events, key=lambda event: (event.start, event.end))
-    for left, right in busy:
-        cursor = left
-        for event in ordered_events:
-            if event.end <= left or event.start >= right:
-                continue
-            start, end = max(left, event.start), min(right, event.end)
-            if cursor < start:
-                append(cursor, start, None, None)
-            append(start, end, event.title, event.attendees)
-            cursor = max(cursor, end)
-        if cursor < right:
-            append(cursor, right, None, None)
-    return [
-        {
-            "start": slot.start.astimezone(zone).isoformat(),
-            "end": slot.end.astimezone(zone).isoformat(),
-            "title": slot.title,
-            "attendees": slot.attendees,
-        }
-        for slot in sorted(slots, key=lambda slot: (slot.start, slot.end))
-    ]

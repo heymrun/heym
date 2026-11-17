@@ -2,19 +2,24 @@
 
 from __future__ import annotations
 
-import json
-import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import quote
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from zoneinfo import ZoneInfo
 
 import httpx
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.db.models import Credential
+from app.services import calendar_slots
+from app.services.calendar_slots import (
+    MAX_AVAILABILITY_DAYS,
+    format_intervals,
+    free_intervals,
+    merge_intervals,
+)
 from app.services.encryption import encrypt_config
 
 CALENDAR_BASE = "https://www.googleapis.com/calendar/v3"
@@ -22,88 +27,38 @@ GOOGLE_MEET_SCOPE = (
     "https://www.googleapis.com/auth/calendar.events "
     "https://www.googleapis.com/auth/calendar.events.freebusy"
 )
-MAX_AVAILABILITY_DAYS = 60
+_LABEL = "Google Meet"
+
+__all__ = [
+    "MAX_AVAILABILITY_DAYS",
+    "GoogleMeetService",
+    "availability_window",
+    "calendar_zone",
+    "parse_attendees",
+    "parse_datetime",
+]
 
 
 def calendar_zone(name: str) -> ZoneInfo:
     """Validate an IANA time zone before interpreting local dates."""
-    try:
-        return ZoneInfo(name or "UTC")
-    except (ZoneInfoNotFoundError, ValueError) as exc:
-        raise HTTPException(400, "Google Meet: use a valid IANA time zone") from exc
+    return calendar_slots.calendar_zone(name, _LABEL)
 
 
 def parse_datetime(value: str, zone: ZoneInfo) -> datetime:
     """Interpret ISO dates/datetimes in the selected zone and retain explicit offsets."""
-    if not isinstance(value, str) or not value.strip():
-        raise HTTPException(400, "Google Meet: dates must use ISO 8601 format")
-    try:
-        result = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise HTTPException(400, "Google Meet: dates must use ISO 8601 format") from exc
-    if result.tzinfo is not None:
-        return result.astimezone(zone)
-    result = result.replace(tzinfo=zone)
-    if result.astimezone(timezone.utc).astimezone(zone).replace(tzinfo=None) != result.replace(
-        tzinfo=None
-    ):
-        raise HTTPException(400, "Google Meet: this local time does not exist; use an offset")
-    if result.utcoffset() != result.replace(fold=1).utcoffset():
-        raise HTTPException(400, "Google Meet: ambiguous local time; include a UTC offset")
-    return result
+    return calendar_slots.parse_datetime(value, zone, _LABEL)
 
 
 def availability_window(
     start: str = "", end: str = "", time_zone: str = "UTC", *, now: datetime | None = None
 ) -> tuple[datetime, datetime]:
     """Default to now through next month's first midnight, with a 60-day maximum."""
-    zone = calendar_zone(time_zone)
-    start_at = parse_datetime(start, zone) if start.strip() else (now or datetime.now(zone))
-    start_at = start_at.astimezone(zone)
-    end_at = (
-        parse_datetime(end, zone)
-        if end.strip()
-        else start_at.replace(
-            year=start_at.year + (start_at.month == 12),
-            month=start_at.month % 12 + 1,
-            day=1,
-            hour=0,
-            minute=0,
-            second=0,
-            microsecond=0,
-        )
-    )
-    # Calendar days keep a 60-day query valid across a daylight-saving transition.
-    if end_at <= start_at or end_at > start_at + timedelta(days=MAX_AVAILABILITY_DAYS):
-        raise HTTPException(400, "Google Meet: end must follow start by at most 60 days")
-    return start_at, end_at
+    return calendar_slots.availability_window(start, end, time_zone, _LABEL, now=now)
 
 
 def parse_attendees(value: str | list[Any]) -> list[dict[str, str]]:
     """Accept email lists as JSON arrays or comma/semicolon/newline separated text."""
-    if isinstance(value, str):
-        if value.strip().startswith("["):
-            try:
-                value = json.loads(value)
-            except ValueError as exc:
-                raise HTTPException(400, "Google Meet: invalid attendee JSON array") from exc
-        else:
-            value = [item.strip() for item in re.split(r"[,;\n]", value) if item.strip()]
-    if not isinstance(value, list):
-        raise HTTPException(400, "Google Meet: attendees must be a list of email addresses")
-    attendees: list[dict[str, str]] = []
-    seen: set[str] = set()
-    for item in value:
-        email = item.get("email", "") if isinstance(item, dict) else item
-        if not isinstance(email, str) or not re.fullmatch(
-            r"[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+", email.strip()
-        ):
-            raise HTTPException(400, "Google Meet: each attendee must have a valid email address")
-        email = email.strip()
-        if email.lower() not in seen:
-            attendees.append({"email": email})
-            seen.add(email.lower())
-    return attendees
+    return [{"email": email} for email in calendar_slots.parse_attendee_emails(value, _LABEL)]
 
 
 class GoogleMeetService:
@@ -245,28 +200,9 @@ class GoogleMeetService:
                     busy.append((max(left, lower), min(right, upper)))
         except (KeyError, TypeError) as exc:
             raise HTTPException(502, "Google Meet: invalid availability response") from exc
-        merged: list[tuple[datetime, datetime]] = []
-        for left, right in sorted(busy):
-            if merged and left <= merged[-1][1]:
-                merged[-1] = (merged[-1][0], max(right, merged[-1][1]))
-            else:
-                merged.append((left, right))
-        free: list[tuple[datetime, datetime]] = []
-        cursor = lower
-        for left, right in merged:
-            if cursor < left:
-                free.append((cursor, left))
-            cursor = right
-        if cursor < upper:
-            free.append((cursor, upper))
-
-        def intervals(values: list[tuple[datetime, datetime]]) -> list[dict[str, str]]:
-            return [
-                {"start": a.astimezone(zone).isoformat(), "end": b.astimezone(zone).isoformat()}
-                for a, b in values
-            ]
-
-        busy_slots: list[dict[str, Any]] = list(intervals(merged))
+        merged = merge_intervals(busy)
+        free = free_intervals(merged, lower, upper)
+        busy_slots: list[dict[str, Any]] = list(format_intervals(merged, zone))
         if enabled and merged:
             from app.services.google_meet_busy_titles import label_busy_intervals, read_busy_events
 
@@ -281,7 +217,7 @@ class GoogleMeetService:
             "time_zone": time_zone,
             "start": start_at.isoformat(),
             "end": end_at.isoformat(),
-            "available_slots": intervals(free),
+            "available_slots": format_intervals(free, zone),
             "busy_slots": busy_slots,
             "count": len(free),
         }

@@ -17,6 +17,29 @@ import type { ReleaseEntry } from "@/features/release-tour/releaseTour.types";
  */
 export const RELEASE_REGISTRY: ReleaseEntry[] = [
   {
+    releaseId: "2026.36",
+    publishedAt: new Date("2026-11-18T12:00:00Z"),
+    headline: "Outlook Calendar",
+    releaseTour: {
+      label: "New in Heym", introTitle: "New in this release",
+      introDescription: "Find free time in Outlook and Microsoft 365 calendars and send Teams invitations.",
+      tourEnabled: true,
+      sectionOrder: ["outlook-calendar"],
+    },
+    sections: [{
+      id: "outlook-calendar", title: "Outlook Calendar",
+      publishedAt: new Date("2026-11-18T12:00:00Z"),
+      blocks: [{ type: "prose", markdown: "The new **Outlook Calendar** node brings everything the Google Meet node does to Outlook.com and Microsoft 365 work or school calendars, connected with an **Outlook Calendar (OAuth2)** credential through Microsoft Graph. **Read Available Time Slots** returns the free time between your Busy, Tentative and Away events, recurring meetings and all-day events included, in any time zone and up to 60 days ahead. Enter a colleague's email address to read their free/busy the way Outlook's Scheduling Assistant does, or a calendar name such as **Work** to read one of your other calendars. **Create Meeting** sends Outlook invitations with a Microsoft Teams link; **Update** and **Delete** notify the guests. Every field accepts expressions and can be filled by an Agent, so an agent can find a time and book it in one conversation." }],
+      tour: {
+        description: "Read free time in Outlook or Microsoft 365 calendars, yours or a colleague's, and send invitations with Teams links.",
+        useCases: ["Let visitors book a Teams call in your free time", "Have an agent find a slot that suits you and a colleague", "Reschedule or cancel meetings and notify every guest"],
+        tourVisual: "outlook-calendar",
+        docTarget: { categoryId: "nodes", slug: "outlook-calendar-node", title: "Outlook Calendar" },
+      },
+    }],
+  },
+
+  {
     releaseId: "2026.35",
     publishedAt: new Date("2026-11-17T12:00:00Z"),
     headline: "Outlook Trigger",
@@ -106,29 +129,6 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
         useCases: ["Extract totals and due dates from invoice PDFs sent to a billing inbox", "Hand contracts that arrive by email to an Agent for review", "File scans and delivery notes in Drive with the email they came with"],
         tourVisual: "imap-attachments",
         docTarget: { categoryId: "nodes", slug: "imap-trigger-node", title: "IMAP Trigger" },
-      },
-    }],
-  },
-
-  {
-    releaseId: "2026.31",
-    publishedAt: new Date("2026-11-14T12:00:00Z"),
-    headline: "Revert a widget Chat changed",
-    releaseTour: {
-      label: "New in Heym", introTitle: "New in this release",
-      introDescription: "Undo an AI change to a dashboard widget in one click.",
-      tourEnabled: true,
-      sectionOrder: ["chat-widget-revert"],
-    },
-    sections: [{
-      id: "chat-widget-revert", title: "Revert a widget Chat changed",
-      publishedAt: new Date("2026-11-14T12:00:00Z"),
-      blocks: [{ type: "prose", markdown: "When Chat changes a dashboard widget, or you fine-tune one with AI, the card shows **Revert previous**. One click puts the widget back as it was before that change, together with any fix Chat made to its data in the same change: a change and its fixes are now one Edit History entry. The offer lasts until you reload or the widget changes again, and Heym never overwrites a save made since. Heym Work's pages offer the same button." }],
-      tour: {
-        description: "Undo the last AI change to a dashboard widget, from Chat or a fine-tune, in one click.",
-        useCases: ["Try another chart from Chat and go back if the old one was better", "Undo a fine-tune that left a widget empty", "Review AI edits to a page before keeping them"],
-        tourVisual: "chat-widget-revert",
-        docTarget: { categoryId: "tabs", slug: "dashboard-tab", title: "Dashboard" },
       },
     }],
   },
