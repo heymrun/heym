@@ -1152,8 +1152,12 @@ async def list_vector_store_items(
     config = decrypt_config(credential.encrypted_config)
     service = get_vector_store_service_from_config(config, credential.type)
 
-    source_groups, total_items = service.list_items(
-        store.collection_name, limit=limit, text_truncate_length=text_truncate_length
+    # Every chunk is read, page by page; keep the event loop free meanwhile.
+    source_groups, total_items = await asyncio.to_thread(
+        service.list_items,
+        store.collection_name,
+        limit=limit,
+        text_truncate_length=text_truncate_length,
     )
 
     return VectorStoreItemsResponse(

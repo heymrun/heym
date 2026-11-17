@@ -29,6 +29,8 @@ AGENT_CAPABILITIES = (
     "rename or delete a widget and tidy a dashboard's layout; inspect data tables, add or "
     "remove columns, read, "
     "insert, update and delete rows on tables the user owns or has write access to; "
+    "list the user's knowledge bases and the documents in each, and search their content to "
+    "answer questions with the source documents; "
     "read schedules, teams and global variables; search "
     "the Heym documentation; and create or update the user's credentials on a secure Heym "
     "page the user opens in their browser, so keys and tokens never pass through the client."
@@ -136,6 +138,17 @@ AGENT_SKILLS: tuple[AgentSkillInfo, ...] = (
         "with the user's write access.",
         ("data-tables", "rows", "columns"),
         ("Add name and surname columns to my names table.",),
+    ),
+    AgentSkillInfo(
+        "knowledge-bases",
+        "Knowledge bases",
+        "List the user's knowledge bases and their documents, and answer questions from their "
+        "content, naming the source documents.",
+        ("knowledge-bases", "rag", "search"),
+        (
+            "What does our refund policy say about digital goods?",
+            "Which documents are in the HR knowledge base?",
+        ),
     ),
     AgentSkillInfo(
         "docs",

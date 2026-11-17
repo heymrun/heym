@@ -92,6 +92,9 @@ class ChatDocumentationTests(unittest.IsolatedAsyncioTestCase):
                 patch.object(ai_assistant, "_load_agents_md_content", return_value=""),
                 patch.object(ai_assistant, "build_credentials_prompt", AsyncMock(return_value="")),
                 patch.object(
+                    ai_assistant, "knowledge_bases_prompt_block", AsyncMock(return_value="")
+                ),
+                patch.object(
                     ai_assistant, "build_public_base_url", return_value="http://localhost"
                 ),
                 patch.object(ai_assistant, "record_llm_trace"),

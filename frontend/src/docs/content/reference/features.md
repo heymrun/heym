@@ -520,6 +520,8 @@ Click **AI** above any node on the canvas to change or fix just that node. The p
 
 When a workflow stores records, the assistant asks which [data table](../tabs/datatable-tab.md) to use, or creates one with the columns the workflow needs. Chat and MCP `heym_chat` can also edit columns and rows directly using owner or write access, with confirmation before column removal or clearing all rows. See [AI Assistant › Data tables](./ai-assistant.md#data-tables).
 
+Chat and MCP `heym_chat` also answer questions from your [vector stores](../tabs/vectorstores-tab.md): when a store's name or description fits a question, they search it before running a workflow and name the documents the answer came from. See [Vectorstores › From Chat and MCP](../tabs/vectorstores-tab.md#from-chat-and-mcp).
+
 When the current workflow contains [Agent Node](../nodes/agent-node.md) skills, the assistant sends only each skill's `SKILL.md` into the workflow context. Attached `.py` files and binary skill assets are excluded before the request so large skill bundles do not overflow the model context window.
 
 Pairs well with [Chat with Heym](./chat-with-heym.md), [Agent Architecture](./agent-architecture.md), and [Expression DSL](./expression-dsl.md).
@@ -812,7 +814,7 @@ See also [Credentials](./credentials.md), [Credentials Sharing](./credentials-sh
 
 ### [Vectorstores](../tabs/vectorstores-tab.md)
 
-The Vectorstores tab manages vector stores used by [RAG](../nodes/rag-node.md) nodes. Create a store with a name and a vector store [credential](./credentials.md) — *RAG: Qdrant + OpenAI* (external Qdrant) or *RAG: Psql + OpenAI* (Heym's own Postgres via pgvector), which fixes the store's backend — optionally set a collection name, then upload documents (PDF, Markdown, text, CSV, JSON, images read with OCR, mp3/wav/ogg/opus/flac audio, including WhatsApp voice notes, transcribed on the instance, and any other UTF-8 text file; audio and scanned PDFs are read in the background). Manage content (view, delete sources), edit store details, and share stores with users. In a [RAG](../nodes/rag-node.md) node, pick the Database, select the vector store, and run insert, upsert, delete, or search operations.
+The Vectorstores tab manages vector stores used by [RAG](../nodes/rag-node.md) nodes. Create a store with a name and a vector store [credential](./credentials.md) — *RAG: Qdrant + OpenAI* (external Qdrant) or *RAG: Psql + OpenAI* (Heym's own Postgres via pgvector), which fixes the store's backend — optionally set a collection name, then upload documents (PDF, Markdown, text, CSV, JSON, images read with OCR, mp3/wav/ogg/opus/flac audio, including WhatsApp voice notes, transcribed on the instance, and any other UTF-8 text file; audio and scanned PDFs are read in the background). Manage content (view, delete sources), edit store details, and share stores with users. In a [RAG](../nodes/rag-node.md) node, pick the Database, select the vector store, and run insert, upsert, delete, or search operations. [Chat](../tabs/chat-tab.md) and MCP `heym_chat` treat these stores as knowledge bases: when a store's name or description fits a question, they search it before running a workflow, answer from the matching chunks with their source documents, and can list your stores and the documents in each. See [Vectorstores › From Chat and MCP](../tabs/vectorstores-tab.md#from-chat-and-mcp).
 
 See also [Qdrant RAG](../nodes/rag-node.md), [Credentials](./credentials.md), and [Teams](./teams.md).
 

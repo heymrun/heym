@@ -57,6 +57,15 @@ are refused with a message.
 - Shared stores appear with an indicator
 - Revoke sharing from the store card menu
 
+## From Chat and MCP
+
+[Chat](./chat-tab.md), Heym Work's Chat, the `heym_chat` [MCP tool](./mcp-tab.md) and [A2A](../reference/a2a.md) treat your vector stores as knowledge bases:
+
+- **Ask a question** – When a store's name or description fits a question, such as "what does our refund policy say about digital goods?", Chat searches that store before it runs a workflow and answers from the matching chunks, naming the documents it used. It can search up to five stores in one step and says so when none of them covers the question
+- **List stores and documents** – Ask which knowledge bases you have, or which documents are in one; Chat lists each document with its chunk count
+- **Access** – Chat reaches the stores you own and the ones shared with you directly or through a team, and searches them through the same search endpoint as Heym Work
+- **Descriptions matter** – Every turn shows Chat the name and the first 200 characters of the description of up to 50 stores (it lists the rest on request), so a short description of what a store holds helps it pick the right one
+
 ## Using in Workflows
 
 In a [RAG node](../nodes/rag-node.md), select the vector store by name. The node retrieves relevant chunks and augments the LLM context with them.

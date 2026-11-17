@@ -32,6 +32,7 @@ from app.api.ai_assistant import (
 )
 from app.api.chat_build import ChatBuildSession
 from app.api.chat_files import ChatFileTools
+from app.api.chat_knowledge_bases import knowledge_bases_prompt_block
 from app.api.deps import get_current_user, get_current_user_id, get_db
 from app.api.workflows import get_workflow_for_user
 from app.db.models import (
@@ -280,6 +281,7 @@ class SystemPromptParts:
     build_block: str = ""
     build_reference: str = ""
     workflows: tuple[dict[str, Any], ...] = ()
+    knowledge_bases_block: str = ""
 
 
 async def _assemble_system_prompt_parts(
@@ -294,6 +296,7 @@ async def _assemble_system_prompt_parts(
     """The turn's system prompt, fixed parts first so providers can cache the longest prefix."""
     workflows = await get_workflows_for_user_with_inputs(db, user.id)
     workflows_block = _format_workflows_for_prompt(workflows)
+    knowledge_bases_block = await knowledge_bases_prompt_block(db, user.id)
     agents_md = _load_agents_md_content() or ""
     user_rules = (user.user_rules or "").strip()
     credentials_block = (
@@ -318,6 +321,7 @@ async def _assemble_system_prompt_parts(
             + "\n\nAvailable workflows (always check these first when user asks for information):\n"
             + workflows_block
         )
+    system_prompt += knowledge_bases_block
     system_prompt += credentials_block
     if user_rules:
         system_prompt = (
@@ -337,6 +341,7 @@ async def _assemble_system_prompt_parts(
         credentials_block=credentials_block,
         build_reference=build_reference,
         workflows=tuple(workflows),
+        knowledge_bases_block=knowledge_bases_block,
     )
 
 
@@ -1905,7 +1910,9 @@ async def get_context_summary(
         current_user, db, include_attachment_instructions=False
     )
     breakdown = _context_breakdown(
-        base_system_prompt=parts.base_system_prompt + parts.credentials_block,
+        base_system_prompt=parts.base_system_prompt
+        + parts.credentials_block
+        + parts.knowledge_bases_block,
         agents_md=parts.agents_md,
         workflows_block=parts.workflows_block,
         user_rules=parts.user_rules,

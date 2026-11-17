@@ -82,6 +82,7 @@ When it is on, `heym_chat` appears in `tools/list` alongside your workflow tools
 - List boards, create cards, and read card detail on the [Board tab](./board-tab.md)
 - List your dashboards (Heym Work's pages) with the widgets on each, find which dashboard a workflow is on, add a new widget to a dashboard and build its workflow, put an existing workflow on a dashboard as a widget, rename or delete a widget, or tidy a dashboard's layout (see [Dashboard › From Chat and MCP](./dashboard-tab.md#from-chat-and-mcp))
 - Inspect data tables and rows, create tables, add or remove columns, insert, update or delete rows, and wire tables into workflows
+- List your knowledge bases ([vector stores](./vectorstores-tab.md)) and the documents in each, and answer questions from their content with the source documents: when a knowledge base's name or description fits a question, `heym_chat` searches it before running a workflow
 - Create, edit and run prompt and agent [eval suites](./evals-tab.md#from-chat-and-mcp), including an agent's baseline: reported, built from runs, or stated as numbers. The result lists the Evals link of every suite saved in the call.
 - Create or update your credentials on Heym's own page (see [Credentials](#credentials))
 - Read teams and global variables, and search the documentation
