@@ -553,6 +553,49 @@ Then an Agent user message such as `"Extract vendor, total and due date from the
 {"id": "n1", "type": "gmailTrigger", "position": {"x": 100, "y": 100}, "data": {"label": "invoiceGmail", "credentialId": "gmail-credential-uuid", "pollIntervalMinutes": 5, "gmailMailbox": "label", "gmailLabelId": "Label_12", "gmailLabelName": "Invoices", "gmailDownloadAttachments": true, "gmailAfterAction": "markReadAndArchive"}}
 ```
 
+### 3j. outlookTrigger (Outlook Trigger)
+- **Purpose**: Poll an Outlook.com or Microsoft 365 (work or school) mailbox through Microsoft Graph and start the workflow once for each new email in the watched mailbox
+- **Inputs**: 0 | **Outputs**: 1
+- **WHEN TO USE**: When the workflow should react to email in an Outlook, Hotmail, Live or Microsoft 365 / Exchange Online mailbox, especially when it needs the Focused or Other inbox, a mail folder, an alias, only flagged email, or should mark the email read, archive it, or move it to Deleted Items afterwards. Use `gmailTrigger` for Gmail and `imapTrigger` for other mail providers
+- **DO NOT use** `imapTrigger` for a Microsoft 365 or Outlook.com account when an `outlook` credential is available: Microsoft turned off password sign-in for IMAP
+- **Data fields** (plain values, not `$` expressions):
+  - `label`: Node identifier (e.g., "supportOutlook")
+  - `credentialId`: UUID of an `outlook` credential (Microsoft OAuth app, permissions `Mail.ReadWrite`, `User.Read`, `offline_access`)
+  - `pollIntervalMinutes`: Integer, minimum `1`, default `1`
+  - `outlookMailbox`: Which mail starts a run. `"inbox"` (default), `"focused"` (Focused Inbox), `"other"` (the Other tab of the Focused Inbox), `"important"` (high importance mail in any received folder), `"sent"` (Sent Items), `"all"` (mail received into any folder, archived included; not Sent Items, Drafts, Deleted Items, Junk Email or Outbox), `"folder"` (one mail folder of the account, nested folders included)
+  - `outlookFolderId`: Graph mail folder id when `outlookMailbox` is `"folder"`; `outlookFolderName` holds its path, for example `"Inbox / Invoices"`
+  - `outlookFlaggedOnly`: Boolean, default `false`. When `true`, only flagged email in the mailbox starts a run: an email starts one when it is flagged (or arrives flagged), at the next poll. Unflagging it and flagging it again starts another run
+  - `outlookAliases`: Array of addresses. When set, only email sent or delivered to one of them starts a run (To, Cc, Delivered-To, X-Original-To). Use it for a Microsoft 365 alias (proxy address) or a plus address (`me+invoices@contoso.com`). Empty means any address
+  - `outlookDownloadAttachments`: Boolean, default `false`. Same as `imapDownloadAttachments`: saves every attachment to the owner's Heym Drive during the run (at most 10 per email)
+  - `outlookAfterAction`: What Heym does to the email once its run has started, whatever the outcome: `"none"` (default), `"markRead"`, `"archive"` (move to the Archive folder), `"markReadAndArchive"`, `"delete"` (move to Deleted Items, recoverable from there). Never a permanent delete
+- **Behavior**: The first poll records where the mailbox is and starts nothing. Without `outlookFlaggedOnly`, a message starts a run when it is received into the mailbox; moving older mail into a folder later does not start one. Each email starts at most one run, also on multi-worker and multi-instance installs
+- **Output fields available downstream**: the same as `imapTrigger` (`$<label>.email.subject`, `.from`, `.fromAddresses`, `.toAddresses`, `.ccAddresses`, `.text`, `.html`, `.attachments`, `.headers`, `.messageId`, `.date`), plus:
+  - `$<label>.email.id`: Graph message id
+  - `$<label>.email.conversationId`: Outlook conversation id
+  - `$<label>.email.folderId`: id of the folder the message is in
+  - `$<label>.email.categories`: the message's Outlook categories, for example `["Red category"]`
+  - `$<label>.email.importance`: `"low"`, `"normal"` or `"high"`
+  - `$<label>.email.inferenceClassification`: `"focused"` or `"other"`
+  - `$<label>.email.flagged`, `$<label>.email.isRead`: booleans
+  - `$<label>.email.webLink`: link that opens the message in Outlook on the web
+  - `$<label>.email.snippet`: Outlook's short preview of the body
+  - `$<label>.attachments`, `$<label>.file_ids`, `$<label>.triggered_at`: as for `imapTrigger`
+
+**Example node JSON:**
+```json
+{"id": "n1", "type": "outlookTrigger", "position": {"x": 100, "y": 100}, "data": {"label": "supportOutlook", "credentialId": "outlook-credential-uuid", "pollIntervalMinutes": 1, "outlookMailbox": "focused", "outlookAliases": ["support@contoso.com"], "outlookAfterAction": "markRead"}}
+```
+
+**Example with flagged email only (flag an email in Outlook → Agent drafts a follow-up task):**
+```json
+{"id": "n1", "type": "outlookTrigger", "position": {"x": 100, "y": 100}, "data": {"label": "flaggedOutlook", "credentialId": "outlook-credential-uuid", "pollIntervalMinutes": 2, "outlookMailbox": "inbox", "outlookFlaggedOnly": true, "outlookAfterAction": "none"}}
+```
+
+**Example with a folder and attachments (invoices filed into a folder by an Outlook rule → Agent reads the PDFs → archive):**
+```json
+{"id": "n1", "type": "outlookTrigger", "position": {"x": 100, "y": 100}, "data": {"label": "invoiceOutlook", "credentialId": "outlook-credential-uuid", "pollIntervalMinutes": 5, "outlookMailbox": "folder", "outlookFolderId": "AAMkAGI2THVSAAA=", "outlookFolderName": "Inbox / Invoices", "outlookDownloadAttachments": true, "outlookAfterAction": "markReadAndArchive"}}
+```
+
 ### 4. llm (Language Model)
 - **Purpose**: Process text with AI language model or generate images
 - **Inputs**: 1 | **Outputs**: 1
@@ -5396,7 +5439,7 @@ Always include:
 21. **MULTIPLE INPUT FIELDS** - textInput nodes support multiple input fields via `inputFields` array. Define fields like `[{"key": "text"}, {"key": "base64"}]`. Access via `$nodeLabel.body.fieldKey`. Input values are sent in the `body` object.
 22. **⚠️ NO UNNECESSARY textInput!** - NEVER add textInput unless user explicitly needs to provide input data. For static URLs, scheduled tasks, or fixed operations, START DIRECTLY with http, cron, or other nodes. textInput is ONLY for workflows that receive dynamic data from users/API callers.
 23. **⚠️ PRESERVE CREDENTIALS & MODEL** - When modifying an existing workflow, ALWAYS preserve existing `credentialId` and `model` values in nodes. NEVER replace, remove, or change credential IDs or model names unless the user explicitly asks to use a different credential or model. If a node already has a `credentialId` or `model`, keep them exactly as is.
-23a. **⚠️ CREDENTIALS & INTEGRATIONS - OWNED ONLY (NO SHARED)** - For **every** node field that references a credential or secret (`credentialId`, `githubCredentialId`, `fallbackCredentialId`, `guardrailCredentialId`, Playwright `aiStep` credential, etc.), use ONLY credentials **owned** by the workflow owner. **NEVER** put shared credentials (shared with you by another user or via team share) in generated JSON—the UI labels these as shared; they must not appear in AI output. Use placeholders such as `YOUR_CREDENTIAL_ID`, `codex-credential-uuid`, `opencode-credential-uuid`, `github-credential-uuid`, `jira-credential-uuid`, `google-drive-credential-uuid`, `google-sheets-credential-uuid`, `slack-credential-uuid`, `telegram-credential-uuid`, `imap-credential-uuid`, or `gmail-credential-uuid` and let the user pick an owned credential in the editor. Applies to: `llm`, `agent`, `codex`, `opencodeGo`, `slack`, `telegram`, `slackTrigger`, `telegramTrigger`, `imapTrigger`, `gmailTrigger`, `sendEmail`, `redis`, `grist`, `github`, `jira`, `linear`, `googleSheets`, `googleDrive`, `googleMeet`, `googleSheetsTrigger`, `googleDriveTrigger`, `bigquery`, `supabase`, `notion`, `rabbitmq`, `crawler`, `playwright` (including `aiStep`), and any other integration that stores a credential id. When modifying an existing workflow (rule 23), still preserve existing ids if they are already non-shared; when **adding** new nodes, never insert shared credential UUIDs.
+23a. **⚠️ CREDENTIALS & INTEGRATIONS - OWNED ONLY (NO SHARED)** - For **every** node field that references a credential or secret (`credentialId`, `githubCredentialId`, `fallbackCredentialId`, `guardrailCredentialId`, Playwright `aiStep` credential, etc.), use ONLY credentials **owned** by the workflow owner. **NEVER** put shared credentials (shared with you by another user or via team share) in generated JSON—the UI labels these as shared; they must not appear in AI output. Use placeholders such as `YOUR_CREDENTIAL_ID`, `codex-credential-uuid`, `opencode-credential-uuid`, `github-credential-uuid`, `jira-credential-uuid`, `google-drive-credential-uuid`, `google-sheets-credential-uuid`, `slack-credential-uuid`, `telegram-credential-uuid`, `imap-credential-uuid`, `gmail-credential-uuid`, or `outlook-credential-uuid` and let the user pick an owned credential in the editor. Applies to: `llm`, `agent`, `codex`, `opencodeGo`, `slack`, `telegram`, `slackTrigger`, `telegramTrigger`, `imapTrigger`, `gmailTrigger`, `outlookTrigger`, `sendEmail`, `redis`, `grist`, `github`, `jira`, `linear`, `googleSheets`, `googleDrive`, `googleMeet`, `googleSheetsTrigger`, `googleDriveTrigger`, `bigquery`, `supabase`, `notion`, `rabbitmq`, `crawler`, `playwright` (including `aiStep`), and any other integration that stores a credential id. When modifying an existing workflow (rule 23), still preserve existing ids if they are already non-shared; when **adding** new nodes, never insert shared credential UUIDs.
 24. **EXECUTE NODE OUTPUT** - Execute node returns `{status, outputs, workflow_id, execution_time_ms}`. Access the called workflow's result via `$executeNodeLabel.outputs.output.result`. The `outputs.output` object contains the result from the executed workflow's output node.
 25. **EXECUTE NODE MULTIPLE INPUTS** - When calling a workflow that expects multiple input fields: (1) Add matching `inputFields` to your textInput node to collect all required data, (2) Use `executeInputMappings` array to map each field. Example: If target needs `text` and `imageUrl`, your textInput should have `inputFields: [{"key": "prompt"}, {"key": "image"}]`, then execute node uses `"executeInputMappings": [{"key": "text", "value": "$userInput.body.prompt"}, {"key": "imageUrl", "value": "$userInput.body.image"}]`
 26. **REQUEST BODY, HEADERS & QUERY** - When workflow is executed via API, textInput nodes receive `body`, `headers` and `query` objects. Access via `$textInputLabel.body.fieldName`, `$textInputLabel.headers.headerName` and `$textInputLabel.query.paramName`. Useful for accessing raw request data, authentication, and dynamic behavior.

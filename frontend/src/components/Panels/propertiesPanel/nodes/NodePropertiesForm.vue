@@ -7,6 +7,7 @@ import SlackTriggerNodeProperties from "./SlackTriggerNodeProperties.vue";
 import DiscordTriggerNodeProperties from "./DiscordTriggerNodeProperties.vue";
 import ImapTriggerNodeProperties from "./ImapTriggerNodeProperties.vue";
 import GmailTriggerNodeProperties from "./GmailTriggerNodeProperties.vue";
+import OutlookTriggerNodeProperties from "./OutlookTriggerNodeProperties.vue";
 import GoogleDriveTriggerNodeProperties from "./GoogleDriveTriggerNodeProperties.vue";
 import GoogleSheetsTriggerNodeProperties from "./GoogleSheetsTriggerNodeProperties.vue";
 import WebsocketTriggerNodeProperties from "./WebsocketTriggerNodeProperties.vue";
@@ -78,6 +79,7 @@ const { selectedNode } = usePropertiesPanelContext();
   <DiscordTriggerNodeProperties v-else-if="selectedNode?.type === 'discordTrigger'" />
   <ImapTriggerNodeProperties v-else-if="selectedNode?.type === 'imapTrigger'" />
   <GmailTriggerNodeProperties v-else-if="selectedNode?.type === 'gmailTrigger'" />
+  <OutlookTriggerNodeProperties v-else-if="selectedNode?.type === 'outlookTrigger'" />
   <GoogleDriveTriggerNodeProperties v-else-if="selectedNode?.type === 'googleDriveTrigger'" />
   <GoogleSheetsTriggerNodeProperties v-else-if="selectedNode?.type === 'googleSheetsTrigger'" />
   <HeymTriggerNodeProperties v-else-if="selectedNode?.type === 'heymTrigger'" />

@@ -71,6 +71,7 @@ class CredentialType(str, PyEnum):
     google_drive = "google_drive"
     google_meet = "google_meet"
     gmail = "gmail"
+    outlook = "outlook"
     rag = "rag"
     decision = "decision"
     model_router = "model_router"

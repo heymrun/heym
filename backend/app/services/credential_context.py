@@ -98,6 +98,19 @@ def _fresh_google_access_token(credential: Credential, config: dict[str, Any]) -
         return ""
 
 
+def _fresh_outlook_access_token(credential: Credential, config: dict[str, Any]) -> str:
+    """Return the Outlook credential's Graph access token, refreshed when expired."""
+    from app.db.session import SessionLocal
+    from app.services.outlook_service import OutlookService
+
+    try:
+        with SessionLocal() as db:
+            return OutlookService(str(credential.id), config, db).access_token()
+    except Exception:
+        logger.warning("Could not refresh Outlook credential %s for $credentials", credential.id)
+        return ""
+
+
 async def credential_context_value(credential: Credential, config: dict[str, Any]) -> str | None:
     """Return the value `$credentials.<name>` resolves to, or None to leave it out."""
     if credential.type == CredentialType.bearer:
@@ -122,6 +135,8 @@ async def credential_context_value(credential: Credential, config: dict[str, Any
     if credential.type in _GOOGLE_OAUTH_TYPES:
         # Google access tokens expire hourly; the stored one is often stale.
         return await asyncio.to_thread(_fresh_google_access_token, credential, config)
+    if credential.type == CredentialType.outlook:
+        return await asyncio.to_thread(_fresh_outlook_access_token, credential, config)
     return config.get("api_key", "")
 
 

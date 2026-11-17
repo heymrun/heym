@@ -9,6 +9,7 @@ INITIAL_INPUT_TRIGGER_TYPES = frozenset(
     {
         "imapTrigger",
         "gmailTrigger",
+        "outlookTrigger",
         "websocketTrigger",
         "slackTrigger",
         "discordTrigger",

@@ -191,6 +191,17 @@ export type GmailMailbox =
 
 export type GmailAfterAction = "none" | "markRead" | "archive" | "markReadAndArchive" | "trash";
 
+export type OutlookMailbox =
+  | "inbox"
+  | "focused"
+  | "other"
+  | "important"
+  | "sent"
+  | "all"
+  | "folder";
+
+export type OutlookAfterAction = "none" | "markRead" | "archive" | "markReadAndArchive" | "delete";
+
 export type NodeType =
   | "textInput"
   | "cron"
@@ -245,6 +256,7 @@ export type NodeType =
   | "rabbitmq"
   | "imapTrigger"
   | "gmailTrigger"
+  | "outlookTrigger"
   | "heym"
   | "heymTrigger"
   | "crawler"
@@ -566,6 +578,19 @@ export interface NodeData {
   gmailDownloadAttachments?: boolean;
   /** gmailTrigger: what Heym does to the email once its run has started. */
   gmailAfterAction?: GmailAfterAction;
+  /** outlookTrigger: which mail starts a run (inbox, Focused or Other, a system mailbox or a folder). */
+  outlookMailbox?: OutlookMailbox;
+  /** outlookTrigger: Graph folder id when outlookMailbox is "folder"; outlookFolderName is its path. */
+  outlookFolderId?: string;
+  outlookFolderName?: string;
+  /** outlookTrigger: only flagged email starts a run, once when it is flagged. */
+  outlookFlaggedOnly?: boolean;
+  /** outlookTrigger: only email sent or delivered to one of these addresses starts a run. */
+  outlookAliases?: string[];
+  /** outlookTrigger: save each attachment of the email to the owner's Heym Drive during the run. */
+  outlookDownloadAttachments?: boolean;
+  /** outlookTrigger: what Heym does to the email once its run has started. */
+  outlookAfterAction?: OutlookAfterAction;
   /** heymTrigger: platform events to subscribe to; empty means every event. */
   eventNames?: string[];
   /** heym: which Heym read to perform. */

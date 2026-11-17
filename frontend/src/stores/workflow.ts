@@ -6,6 +6,7 @@ import { buildLegacyWebhookBody, getHistoryWebhookBody, parseWebhookJson, string
 import { getLatestNodeResultForNode } from "@/lib/executionLog";
 import { googleTriggerProblems } from "@/lib/googleTriggerConfig";
 import { gmailTriggerProblems } from "@/lib/gmailTriggerConfig";
+import { outlookTriggerProblems } from "@/lib/outlookTriggerConfig";
 import { getSentryOperationMetadata } from "@/lib/sentryExpressionFields";
 import { replaceNodeLabelRefs } from "@/lib/utils";
 import { workflowRunNodeIds } from "@/lib/workflowRunScope";
@@ -2631,6 +2632,25 @@ export const useWorkflowStore = defineStore("workflow", () => {
             nodeId: node.id,
             nodeLabel: node.data.label,
             nodeType: "Gmail Trigger",
+            message,
+          });
+        }
+      }
+
+      if (node.type === "outlookTrigger") {
+        if (!node.data.credentialId || !isValidUUID(node.data.credentialId)) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "Outlook Trigger",
+            message: "Credential is not selected",
+          });
+        }
+        for (const message of outlookTriggerProblems(node.data)) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "Outlook Trigger",
             message,
           });
         }

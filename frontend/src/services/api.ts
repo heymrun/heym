@@ -1661,6 +1661,13 @@ export const credentialsApi = {
     return response.data;
   },
 
+  outlookOAuthAuthorize: async (credentialId: string): Promise<{ auth_url: string }> => {
+    const response = await api.post<{ auth_url: string }>(
+      "/credentials/outlook/oauth/authorize", { credential_id: credentialId },
+    );
+    return response.data;
+  },
+
   googleDriveOAuthAuthorize: async (credentialId: string): Promise<{ auth_url: string }> => {
     const response = await api.post<{ auth_url: string }>(
       "/credentials/google-drive/oauth/authorize",
@@ -4485,6 +4492,26 @@ export const gmailApi = {
   listAddresses: async (credentialId: string): Promise<GmailAddress[]> => {
     const response = await api.get<{ addresses: GmailAddress[] }>(
       `/gmail/${credentialId}/addresses`,
+    );
+    return response.data.addresses;
+  },
+};
+
+// ---------- Outlook pickers (Outlook Trigger form) ----------
+
+import type { OutlookAddress, OutlookFolder } from "@/types/outlook";
+
+export const outlookApi = {
+  listFolders: async (credentialId: string): Promise<OutlookFolder[]> => {
+    const response = await api.get<{ folders: OutlookFolder[] }>(
+      `/outlook/${credentialId}/folders`,
+    );
+    return response.data.folders;
+  },
+
+  listAddresses: async (credentialId: string): Promise<OutlookAddress[]> => {
+    const response = await api.get<{ addresses: OutlookAddress[] }>(
+      `/outlook/${credentialId}/addresses`,
     );
     return response.data.addresses;
   },

@@ -17,6 +17,29 @@ import type { ReleaseEntry } from "@/features/release-tour/releaseTour.types";
  */
 export const RELEASE_REGISTRY: ReleaseEntry[] = [
   {
+    releaseId: "2026.35",
+    publishedAt: new Date("2026-11-17T12:00:00Z"),
+    headline: "Outlook Trigger",
+    releaseTour: {
+      label: "New in Heym", introTitle: "New in this release",
+      introDescription: "Start workflows from Outlook and Microsoft 365 mail, including email you flag.",
+      tourEnabled: true,
+      sectionOrder: ["outlook-trigger"],
+    },
+    sections: [{
+      id: "outlook-trigger", title: "Outlook Trigger",
+      publishedAt: new Date("2026-11-17T12:00:00Z"),
+      blocks: [{ type: "prose", markdown: "The new **Outlook Trigger** starts a run for each new email in an Outlook.com or Microsoft 365 work or school mailbox, connected with an **Outlook Mail (OAuth2)** credential through Microsoft Graph instead of a password. Watch the inbox, the **Focused** or **Other** inbox, high-importance mail, Sent Items, all received mail, or one of your folders. Turn on **Flagged email only** and flagging an email starts its run at the next poll, older email included. List addresses under **Only email sent to** to react only to an alias or a plus address. Once the run starts, Heym can mark the email read, move it to Archive or move it to Deleted Items; the default leaves it alone. The output matches the IMAP and Gmail Triggers, with the Outlook message id, conversation id, folder, categories and a link to the email added, and **Download attachments to Drive** works the same way." }],
+      tour: {
+        description: "Start a run for each new Outlook or Microsoft 365 email, or for each email you flag, then mark it read, archive it or delete it.",
+        useCases: ["Turn every flagged email into a follow-up task", "Triage the Focused Inbox and mark each email read once it is handled", "Read invoice PDFs from a folder an Outlook rule fills and archive them"],
+        tourVisual: "outlook-trigger",
+        docTarget: { categoryId: "nodes", slug: "outlook-trigger-node", title: "Outlook Trigger" },
+      },
+    }],
+  },
+
+  {
     releaseId: "2026.34",
     publishedAt: new Date("2026-11-16T12:00:00Z"),
     headline: "Gmail Trigger",
@@ -106,29 +129,6 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
         useCases: ["Try another chart from Chat and go back if the old one was better", "Undo a fine-tune that left a widget empty", "Review AI edits to a page before keeping them"],
         tourVisual: "chat-widget-revert",
         docTarget: { categoryId: "tabs", slug: "dashboard-tab", title: "Dashboard" },
-      },
-    }],
-  },
-
-  {
-    releaseId: "2026.30",
-    publishedAt: new Date("2026-11-10T22:00:00Z"),
-    headline: "Images, audio and any text file in vector stores",
-    releaseTour: {
-      label: "New in Heym", introTitle: "New in this release",
-      introDescription: "Photos, recordings and scanned pages become searchable RAG sources.",
-      tourEnabled: true,
-      sectionOrder: ["rag-media-upload"],
-    },
-    sections: [{
-      id: "rag-media-upload", title: "Images, audio and any text file in vector stores",
-      publishedAt: new Date("2026-11-10T22:00:00Z"),
-      blocks: [{ type: "prose", markdown: "Drop a photo, a screenshot, a voice note (WhatsApp's `.opus` files too) or a call recording on a vector store and it becomes searchable. Images are read with the Converter's OCR, and audio is transcribed on your own instance with the same Whisper model, in the background, so a long recording does not hold the upload open. PDF pages without a text layer are now read with OCR instead of being skipped, and a plain-text file of any name, such as `notes` or `README`, goes in as text. Heym Work's Knowledge pages take the same files." }],
-      tour: {
-        description: "Put photos, recordings, scanned PDFs and plain-text files of any name into a vector store.",
-        useCases: ["Search call recordings from a RAG node", "Make photographed receipts and whiteboards searchable", "Index scanned contracts without a separate OCR step"],
-        tourVisual: "rag-media-upload",
-        docTarget: { categoryId: "tabs", slug: "vectorstores-tab", title: "Vectorstores" },
       },
     }],
   },

@@ -97,6 +97,7 @@
     --node-google-drive: 38 92% 42%;
     --node-google-meet: 160 84% 32%;
     --node-gmail: 4 78% 50%;
+    --node-outlook: 206 100% 40%;
     --node-datatable: 190 95% 39%;
     --node-notion: 0 0% 18%;
     --node-sentry: 8 78% 52%;
@@ -199,6 +200,7 @@
     --node-google-drive: 38 92% 55%;
     --node-google-meet: 160 84% 45%;
     --node-gmail: 4 82% 62%;
+    --node-outlook: 206 92% 62%;
     --node-datatable: 190 95% 49%;
     --node-notion: 0 0% 88%;
     --node-sentry: 8 88% 70%;

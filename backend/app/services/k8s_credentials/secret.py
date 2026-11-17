@@ -23,6 +23,8 @@ _WRITE_BACK_TYPES = frozenset(
         CredentialType.google_sheets,
         CredentialType.google_drive,
         CredentialType.google_meet,
+        CredentialType.gmail,
+        CredentialType.outlook,
         CredentialType.bigquery,
     }
 )
