@@ -524,7 +524,7 @@ Then an Agent user message such as `"Extract vendor, total and due date from the
 ### 3i. gmailTrigger (Gmail Trigger)
 - **Purpose**: Poll a Gmail account through the Gmail API and start the workflow once for each new email in the watched mailbox
 - **Inputs**: 0 | **Outputs**: 1
-- **WHEN TO USE**: When the workflow should react to email in a Gmail or Google Workspace mailbox, especially when it needs a Gmail tab (Primary, Promotions...), a label, an alias, or should mark the email read, archive it, or move it to Trash afterwards. Use `imapTrigger` for other mail providers
+- **WHEN TO USE**: When the workflow should react to email in a Gmail or Google Workspace mailbox, especially when it needs a Gmail tab (Primary, Promotions...), a label, an alias, or should mark the email read, archive it, or move it to Trash afterwards. Use `imapTrigger` for other mail providers. Answer from the same account with `gmailSend`
 - **DO NOT use** `imapTrigger` with an app password for a Gmail account when a `gmail` credential is available
 - **Data fields** (plain values, not `$` expressions):
   - `label`: Node identifier (e.g., "supportGmail")
@@ -556,7 +556,7 @@ Then an Agent user message such as `"Extract vendor, total and due date from the
 ### 3j. outlookTrigger (Outlook Trigger)
 - **Purpose**: Poll an Outlook.com or Microsoft 365 (work or school) mailbox through Microsoft Graph and start the workflow once for each new email in the watched mailbox
 - **Inputs**: 0 | **Outputs**: 1
-- **WHEN TO USE**: When the workflow should react to email in an Outlook, Hotmail, Live or Microsoft 365 / Exchange Online mailbox, especially when it needs the Focused or Other inbox, a mail folder, an alias, only flagged email, or should mark the email read, archive it, or move it to Deleted Items afterwards. Use `gmailTrigger` for Gmail and `imapTrigger` for other mail providers
+- **WHEN TO USE**: When the workflow should react to email in an Outlook, Hotmail, Live or Microsoft 365 / Exchange Online mailbox, especially when it needs the Focused or Other inbox, a mail folder, an alias, only flagged email, or should mark the email read, archive it, or move it to Deleted Items afterwards. Use `gmailTrigger` for Gmail and `imapTrigger` for other mail providers. Answer from the same mailbox with `outlookSend`
 - **DO NOT use** `imapTrigger` for a Microsoft 365 or Outlook.com account when an `outlook` credential is available: Microsoft turned off password sign-in for IMAP
 - **Data fields** (plain values, not `$` expressions):
   - `label`: Node identifier (e.g., "supportOutlook")
@@ -1998,8 +1998,8 @@ Notes:
   - `attachments`: (optional) Comma-separated Drive file IDs to attach (supports expressions). Reference an upstream `drive` node's `id` output, e.g. `$drive.id`. Only files owned by the workflow owner or shared with one of their teams can be attached.
 
 **SETUP**: Requires an SMTP credential with server, port, email, and password configured. The credential may also set an optional `smtp_from` (visible From address); when blank, mail is sent as the email/username, which always signs in. This is a credential setting, not a node field. Common SMTP servers:
-- Gmail: `smtp.gmail.com`, port `587` (requires App Password)
-- Outlook: `smtp.office365.com`, port `587`
+- Gmail: `smtp.gmail.com`, port `587` (requires App Password). Prefer `gmailSend` when a `gmail` credential exists
+- Outlook: `smtp.office365.com`, port `587`. Prefer `outlookSend` when an `outlook` credential exists; Microsoft is retiring password sign-in for SMTP
 - Custom SMTP: Your organization's SMTP server
 
 **sendEmail Node Output Format**:
@@ -2041,6 +2041,59 @@ Notes:
     "to": "admin@example.com",
     "subject": "Workflow Error Alert",
     "emailBody": "Error in node $errorHandler.errorNode: $errorHandler.error"
+  }
+}
+```
+
+### 17a. gmailSend (Send Email from Gmail)
+- **Purpose**: Send an email from a Gmail or Google Workspace account through the Gmail API, with the same fields as `sendEmail`
+- **Inputs**: 1 | **Outputs**: 1
+- **WHEN TO USE**: Sending from a Gmail account when a `gmail` credential exists (the same credential as `gmailTrigger`), for example answering the email a `gmailTrigger` started the run with. No App Password or SMTP server is needed, and the sent copy lands in the account's Sent mail
+- **Data fields** (all text fields support expressions):
+  - `label`: Node identifier
+  - `credentialId`: UUID of a `gmail` credential (Google OAuth, scope `gmail.modify`, which also allows sending)
+  - `to`, `cc`, `bcc`, `subject`, `emailBody`, `attachments`: exactly as in `sendEmail`. An HTML body (one with `<p>`, `<div>`, `<table>`, `<br>`, `<body>` or `<html>`) is sent with a plain-text alternative; `attachments` are comma-separated Drive file IDs
+  - `fromAddress`: (optional) A Send mail as address of the account, such as `support@example.com`. Blank sends as the account with its Gmail name. An address the account cannot send as fails the node instead of being replaced
+- **Output fields**: the same as `sendEmail` (`status`, `to`, `cc`, `bcc`, `subject`, `attachment_count`), plus `from`, `message_id` (Gmail message id) and `thread_id`
+
+**Example - Answer a Gmail email from the same account:**
+```json
+{
+  "type": "gmailSend",
+  "data": {
+    "label": "replyByGmail",
+    "credentialId": "gmail-credential-uuid",
+    "to": "$supportGmail.email.fromAddresses[0].email",
+    "subject": "Re: $supportGmail.email.subject",
+    "emailBody": "<p>Hi,</p><p>$draftReply.text</p>",
+    "fromAddress": "support@example.com"
+  }
+}
+```
+
+### 17b. outlookSend (Send Email from Outlook)
+- **Purpose**: Send an email from an Outlook.com or Microsoft 365 (work or school) mailbox through Microsoft Graph, with the same fields as `sendEmail`
+- **Inputs**: 1 | **Outputs**: 1
+- **WHEN TO USE**: Sending from an Outlook, Hotmail, Live or Microsoft 365 / Exchange Online mailbox when an `outlook` credential exists (the same credential as `outlookTrigger`). Prefer it over `sendEmail` with `smtp.office365.com`: Microsoft is retiring password sign-in for SMTP. The sent copy lands in Sent Items
+- **Data fields** (all text fields support expressions):
+  - `label`: Node identifier
+  - `credentialId`: UUID of an `outlook` credential (Microsoft OAuth). Sending needs the `Mail.Send` permission; a credential connected before Outlook Send must be reconnected once in Credentials
+  - `to`, `cc`, `bcc`, `subject`, `emailBody`, `attachments`: exactly as in `sendEmail`. An HTML body is sent as HTML, anything else as text; `attachments` are comma-separated Drive file IDs, large files are uploaded in parts
+  - `fromAddress`: (optional) Another address to send from, such as an alias or a shared mailbox the account may send as. Blank sends as the signed-in account
+- **Output fields**: the same as `sendEmail` (`status`, `to`, `cc`, `bcc`, `subject`, `attachment_count`), plus `from`
+
+**Example - Send an Outlook follow-up with a Drive file:**
+```json
+{
+  "type": "outlookSend",
+  "data": {
+    "label": "sendQuote",
+    "credentialId": "outlook-credential-uuid",
+    "to": "$crmLookup.body.contact_email",
+    "cc": "sales@contoso.com",
+    "subject": "Your quote $crmLookup.body.quote_number",
+    "emailBody": "Hello $crmLookup.body.contact_name,\n\nYour quote is attached.\n\nBest regards",
+    "attachments": "$quotePdf.id"
   }
 }
 ```
@@ -5459,7 +5512,7 @@ Always include:
 21. **MULTIPLE INPUT FIELDS** - textInput nodes support multiple input fields via `inputFields` array. Define fields like `[{"key": "text"}, {"key": "base64"}]`. Access via `$nodeLabel.body.fieldKey`. Input values are sent in the `body` object.
 22. **⚠️ NO UNNECESSARY textInput!** - NEVER add textInput unless user explicitly needs to provide input data. For static URLs, scheduled tasks, or fixed operations, START DIRECTLY with http, cron, or other nodes. textInput is ONLY for workflows that receive dynamic data from users/API callers.
 23. **⚠️ PRESERVE CREDENTIALS & MODEL** - When modifying an existing workflow, ALWAYS preserve existing `credentialId` and `model` values in nodes. NEVER replace, remove, or change credential IDs or model names unless the user explicitly asks to use a different credential or model. If a node already has a `credentialId` or `model`, keep them exactly as is.
-23a. **⚠️ CREDENTIALS & INTEGRATIONS - OWNED ONLY (NO SHARED)** - For **every** node field that references a credential or secret (`credentialId`, `githubCredentialId`, `fallbackCredentialId`, `guardrailCredentialId`, Playwright `aiStep` credential, etc.), use ONLY credentials **owned** by the workflow owner. **NEVER** put shared credentials (shared with you by another user or via team share) in generated JSON—the UI labels these as shared; they must not appear in AI output. Use placeholders such as `YOUR_CREDENTIAL_ID`, `codex-credential-uuid`, `opencode-credential-uuid`, `github-credential-uuid`, `jira-credential-uuid`, `google-drive-credential-uuid`, `google-sheets-credential-uuid`, `slack-credential-uuid`, `telegram-credential-uuid`, `imap-credential-uuid`, `gmail-credential-uuid`, `outlook-credential-uuid`, or `outlook-calendar-credential-uuid` and let the user pick an owned credential in the editor. Applies to: `llm`, `agent`, `codex`, `opencodeGo`, `slack`, `telegram`, `slackTrigger`, `telegramTrigger`, `imapTrigger`, `gmailTrigger`, `outlookTrigger`, `sendEmail`, `redis`, `grist`, `github`, `jira`, `linear`, `googleSheets`, `googleDrive`, `googleMeet`, `outlookCalendar`, `googleSheetsTrigger`, `googleDriveTrigger`, `bigquery`, `supabase`, `notion`, `rabbitmq`, `crawler`, `playwright` (including `aiStep`), and any other integration that stores a credential id. When modifying an existing workflow (rule 23), still preserve existing ids if they are already non-shared; when **adding** new nodes, never insert shared credential UUIDs.
+23a. **⚠️ CREDENTIALS & INTEGRATIONS - OWNED ONLY (NO SHARED)** - For **every** node field that references a credential or secret (`credentialId`, `githubCredentialId`, `fallbackCredentialId`, `guardrailCredentialId`, Playwright `aiStep` credential, etc.), use ONLY credentials **owned** by the workflow owner. **NEVER** put shared credentials (shared with you by another user or via team share) in generated JSON—the UI labels these as shared; they must not appear in AI output. Use placeholders such as `YOUR_CREDENTIAL_ID`, `codex-credential-uuid`, `opencode-credential-uuid`, `github-credential-uuid`, `jira-credential-uuid`, `google-drive-credential-uuid`, `google-sheets-credential-uuid`, `slack-credential-uuid`, `telegram-credential-uuid`, `imap-credential-uuid`, `gmail-credential-uuid`, `outlook-credential-uuid`, or `outlook-calendar-credential-uuid` and let the user pick an owned credential in the editor. Applies to: `llm`, `agent`, `codex`, `opencodeGo`, `slack`, `telegram`, `slackTrigger`, `telegramTrigger`, `imapTrigger`, `gmailTrigger`, `outlookTrigger`, `sendEmail`, `gmailSend`, `outlookSend`, `redis`, `grist`, `github`, `jira`, `linear`, `googleSheets`, `googleDrive`, `googleMeet`, `outlookCalendar`, `googleSheetsTrigger`, `googleDriveTrigger`, `bigquery`, `supabase`, `notion`, `rabbitmq`, `crawler`, `playwright` (including `aiStep`), and any other integration that stores a credential id. When modifying an existing workflow (rule 23), still preserve existing ids if they are already non-shared; when **adding** new nodes, never insert shared credential UUIDs.
 24. **EXECUTE NODE OUTPUT** - Execute node returns `{status, outputs, workflow_id, execution_time_ms}`. Access the called workflow's result via `$executeNodeLabel.outputs.output.result`. The `outputs.output` object contains the result from the executed workflow's output node.
 25. **EXECUTE NODE MULTIPLE INPUTS** - When calling a workflow that expects multiple input fields: (1) Add matching `inputFields` to your textInput node to collect all required data, (2) Use `executeInputMappings` array to map each field. Example: If target needs `text` and `imageUrl`, your textInput should have `inputFields: [{"key": "prompt"}, {"key": "image"}]`, then execute node uses `"executeInputMappings": [{"key": "text", "value": "$userInput.body.prompt"}, {"key": "imageUrl", "value": "$userInput.body.image"}]`
 26. **REQUEST BODY, HEADERS & QUERY** - When workflow is executed via API, textInput nodes receive `body`, `headers` and `query` objects. Access via `$textInputLabel.body.fieldName`, `$textInputLabel.headers.headerName` and `$textInputLabel.query.paramName`. Useful for accessing raw request data, authentication, and dynamic behavior.

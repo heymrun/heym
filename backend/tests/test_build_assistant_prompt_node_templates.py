@@ -109,6 +109,17 @@ class TestBuildAssistantPromptNodeTemplates(unittest.TestCase):
         self.assertEqual(node["type"], "outlookCalendar")
         self.assertEqual(node["data"]["ocOperation"], "create")
 
+    def test_includes_gmail_and_outlook_send_guidance(self) -> None:
+        prompt = build_assistant_prompt()
+
+        self.assertIn("### 17a. gmailSend", prompt)
+        self.assertIn("### 17b. outlookSend", prompt)
+        self.assertIn('"type": "gmailSend"', prompt)
+        self.assertIn('"type": "outlookSend"', prompt)
+        self.assertIn("fromAddress", prompt)
+        self.assertIn("Mail.Send", prompt)
+        self.assertIn("`sendEmail`, `gmailSend`, `outlookSend`", prompt)
+
     def test_includes_google_trigger_guidance(self) -> None:
         prompt = build_assistant_prompt()
 

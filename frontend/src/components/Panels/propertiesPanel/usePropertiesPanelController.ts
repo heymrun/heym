@@ -90,6 +90,7 @@ import { useGoogleMeetExpressionFields } from "./nodes/googleMeetExpressionField
 import { useOutlookCalendarExpressionFields } from "./nodes/outlookCalendarExpressionFields";
 import { useCodeExpressionFields } from "./nodes/codeExpressionFields";
 import { randomUUID } from "@/lib/uuid";
+import { emailSendHasFromField, isEmailSendNodeType } from "@/lib/emailSendNodes";
 
 interface ExpandableFieldRef {
   openExpandDialog(localIndex?: number): void;
@@ -142,6 +143,8 @@ export function usePropertiesPanelController() {
     gmailTrigger: "node-gmail",
     outlookTrigger: "node-outlook",
     outlookCalendar: "node-outlook",
+    gmailSend: "node-gmail",
+    outlookSend: "node-outlook",
     googleDriveTrigger: "node-google-drive",
     googleSheetsTrigger: "node-google-sheets",
     heym: "node-heym",
@@ -454,6 +457,7 @@ export function usePropertiesPanelController() {
   const sendEmailSubjectInputRef = ref<ExpandableFieldRef | null>(null);
   const sendEmailBodyInputRef = ref<ExpandableFieldRef | null>(null);
   const sendEmailAttachmentsInputRef = ref<ExpandableFieldRef | null>(null);
+  const sendEmailFromInputRef = ref<ExpandableFieldRef | null>(null);
   const currentSendEmailExpressionFieldIndex = ref(0);
   const conditionInputRef = ref<ExpandableFieldRef | null>(null);
   const redisKeyInputRef = ref<ExpandableFieldRef | null>(null);
@@ -2188,6 +2192,7 @@ export function usePropertiesPanelController() {
     sendEmailSubjectInputRef.value?.closeExpandDialog();
     sendEmailBodyInputRef.value?.closeExpandDialog();
     sendEmailAttachmentsInputRef.value?.closeExpandDialog();
+    sendEmailFromInputRef.value?.closeExpandDialog();
     conditionInputRef.value?.closeExpandDialog();
     redisKeyInputRef.value?.closeExpandDialog();
     variableValueInputRef.value?.closeExpandDialog();
@@ -2559,11 +2564,11 @@ export function usePropertiesPanelController() {
         }
       };
       nextTick(() => tryOpenDialog());
-    } else if (nodeType === "sendEmail") {
+    } else if (isEmailSendNodeType(nodeType)) {
       currentSendEmailExpressionFieldIndex.value = 0;
       const tryOpenDialog = (attempts = 0): void => {
         if (attempts > 20) return;
-        if (sendEmailToInputRef.value) {
+        if (sendEmailExpressionFieldRefs.value[0]) {
           nextTick(() => openSendEmailExpressionFieldAtIndex(0));
         } else {
           setTimeout(() => tryOpenDialog(attempts + 1), 100);
@@ -3148,6 +3153,8 @@ export function usePropertiesPanelController() {
       case "slack":
       case "discord":
       case "sendEmail":
+      case "gmailSend":
+      case "outlookSend":
       case "condition":
       case "execute": {
         const wfId =
@@ -3330,22 +3337,24 @@ export function usePropertiesPanelController() {
     });
   }
 
-  const sendEmailExpressionFieldRefs = computed(
-    (): (ExpandableFieldRef | null)[] => [
-      sendEmailToInputRef.value,
-      sendEmailCcInputRef.value,
-      sendEmailBccInputRef.value,
-      sendEmailSubjectInputRef.value,
-      sendEmailBodyInputRef.value,
-      sendEmailAttachmentsInputRef.value,
-    ],
-  );
+  /** Gmail Send and Outlook Send show From above the fields they share with Send Email. */
+  const sendEmailExpressionFieldRefs = computed((): (ExpandableFieldRef | null)[] => [
+    ...(emailSendHasFromField(selectedNode.value?.type) ? [sendEmailFromInputRef.value] : []),
+    sendEmailToInputRef.value,
+    sendEmailCcInputRef.value,
+    sendEmailBccInputRef.value,
+    sendEmailSubjectInputRef.value,
+    sendEmailBodyInputRef.value,
+    sendEmailAttachmentsInputRef.value,
+  ]);
 
-  const sendEmailExpressionFieldCount = computed((): number => 6);
+  const sendEmailExpressionFieldCount = computed(
+    (): number => sendEmailExpressionFieldRefs.value.length,
+  );
 
   function openSendEmailExpressionFieldAtIndex(index: number): void {
     const n = selectedNode.value;
-    if (!n || n.type !== "sendEmail") {
+    if (!n || !isEmailSendNodeType(n.type)) {
       return;
     }
     currentSendEmailExpressionFieldIndex.value = index;
@@ -3354,7 +3363,7 @@ export function usePropertiesPanelController() {
 
   function handleSendEmailExpressionFieldNavigate(direction: "prev" | "next"): void {
     const n = selectedNode.value;
-    if (!n || n.type !== "sendEmail") {
+    if (!n || !isEmailSendNodeType(n.type)) {
       return;
     }
     const total = sendEmailExpressionFieldCount.value;
@@ -9237,6 +9246,7 @@ export function usePropertiesPanelController() {
     sendEmailSubjectInputRef,
     sendEmailBodyInputRef,
     sendEmailAttachmentsInputRef,
+    sendEmailFromInputRef,
     conditionInputRef,
     redisKeyInputRef,
     llmSystemInstructionInputRef,

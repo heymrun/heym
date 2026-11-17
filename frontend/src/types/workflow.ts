@@ -230,6 +230,8 @@ export type NodeType =
   | "slack"
   | "discord"
   | "sendEmail"
+  | "gmailSend"
+  | "outlookSend"
   | "errorHandler"
   | "variable"
   | "loop"
@@ -729,6 +731,8 @@ export interface NodeData {
   subject?: string;
   emailBody?: string;
   attachments?: string;
+  /** gmailSend / outlookSend: an address of the account to send as; blank sends as the account. */
+  fromAddress?: string;
   targetNodeLabel?: string;
   redisOperation?: RedisOperation;
   redisKey?: string;

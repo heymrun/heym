@@ -21,6 +21,23 @@ class NodePlacementTests(unittest.TestCase):
     def test_send_email_is_pinned_even_without_attachments(self) -> None:
         self.assertEqual(node_placement({"type": "sendEmail", "data": {}}), Placement.MAIN_ONLY)
 
+    def test_gmail_and_outlook_send_run_anywhere_without_attachments(self) -> None:
+        for node_type in ("gmailSend", "outlookSend"):
+            for data in ({}, {"attachments": ""}, {"attachments": "   "}):
+                with self.subTest(node=node_type, data=data):
+                    node = {"type": node_type, "data": data}
+                    self.assertEqual(node_placement(node), Placement.ANYWHERE)
+
+    def test_gmail_and_outlook_send_with_attachments_are_pinned_to_main(self) -> None:
+        for node_type in ("gmailSend", "outlookSend"):
+            for data in (
+                {"attachments": "$drive.id"},
+                {"attachments": "", "agentProvidedFields": ["to", "attachments"]},
+            ):
+                with self.subTest(node=node_type, data=data):
+                    node = {"type": node_type, "data": data}
+                    self.assertEqual(node_placement(node), Placement.MAIN_ONLY)
+
     def test_code_node_runs_anywhere(self) -> None:
         self.assertEqual(node_placement({"type": "code", "data": {}}), Placement.ANYWHERE)
 

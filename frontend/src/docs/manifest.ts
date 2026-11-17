@@ -73,6 +73,8 @@ export const DOCS_MANIFEST: Record<string, DocCategory> = {
       { slug: "slack-trigger-node", title: "Slack Trigger" },
       { slug: "discord-node", title: "Discord" },
       { slug: "send-email-node", title: "Send Email" },
+      { slug: "gmail-send-node", title: "Gmail Send" },
+      { slug: "outlook-send-node", title: "Outlook Send" },
       { slug: "redis-node", title: "Redis" },
       { slug: "grist-node", title: "Grist" },
       { slug: "github-node", title: "GitHub" },

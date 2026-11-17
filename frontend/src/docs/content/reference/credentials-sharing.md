@@ -112,11 +112,11 @@ After execution, `mask_sensitive_output()` masks credential values in outputs, k
 
 ## Gmail mailbox access
 
-Sharing a [Gmail credential](../nodes/gmail-trigger-node.md) lets the workflows of the people you share it with read every email in the connected mailbox, and mark email read, archive it or move it to Trash through a Gmail Trigger's after-run action. It does not allow permanent deletion. Share it only with people you would let read that mailbox. Only the credential owner can reconnect its Google authorization.
+Sharing a [Gmail credential](../nodes/gmail-trigger-node.md) lets the workflows of the people you share it with read every email in the connected mailbox, and mark email read, archive it or move it to Trash through a Gmail Trigger's after-run action. It also lets their workflows send email as that account, and as its Send mail as addresses, through [Gmail Send](../nodes/gmail-send-node.md). It does not allow permanent deletion. Share it only with people you would let read that mailbox and write in its name. Only the credential owner can reconnect its Google authorization.
 
 ## Outlook mailbox access
 
-Sharing an [Outlook credential](../nodes/outlook-trigger-node.md) lets the workflows of the people you share it with read every email in the connected mailbox, and mark email read or move it to Archive or Deleted Items through an Outlook Trigger's after-run action. It does not allow permanent deletion. Share it only with people you would let read that mailbox. Only the credential owner can reconnect its Microsoft authorization.
+Sharing an [Outlook credential](../nodes/outlook-trigger-node.md) lets the workflows of the people you share it with read every email in the connected mailbox, and mark email read or move it to Archive or Deleted Items through an Outlook Trigger's after-run action. Once connected with `Mail.Send`, it also lets their workflows send email as that account through [Outlook Send](../nodes/outlook-send-node.md). It does not allow permanent deletion. Share it only with people you would let read that mailbox and write in its name. Only the credential owner can reconnect its Microsoft authorization.
 
 ## Outlook Calendar permissions
 

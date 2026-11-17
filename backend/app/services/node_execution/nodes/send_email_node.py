@@ -1,94 +1,30 @@
 from __future__ import annotations
 
-from email.utils import formatdate, getaddresses, make_msgid, parseaddr
-
-from app.services.node_execution.base import NodeExecutionContext
-
-
-def _envelope(group: str) -> list[str]:
-    """The addresses in one To/Cc/Bcc field, read as an RFC 5322 address list.
-
-    A quoted display name may hold a comma ("Doe, John" <john@x.com>), so the field is not
-    split on commas. What the parser rejects (it returns nothing for the whole field) is
-    split on commas as before.
-    """
-    parsed = [addr for _name, addr in getaddresses([group]) if addr]
-    return parsed or [addr.strip() for addr in group.split(",") if addr.strip()]
-
-
-_BLOCK_TAGS = (
-    *("p", "div", "br", "li", "tr", "table", "ul", "ol", "blockquote", "hr"),
-    *("h1", "h2", "h3", "h4", "h5", "h6", "section", "article", "header", "footer"),
+from app.services.email_compose import (
+    build_mime_message,
+    envelope,
+    load_attachments,
+    resolve_email_fields,
+    sent_output,
 )
-
-
-def _html_to_text(html: str) -> str:
-    """The text/plain alternative of an HTML body, as a text-only client should show it.
-
-    Style, script and head content are dropped, entities are decoded, every block element
-    starts a new line, table cells are spaced, and a link keeps its URL so a call to action
-    still works.
-    """
-    import re
-
-    from bs4 import BeautifulSoup
-
-    soup = BeautifulSoup(html, "html.parser")
-    for tag in soup(["style", "script", "head"]):
-        tag.decompose()
-    for link in soup.find_all("a", href=True):
-        href = str(link["href"]).strip()
-        if href.startswith(("http://", "https://")) and href != link.get_text().strip():
-            link.append(f" ({href})")
-    for tag in soup.find_all(_BLOCK_TAGS):
-        tag.insert_before("\n")
-        tag.insert_after("\n")
-    for cell in soup.find_all(("td", "th")):
-        cell.insert_after(" ")
-    lines = (re.sub(r"\s+", " ", line).strip() for line in soup.get_text().splitlines())
-    return "\n".join(line for line in lines if line)
+from app.services.node_execution.base import NodeExecutionContext
 
 
 def execute(ctx: NodeExecutionContext) -> object:
     """Execute the sendEmail node."""
-    self = ctx.executor
-    node_id = ctx.node_id
-    inputs = ctx.inputs
-    node_data = ctx.node_data
-
     import smtplib
-    import uuid as _uuid
-    from email.mime.application import MIMEApplication
-    from email.mime.multipart import MIMEMultipart
-    from email.mime.text import MIMEText
 
     from app.db.session import SessionLocal
     from app.services.encryption import decrypt_config
-    from app.services.file_storage import load_readable_file_sync
 
-    to_template = node_data.get("to", "")
-    cc_template = node_data.get("cc", "")
-    bcc_template = node_data.get("bcc", "")
-    subject_template = node_data.get("subject", "")
-    body_template = node_data.get("emailBody", "$input.text")
-    attachments_template = node_data.get("attachments", "")
+    fields = resolve_email_fields(ctx)
 
-    # A blank field stays blank: evaluate_message_template("") returns str(inputs), which
-    # would mail the run's whole input as the subject or body and skip the recipient check.
-    resolve = self.evaluate_nonempty_message_template
-    to_address = resolve(to_template, inputs, node_id)
-    cc_address = resolve(cc_template, inputs, node_id)
-    bcc_address = resolve(bcc_template, inputs, node_id)
-    subject = resolve(subject_template, inputs, node_id)
-    body = resolve(body_template, inputs, node_id)
-    attachments_value = resolve(attachments_template, inputs, node_id)
-
-    credential_id = node_data.get("credentialId")
+    credential_id = ctx.node_data.get("credentialId")
     if not credential_id:
         raise ValueError("Send Email node requires an SMTP credential")
 
     with SessionLocal() as db:
-        cred = self._get_accessible_credential(db, credential_id)
+        cred = ctx.executor._get_accessible_credential(db, credential_id)
         if cred is None:
             raise ValueError("SMTP credential not found or not accessible")
         smtp_config: dict = decrypt_config(cred.encrypted_config)
@@ -111,72 +47,13 @@ def execute(ctx: NodeExecutionContext) -> object:
     if missing_fields:
         raise ValueError(f"SMTP credential requires {', '.join(missing_fields)}")
 
-    if not to_address:
+    if not fields.to:
         raise ValueError("Email recipient (to) is required")
 
-    msg = MIMEMultipart("mixed")
-    msg["From"] = smtp_from or smtp_email
-    # RFC 5322 requires Date; Gmail refuses mail without a Message-ID. Relays that do not add
-    # missing headers for remote clients (Postfix's default) pass the message on as built.
-    msg["Date"] = formatdate(localtime=True)
-    msg["Message-ID"] = make_msgid(domain=parseaddr(msg["From"])[1].rpartition("@")[2] or None)
-    msg["To"] = to_address
-    if cc_address:
-        msg["Cc"] = cc_address
-    msg["Subject"] = subject
-
-    body_lower = body.strip().lower()
-    is_html = (
-        body_lower.startswith("<!doctype html")
-        or body_lower.startswith("<html")
-        or "<body" in body_lower
-        or "<div" in body_lower
-        or "<table" in body_lower
-        or "<p>" in body_lower
-        or "<br>" in body_lower
-        or "<br/>" in body_lower
-        or "<br />" in body_lower
-    )
-
-    body_part = MIMEMultipart("alternative")
-    if is_html:
-        body_part.attach(MIMEText(_html_to_text(body), "plain"))
-        body_part.attach(MIMEText(body, "html"))
-    else:
-        body_part.attach(MIMEText(body, "plain"))
-    msg.attach(body_part)
-
-    attachment_count = 0
-    attachment_ids = [token.strip() for token in attachments_value.split(",") if token.strip()]
-    if attachment_ids:
-        owner_id = self.trace_user_id
-        if not owner_id:
-            raise ValueError("Send Email: no owner context available for attachments")
-        with SessionLocal() as db:
-            for token in attachment_ids:
-                try:
-                    file_uuid = _uuid.UUID(token)
-                except ValueError as exc:
-                    raise ValueError(f"Send Email: invalid attachment file ID '{token}'") from exc
-                file_row, file_bytes = load_readable_file_sync(
-                    db,
-                    file_id=file_uuid,
-                    owner_id=owner_id,
-                    context="Send Email: attachment",
-                )
-                mime_type = file_row.mime_type or "application/octet-stream"
-                _, _, subtype = mime_type.partition("/")
-                part = MIMEApplication(file_bytes, _subtype=subtype or "octet-stream")
-                part.add_header(
-                    "Content-Disposition",
-                    "attachment",
-                    filename=file_row.filename,
-                )
-                msg.attach(part)
-                attachment_count += 1
-
+    attachments = load_attachments(ctx, fields, "Send Email")
+    msg = build_mime_message(fields, smtp_from or smtp_email, attachments, bcc_header=False)
     all_recipients = [
-        addr for group in (to_address, cc_address, bcc_address) for addr in _envelope(group)
+        addr for group in (fields.to, fields.cc, fields.bcc) for addr in envelope(group)
     ]
 
     try:
@@ -192,12 +69,4 @@ def execute(ctx: NodeExecutionContext) -> object:
     except smtplib.SMTPException as e:
         raise ValueError(f"Failed to send email: {e}")
 
-    output = {
-        "status": "sent",
-        "to": to_address,
-        "cc": cc_address,
-        "bcc": bcc_address,
-        "subject": subject,
-        "attachment_count": attachment_count,
-    }
-    return output
+    return sent_output(fields, len(attachments))

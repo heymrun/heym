@@ -66,6 +66,8 @@ See [Triggers](./triggers.md) for all entry points.
 | [Slack](../nodes/slack-node.md) | Send Slack messages | 1 | 1 |
 | [Discord](../nodes/discord-node.md) | Send Discord webhook messages | 1 | 1 |
 | [Send Email](../nodes/send-email-node.md) | Send emails via SMTP | 1 | 1 |
+| [Gmail Send](../nodes/gmail-send-node.md) | Send emails from a Gmail account, optionally as one of its Send mail as addresses | 1 | 1 |
+| [Outlook Send](../nodes/outlook-send-node.md) | Send emails from an Outlook or Microsoft 365 mailbox, optionally as an alias or shared mailbox | 1 | 1 |
 | [Redis](../nodes/redis-node.md) | Redis operations (set, get, hasKey, deleteKey) | 1 | 1 |
 | [Grist](../nodes/grist-node.md) | Read/write Grist spreadsheets | 1 | 1 |
 | [GitHub](../nodes/github-node.md) | Manage repositories, users, issues, pull requests, reviews, releases, Actions workflows, and files through the GitHub REST API | 1 | 1 |

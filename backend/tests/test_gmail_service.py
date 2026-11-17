@@ -7,7 +7,12 @@ from unittest.mock import MagicMock, patch
 import httpx
 
 from app.services import gmail_service
-from app.services.gmail_service import GMAIL_BASE, GmailApiError, GmailService
+from app.services.gmail_service import (
+    GMAIL_BASE,
+    GMAIL_UPLOAD_BASE,
+    GmailApiError,
+    GmailService,
+)
 
 
 def _config(expired: bool = False) -> dict:
@@ -105,3 +110,37 @@ class GmailServiceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GmailSendTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.post = patch.object(gmail_service.httpx, "post").start()
+        self.addCleanup(patch.stopall)
+
+    def test_a_message_is_uploaded_as_rfc822_to_the_send_endpoint(self) -> None:
+        self.post.return_value = _response(json={"id": "m1", "threadId": "t1"}, method="POST")
+        sent = GmailService("cred", _config(), MagicMock()).send_message(b"To: a@x.com\r\n\r\nhi")
+
+        self.assertEqual(sent, {"id": "m1", "threadId": "t1"})
+        self.assertEqual(self.post.call_args.args, (f"{GMAIL_UPLOAD_BASE}/messages/send",))
+        kwargs = self.post.call_args.kwargs
+        self.assertEqual(kwargs["params"], {"uploadType": "media"})
+        self.assertEqual(kwargs["headers"]["Content-Type"], "message/rfc822")
+        self.assertEqual(kwargs["headers"]["Authorization"], "Bearer access")
+        self.assertEqual(kwargs["content"], b"To: a@x.com\r\n\r\nhi")
+
+    def test_a_refused_message_says_why_and_other_errors_stay_generic(self) -> None:
+        self.post.return_value = _response(
+            400, json={"error": {"message": "Invalid To header"}}, method="POST"
+        )
+        service = GmailService("cred", _config(), MagicMock())
+        with self.assertRaises(GmailApiError) as raised:
+            service.send_message(b"raw")
+        self.assertEqual(str(raised.exception), "Gmail: Invalid To header")
+
+        self.post.return_value = _response(
+            500, json={"error": {"message": "token=secret"}}, method="POST"
+        )
+        with self.assertRaises(GmailApiError) as raised:
+            service.send_message(b"raw")
+        self.assertNotIn("secret", str(raised.exception))

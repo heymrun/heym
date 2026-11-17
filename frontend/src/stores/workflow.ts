@@ -7,6 +7,7 @@ import { getLatestNodeResultForNode } from "@/lib/executionLog";
 import { googleTriggerProblems } from "@/lib/googleTriggerConfig";
 import { gmailTriggerProblems } from "@/lib/gmailTriggerConfig";
 import { outlookTriggerProblems } from "@/lib/outlookTriggerConfig";
+import { EMAIL_SEND_NODE_LABELS, isEmailSendNodeType } from "@/lib/emailSendNodes";
 import { getSentryOperationMetadata } from "@/lib/sentryExpressionFields";
 import { replaceNodeLabelRefs } from "@/lib/utils";
 import { workflowRunNodeIds } from "@/lib/workflowRunScope";
@@ -2565,12 +2566,13 @@ export const useWorkflowStore = defineStore("workflow", () => {
         }
       }
 
-      if (node.type === "sendEmail") {
+      if (isEmailSendNodeType(node.type)) {
+        const nodeType = EMAIL_SEND_NODE_LABELS[node.type];
         if (!node.data.credentialId || !isValidUUID(node.data.credentialId)) {
           errors.push({
             nodeId: node.id,
             nodeLabel: node.data.label,
-            nodeType: "Send Email",
+            nodeType,
             message: "Credential is not selected",
           });
         }
@@ -2578,7 +2580,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
           errors.push({
             nodeId: node.id,
             nodeLabel: node.data.label,
-            nodeType: "Send Email",
+            nodeType,
             message: "Recipient (To) is not specified",
           });
         }

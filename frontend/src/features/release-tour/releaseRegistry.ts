@@ -17,6 +17,29 @@ import type { ReleaseEntry } from "@/features/release-tour/releaseTour.types";
  */
 export const RELEASE_REGISTRY: ReleaseEntry[] = [
   {
+    releaseId: "2026.37",
+    publishedAt: new Date("2026-11-19T12:00:00Z"),
+    headline: "Gmail Send and Outlook Send",
+    releaseTour: {
+      label: "New in Heym", introTitle: "New in this release",
+      introDescription: "Send email from Gmail and Outlook accounts, without an SMTP password.",
+      tourEnabled: true,
+      sectionOrder: ["mail-send"],
+    },
+    sections: [{
+      id: "mail-send", title: "Gmail Send and Outlook Send",
+      publishedAt: new Date("2026-11-19T12:00:00Z"),
+      blocks: [{ type: "prose", markdown: "Two new nodes send email from the accounts your triggers already read. **Gmail Send** uses a **Gmail (OAuth2)** credential and **Outlook Send** an **Outlook Mail (OAuth2)** credential, so no App Password or SMTP server is needed. Both have every **Send Email** field: To, Cc and Bcc, Subject, a text or HTML Body, and Drive attachments, all with expressions, the expression dialog and agent tool fields. **From** sends as one of the account's addresses, such as a Gmail Send mail as alias or an Outlook shared mailbox; the account's own addresses show as chips under the field. The sent email lands in the account's Sent folder. Outlook credentials connected before this release need one **Reconnect** to allow sending; the node shows a reminder until then. In Heym Work, a flow's **Email sending** connection now lists Gmail and Outlook accounts next to SMTP." }],
+      tour: {
+        description: "Send from a Gmail or Outlook account with the same fields as Send Email, plus From, and no SMTP password.",
+        useCases: ["Answer each support email from the inbox it arrived in", "Send a quote with a Drive PDF from your Microsoft 365 mailbox", "Reply as support@ through a Gmail Send mail as alias"],
+        tourVisual: "mail-send",
+        docTarget: { categoryId: "nodes", slug: "gmail-send-node", title: "Gmail Send" },
+      },
+    }],
+  },
+
+  {
     releaseId: "2026.36",
     publishedAt: new Date("2026-11-18T12:00:00Z"),
     headline: "Outlook Calendar",
@@ -108,28 +131,5 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
         },
       },
     ],
-  },
-
-  {
-    releaseId: "2026.32",
-    publishedAt: new Date("2026-11-14T21:00:00Z"),
-    headline: "Email attachments in Heym Drive",
-    releaseTour: {
-      label: "New in Heym", introTitle: "New in this release",
-      introDescription: "Work with the files an email brings, straight from the IMAP Trigger.",
-      tourEnabled: true,
-      sectionOrder: ["imap-attachments"],
-    },
-    sections: [{
-      id: "imap-attachments", title: "Email attachments in Heym Drive",
-      publishedAt: new Date("2026-11-14T21:00:00Z"),
-      blocks: [{ type: "prose", markdown: "Turn on **Download attachments to Drive** in the IMAP Trigger and every attachment of a new email is saved to your Heym Drive while the run executes. The trigger output gets `attachments`, with each file's name, size and Drive link, and `file_ids`, which goes straight into an Agent's message, a Converter or a Drive node: read an invoice PDF, hand a contract to an Agent or pass a scan on. Up to 10 files per email are saved; a file over the Drive size limit is listed as skipped and the run keeps going. The email stays unread, and the toggle is off by default, so existing workflows behave as before." }],
-      tour: {
-        description: "Save the files of each new email to Drive and let the next node read them.",
-        useCases: ["Extract totals and due dates from invoice PDFs sent to a billing inbox", "Hand contracts that arrive by email to an Agent for review", "File scans and delivery notes in Drive with the email they came with"],
-        tourVisual: "imap-attachments",
-        docTarget: { categoryId: "nodes", slug: "imap-trigger-node", title: "IMAP Trigger" },
-      },
-    }],
   },
 ];

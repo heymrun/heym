@@ -27,6 +27,7 @@ import SlackNodeProperties from "./SlackNodeProperties.vue";
 import DiscordNodeProperties from "./DiscordNodeProperties.vue";
 import TelegramNodeProperties from "./TelegramNodeProperties.vue";
 import SendEmailNodeProperties from "./SendEmailNodeProperties.vue";
+import MailSendNodeProperties from "./MailSendNodeProperties.vue";
 import ErrorHandlerNodeProperties from "./ErrorHandlerNodeProperties.vue";
 import MergeNodeProperties from "./MergeNodeProperties.vue";
 import HtmlOutputMapperNodeProperties from "./HtmlOutputMapperNodeProperties.vue";
@@ -102,6 +103,9 @@ const { selectedNode } = usePropertiesPanelContext();
   <DiscordNodeProperties v-else-if="selectedNode?.type === 'discord'" />
   <TelegramNodeProperties v-else-if="selectedNode?.type === 'telegram'" />
   <SendEmailNodeProperties v-else-if="selectedNode?.type === 'sendEmail'" />
+  <MailSendNodeProperties
+    v-else-if="selectedNode?.type === 'gmailSend' || selectedNode?.type === 'outlookSend'"
+  />
   <ErrorHandlerNodeProperties v-else-if="selectedNode?.type === 'errorHandler'" />
   <MergeNodeProperties v-else-if="selectedNode?.type === 'merge'" />
   <SetJsonOutputMapperNodeProperties v-else-if="selectedNode?.type === 'set' || selectedNode?.type === 'jsonOutputMapper'" />

@@ -3701,9 +3701,9 @@ async function handleSave(): Promise<void> {
         <p class="text-xs text-muted-foreground">
           Enable the Gmail API in your Google Cloud project. Add
           <code>{{ appOrigin }}/api/credentials/gmail/oauth/callback</code>
-          as an authorized redirect URI. Heym asks to read and organize mail (gmail.modify), so a
-          Gmail Trigger can mark email as read, archive it or move it to Trash. It never deletes
-          mail permanently.
+          as an authorized redirect URI. Heym asks to read, send and organize mail (gmail.modify),
+          so a Gmail Trigger can mark email as read, archive it or move it to Trash and Gmail Send
+          can send from the account. It never deletes mail permanently.
         </p>
 
         <div class="rounded-md border p-3 space-y-2">
@@ -3823,9 +3823,10 @@ async function handleSave(): Promise<void> {
           Add
           <code>{{ appOrigin }}/api/credentials/outlook/oauth/callback</code>
           as a Web redirect URI and grant the Microsoft Graph delegated permissions
-          <code>Mail.ReadWrite</code>, <code>User.Read</code> and <code>offline_access</code>.
-          Heym can then mark email as read or move it to Archive or Deleted Items. It never
-          deletes mail permanently. Some organizations require an administrator to consent first.
+          <code>Mail.ReadWrite</code>, <code>Mail.Send</code>, <code>User.Read</code> and
+          <code>offline_access</code>. Heym can then mark email as read, move it to Archive or
+          Deleted Items, and send email from Outlook Send. It never deletes mail permanently.
+          Some organizations require an administrator to consent first.
         </p>
 
         <div class="rounded-md border p-3 space-y-2">

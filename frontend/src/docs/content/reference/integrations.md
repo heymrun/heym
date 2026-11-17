@@ -29,8 +29,8 @@ Some integration nodes do **not** require credentials. [WebSocket Trigger](../no
 | **Google Sheets** | [Google Sheets node](../nodes/google-sheets-node.md), [Google Sheets Trigger](../nodes/google-sheets-trigger-node.md) | `client_id`, `client_secret` + OAuth2 consent |
 | **Google Drive** | [Google Drive node](../nodes/google-drive-node.md), [Google Drive Trigger](../nodes/google-drive-trigger-node.md) | `client_id`, `client_secret` + OAuth2 consent (full Drive scope) |
 | **Google Meet** | [Google Meet node](../nodes/google-meet-node.md) | `client_id`, `client_secret` + Google OAuth consent for Calendar events and availability |
-| **Gmail** | [Gmail Trigger](../nodes/gmail-trigger-node.md) | `client_id`, `client_secret` + Google OAuth consent (`gmail.modify`) |
-| **Outlook Mail** | [Outlook Trigger](../nodes/outlook-trigger-node.md) | `client_id`, `client_secret`, `tenant` + Microsoft OAuth consent (`Mail.ReadWrite`, `User.Read`, `offline_access`) |
+| **Gmail** | [Gmail Trigger](../nodes/gmail-trigger-node.md), [Gmail Send](../nodes/gmail-send-node.md) | `client_id`, `client_secret` + Google OAuth consent (`gmail.modify`) |
+| **Outlook Mail** | [Outlook Trigger](../nodes/outlook-trigger-node.md), [Outlook Send](../nodes/outlook-send-node.md) | `client_id`, `client_secret`, `tenant` + Microsoft OAuth consent (`Mail.ReadWrite`, `Mail.Send`, `User.Read`, `offline_access`) |
 | **Outlook Calendar** | [Outlook Calendar node](../nodes/outlook-calendar-node.md) | `client_id`, `client_secret`, `tenant` + Microsoft OAuth consent (`Calendars.ReadWrite`, `User.Read`, `offline_access`) |
 | **BigQuery** | [BigQuery node](../nodes/bigquery-node.md) | `client_id`, `client_secret` + OAuth2 consent |
 | **Supabase** | [Supabase node](../nodes/supabase-node.md) | `supabase_url`, `supabase_key`, optional `supabase_schema` |
@@ -648,8 +648,8 @@ The SMTP credential stores email server connection details for sending outgoing 
 
 | Provider | Host | Port | Notes |
 |----------|------|------|-------|
-| Gmail | `smtp.gmail.com` | `587` | Requires an [App Password](https://support.google.com/accounts/answer/185833) (2FA must be enabled) |
-| Outlook / Office 365 | `smtp.office365.com` | `587` | Use your Microsoft account credentials |
+| Gmail | `smtp.gmail.com` | `587` | Requires an [App Password](https://support.google.com/accounts/answer/185833) (2FA must be enabled). [Gmail Send](../nodes/gmail-send-node.md) needs none |
+| Outlook / Office 365 | `smtp.office365.com` | `587` | Use your Microsoft account credentials. [Outlook Send](../nodes/outlook-send-node.md) signs in with OAuth instead |
 | Mailgun | `smtp.mailgun.org` | `587` | Use Mailgun SMTP credentials from your domain settings |
 | SendGrid | `smtp.sendgrid.net` | `587` | Use `apikey` as username and an API key as password |
 | Custom / Self-hosted | your domain | `587` / `465` | Postfix, Exim, etc. |
@@ -968,7 +968,7 @@ option cannot point at another Model Router.
 
 ## Gmail (OAuth2)
 
-The Gmail credential connects the [Gmail Trigger](../nodes/gmail-trigger-node.md) to the Gmail API with the same "Bring Your Own App" model as the other Google credentials.
+The Gmail credential connects the [Gmail Trigger](../nodes/gmail-trigger-node.md) and [Gmail Send](../nodes/gmail-send-node.md) to the Gmail API with the same "Bring Your Own App" model as the other Google credentials.
 
 ### Setup
 
@@ -978,40 +978,43 @@ The Gmail credential connects the [Gmail Trigger](../nodes/gmail-trigger-node.md
 
 ### Notes
 
-- The scope is `https://www.googleapis.com/auth/gmail.modify`: read mail, change labels, move to Trash. It cannot delete mail permanently.
+- The scope is `https://www.googleapis.com/auth/gmail.modify`: read and send mail, change labels, move to Trash. It cannot delete mail permanently.
 - After connecting, the credential shows the connected address. Tokens are encrypted and refreshed automatically.
 - Connecting fails with "enable the Gmail API" when the OAuth client's project has the Gmail API turned off.
-- For a Gmail account, prefer this credential over IMAP with an app password: it needs no app password and gives the trigger tabs, labels, aliases and after-run actions.
+- For a Gmail account, prefer this credential over IMAP or SMTP with an app password: it needs no app password, gives the trigger tabs, labels, aliases and after-run actions, and sends through Gmail Send.
 
 ### Used By
 
 - [Gmail Trigger node](../nodes/gmail-trigger-node.md)
-- [HTTP node](../nodes/http-node.md) through `$credentials.<name>`, which resolves to a fresh access token for Gmail API calls the trigger does not make
+- [Gmail Send node](../nodes/gmail-send-node.md)
+- [HTTP node](../nodes/http-node.md) through `$credentials.<name>`, which resolves to a fresh access token for Gmail API calls the nodes do not make
 
 ## Outlook Mail (OAuth2)
 
-The Outlook Mail credential connects the [Outlook Trigger](../nodes/outlook-trigger-node.md) to Microsoft Graph with your own app registration, the same "Bring Your Own App" model as the Google credentials. It works for Outlook.com, Hotmail and Live accounts and for Microsoft 365 work or school mailboxes.
+The Outlook Mail credential connects the [Outlook Trigger](../nodes/outlook-trigger-node.md) and [Outlook Send](../nodes/outlook-send-node.md) to Microsoft Graph with your own app registration, the same "Bring Your Own App" model as the Google credentials. It works for Outlook.com, Hotmail and Live accounts and for Microsoft 365 work or school mailboxes.
 
 ### Setup
 
 1. In the [Microsoft Entra admin center](https://entra.microsoft.com), **App registrations → New registration**. Pick the supported account types that match who will connect.
 2. Add a **Web** redirect URI `https://your-heym-domain/api/credentials/outlook/oauth/callback`.
-3. Under **API permissions**, add the Microsoft Graph delegated permissions `Mail.ReadWrite`, `User.Read` and `offline_access`. Grant admin consent when your organization requires it.
+3. Under **API permissions**, add the Microsoft Graph delegated permissions `Mail.ReadWrite`, `Mail.Send`, `User.Read` and `offline_access`. Grant admin consent when your organization requires it.
 4. Under **Certificates & secrets**, create a client secret and copy its **Value**.
 5. In Heym Dashboard, **Credentials → New → Outlook Mail (OAuth2)**, enter a name, the Application (client) ID, the client secret and the tenant, then click **Connect** and sign in with the mailbox to watch.
 
 ### Notes
 
 - **Tenant** is `common` by default (work, school and personal accounts). Use `organizations`, `consumers`, or your organization's tenant id or domain to narrow who can connect.
-- `Mail.ReadWrite` lets Heym read mail, mark it read and move it between folders. Heym never deletes mail permanently.
+- `Mail.ReadWrite` lets Heym read mail, mark it read and move it between folders. `Mail.Send` lets Outlook Send send as the account. Heym never deletes mail permanently.
+- A credential connected before Outlook Send holds `Mail.ReadWrite` only. Its triggers keep working; to send, add `Mail.Send` to the app and click **Connect** again on the credential.
 - After connecting, the credential shows the connected address. Tokens are encrypted and refreshed automatically; Microsoft rotates refresh tokens and Heym keeps the newest one.
 - Connecting fails with "Allow Heym to read and organize your Outlook mail" when `Mail.ReadWrite` was not granted. Organizations that block user consent need an administrator to grant consent for the app first.
-- For Microsoft 365, prefer this credential over IMAP: Exchange Online no longer accepts passwords over IMAP.
+- For Microsoft 365, prefer this credential over IMAP and SMTP: Exchange Online no longer accepts passwords over IMAP and is retiring them for SMTP.
 
 ### Used By
 
 - [Outlook Trigger node](../nodes/outlook-trigger-node.md)
-- [HTTP node](../nodes/http-node.md) through `$credentials.<name>`, which resolves to a fresh access token for Microsoft Graph mail calls the trigger does not make
+- [Outlook Send node](../nodes/outlook-send-node.md)
+- [HTTP node](../nodes/http-node.md) through `$credentials.<name>`, which resolves to a fresh access token for Microsoft Graph mail calls the nodes do not make
 
 ## Outlook Calendar (OAuth2)
 

@@ -13,7 +13,9 @@ from app.services.outlook_service import (
     OutlookService,
     account_address,
     has_mail_scope,
+    has_send_scope,
     oauth_tenant,
+    refresh_scopes,
 )
 
 FRESH = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
@@ -49,6 +51,19 @@ class TenantAndScopeTests(unittest.TestCase):
         self.assertFalse(has_mail_scope("Mail.Read User.Read"))
         self.assertFalse(has_mail_scope(""))
 
+    def test_send_scope_is_found_in_short_and_full_forms(self) -> None:
+        self.assertTrue(has_send_scope("Mail.ReadWrite Mail.Send"))
+        self.assertTrue(has_send_scope("https://graph.microsoft.com/Mail.Send openid"))
+        self.assertFalse(has_send_scope("Mail.ReadWrite Mail.Send.Shared"))
+        self.assertFalse(has_send_scope(None))
+
+    def test_a_refresh_asks_for_mail_send_only_when_the_sign_in_granted_it(self) -> None:
+        # Credentials connected before Outlook Send must keep refreshing for their trigger.
+        self.assertNotIn("Mail.Send", refresh_scopes({"scope": "User.Read Mail.ReadWrite"}))
+        self.assertNotIn("Mail.Send", refresh_scopes({}))
+        self.assertIn("Mail.Send", refresh_scopes({"scope": "Mail.ReadWrite Mail.Send"}))
+        self.assertIn("Mail.ReadWrite", refresh_scopes({}))
+
     def test_account_address_falls_back_to_the_user_principal_name(self) -> None:
         self.assertEqual(account_address({"mail": "a@contoso.com"}), "a@contoso.com")
         self.assertEqual(
@@ -74,6 +89,7 @@ class TokenTests(unittest.TestCase):
         )
         self.assertEqual(post.call_args.kwargs["data"]["grant_type"], "refresh_token")
         self.assertIn("Mail.ReadWrite", post.call_args.kwargs["data"]["scope"])
+        self.assertNotIn("Mail.Send", post.call_args.kwargs["data"]["scope"])
         saved = encrypt.call_args.args[0]
         self.assertEqual((saved["access_token"], saved["refresh_token"]), ("new", "r2"))
         db.commit.assert_called_once()
@@ -190,3 +206,83 @@ class RequestTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SendMessageTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.request = patch.object(outlook_service.httpx, "request").start()
+        self.put = patch.object(outlook_service.httpx, "put").start()
+        self.addCleanup(patch.stopall)
+        self.service, _ = _service(scope="Mail.ReadWrite Mail.Send")
+        self.message = {"subject": "Hi", "body": {"contentType": "Text", "content": "Body"}}
+
+    def test_a_small_message_goes_through_send_mail_with_inline_attachments(self) -> None:
+        self.request.return_value = _response(202, content=b"")
+        self.service.send_message(self.message, [("a.pdf", "application/pdf", b"PDF")])
+
+        method, url = self.request.call_args.args
+        self.assertEqual((method, url), ("POST", f"{GRAPH_BASE}/sendMail"))
+        sent = self.request.call_args.kwargs["json"]
+        self.assertTrue(sent["saveToSentItems"])
+        self.assertEqual(sent["message"]["subject"], "Hi")
+        attachment = sent["message"]["attachments"][0]
+        self.assertEqual(attachment["@odata.type"], "#microsoft.graph.fileAttachment")
+        self.assertEqual((attachment["name"], attachment["contentBytes"]), ("a.pdf", "UERG"))
+        self.assertNotIn("attachments", self.message)
+
+    def test_a_refused_message_says_why(self) -> None:
+        refusal = {"error": {"code": "ErrorInvalidRecipients", "message": "Recipient not valid"}}
+        self.request.return_value = _response(400, json=refusal)
+        with self.assertRaises(OutlookApiError) as raised:
+            self.service.send_message(self.message, [])
+        self.assertEqual(str(raised.exception), "Outlook: Recipient not valid")
+
+    def test_a_large_message_is_sent_as_a_draft_with_an_upload_session(self) -> None:
+        big = b"x" * (outlook_service._UPLOAD_CHUNK_BYTES + 10)
+        upload_url = "https://outlook.office.com/api/v2.0/me/AttachmentSessions('s')?authtoken=t"
+        self.request.side_effect = [
+            _response(201, json={"id": "draft/1"}),
+            _response(201, json={}),
+            _response(200, json={"uploadUrl": upload_url}),
+            _response(202, content=b""),
+        ]
+        self.put.return_value = _response(201, json={})
+        self.service.send_message(
+            self.message,
+            [("small.txt", "text/plain", b"hello"), ("big.bin", "application/octet-stream", big)],
+        )
+
+        urls = [call.args[1] for call in self.request.call_args_list]
+        draft = f"{GRAPH_BASE}/messages/draft%2F1"
+        self.assertEqual(
+            urls,
+            [
+                f"{GRAPH_BASE}/messages",
+                f"{draft}/attachments",
+                f"{draft}/attachments/createUploadSession",
+                f"{draft}/send",
+            ],
+        )
+        session = self.request.call_args_list[2].kwargs["json"]["AttachmentItem"]
+        self.assertEqual((session["name"], session["size"]), ("big.bin", len(big)))
+        ranges = [call.kwargs["headers"]["Content-Range"] for call in self.put.call_args_list]
+        chunk = outlook_service._UPLOAD_CHUNK_BYTES
+        self.assertEqual(
+            ranges, [f"bytes 0-{chunk - 1}/{len(big)}", f"bytes {chunk}-{len(big) - 1}/{len(big)}"]
+        )
+        for call in self.put.call_args_list:
+            self.assertNotIn("Authorization", call.kwargs["headers"])
+
+    def test_a_draft_that_cannot_be_completed_is_removed(self) -> None:
+        big = b"x" * (outlook_service.INLINE_MESSAGE_LIMIT)
+        self.request.side_effect = [
+            _response(201, json={"id": "d1"}),
+            _response(200, json={"uploadUrl": "https://attacker.example/upload"}),
+            _response(204, content=b""),
+        ]
+        with self.assertRaises(OutlookApiError):
+            self.service.send_message(self.message, [("big.bin", "application/pdf", big)])
+
+        self.put.assert_not_called()
+        method, url = self.request.call_args_list[-1].args
+        self.assertEqual((method, url), ("DELETE", f"{GRAPH_BASE}/messages/d1"))
