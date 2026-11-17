@@ -100,5 +100,5 @@ class ToolsWithChatTests(unittest.IsolatedAsyncioTestCase):
         )
         chat = SimpleNamespace(enabled=False)
         with patch("app.api.mcp.extract_input_fields_from_workflow", return_value=[]):
-            tools = await build_tools_with_chat([workflow], chat)
+            tools = await build_tools_with_chat([workflow], chat, owner_id=None)
         self.assertIn("heym_execution_status", [t.name for t in tools])

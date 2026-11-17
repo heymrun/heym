@@ -66,7 +66,7 @@ class ChatToolExposureTests(unittest.IsolatedAsyncioTestCase):
             "app.api.mcp.workflow_to_mcp_tool",
             side_effect=lambda w, _name: SimpleNamespace(name=w.name),
         ):
-            tools = await build_tools_with_chat([_make_workflow()], settings)
+            tools = await build_tools_with_chat([_make_workflow()], settings, owner_id=None)
 
         self.assertEqual([t.name for t in tools], ["My Workflow"])
 
@@ -77,7 +77,7 @@ class ChatToolExposureTests(unittest.IsolatedAsyncioTestCase):
             "app.api.mcp.workflow_to_mcp_tool",
             side_effect=lambda w, _name: SimpleNamespace(name=w.name),
         ):
-            tools = await build_tools_with_chat([_make_workflow()], settings)
+            tools = await build_tools_with_chat([_make_workflow()], settings, owner_id=None)
 
         self.assertEqual(
             [t.name for t in tools],
@@ -92,7 +92,7 @@ class ChatToolExposureTests(unittest.IsolatedAsyncioTestCase):
             "app.api.mcp.workflow_to_mcp_tool",
             side_effect=lambda w, _name: SimpleNamespace(name=w.name),
         ):
-            tools = await build_tools_with_chat([_make_workflow()], settings)
+            tools = await build_tools_with_chat([_make_workflow()], settings, owner_id=None)
 
         self.assertFalse(EVAL_TOOL_NAMES & {t.name for t in tools})
         self.assertIn("eval suites", mcp_chat_service.MCP_CHAT_TOOL_DESCRIPTION)

@@ -412,7 +412,9 @@ async def list_named_server_tools(
     user, mcp_server = server
     workflows = await _get_server_workflows(db, mcp_server.id)
     chat_settings = await agent_settings.get_server_agent_settings(db, mcp_server.id, user.id)
-    return MCPToolsListResponse(tools=await build_tools_with_chat(workflows, chat_settings))
+    return MCPToolsListResponse(
+        tools=await build_tools_with_chat(workflows, chat_settings, owner_id=user.id)
+    )
 
 
 @router.get("/{server_id}/sse")
@@ -516,7 +518,7 @@ async def _dispatch_named_server_jsonrpc(
     if msg.method == "tools/list":
         workflows = await _get_server_workflows(db, mcp_server.id)
         chat_settings = await agent_settings.get_server_agent_settings(db, mcp_server.id, user.id)
-        tools = await build_tools_with_chat(workflows, chat_settings)
+        tools = await build_tools_with_chat(workflows, chat_settings, owner_id=user.id)
         return {
             "jsonrpc": "2.0",
             "id": msg.id,
@@ -553,7 +555,7 @@ async def _dispatch_named_server_jsonrpc(
                 workflows, arguments
             )
             return _mcp_tool_result_jsonrpc_response(msg.id, text, is_error=is_error)
-        target_workflow = find_workflow_tool(workflows, tool_name)
+        target_workflow = find_workflow_tool(workflows, tool_name, user.id)
 
         if target_workflow is None:
             return {

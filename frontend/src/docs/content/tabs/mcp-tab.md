@@ -36,7 +36,7 @@ Each workflow can be exposed as an MCP tool:
 
 Workflow cards show the description and a preview of input field names so you can see what each tool expects before enabling it.
 
-A workflow's tool name is its name in lowercase, with spaces and hyphens turned into underscores and other punctuation removed: "Invoice sync" becomes `invoice_sync`. When two exposed workflows end up with the same name, the oldest keeps it and the others get `_2`, `_3` and so on, so each workflow stays callable.
+A workflow's tool name is its name in lowercase, with spaces and hyphens turned into underscores and other punctuation removed: "Invoice sync" becomes `invoice_sync`. When two exposed workflows end up with the same name, each still gets a tool of its own: one keeps the plain name and the others get `_2`, `_3` and so on. Your own workflows come before ones shared with you (on a named server, the server owner's), and within each group the oldest comes first. A workflow that ranks ahead can still take the plain name over: an older workflow of your own renamed to that name, or an older shared one when the plain name was on another shared one. Give exposed workflows distinct names when clients call them by name.
 
 ### Queued runs and heym_execution_status
 

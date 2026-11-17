@@ -31,7 +31,7 @@ class GlobalToolsTests(unittest.IsolatedAsyncioTestCase):
     async def test_memory_tools_are_listed_without_heym_chat(self) -> None:
         with patch("app.api.mcp.extract_input_fields_from_workflow", return_value=[]):
             tools = await mcp_api.global_mcp_tools(
-                [_workflow("Daily report")], SimpleNamespace(enabled=False)
+                [_workflow("Daily report")], SimpleNamespace(enabled=False), owner_id=None
             )
         names = [t.name for t in tools]
         self.assertIn("daily_report", names)
@@ -42,7 +42,7 @@ class GlobalToolsTests(unittest.IsolatedAsyncioTestCase):
     async def test_a_workflow_with_a_reserved_name_is_left_out(self) -> None:
         with patch("app.api.mcp.extract_input_fields_from_workflow", return_value=[]):
             tools = await mcp_api.global_mcp_tools(
-                [_workflow("Get User Memory")], SimpleNamespace(enabled=False)
+                [_workflow("Get User Memory")], SimpleNamespace(enabled=False), owner_id=None
             )
         names = [t.name for t in tools]
         self.assertEqual(names.count("get_user_memory"), 1)
