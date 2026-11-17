@@ -3,7 +3,7 @@ import json
 import logging
 import secrets
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Sequence
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, TypeVar
@@ -163,6 +163,46 @@ async def _run_mcp_protocol_limited_with_session(
 def _sanitize_workflow_tool_name(name: str) -> str:
     tool_name = name.lower().replace(" ", "_").replace("-", "_")
     return "".join(c if c.isalnum() or c == "_" else "" for c in tool_name)
+
+
+def workflow_tool_names(
+    workflows: Sequence[Workflow], owner_id: uuid.UUID | None
+) -> dict[uuid.UUID, str]:
+    """Each workflow's MCP tool name: its sanitized name, with `_2`, `_3` on a repeat.
+
+    Workflow names are not unique, and a user's list mixes owned and shared workflows, so two
+    of them can sanitize to one name. Each keeps a name of its own, as agent node tools do.
+    The plain name goes to a workflow ``owner_id`` owns before a shared one, as the first
+    match did before, and then to the oldest, so a newer workflow of the same rank does not
+    take a tool name a client already uses.
+    """
+
+    def rank(workflow: Workflow) -> tuple[bool, float, str]:
+        created_at = getattr(workflow, "created_at", None)
+        return (
+            getattr(workflow, "owner_id", None) != owner_id,
+            created_at.timestamp() if created_at else float("inf"),
+            str(workflow.id),
+        )
+
+    names: dict[uuid.UUID, str] = {}
+    used: set[str] = set()
+    for workflow in sorted(workflows, key=rank):
+        base = _sanitize_workflow_tool_name(workflow.name)
+        name, suffix = base, 2
+        while name in used:
+            name, suffix = f"{base}_{suffix}", suffix + 1
+        used.add(name)
+        names[workflow.id] = name
+    return names
+
+
+def find_workflow_tool(
+    workflows: Sequence[Workflow], tool_name: str, owner_id: uuid.UUID | None
+) -> Workflow | None:
+    """The workflow `tools/list` offers as ``tool_name`` to ``owner_id``, or None."""
+    names = workflow_tool_names(workflows, owner_id)
+    return next((w for w in workflows if names[w.id] == tool_name), None)
 
 
 def _mcp_tool_result_jsonrpc_response(
@@ -615,7 +655,7 @@ async def get_all_user_workflows(db: AsyncSession, user_id: uuid.UUID) -> list[W
     return list(result.scalars().all())
 
 
-def workflow_to_mcp_tool(workflow: Workflow) -> MCPTool:
+def workflow_to_mcp_tool(workflow: Workflow, name: str | None = None) -> MCPTool:
     input_fields = extract_input_fields_from_workflow(workflow)
     properties: dict[str, MCPToolInputProperty] = {}
     required: list[str] = []
@@ -628,7 +668,7 @@ def workflow_to_mcp_tool(workflow: Workflow) -> MCPTool:
         required.append(field.key)
 
     return MCPTool(
-        name=_sanitize_workflow_tool_name(workflow.name),
+        name=name or _sanitize_workflow_tool_name(workflow.name),
         description=workflow.description or f"Execute workflow: {workflow.name}",
         inputSchema=MCPToolInputSchema(
             type="object",
@@ -641,9 +681,16 @@ def workflow_to_mcp_tool(workflow: Workflow) -> MCPTool:
 async def build_tools_with_chat(
     workflows: list[Workflow],
     chat_settings: agent_settings.AgentSettings,
+    *,
+    owner_id: uuid.UUID | None,
 ) -> list[MCPTool]:
-    """Workflow tools for an MCP surface, plus `heym_chat` when it is enabled."""
-    tools = [workflow_to_mcp_tool(w) for w in workflows]
+    """Workflow tools for an MCP surface, plus `heym_chat` when it is enabled.
+
+    ``owner_id`` is the user whose own workflows keep a repeated name; see
+    `workflow_tool_names`.
+    """
+    names = workflow_tool_names(workflows, owner_id)
+    tools = [workflow_to_mcp_tool(w, names[w.id]) for w in workflows]
     if mcp_execution_status.should_list(workflows):
         tools.append(mcp_execution_status.build_execution_status_tool())
     if chat_settings.enabled:
@@ -654,13 +701,15 @@ async def build_tools_with_chat(
 async def global_mcp_tools(
     workflows: list[Workflow],
     chat_settings: agent_settings.AgentSettings,
+    *,
+    owner_id: uuid.UUID | None,
 ) -> list[MCPTool]:
     """The global server's tools: the shared list plus the user memory tools.
 
     The memory tools win a name clash, so a workflow named like one is not listed. Named servers
     use `build_tools_with_chat` directly and do not offer memory.
     """
-    tools = await build_tools_with_chat(workflows, chat_settings)
+    tools = await build_tools_with_chat(workflows, chat_settings, owner_id=owner_id)
     kept = [tool for tool in tools if tool.name not in USER_MEMORY_TOOL_NAMES]
     return kept + build_user_memory_mcp_tools()
 
@@ -1058,7 +1107,9 @@ async def list_mcp_tools(
 ) -> MCPToolsListResponse:
     workflows = await get_user_mcp_workflows(db, mcp_user.id)
     chat_settings = await agent_settings.get_global_agent_settings(db, mcp_user.id)
-    return MCPToolsListResponse(tools=await global_mcp_tools(workflows, chat_settings))
+    return MCPToolsListResponse(
+        tools=await global_mcp_tools(workflows, chat_settings, owner_id=mcp_user.id)
+    )
 
 
 # Server-side ceiling for the caller-supplied MCP connect timeout. The outer HTTP
@@ -1176,13 +1227,7 @@ async def call_mcp_tool(
     if tool_name == mcp_execution_status.MCP_EXECUTION_STATUS_TOOL_NAME:
         text, is_error = await mcp_execution_status.run_execution_status_tool(workflows, arguments)
         return MCPToolResult(content=[MCPTextContent(text=text)], isError=is_error)
-    target_workflow = None
-
-    for w in workflows:
-        # Match by sanitized workflow name
-        if _sanitize_workflow_tool_name(w.name) == tool_name:
-            target_workflow = w
-            break
+    target_workflow = find_workflow_tool(workflows, tool_name, mcp_user.id)
 
     if target_workflow is None:
         return MCPToolResult(
@@ -1412,7 +1457,7 @@ async def _dispatch_mcp_jsonrpc(
     if msg.method == "tools/list":
         workflows = await get_user_mcp_workflows(db, mcp_user.id)
         chat_settings = await agent_settings.get_global_agent_settings(db, mcp_user.id)
-        tools = await global_mcp_tools(workflows, chat_settings)
+        tools = await global_mcp_tools(workflows, chat_settings, owner_id=mcp_user.id)
         return {
             "jsonrpc": "2.0",
             "id": msg.id,
@@ -1457,13 +1502,7 @@ async def _dispatch_mcp_jsonrpc(
                 workflows, arguments
             )
             return _mcp_tool_result_jsonrpc_response(msg.id, text, is_error=is_error)
-        target_workflow = None
-
-        for w in workflows:
-            # Match by sanitized workflow name
-            if _sanitize_workflow_tool_name(w.name) == tool_name:
-                target_workflow = w
-                break
+        target_workflow = find_workflow_tool(workflows, tool_name, mcp_user.id)
 
         if target_workflow is None:
             return {

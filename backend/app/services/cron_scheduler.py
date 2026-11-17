@@ -34,6 +34,11 @@ from app.services.data_retention import apply_retention, retention_cutoff
 from app.services.distributed_lock import lock_service
 from app.services.execution_history_maintenance import reclaim_execution_history_toast
 from app.services.global_variables_service import get_global_variables_context
+from app.services.heym_event_service import (
+    EVENT_WORKFLOW_DELETED,
+    publish_event,
+    workflow_event_payload,
+)
 from app.services.hitl_service import build_default_public_base_url, persist_pending_hitl_execution
 from app.services.node_analytics_rollup import roll_up_node_analytics
 from app.services.timezone_utils import get_configured_timezone
@@ -497,6 +502,8 @@ class CronScheduler:
             scheduled_workflows = result.scalars().all()
 
             deleted_count = 0
+            # Captured before each delete: the event reports a workflow whose row is gone.
+            deleted_events: list[tuple[uuid.UUID, uuid.UUID, dict]] = []
             for workflow in scheduled_workflows:
                 should_delete = self._should_delete_workflow(workflow)
                 if should_delete:
@@ -508,6 +515,14 @@ class CronScheduler:
                         workflow.id,
                         workflow.name,
                     )
+                    if getattr(workflow, "kind", "workflow") == "workflow":
+                        deleted_events.append(
+                            (
+                                workflow.id,
+                                workflow.owner_id,
+                                workflow_event_payload(workflow, actor_user_id=None),
+                            )
+                        )
                     await db.delete(workflow)
                     deleted_count += 1
                 else:
@@ -522,6 +537,15 @@ class CronScheduler:
                 logger.info(
                     "Scheduled deletion cleanup completed: %d workflows deleted", deleted_count
                 )
+        # Like the delete endpoint, publish once the deletion is durable.
+        for workflow_id, owner_id, payload in deleted_events:
+            await publish_event(
+                name=EVENT_WORKFLOW_DELETED,
+                payload=payload,
+                owner_id=owner_id,
+                workflow_id=workflow_id,
+                dedupe_key=f"{EVENT_WORKFLOW_DELETED}:{workflow_id}",
+            )
 
     def _should_delete_workflow(self, workflow: Workflow) -> bool:
         nodes = workflow.nodes or []

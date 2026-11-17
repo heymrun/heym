@@ -2419,6 +2419,25 @@ async def revert_workflow_to_version(
         if blocked_error is not None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=blocked_error)
 
+    # A revert is a save: keep the state it replaces in Edit History, so the work on the
+    # canvas before the revert can be restored like any other version.
+    before = WorkflowSnapshot.capture(workflow)
+    restored = WorkflowSnapshot(
+        nodes=reverted_nodes,
+        edges=reverted_edges,
+        auth_type=version.auth_type,
+        auth_header_key=version.auth_header_key,
+        auth_header_value=version.auth_header_value,
+        webhook_body_mode=version.webhook_body_mode,
+        cache_ttl_seconds=version.cache_ttl_seconds,
+        rate_limit_requests=version.rate_limit_requests,
+        rate_limit_window_seconds=version.rate_limit_window_seconds,
+    )
+    if before != restored:
+        await add_workflow_version(db, workflow, before, current_user.id)
+    renamed = version.name != workflow.name
+    described = version.description != workflow.description
+
     workflow.name = version.name
     workflow.description = version.description
     workflow.nodes = reverted_nodes
@@ -2430,10 +2449,19 @@ async def revert_workflow_to_version(
     workflow.cache_ttl_seconds = version.cache_ttl_seconds
     workflow.rate_limit_requests = version.rate_limit_requests
     workflow.rate_limit_window_seconds = version.rate_limit_window_seconds
+    await sync_dashboard_widget(
+        db,
+        workflow,
+        renamed=renamed,
+        described=described,
+        graph_changed=(before.nodes, before.edges) != (reverted_nodes, reverted_edges),
+    )
 
     await queue_collab_saved(db, workflow.id, current_user.id, session=None, state_hash=None)
     await db.flush()
+    await db.commit()
     await db.refresh(workflow)
+    await announce_workflow_saved(workflow, current_user.id, publish=publish_event)
 
     audit(
         action="workflow.version_revert",

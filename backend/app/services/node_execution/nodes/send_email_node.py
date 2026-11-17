@@ -73,18 +73,15 @@ def execute(ctx: NodeExecutionContext) -> object:
     body_template = node_data.get("emailBody", "$input.text")
     attachments_template = node_data.get("attachments", "")
 
-    to_address = self.evaluate_message_template(to_template, inputs, node_id)
-    cc_address = self.evaluate_message_template(cc_template, inputs, node_id) if cc_template else ""
-    bcc_address = (
-        self.evaluate_message_template(bcc_template, inputs, node_id) if bcc_template else ""
-    )
-    subject = self.evaluate_message_template(subject_template, inputs, node_id)
-    body = self.evaluate_message_template(body_template, inputs, node_id)
-    attachments_value = (
-        self.evaluate_message_template(attachments_template, inputs, node_id)
-        if attachments_template
-        else ""
-    )
+    # A blank field stays blank: evaluate_message_template("") returns str(inputs), which
+    # would mail the run's whole input as the subject or body and skip the recipient check.
+    resolve = self.evaluate_nonempty_message_template
+    to_address = resolve(to_template, inputs, node_id)
+    cc_address = resolve(cc_template, inputs, node_id)
+    bcc_address = resolve(bcc_template, inputs, node_id)
+    subject = resolve(subject_template, inputs, node_id)
+    body = resolve(body_template, inputs, node_id)
+    attachments_value = resolve(attachments_template, inputs, node_id)
 
     credential_id = node_data.get("credentialId")
     if not credential_id:

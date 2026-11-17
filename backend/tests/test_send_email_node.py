@@ -191,6 +191,49 @@ class SendEmailRecipientListTests(unittest.TestCase):
         self.assertEqual(envelope, ["a@x.com", "b@x.com", "c@x.com"])
 
 
+class SendEmailBlankFieldTests(unittest.TestCase):
+    """A blank field stays blank instead of becoming the node's whole input."""
+
+    def _send(self, **fields: str) -> tuple[dict, MagicMock]:
+        return _run_send_email(
+            {
+                "label": "sendEmail",
+                "credentialId": str(uuid.uuid4()),
+                "to": "ops@x.com",
+                "subject": "Invoice 42",
+                "emailBody": "See attached.",
+                **fields,
+            },
+            uuid.uuid4(),
+            _make_db_mock([]),
+        )
+
+    def test_blank_subject_sends_an_empty_subject(self) -> None:
+        nr, server = self._send(subject="")
+        self.assertEqual(nr["status"], "success")
+        _, msg = _sent_message(server)
+        self.assertEqual(msg["Subject"], "")
+        self.assertEqual(nr["output"]["subject"], "")
+
+    def test_blank_body_sends_an_empty_body(self) -> None:
+        nr, server = self._send(emailBody="")
+        self.assertEqual(nr["status"], "success")
+        _, msg = _sent_message(server)
+        plain = next(p for p in msg.walk() if p.get_content_type() == "text/plain")
+        self.assertEqual(plain.get_payload(decode=True).decode().strip(), "")
+
+    def test_blank_to_fails_before_sending(self) -> None:
+        nr, server = self._send(to="")
+        self.assertEqual(nr["status"], "error")
+        self.assertEqual(nr["error"], "Email recipient (to) is required")
+        server.sendmail.assert_not_called()
+
+    def test_expressions_still_resolve(self) -> None:
+        nr, server = self._send(subject="Re: $in.text")
+        _, msg = _sent_message(server)
+        self.assertEqual(msg["Subject"], "Re: hi")
+
+
 class SendEmailCcBccTests(unittest.TestCase):
     def test_cc_appears_in_header_and_envelope(self) -> None:
         owner = uuid.uuid4()

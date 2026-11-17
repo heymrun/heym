@@ -20,7 +20,9 @@ def execute(ctx: NodeExecutionContext) -> object:
     if chat_id_template and str(chat_id_template).startswith("$"):
         chat_id = self.resolve_expression(str(chat_id_template), inputs, node_id)
     else:
-        chat_id = self.evaluate_message_template(str(chat_id_template), inputs, node_id)
+        # Blank stays blank so the chatId check below fires (evaluate_message_template("")
+        # returns str(inputs)).
+        chat_id = self.evaluate_nonempty_message_template(str(chat_id_template), inputs, node_id)
     message = self.evaluate_message_template(message_template, inputs, node_id)
 
     credential_id = node_data.get("credentialId")

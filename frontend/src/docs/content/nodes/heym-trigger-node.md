@@ -24,7 +24,7 @@ The **Heym Trigger** node starts a workflow when Heym itself publishes a platfor
 | `heym.started` | The Heym platform starts | Instance-wide: every subscriber receives it |
 | `workflow.created` | A workflow is created | Only the workflow owner's subscribers |
 | `workflow.updated` | A workflow is saved | Only the workflow owner's subscribers |
-| `workflow.deleted` | A workflow is deleted | Only the workflow owner's subscribers |
+| `workflow.deleted` | A workflow is deleted, right away or when its scheduled deletion runs | Only the workflow owner's subscribers |
 
 Dashboard widgets are stored as workflows internally, but they never produce `workflow.*` events.
 
@@ -82,7 +82,7 @@ Events are kept for **7 days** and then deleted.
 { "version": "1.4.2", "started_at": "2026-08-11T09:30:00+00:00" }
 ```
 
-`workflow.deleted` carries the name captured just before deletion, since the workflow row is gone by the time you read the event.
+`workflow.deleted` carries the name captured just before deletion, since the workflow row is gone by the time you read the event. When the deletion is a scheduled one, run by the nightly cleanup rather than by a person, `actor_user_id` is `null`; use `owner_id` to see whose workflow it was.
 
 ## Example Workflow
 
