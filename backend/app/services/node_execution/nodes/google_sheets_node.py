@@ -61,21 +61,29 @@ def execute(ctx: NodeExecutionContext) -> object:
     if not operation:
         raise ValueError("Google Sheets node requires an operation")
 
-    raw_id = self.evaluate_message_template(node_data.get("gsSpreadsheetId", ""), inputs, node_id)
-    spreadsheet_id = GoogleSheetsService.parse_spreadsheet_id(raw_id)
-    sheet_name = self.evaluate_message_template(
-        node_data.get("gsSheetName", "Sheet1"), inputs, node_id
+    raw_id = self.evaluate_nonempty_message_template(
+        node_data.get("gsSpreadsheetId", ""), inputs, node_id
     )
-    _sr_ev = self.evaluate_message_template(
-        str(node_data.get("gsStartRow", "1") or "1"), inputs, node_id
-    ).strip()
+    spreadsheet_id = GoogleSheetsService.parse_spreadsheet_id(raw_id)
+    if not spreadsheet_id:
+        raise ValueError("Google Sheets node requires a spreadsheet ID")
+
+    raw_sheet_name = node_data.get("gsSheetName")
+    if raw_sheet_name is None or str(raw_sheet_name).strip() == "":
+        sheet_name = "Sheet1"
+    else:
+        sheet_name = self.evaluate_nonempty_message_template(str(raw_sheet_name), inputs, node_id)
+        if not sheet_name.strip() and operation != "getSheetInfo":
+            raise ValueError("Google Sheets node requires a sheet name")
+
+    _sr_raw = str(node_data.get("gsStartRow", "1") or "1")
+    _sr_ev = self.evaluate_nonempty_message_template(_sr_raw, inputs, node_id).strip()
     try:
         start_row = max(1, int(float(_sr_ev or "1")))
     except (ValueError, TypeError):
         start_row = 1
-    _mr_ev = self.evaluate_message_template(
-        str(node_data.get("gsMaxRows", "100") or "100"), inputs, node_id
-    ).strip()
+    _mr_raw = str(node_data.get("gsMaxRows", "100") or "100")
+    _mr_ev = self.evaluate_nonempty_message_template(_mr_raw, inputs, node_id).strip()
     try:
         max_rows = int(float(_mr_ev or "0"))
     except (ValueError, TypeError):
@@ -84,7 +92,7 @@ def execute(ctx: NodeExecutionContext) -> object:
         max_rows = 0
     _ur_raw = node_data.get("gsUpdateRow")
     if _ur_raw is not None and str(_ur_raw).strip() != "":
-        _ur_ev = self.evaluate_message_template(str(_ur_raw), inputs, node_id).strip()
+        _ur_ev = self.evaluate_nonempty_message_template(str(_ur_raw), inputs, node_id).strip()
     else:
         _ur_ev = _sr_ev
     try:
