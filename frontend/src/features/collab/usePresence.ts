@@ -165,7 +165,7 @@ export function createPresence(me: Ref<CollabIdentity | null>, selfMic: Ref<bool
 
   const cursors = computed<RemoteCursor[]>(() =>
     [...peers.values()].flatMap((peer) =>
-      peer.cursor
+      peer.cursor && peer.identity.userId !== me.value?.userId
         ? [
             {
               sid: peer.identity.sid,

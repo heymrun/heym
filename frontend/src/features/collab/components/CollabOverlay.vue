@@ -49,6 +49,7 @@ function ringStyle(user: CollabUserView): Record<string, string> {
         type="button"
         class="relative flex h-7 w-7 shrink-0 items-center justify-center rounded-full"
         :class="user.isSelf ? 'cursor-default' : 'cursor-pointer'"
+        :disabled="user.isSelf"
         :style="ringStyle(user)"
         :title="avatarLabel(user)"
         :aria-label="avatarLabel(user)"
