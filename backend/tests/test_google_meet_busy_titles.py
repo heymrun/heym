@@ -272,6 +272,39 @@ class TestGoogleMeetBusyTitles(unittest.TestCase):
             ],
         )
 
+    def test_an_all_day_event_on_a_day_without_midnight_is_read(self) -> None:
+        # Africa/Cairo goes from 00:00 to 01:00 on 2026-04-24: that day starts at 01:00.
+        self.busy = [{"start": "2026-04-23T22:00:00Z", "end": "2026-04-24T21:00:00Z"}]
+        self.pages = [
+            {
+                "timeZone": "Africa/Cairo",
+                "items": [
+                    {
+                        "start": {"date": "2026-04-24"},
+                        "end": {"date": "2026-04-25"},
+                        "summary": "Holiday",
+                    }
+                ],
+            }
+        ]
+        result = self.service.read_availability(
+            start="2026-04-23T00:00:00Z",
+            end="2026-04-26T00:00:00Z",
+            include_busy_details=True,
+            time_zone="Africa/Cairo",
+        )
+        self.assertEqual(
+            result["busy_slots"],
+            [
+                {
+                    "start": "2026-04-24T01:00:00+03:00",
+                    "end": "2026-04-25T00:00:00+03:00",
+                    "title": "Holiday",
+                    "attendees": [],
+                }
+            ],
+        )
+
     def test_recurring_instances_page_through_empty_and_nonempty_pages(self) -> None:
         self.pages = [
             {"timeZone": "UTC", "items": [], "nextPageToken": "page-2"},
