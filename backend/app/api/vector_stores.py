@@ -23,8 +23,6 @@ from app.models.schemas import (
     CheckDuplicatesRequest,
     CheckDuplicatesResponse,
     DuplicateFile,
-    TeamShareRequest,
-    TeamShareResponse,
     VectorStoreCreate,
     VectorStoreDeleteResponse,
     VectorStoreIngestJobResponse,
@@ -40,6 +38,8 @@ from app.models.schemas import (
     VectorStoreShareResponse,
     VectorStoreSourceGroup,
     VectorStoreStatsResponse,
+    VectorStoreTeamShareRequest,
+    VectorStoreTeamShareResponse,
     VectorStoreUpdate,
     VectorStoreUploadResponse,
 )
@@ -53,7 +53,12 @@ from app.services.vector_store import (
     create_vector_store_service_for_credential,
     rag_credential_backend,
 )
-from app.services.vector_store_access import get_vector_store_with_grant
+from app.services.vector_store_access import (
+    PERMISSION_OWNER,
+    can_write,
+    get_vector_store_with_permission,
+    strongest_share_permission,
+)
 from app.services.vector_store_pg import VectorStoreBackendUnavailableError
 
 router = APIRouter()
@@ -152,7 +157,7 @@ async def list_vector_stores(
     owned_stores = owned_result.scalars().all()
 
     shared_result = await db.execute(
-        select(VectorStore, User.email)
+        select(VectorStore, User.email, VectorStoreShare.permission)
         .join(VectorStoreShare, VectorStoreShare.vector_store_id == VectorStore.id)
         .join(User, User.id == VectorStore.owner_id)
         .where(VectorStoreShare.user_id == current_user.id)
@@ -161,7 +166,7 @@ async def list_vector_stores(
     shared_stores = shared_result.all()
 
     shared_team_result = await db.execute(
-        select(VectorStore, Team.name)
+        select(VectorStore, Team.name, VectorStoreTeamShare.permission)
         .join(VectorStoreTeamShare, VectorStoreTeamShare.vector_store_id == VectorStore.id)
         .join(TeamMember, TeamMember.team_id == VectorStoreTeamShare.team_id)
         .join(Team, Team.id == VectorStoreTeamShare.team_id)
@@ -170,7 +175,22 @@ async def list_vector_stores(
     )
     shared_team_stores = shared_team_result.all()
 
-    seen_ids: set[uuid.UUID] = set()
+    owned_ids = {store.id for store in owned_stores}
+    # One entry per shared store: a direct share names the owner, else the first team. The
+    # permission is the strongest across every share that reaches the user.
+    shared: dict[uuid.UUID, tuple[VectorStore, str | None, str | None]] = {}
+    shared_permissions: dict[uuid.UUID, list[str]] = {}
+    for store, owner_email, permission in shared_stores:
+        if store.id in owned_ids:
+            continue
+        shared.setdefault(store.id, (store, owner_email, None))
+        shared_permissions.setdefault(store.id, []).append(permission)
+    for store, team_name, permission in shared_team_stores:
+        if store.id in owned_ids:
+            continue
+        shared.setdefault(store.id, (store, None, team_name))
+        shared_permissions.setdefault(store.id, []).append(permission)
+
     responses = []
 
     for store in owned_stores:
@@ -188,14 +208,11 @@ async def list_vector_stores(
                 shared_by_team=None,
                 stats=stats,
                 backend=await _store_backend(store, db),
+                permission=PERMISSION_OWNER,
             )
         )
-        seen_ids.add(store.id)
 
-    for store, owner_email in shared_stores:
-        if store.id in seen_ids:
-            continue
-        seen_ids.add(store.id)
+    for store_id, (store, owner_email, team_name) in shared.items():
         stats = await _get_store_stats(store, db)
         responses.append(
             VectorStoreListResponse(
@@ -207,30 +224,10 @@ async def list_vector_stores(
                 updated_at=store.updated_at,
                 is_shared=True,
                 shared_by=owner_email,
-                shared_by_team=None,
-                stats=stats,
-                backend=await _store_backend(store, db),
-            )
-        )
-
-    for store, team_name in shared_team_stores:
-        if store.id in seen_ids:
-            continue
-        seen_ids.add(store.id)
-        stats = await _get_store_stats(store, db)
-        responses.append(
-            VectorStoreListResponse(
-                id=store.id,
-                name=store.name,
-                description=store.description,
-                collection_name=store.collection_name,
-                created_at=store.created_at,
-                updated_at=store.updated_at,
-                is_shared=True,
-                shared_by=None,
                 shared_by_team=team_name,
                 stats=stats,
                 backend=await _store_backend(store, db),
+                permission=strongest_share_permission(shared_permissions[store_id]),
             )
         )
 
@@ -371,7 +368,7 @@ async def get_vector_store(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> VectorStoreResponse:
-    store = await _get_accessible_store(vector_store_id, current_user.id, db)
+    store, permission = await _get_store_with_permission(vector_store_id, current_user.id, db)
     stats = await _get_store_stats(store, db)
 
     return VectorStoreResponse(
@@ -385,6 +382,7 @@ async def get_vector_store(
         updated_at=store.updated_at,
         stats=stats,
         backend=await _store_backend(store, db),
+        permission=permission,
     )
 
 
@@ -674,7 +672,7 @@ async def upload_file_to_vector_store(
     PDFs with pages that need OCR are read in the background: the response says ``queued``
     and the job is listed under ``/ingest-jobs`` until its chunks are in the store.
     """
-    store = await _get_accessible_store(vector_store_id, current_user.id, db)
+    store = await _get_accessible_store(vector_store_id, current_user.id, db, require_write=True)
 
     filename = file.filename or "unknown.txt"
     file_content = await read_upload_file_limited(file)
@@ -810,7 +808,7 @@ async def dismiss_ingest_job(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     """Remove a failed background upload from the store's list."""
-    store = await _get_accessible_store(vector_store_id, current_user.id, db)
+    store = await _get_accessible_store(vector_store_id, current_user.id, db, require_write=True)
     outcome = await rag_ingest_jobs.dismiss(db, store.id, job_id)
     if outcome == "missing":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
@@ -853,6 +851,7 @@ async def list_vector_store_shares(
             user_id=user.id,
             email=user.email,
             name=user.name,
+            permission=share.permission,
             shared_at=share.created_at,
         )
         for share, user in rows
@@ -900,36 +899,50 @@ async def create_vector_store_share(
             VectorStoreShare.user_id == target_user.id,
         )
     )
-    existing = existing_result.scalar_one_or_none()
+    share = existing_result.scalar_one_or_none()
 
-    if existing:
-        return VectorStoreShareResponse(
-            id=existing.id,
+    if share is None:
+        share = VectorStoreShare(
+            vector_store_id=vector_store_id,
             user_id=target_user.id,
-            email=target_user.email,
-            name=target_user.name,
-            shared_at=existing.created_at,
+            permission=share_data.permission,
+        )
+        db.add(share)
+        await db.flush()
+        await db.refresh(share)
+        audit(
+            action="vector_store.share_add",
+            actor=current_user,
+            target_type="vector_store",
+            target_id=vector_store_id,
+            target_name=store.name,
+            grantee_id=target_user.id,
+            grantee_email=target_user.email,
+            permission=share.permission,
+        )
+    elif share.permission != share_data.permission:
+        previous_permission = share.permission
+        share.permission = share_data.permission
+        await db.flush()
+        await db.refresh(share)
+        audit(
+            action="vector_store.share_update",
+            actor=current_user,
+            target_type="vector_store",
+            target_id=vector_store_id,
+            target_name=store.name,
+            grantee_id=target_user.id,
+            grantee_email=target_user.email,
+            permission=share.permission,
+            previous_permission=previous_permission,
         )
 
-    share = VectorStoreShare(vector_store_id=vector_store_id, user_id=target_user.id)
-    db.add(share)
-    await db.flush()
-    await db.refresh(share)
-
-    audit(
-        action="vector_store.share_add",
-        actor=current_user,
-        target_type="vector_store",
-        target_id=vector_store_id,
-        target_name=store.name,
-        grantee_id=target_user.id,
-        grantee_email=target_user.email,
-    )
     return VectorStoreShareResponse(
         id=share.id,
         user_id=target_user.id,
         email=target_user.email,
         name=target_user.name,
+        permission=share.permission,
         shared_at=share.created_at,
     )
 
@@ -984,12 +997,12 @@ async def delete_vector_store_share(
     await db.commit()
 
 
-@router.get("/{vector_store_id}/team-shares", response_model=list[TeamShareResponse])
+@router.get("/{vector_store_id}/team-shares", response_model=list[VectorStoreTeamShareResponse])
 async def list_vector_store_team_shares(
     vector_store_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> list[TeamShareResponse]:
+) -> list[VectorStoreTeamShareResponse]:
     result = await db.execute(
         select(VectorStore).where(
             VectorStore.id == vector_store_id,
@@ -1009,23 +1022,24 @@ async def list_vector_store_team_shares(
         .order_by(Team.name.asc())
     )
     return [
-        TeamShareResponse(
+        VectorStoreTeamShareResponse(
             id=share.id,
             team_id=team.id,
             team_name=team.name,
+            permission=share.permission,
             shared_at=share.created_at,
         )
         for share, team in shares_result.all()
     ]
 
 
-@router.post("/{vector_store_id}/team-shares", response_model=TeamShareResponse)
+@router.post("/{vector_store_id}/team-shares", response_model=VectorStoreTeamShareResponse)
 async def create_vector_store_team_share(
     vector_store_id: uuid.UUID,
-    payload: TeamShareRequest,
+    payload: VectorStoreTeamShareRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> TeamShareResponse:
+) -> VectorStoreTeamShareResponse:
     result = await db.execute(
         select(VectorStore).where(
             VectorStore.id == vector_store_id,
@@ -1056,31 +1070,48 @@ async def create_vector_store_team_share(
         )
     )
     share = existing.scalar_one_or_none()
-    if share:
-        return TeamShareResponse(
-            id=share.id,
+    if share is None:
+        share = VectorStoreTeamShare(
+            vector_store_id=vector_store_id,
+            team_id=payload.team_id,
+            permission=payload.permission,
+        )
+        db.add(share)
+        await db.flush()
+        await db.refresh(share)
+        await db.commit()
+        audit(
+            action="vector_store.team_share_add",
+            actor=current_user,
+            target_type="vector_store",
+            target_id=vector_store_id,
+            target_name=store.name,
             team_id=team.id,
             team_name=team.name,
-            shared_at=share.created_at,
+            permission=share.permission,
         )
-    share = VectorStoreTeamShare(vector_store_id=vector_store_id, team_id=payload.team_id)
-    db.add(share)
-    await db.flush()
-    await db.refresh(share)
-    await db.commit()
-    audit(
-        action="vector_store.team_share_add",
-        actor=current_user,
-        target_type="vector_store",
-        target_id=vector_store_id,
-        target_name=store.name,
-        team_id=team.id,
-        team_name=team.name,
-    )
-    return TeamShareResponse(
+    elif share.permission != payload.permission:
+        previous_permission = share.permission
+        share.permission = payload.permission
+        await db.flush()
+        await db.refresh(share)
+        await db.commit()
+        audit(
+            action="vector_store.team_share_update",
+            actor=current_user,
+            target_type="vector_store",
+            target_id=vector_store_id,
+            target_name=store.name,
+            team_id=team.id,
+            team_name=team.name,
+            permission=share.permission,
+            previous_permission=previous_permission,
+        )
+    return VectorStoreTeamShareResponse(
         id=share.id,
         team_id=team.id,
         team_name=team.name,
+        permission=share.permission,
         shared_at=share.created_at,
     )
 
@@ -1238,19 +1269,7 @@ async def delete_items_by_source(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    result = await db.execute(
-        select(VectorStore).where(
-            VectorStore.id == vector_store_id,
-            VectorStore.owner_id == current_user.id,
-        )
-    )
-    store = result.scalar_one_or_none()
-
-    if store is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Vector store not found",
-        )
+    store = await _get_accessible_store(vector_store_id, current_user.id, db, require_write=True)
 
     cred_result = await db.execute(select(Credential).where(Credential.id == store.credential_id))
     credential = cred_result.scalar_one_or_none()
@@ -1283,19 +1302,7 @@ async def delete_item(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    result = await db.execute(
-        select(VectorStore).where(
-            VectorStore.id == vector_store_id,
-            VectorStore.owner_id == current_user.id,
-        )
-    )
-    store = result.scalar_one_or_none()
-
-    if store is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Vector store not found",
-        )
+    store = await _get_accessible_store(vector_store_id, current_user.id, db, require_write=True)
 
     cred_result = await db.execute(select(Credential).where(Credential.id == store.credential_id))
     credential = cred_result.scalar_one_or_none()
@@ -1318,15 +1325,35 @@ async def delete_item(
     service.delete_point(store.collection_name, point_id)
 
 
-async def _get_accessible_store(
+async def _get_store_with_permission(
     vector_store_id: uuid.UUID,
     user_id: uuid.UUID,
     db: AsyncSession,
-) -> VectorStore:
-    reached = await get_vector_store_with_grant(db, vector_store_id, user_id)
+    require_write: bool = False,
+) -> tuple[VectorStore, str]:
+    """The store and the user's strongest permission; 404 when unreachable.
+
+    ``require_write`` turns a read-only share into a 403.
+    """
+    reached = await get_vector_store_with_permission(db, vector_store_id, user_id)
     if reached is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Vector store not found",
         )
-    return reached[0]
+    store, permission = reached
+    if require_write and not can_write(permission):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Write access required")
+    return store, permission
+
+
+async def _get_accessible_store(
+    vector_store_id: uuid.UUID,
+    user_id: uuid.UUID,
+    db: AsyncSession,
+    require_write: bool = False,
+) -> VectorStore:
+    store, _permission = await _get_store_with_permission(
+        vector_store_id, user_id, db, require_write=require_write
+    )
+    return store

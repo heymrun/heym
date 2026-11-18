@@ -1303,13 +1303,15 @@ class WorkflowExecutorDataTableNodeTests(unittest.TestCase):
         fake_db = _SequenceSession(
             [
                 _SequenceQuery(first_result=None),
+                _SequenceQuery(all_result=[("read",)]),
+                _SequenceQuery(all_result=[]),
                 _SequenceQuery(first_result=store),
                 _SequenceQuery(first_result=credential),
             ]
         )
         executor = WorkflowExecutor(nodes=[], edges=[], actor_user_id=actor_id)
 
-        accessible_store = executor._get_accessible_vector_store(fake_db, store.id)
+        accessible_store = executor._get_accessible_vector_store(fake_db, store.id, "search")
         backing_credential = executor._get_vector_store_backing_credential(
             fake_db, accessible_store.credential_id
         )

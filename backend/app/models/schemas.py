@@ -1163,6 +1163,10 @@ class VectorStoreStatsResponse(BaseModel):
     status: str
 
 
+VectorStoreSharePermission = Literal["read", "write"]
+VectorStorePermission = Literal["owner", "write", "read"]
+
+
 class VectorStoreResponse(BaseModel):
     id: uuid.UUID
     name: str
@@ -1174,6 +1178,7 @@ class VectorStoreResponse(BaseModel):
     updated_at: datetime
     stats: VectorStoreStatsResponse | None = None
     backend: str = "qdrant"
+    permission: VectorStorePermission = "owner"
 
     class Config:
         from_attributes = True
@@ -1191,6 +1196,7 @@ class VectorStoreListResponse(BaseModel):
     shared_by_team: str | None = None
     stats: VectorStoreStatsResponse | None = None
     backend: str = "qdrant"
+    permission: VectorStorePermission = "owner"
 
     class Config:
         from_attributes = True
@@ -1198,6 +1204,7 @@ class VectorStoreListResponse(BaseModel):
 
 class VectorStoreShareRequest(BaseModel):
     email: EmailStr
+    permission: VectorStoreSharePermission = "read"
 
 
 class VectorStoreShareResponse(BaseModel):
@@ -1205,6 +1212,20 @@ class VectorStoreShareResponse(BaseModel):
     user_id: uuid.UUID
     email: str
     name: str
+    permission: VectorStoreSharePermission
+    shared_at: datetime
+
+
+class VectorStoreTeamShareRequest(BaseModel):
+    team_id: uuid.UUID
+    permission: VectorStoreSharePermission = "read"
+
+
+class VectorStoreTeamShareResponse(BaseModel):
+    id: uuid.UUID
+    team_id: uuid.UUID
+    team_name: str
+    permission: VectorStoreSharePermission
     shared_at: datetime
 
 

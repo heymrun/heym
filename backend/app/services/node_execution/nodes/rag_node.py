@@ -152,7 +152,7 @@ def execute(ctx: NodeExecutionContext) -> object:
     credential_type = None
     collection_name: str = ""
     with SessionLocal() as db:
-        store = self._get_accessible_vector_store(db, vector_store_id)
+        store = self._get_accessible_vector_store(db, vector_store_id, operation)
         if not store:
             raise ValueError("Vector store not found or not accessible")
         collection_name = store.collection_name

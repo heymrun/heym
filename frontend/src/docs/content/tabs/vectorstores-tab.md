@@ -60,9 +60,19 @@ without speech, and a binary file of another type are refused with a message.
 
 ## Sharing
 
-- Share vector stores with other users by email
-- Shared stores appear with an indicator
-- Revoke sharing from the store card menu
+The owner shares a store with users by email or with a team, and picks a permission for each share:
+
+| Permission | What the user can do |
+|------------|----------------------|
+| **Read** | See the store and its documents, search it, and use it in RAG `search` operations |
+| **Write** | Everything Read allows, plus upload documents, delete documents and chunks, dismiss failed background uploads, and run RAG `insert`, `upsert` and `delete` operations |
+
+- Change a share's permission from the dialog's dropdown, or remove the share
+- Renaming, deleting and sharing the store stay with the owner
+- Shares created before permissions existed are **Read**
+- A user who reaches a store through several shares gets the strongest one
+- Shared stores show their permission on the card (**Shared · Read** or **Shared · Write**)
+- `POST /api/vector-stores/{id}/shares` and `/team-shares` accept `permission` (`read` or `write`, default `read`); posting an existing user or team again updates its permission
 
 ## From Chat and MCP
 

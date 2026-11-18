@@ -15,7 +15,13 @@ class AlembicMigrationGraphTest(unittest.TestCase):
         self.script = ScriptDirectory.from_config(config)
 
     def test_revision_graph_has_one_head(self) -> None:
-        self.assertEqual(self.script.get_heads(), ["158_outlook_calendar_credential"])
+        self.assertEqual(self.script.get_heads(), ["159_vector_store_share_perm"])
+
+    def test_vector_store_share_perm_follows_outlook_calendar_credential(self) -> None:
+        revision = self.script.get_revision("159_vector_store_share_perm")
+
+        self.assertIsNotNone(revision)
+        self.assertEqual(revision.down_revision, "158_outlook_calendar_credential")
 
     def test_outlook_calendar_credential_follows_outlook_credential(self) -> None:
         revision = self.script.get_revision("158_outlook_calendar_credential")

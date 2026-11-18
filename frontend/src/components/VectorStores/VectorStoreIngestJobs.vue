@@ -10,7 +10,7 @@ import { formatFileSize } from "@/lib/utils";
 import { vectorStoresApi } from "@/services/api";
 
 /** A store's uploads Heym is still reading in the background, or failed to read. */
-const props = defineProps<{ storeId: string }>();
+const props = defineProps<{ storeId: string; canDismiss: boolean }>();
 const emit = defineEmits<{ finished: [] }>();
 
 const polling = useIngestJobPolling(
@@ -73,7 +73,7 @@ onMounted(() => void polling.refresh());
         :title="label(job)"
       >{{ label(job) }}</span>
       <Button
-        v-if="job.status === 'failed'"
+        v-if="canDismiss && job.status === 'failed'"
         variant="ghost"
         size="icon"
         class="h-6 w-6 flex-shrink-0 text-muted-foreground"

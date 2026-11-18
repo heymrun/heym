@@ -2138,12 +2138,17 @@ class WorkflowExecutor(WorkflowBranchRoutingMixin):
 
         return db.query(Credential).filter(Credential.id == credential_id).first()
 
-    def _get_accessible_vector_store(self, db, vector_store_id: object):
+    def _get_accessible_vector_store(self, db, vector_store_id: object, operation: str):
         from app.db.models import (
             TeamMember,
             VectorStore,
             VectorStoreShare,
             VectorStoreTeamShare,
+        )
+        from app.services.vector_store_access import (
+            PERMISSION_WRITE,
+            WRITE_OPERATIONS,
+            strongest_share_permission,
         )
 
         actor_user_id = self._require_actor_user_id("Vector store")
@@ -2159,28 +2164,31 @@ class WorkflowExecutor(WorkflowBranchRoutingMixin):
         if store is not None:
             return store
 
-        store = (
-            db.query(VectorStore)
-            .join(VectorStoreShare, VectorStoreShare.vector_store_id == VectorStore.id)
+        user_permissions = [
+            permission
+            for (permission,) in db.query(VectorStoreShare.permission)
             .filter(
-                VectorStore.id == vector_store_id,
+                VectorStoreShare.vector_store_id == vector_store_id,
                 VectorStoreShare.user_id == actor_user_id,
             )
-            .first()
-        )
-        if store is not None:
-            return store
-
-        return (
-            db.query(VectorStore)
-            .join(VectorStoreTeamShare, VectorStoreTeamShare.vector_store_id == VectorStore.id)
+            .all()
+        ]
+        team_permissions = [
+            permission
+            for (permission,) in db.query(VectorStoreTeamShare.permission)
             .join(TeamMember, TeamMember.team_id == VectorStoreTeamShare.team_id)
             .filter(
-                VectorStore.id == vector_store_id,
+                VectorStoreTeamShare.vector_store_id == vector_store_id,
                 TeamMember.user_id == actor_user_id,
             )
-            .first()
-        )
+            .all()
+        ]
+        permission = strongest_share_permission([*user_permissions, *team_permissions])
+        if permission is None:
+            return None
+        if operation in WRITE_OPERATIONS and permission != PERMISSION_WRITE:
+            raise ValueError("Write access required for this operation")
+        return db.query(VectorStore).filter(VectorStore.id == vector_store_id).first()
 
     def _get_accessible_data_table(self, db, data_table_id: object, operation: str):
         from app.db.models import DataTable, DataTableShare, DataTableTeamShare, TeamMember

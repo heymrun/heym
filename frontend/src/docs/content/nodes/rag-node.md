@@ -44,6 +44,8 @@ targets. See [Custom Embeddings](../reference/integrations.md#custom-embeddings-
 
 ## Operations
 
+On a store shared with you, **Search** needs a Read share. **Insert**, **Upsert** and **Delete** need a Write share; on a Read share the node fails with "Write access required for this operation". See [Vectorstores › Sharing](../tabs/vectorstores-tab.md#sharing).
+
 ### Insert
 
 Add documents to the vector store.

@@ -20,7 +20,10 @@ from app.db.models import (
     VectorStoreShare,
     VectorStoreTeamShare,
 )
-from app.services.vector_store_access import get_vector_store_with_grant, vector_store_access_rows
+from app.services.vector_store_access import (
+    get_vector_store_with_permission,
+    vector_store_access_rows,
+)
 
 
 class VectorStoreAccessPostgresTests(unittest.IsolatedAsyncioTestCase):
@@ -117,12 +120,15 @@ class VectorStoreAccessPostgresTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_single_store_check_matches_the_rows(self) -> None:
         async with AsyncSession(self.engine) as db:
+            rows = (await db.execute(vector_store_access_rows(self.member.id))).all()
+            permissions = {row.vector_store_id: row.permission for row in rows}
             for store_id, grant in self.expected.items():
-                reached = await get_vector_store_with_grant(db, store_id, self.member.id)
+                reached = await get_vector_store_with_permission(db, store_id, self.member.id)
                 self.assertIsNotNone(reached)
-                self.assertEqual(reached[1], grant)
+                self.assertEqual(reached[1], "owner" if grant == "owner" else "read")
+                self.assertEqual(reached[1], permissions[store_id])
             unshared = self.stores["unshared"].id
-            self.assertIsNone(await get_vector_store_with_grant(db, unshared, self.member.id))
+            self.assertIsNone(await get_vector_store_with_permission(db, unshared, self.member.id))
 
     async def test_the_list_endpoint_shows_the_same_stores(self) -> None:
         async with AsyncSession(self.engine) as db:

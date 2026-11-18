@@ -1296,6 +1296,7 @@ class VectorStoreShare(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
+    permission: Mapped[str] = mapped_column(String(10), nullable=False, default="read")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     vector_store: Mapped["VectorStore"] = relationship("VectorStore", back_populates="shares")
@@ -1356,6 +1357,7 @@ class VectorStoreTeamShare(Base):
         nullable=False,
         index=True,
     )
+    permission: Mapped[str] = mapped_column(String(10), nullable=False, default="read")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

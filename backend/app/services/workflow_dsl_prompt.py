@@ -2546,6 +2546,8 @@ The last node in the iteration body MUST connect BACK to the loop node's `loop` 
 | `delete` | documentId, documentIdField (optional) | Delete every point whose id field matches |
 | `search` | queryText, searchLimit (optional), metadataFilters (optional), hybridSearch (optional), enableReranker + rerankerCredentialId (+ rerankerModel for a decision credential) (optional) | Search for similar documents; with hybridSearch, vector and BM25 keyword matches are fused; with the reranker, hits are reordered by relevance |
 
+**Shared stores**: `search` works on any store the run's user owns or was shared. `insert`, `upsert` and `delete` need the owner or a share with Write permission; on a Read share they fail with "Write access required for this operation".
+
 **Document source**: a document stored without a `source` key in `documentMetadata` is stamped with `source: "workflow:<workflow name>"`, so the Vectorstores tab can show which workflow stored it. Set `source` yourself to override it.
 
 **Document identity for `upsert` / `delete`**: the id is a field inside the payload, not the internal point id. `documentIdField` names that field (default `doc_id`) and `documentId` carries its value, so a document keeps the id your own system already uses. `upsert` writes the id field into the payload for you, and both operations work identically on Qdrant and Postgres (pgvector).
