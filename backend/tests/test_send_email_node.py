@@ -334,6 +334,41 @@ class SendEmailAttachmentTests(unittest.TestCase):
         filenames = [p.get_filename() for p in msg.walk() if p.get_filename()]
         self.assertIn("report.pdf", filenames)
 
+    def test_an_attachment_keeps_its_drive_file_type(self) -> None:
+        for filename, mime_type, sent_type in (
+            ("chart.png", "image/png", "image/png"),
+            ("meeting.ics", "text/calendar", "text/calendar"),
+            ("report.pdf", "application/pdf", "application/pdf"),
+            ("blob", "", "application/octet-stream"),
+        ):
+            with self.subTest(mime_type=mime_type):
+                owner = uuid.uuid4()
+                file_id = uuid.uuid4()
+                file_row = SimpleNamespace(
+                    id=file_id,
+                    owner_id=owner,
+                    filename=filename,
+                    mime_type=mime_type,
+                    storage_path=f"{owner}/{file_id}/{filename}",
+                )
+                nr, server = _run_send_email(
+                    {
+                        "label": "sendEmail",
+                        "credentialId": str(uuid.uuid4()),
+                        "to": "a@x.com",
+                        "subject": "Hi",
+                        "attachments": str(file_id),
+                    },
+                    owner,
+                    _make_db_mock([file_row]),
+                )
+                self.assertEqual(nr["status"], "success")
+                _, msg = _sent_message(server)
+                (part,) = [p for p in msg.walk() if p.get_filename()]
+                self.assertEqual(part.get_content_type(), sent_type)
+                self.assertEqual(part["Content-Transfer-Encoding"], "base64")
+                self.assertEqual(part.get_payload(decode=True), b"PDFDATA")
+
     def test_team_shared_drive_file_attached(self) -> None:
         owner = uuid.uuid4()
         other_user = uuid.uuid4()

@@ -11,7 +11,9 @@ from __future__ import annotations
 import re
 import uuid
 from dataclasses import dataclass
+from email import encoders
 from email.mime.application import MIMEApplication
+from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.utils import formataddr, formatdate, getaddresses, make_msgid, parseaddr
@@ -225,8 +227,15 @@ def build_mime_message(
     msg.attach(body_part)
 
     for attachment in attachments:
-        _, _, subtype = attachment.mime_type.partition("/")
-        part = MIMEApplication(attachment.content, _subtype=subtype or "octet-stream")
+        maintype, _, subtype = attachment.mime_type.partition("/")
+        if subtype and maintype not in ("multipart", "message"):
+            # The file's own type (image/png, text/calendar), base64 like any attachment.
+            part = MIMEBase(maintype, subtype)
+            part.set_payload(attachment.content)
+            encoders.encode_base64(part)
+        else:
+            # A multipart or message body must not be base64 encoded; send it as data.
+            part = MIMEApplication(attachment.content, _subtype=subtype or "octet-stream")
         part.add_header("Content-Disposition", "attachment", filename=attachment.filename)
         msg.attach(part)
     return msg

@@ -213,6 +213,26 @@ class GmailSendMessageTests(unittest.TestCase):
             base64.b64decode(attached[0].get_payload()), b"PDFDATA"
         )  # base64 on the wire, as SMTP sends it
 
+    def test_an_attachment_keeps_its_drive_file_type(self) -> None:
+        for filename, mime_type in (("chart.png", "image/png"), ("meeting.ics", "text/calendar")):
+            with self.subTest(mime_type=mime_type):
+                owner = uuid.uuid4()
+                file_id = uuid.uuid4()
+                row = SimpleNamespace(
+                    id=file_id,
+                    owner_id=owner,
+                    filename=filename,
+                    mime_type=mime_type,
+                    storage_path=f"{owner}/{file_id}/{filename}",
+                )
+                _, send, _ = _run(
+                    {**BASE, "attachments": str(file_id)}, owner_id=owner, db=_db_mock([row])
+                )
+
+                (part,) = [p for p in _sent(send).walk() if p.get_filename()]
+                self.assertEqual(part.get_content_type(), mime_type)
+                self.assertEqual(part.get_payload(decode=True), b"PDFDATA")
+
     def test_an_inaccessible_drive_file_fails_before_sending(self) -> None:
         result, send, _ = _run({**BASE, "attachments": str(uuid.uuid4())}, db=_db_mock([None]))
 
