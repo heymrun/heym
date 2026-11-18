@@ -125,6 +125,7 @@ class ConcurrentEnqueueRealPostgresTests(_RealBoardFixture):
                         board=self.board,
                         move=None,
                         rerun=True,
+                        actor_user_id=self.user_id,
                     )
 
         results = await asyncio.gather(*[_attempt() for _ in range(8)])
@@ -155,6 +156,7 @@ class ConcurrentEnqueueRealPostgresTests(_RealBoardFixture):
                     board=self.board,
                     move=None,
                     rerun=True,
+                    actor_user_id=self.user_id,
                 )
             async with async_session_maker() as db:
                 second = await board_run_service.enqueue_card_chain(
@@ -164,6 +166,7 @@ class ConcurrentEnqueueRealPostgresTests(_RealBoardFixture):
                     board=self.board,
                     move=None,
                     rerun=True,
+                    actor_user_id=self.user_id,
                 )
 
         self.assertEqual(first, board_run_service.ENQUEUE_STARTED)
@@ -187,6 +190,7 @@ class ConcurrentEnqueueRealPostgresTests(_RealBoardFixture):
                     board=self.board,
                     move=None,
                     rerun=False,
+                    actor_user_id=self.user_id,
                 )
 
         self.assertEqual(result, board_run_service.ENQUEUE_NO_CHAIN)
@@ -274,6 +278,7 @@ class _RealFourColumnBoardFixture(unittest.IsolatedAsyncioTestCase):
                     board=self.board,
                     move={"from_column": "Planning", "to_column": "Development"},
                     rerun=False,
+                    actor_user_id=self.user_id,
                     allow_advance=True,
                 ),
                 timeout=10,

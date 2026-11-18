@@ -188,7 +188,13 @@ class EnqueueCardChainGuardTests(unittest.IsolatedAsyncioTestCase):
             patch.object(board_run_service, "_spawn_chain", spawn),
         ):
             enqueued = await board_run_service.enqueue_card_chain(
-                session, card=card, column=column, board=board, move=None, rerun=True
+                session,
+                card=card,
+                column=column,
+                board=board,
+                move=None,
+                rerun=True,
+                actor_user_id=uuid.uuid4(),
             )
         return enqueued, spawn, session
 
@@ -293,7 +299,7 @@ class AnswerCardCommentEndToEndTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(board_run_service, "_auto_advance", AsyncMock()) as advance:
             result = await board_run_service.answer_card_comment(
-                session, card=card, column=column, board=board
+                session, card=card, column=column, board=board, actor_user_id=uuid.uuid4()
             )
 
         self.assertFalse(result)
@@ -311,7 +317,7 @@ class AnswerCardCommentEndToEndTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(board_run_service, "_auto_advance", AsyncMock()) as advance:
             result = await board_run_service.answer_card_comment(
-                session, card=card, column=column, board=board
+                session, card=card, column=column, board=board, actor_user_id=uuid.uuid4()
             )
 
         self.assertTrue(result)
@@ -329,7 +335,7 @@ class AnswerCardCommentEndToEndTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(board_run_service, "_auto_advance", AsyncMock()) as advance:
             result = await board_run_service.answer_card_comment(
-                session, card=card, column=column, board=board
+                session, card=card, column=column, board=board, actor_user_id=uuid.uuid4()
             )
 
         self.assertFalse(result)

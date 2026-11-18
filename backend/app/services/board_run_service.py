@@ -46,6 +46,7 @@ from app.services.execution_cancellation import (
 )
 from app.services.global_variables_service import get_global_variables_context
 from app.services.hitl_service import build_default_public_base_url, persist_pending_hitl_execution
+from app.services.workflow_access import user_has_workflow_access
 from app.services.workflow_executor import (
     WorkflowCancelledError,
     WorkflowTimeoutError,
@@ -60,6 +61,17 @@ ACTIVE_RUN_STATUSES = ("running", "pending")
 _OUTPUT_SNIPPET_LIMIT = 500
 _RESTART_RUN_ERROR = "Server restarted during execution"
 _ABANDONED_RUN_ERROR = "Execution is no longer running"
+WORKFLOW_NOT_SHARED_ERROR = "This workflow is not shared with the user who started the run"
+
+
+def run_as_user_id(actor_user_id: uuid.UUID | None, board: Any) -> uuid.UUID:
+    """The user a board run executes as: whoever started it.
+
+    A board run uses that user's credentials, global variables and workflow access, the
+    same as a run they start from the editor. ``None`` only comes from a run row written
+    before runs recorded who started them; such a chain keeps the board owner it started with.
+    """
+    return actor_user_id if actor_user_id is not None else board.owner_id
 
 
 def live_execution_conditions() -> tuple[Any, ...]:
@@ -386,6 +398,7 @@ async def _run_chain(
     links: list[dict],
     move: dict | None,
     rerun: bool,
+    actor_user_id: uuid.UUID | None,
     allow_advance: bool = True,
     session_factory=async_session_maker,
     start_index: int = 0,
@@ -402,6 +415,9 @@ async def _run_chain(
     ``first_run_id`` is set when ``enqueue_card_chain`` already created and committed the
     first run row as part of claiming the card: that row is reused here instead of creating
     a duplicate, since the claim's whole point is for the row to exist before this task runs.
+
+    ``actor_user_id`` is the user who started the chain (see ``run_as_user_id``). Every link
+    runs as them, and a link whose workflow they cannot reach fails without running.
     """
     total = chain_length if chain_length is not None else len(links)
     chain_outputs: list[dict] = list(initial_outputs or [])
@@ -443,6 +459,33 @@ async def _run_chain(
                     return
 
                 board = context["board"]
+                run_as = run_as_user_id(actor_user_id, board)
+                run.actor_user_id = run_as
+                if not await user_has_workflow_access(db, workflow, run_as):
+                    # Checked before input mapping, so nothing about the workflow runs.
+                    run.status = "failed"
+                    run.error = WORKFLOW_NOT_SHARED_ERROR
+                    run.finished_at = datetime.now(timezone.utc)
+                    db.add(
+                        BoardCardActivity(
+                            card_id=card_id,
+                            kind="event",
+                            author_type="system",
+                            content=(
+                                f"{link['workflow_name']} did not run: it is not shared with "
+                                "the user who started the run"
+                            ),
+                            data={"error": WORKFLOW_NOT_SHARED_ERROR},
+                            run_id=run.id,
+                        )
+                    )
+                    await _abort_remaining(
+                        db, card_id, column_id, links, index + 1, start_index, total
+                    )
+                    await _set_card_status(db, card_id, "failed")
+                    await db.commit()
+                    return
+
                 inputs = build_card_payload(
                     card=context["card"],
                     board=board,
@@ -489,10 +532,10 @@ async def _run_chain(
                         return
 
                 workflow_cache = await collect_referenced_workflows(
-                    db, workflow.nodes, actor_user_id=board.owner_id
+                    db, workflow.nodes, actor_user_id=run_as
                 )
-                credentials_context = await get_credentials_context(db, board.owner_id)
-                global_variables_context = await get_global_variables_context(db, board.owner_id)
+                credentials_context = await get_credentials_context(db, run_as)
+                global_variables_context = await get_global_variables_context(db, run_as)
                 public_base_url = build_default_public_base_url()
                 execution_id = run.id
                 cancel_event = register_execution(
@@ -500,7 +543,7 @@ async def _run_chain(
                     execution_id=execution_id,
                     inputs=inputs,
                     trigger_source="board",
-                    actor_user_id=board.owner_id,
+                    actor_user_id=run_as,
                 )
                 run.active_execution_id = execution_id
                 await db.commit()
@@ -514,8 +557,8 @@ async def _run_chain(
                         workflow_cache=workflow_cache,
                         credentials_context=credentials_context,
                         global_variables_context=global_variables_context,
-                        trace_user_id=board.owner_id,
-                        actor_user_id=board.owner_id,
+                        trace_user_id=run_as,
+                        actor_user_id=run_as,
                         public_base_url=public_base_url,
                         cancel_event=cancel_event,
                         execution_id=str(execution_id),
@@ -582,8 +625,8 @@ async def _run_chain(
                         enriched_inputs=inputs,
                         execution_result=result,
                         trigger_source="board",
-                        credentials_owner_id=board.owner_id,
-                        trace_user_id=board.owner_id,
+                        credentials_owner_id=run_as,
+                        trace_user_id=run_as,
                         public_base_url=public_base_url,
                         history_entry_id=execution_id,
                     )
@@ -619,6 +662,7 @@ async def _run_chain(
                 )
                 db.add(history_entry)
                 await db.flush()
+                # Run counts stay on the board owner's analytics, whoever started the run.
                 await upsert_workflow_analytics_snapshot(
                     db,
                     workflow_id=workflow.id,
@@ -629,7 +673,7 @@ async def _run_chain(
                 )
                 await _persist_global_variables_from_execution(
                     db,
-                    board.owner_id,
+                    run_as,
                     workflow.nodes,
                     workflow_cache,
                     _to_json_compatible(result.node_results),
@@ -688,6 +732,7 @@ async def _run_chain(
                 card_id=card_id,
                 board_id=board_id,
                 from_column_id=column_id,
+                actor_user_id=actor_user_id,
                 session_factory=session_factory,
             )
     except Exception as exc:  # noqa: BLE001 - chain must never crash the server
@@ -819,6 +864,9 @@ async def resume_card_chain(
                 column_instructions=getattr(column, "ai_instructions", None),
             )
 
+            # The rest of the chain runs as the user who started it, not the one who
+            # answered the review.
+            actor_user_id = run.actor_user_id
             if remaining:
                 card.run_status = "running"
                 await db.commit()
@@ -829,6 +877,7 @@ async def resume_card_chain(
                     links=remaining,
                     move=None,
                     rerun=False,
+                    actor_user_id=actor_user_id,
                     start_index=next_index,
                     chain_length=len(links),
                     initial_outputs=[{"workflow_name": run.workflow_name, "output": outputs}],
@@ -845,18 +894,20 @@ async def resume_card_chain(
             card_id=card_id,
             board_id=board_id,
             from_column_id=column_id,
+            actor_user_id=actor_user_id,
             session_factory=session_factory,
         )
     except Exception:  # noqa: BLE001 - a resume must never crash the answering request
         logger.exception("Board chain resume failed for execution %s", execution_history_id)
 
 
-async def answer_card_comment(db, *, card, column, board) -> bool:
+async def answer_card_comment(db, *, card, column, board, actor_user_id: uuid.UUID) -> bool:
     """A user comment on a card waiting at the planning gate is its answer.
 
     The gate column's chain has already run and asked its questions, so the answer does not
     re-run it: it releases the gate and the card flows on to the right. No-op for cards past
     the gate, for cards whose chain never completed here, or while a run is still active.
+    The chains the card then runs run as ``actor_user_id``, the user who answered.
     """
     columns = (
         (
@@ -897,7 +948,11 @@ async def answer_card_comment(db, *, card, column, board) -> bool:
     card.run_status = "running"
     await db.commit()
     await _auto_advance(
-        card_id=card.id, board_id=board.id, from_column_id=column.id, ignore_gate=True
+        card_id=card.id,
+        board_id=board.id,
+        from_column_id=column.id,
+        actor_user_id=actor_user_id,
+        ignore_gate=True,
     )
     return True
 
@@ -908,9 +963,20 @@ ENQUEUE_NO_CHAIN = "no_chain"
 
 
 async def enqueue_card_chain(
-    db, *, card, column, board, move: dict | None, rerun: bool, allow_advance: bool = True
+    db,
+    *,
+    card,
+    column,
+    board,
+    move: dict | None,
+    rerun: bool,
+    actor_user_id: uuid.UUID,
+    allow_advance: bool = True,
 ) -> str:
     """Claim the card for a new chain and start it, inside this request's own transaction.
+
+    The chain, and every chain the card auto-advances into from it, runs as
+    ``actor_user_id``: the user who moved or ran the card.
 
     Returns ``ENQUEUE_BLOCKED`` when the card already has an active run, ``ENQUEUE_NO_CHAIN``
     when the column has no workflow chain, or ``ENQUEUE_STARTED`` once the chain is spawned.
@@ -945,7 +1011,12 @@ async def enqueue_card_chain(
             # the other is just an in-process await), so it hangs until the worker
             # restarts instead of erroring out.
             await db.commit()
-            await _auto_advance(card_id=card.id, board_id=board.id, from_column_id=column.id)
+            await _auto_advance(
+                card_id=card.id,
+                board_id=board.id,
+                from_column_id=column.id,
+                actor_user_id=actor_user_id,
+            )
         return ENQUEUE_NO_CHAIN
     first_link = links[0]
     first_run = BoardCardRun(
@@ -956,6 +1027,7 @@ async def enqueue_card_chain(
         chain_position=0,
         chain_length=len(links),
         status="running",
+        actor_user_id=actor_user_id,
     )
     db.add(first_run)
     card.run_status = "running"
@@ -967,6 +1039,7 @@ async def enqueue_card_chain(
         links=links,
         move=move,
         rerun=rerun,
+        actor_user_id=actor_user_id,
         allow_advance=allow_advance,
         first_run_id=first_run.id,
     )
@@ -981,6 +1054,7 @@ def _spawn_chain(
     links: list[dict],
     move: dict | None,
     rerun: bool,
+    actor_user_id: uuid.UUID | None,
     allow_advance: bool = True,
     start_index: int = 0,
     chain_length: int | None = None,
@@ -996,6 +1070,7 @@ def _spawn_chain(
             links=links,
             move=move,
             rerun=rerun,
+            actor_user_id=actor_user_id,
             allow_advance=allow_advance,
             start_index=start_index,
             chain_length=chain_length,
@@ -1022,12 +1097,14 @@ async def _auto_advance(
     card_id: uuid.UUID,
     board_id: uuid.UUID,
     from_column_id: uuid.UUID,
+    actor_user_id: uuid.UUID | None,
     session_factory=async_session_maker,
     ignore_gate: bool = False,
 ) -> None:
     """After a successful chain, move the card to the next column (to the right) and run
     that column's chain. Empty columns are passed through; the cascade continues until the
-    last column. Never raises (best-effort automation).
+    last column. Never raises (best-effort automation). The next chain runs as
+    ``actor_user_id``, the user who started the cascade.
 
     The planning gate is positional: a card in the leftmost column or the one to its
     right never cascades on its own. That second column runs its chain, then waits for
@@ -1124,6 +1201,7 @@ async def _auto_advance(
                         links=links,
                         move={"from_column": prev_name, "to_column": target.name},
                         rerun=False,
+                        actor_user_id=actor_user_id,
                     )
                     return
                 await db.commit()
@@ -1168,6 +1246,8 @@ async def sync_recovered_board_run(
             links = await _column_links(db, column.id)
             next_index = _next_link_index(links, run)
             remaining = links[next_index:]
+            # The rest of the chain keeps running as the user who started it.
+            actor_user_id = run.actor_user_id
             run.execution_history_id = history.id
             run.active_execution_id = None
             run.finished_at = datetime.now(timezone.utc)
@@ -1268,6 +1348,7 @@ async def sync_recovered_board_run(
                     links=remaining,
                     move=None,
                     rerun=False,
+                    actor_user_id=actor_user_id,
                     start_index=next_index,
                     chain_length=len(links),
                     initial_outputs=previous_outputs,
@@ -1284,6 +1365,7 @@ async def sync_recovered_board_run(
             card_id=card_id,
             board_id=board_id,
             from_column_id=column_id,
+            actor_user_id=actor_user_id,
             session_factory=session_factory,
         )
     except Exception:  # noqa: BLE001 - board sync must never break generic recovery

@@ -2683,6 +2683,10 @@ class BoardCardRun(Base):
     active_execution_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True, index=True
     )
+    # The user whose credentials, global variables and access the run used: whoever moved,
+    # ran or answered the card, carried through auto-advance, review resumes and recovery.
+    # Null only on rows written before the column existed; those keep the board owner.
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     output: Mapped[dict] = mapped_column(JSON, default=dict)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

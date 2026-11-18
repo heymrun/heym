@@ -86,8 +86,27 @@ Board settings also share the board with **users** (by email) and with **teams**
 - Only the **owner** sees the gear and delete buttons, and only the owner can change the
   board's settings, its Agentic Kanban Model or its shares.
 
-Chains on a shared board always run with the **owner's** credentials and Agentic Kanban
-Model, so collaborators never need their own.
+### Whose credentials a run uses
+
+A chain runs as the user who **started** it: whoever moved the card, pressed **Run**, or
+answered a card waiting at the planning step. Its workflows use that user's credentials
+and global variables, the same as a run they start from the editor, no matter who owns the
+board or who added the workflow to the column. Global variables a workflow writes are saved
+to that user too.
+
+- Auto-advance keeps the same user: a card one person moved runs every later column's chain
+  as that person.
+- After a [review or Codex question](#human-in-the-loop-and-codex-questions) is answered,
+  the rest of the chain still runs as the user who started it, not as the one who answered.
+- A workflow in the chain must be **shared with** the user who started the run (or owned
+  by them). If it is not, that step does not run: the card shows
+  "*Workflow* did not run: it is not shared with the user who started the run", turns red,
+  and the remaining steps are skipped.
+- A workflow that reads `$credentials.<name>` or uses a credential selected in a node only
+  works for collaborators who can use that credential: share it with them, or each
+  collaborator adds their own credential with the same name.
+- The Agentic Kanban Model stays a board setting: card mapping and output summaries use the
+  owner's model for everyone.
 
 ## Card attachments
 
