@@ -23,3 +23,21 @@ export interface AgentMemoryGraphResponse {
   nodes: AgentMemoryNodeDTO[];
   edges: AgentMemoryEdgeDTO[];
 }
+
+export interface AgentMemoryAiInsertRequest {
+  text: string;
+  credential_id: string;
+  model: string;
+}
+
+export interface AgentMemoryAiInsertResponse {
+  /** The graph after the insert, read in the transaction that wrote it. */
+  graph: AgentMemoryGraphResponse;
+  entities_applied: number;
+  relationships_applied: number;
+}
+
+export interface AgentMemoryClearResponse {
+  deleted_nodes: number;
+  deleted_edges: number;
+}

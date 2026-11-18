@@ -3,6 +3,8 @@ import { computed, nextTick, onUnmounted, ref, watch } from "vue";
 import type { Edge, Node } from "@vue-flow/core";
 import { Eye, EyeOff, Maximize2, Minimize2, RefreshCw, Search, Trash2, Wand2, X } from "lucide-vue-next";
 
+import AgentMemoryAiInsertPanel from "@/components/Dialogs/AgentMemoryAiInsertPanel.vue";
+import AgentMemoryGraphBulkActions from "@/components/Dialogs/AgentMemoryGraphBulkActions.vue";
 import { REVEAL_DURATION_MS } from "@/components/Dialogs/AgentMemoryGraphEdge.vue";
 import AgentMemoryGraphFlowPane from "@/components/Dialogs/AgentMemoryGraphFlowPane.vue";
 import { parseSearchTokens, searchMemoryGraph } from "@/components/Dialogs/agentMemoryGraphSearch";
@@ -12,6 +14,8 @@ import {
   nodeRadius,
   seedPositions,
 } from "@/components/Dialogs/agentMemoryGraphView";
+import { revealBelow } from "@/components/Dialogs/agentMemoryBulkActions";
+import { useAgentMemoryBulkActions } from "@/components/Dialogs/useAgentMemoryBulkActions";
 import Button from "@/components/ui/Button.vue";
 import Dialog from "@/components/ui/Dialog.vue";
 import Input from "@/components/ui/Input.vue";
@@ -871,6 +875,65 @@ watch(
   },
 );
 
+/** Takes the graph an AI insert or Clear all returned instead of reloading: the server commits
+ * after it responds, so an immediate GET could still read the graph from before the write. */
+async function applyServerGraph(next: AgentMemoryGraphResponse): Promise<void> {
+  captureLivePositions();
+  graph.value = {
+    nodes: next.nodes.map((n) => ({ ...n })),
+    edges: next.edges.map((e) => ({ ...e })),
+  };
+  // Neither write can be undone, and the undo ops recorded before it may no longer apply.
+  undoStack.value = [];
+  const selected = selectedNodeId.value;
+  if (selected !== null && !next.nodes.some((n) => n.id === selected)) {
+    selectedNodeId.value = null;
+  }
+  if (!next.nodes.length) {
+    knownPositions.value = new Map();
+    return;
+  }
+  await tryFitView();
+  flowPaneRef.value?.reheat();
+}
+
+const aiInsertPanelRef = ref<InstanceType<typeof AgentMemoryAiInsertPanel> | null>(null);
+const graphCanvasRef = ref<HTMLElement | null>(null);
+
+/** After an insert the dialog is still scrolled to the top, where the closed panel was, and on a
+ * laptop-height screen the bottom of the canvas sits below the fold: bring the canvas into view. */
+async function revealGraphCanvas(): Promise<void> {
+  await nextTick();
+  await new Promise<void>((resolve) => {
+    requestAnimationFrame(() => resolve());
+  });
+  if (graphCanvasRef.value) {
+    revealBelow(graphCanvasRef.value);
+  }
+}
+const {
+  modelChoice: aiModelChoice,
+  insertOpen: aiInsertOpen,
+  insertText: aiInsertText,
+  inserting: aiInserting,
+  clearing: memoryClearing,
+  toggleInsert: toggleAiInsert,
+  closeInsert: closeAiInsert,
+  submitInsert: submitAiInsert,
+  clearAll: clearAllMemory,
+  reset: resetBulkActions,
+} = useAgentMemoryBulkActions({
+  workflowId: () => props.workflowId,
+  canvasNodeId: () => props.canvasNodeId,
+  agentNodeData: () => {
+    const data = workflowStore.nodes.find((n) => n.id === props.canvasNodeId)?.data;
+    return data && typeof data === "object" ? (data as Record<string, unknown>) : undefined;
+  },
+  graph,
+  applyGraph: applyServerGraph,
+  onInserted: revealGraphCanvas,
+});
+
 async function performUndo(): Promise<void> {
   if (!props.workflowId || !props.canvasNodeId) {
     return;
@@ -994,6 +1057,7 @@ watch(
       }
       dimmingNodeId.value = null;
       undoStack.value = [];
+      resetBulkActions();
     }
   },
   { immediate: true },
@@ -1490,12 +1554,20 @@ function handleDialogEscape(event: KeyboardEvent): void {
   // fullscreen, and only close the dialog once none of those are open. Dialog listens on window
   // in the capture phase, so this is the only place Escape can be intercepted — a @keydown
   // handler on the search input itself would never run.
+  if (aiInsertOpen.value && aiInsertPanelRef.value?.contains(event.target)) {
+    closeAiInsert();
+    return;
+  }
   if (searchExpanded.value) {
     clearOrCollapseSearch();
     return;
   }
   if (graphCanvasFullscreen.value) {
     graphCanvasFullscreen.value = false;
+    return;
+  }
+  if (aiInsertOpen.value && !aiInserting.value) {
+    closeAiInsert();
     return;
   }
   emit("close");
@@ -1511,6 +1583,17 @@ function handleDialogEscape(event: KeyboardEvent): void {
     @close="emit('close')"
   >
     <template #header-trailing>
+      <AgentMemoryGraphBulkActions
+        v-if="workflowId && canvasNodeId"
+        :model="aiModelChoice?.model ?? null"
+        :insert-open="aiInsertOpen"
+        :inserting="aiInserting"
+        :clearing="memoryClearing"
+        :busy="loading"
+        :entity-count="totalNodeCount"
+        @toggle-insert="toggleAiInsert"
+        @clear="clearAllMemory"
+      />
       <button
         type="button"
         class="dialog-header-icon-btn flex items-center justify-center h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground transition-all duration-200 disabled:opacity-40 disabled:pointer-events-none"
@@ -1530,8 +1613,20 @@ function handleDialogEscape(event: KeyboardEvent): void {
       tabindex="-1"
       class="flex flex-col gap-3 min-h-0 w-full overflow-hidden max-h-[min(70vh,calc(100dvh-10rem))] outline-none focus:outline-none"
     >
+      <AgentMemoryAiInsertPanel
+        v-if="aiInsertOpen && aiModelChoice"
+        ref="aiInsertPanelRef"
+        v-model="aiInsertText"
+        :model="aiModelChoice.model"
+        :inserting="aiInserting"
+        @submit="submitAiInsert"
+        @cancel="closeAiInsert"
+      />
+
       <p class="text-xs text-muted-foreground shrink-0">
         Graph updates in the background after each successful agent run (including sub-agents).
+        AI insert (top right) extracts entities and relationships from pasted text with this
+        agent's model; Clear all empties the graph.
         Search (Ctrl/Cmd+F) filters the canvas down to the entities and relationships that match
         and hides everything else. Drag a node
         to place it (dragging a selected node moves its connected entities with it); Tidy layout
@@ -1627,6 +1722,7 @@ function handleDialogEscape(event: KeyboardEvent): void {
         :class="{ 'agent-memory-graph-fs-root': graphCanvasFullscreen }"
       >
         <div
+          ref="graphCanvasRef"
           class="agent-memory-graph-flow relative flex flex-col border border-border rounded-lg overflow-hidden bg-muted/30 min-h-[220px] h-[min(42vh,360px)] max-h-[50vh] lg:h-full lg:max-h-none lg:min-h-0"
           :class="{ 'needles-spinning': needleAnimating, 'compact-mode': labelsHidden }"
         >

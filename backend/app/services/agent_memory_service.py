@@ -12,7 +12,7 @@ import json
 import logging
 import threading
 import uuid
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import Any
 
 from sqlalchemy import func, literal, or_, select
@@ -64,6 +64,41 @@ Rules:
 - Residence / primary location changes: emit the new lives_in (or equivalent) relationship and the new place entity only; the system replaces prior same-type location links from that person. When you also set location on the person entity, include only the fields that changed (e.g. {\"location\": \"Istanbul\"}) so attributes merge with existing properties.
 - If there is nothing to remember, return {"revoked_entities": [], "entities": [], "relationships": []}.
 """
+
+# Same output shape as _MEMORY_SYSTEM minus revoked_entities: a pasted text only adds to the
+# graph, so an "AI insert" can never delete an entity the user did not point at.
+MEMORY_INSERT_SYSTEM = """You extract structured memory entities and relationships from a text the user wants added to an agent's memory graph.
+Output JSON ONLY with this exact shape:
+{
+  "entities": [
+    {"name": string, "type": string, "properties": object, "confidence": number, "similar_to": string|null}
+  ],
+  "relationships": [
+    {"source": string, "target": string, "type": string, "properties": object, "confidence": number}
+  ]
+}
+Rules:
+- The user chose to add this text, so extract every entity and relationship it states. Do not drop facts as unimportant.
+- Keep entity names in the language and spelling the text uses.
+- Every relationship's source and target must be listed in entities, or be the exact name of a node in "Existing Graph Nodes".
+- similar_to: name of an existing entity in the graph that this is the same as (for merge), or null if new.
+- Use concise entity types: person, product, topic, organization, preference, other.
+- Put descriptive facts about one entity in its properties (e.g. {"role": "CTO"}) instead of creating an entity for each fact.
+- Use short lowercase relationship types, such as "works for", "lives in", "owns".
+- confidence must be between 0.0 and 1.0.
+- If the text contains nothing to remember, return {"entities": [], "relationships": []}.
+"""
+
+# Matches the conversation cap of the post-run extraction job.
+AI_INSERT_MAX_TEXT_CHARS = 24000
+
+
+@dataclass(frozen=True)
+class MemoryMergeResult:
+    """How many extracted items reached the graph (created or merged into an existing row)."""
+
+    entities_applied: int = 0
+    relationships_applied: int = 0
 
 
 def normalize_relationship_type(rel: str) -> str:
@@ -610,7 +645,7 @@ def apply_parsed_extraction_sync(
     workflow_id: uuid.UUID,
     canvas_node_id: str,
     data: dict[str, Any],
-) -> None:
+) -> MemoryMergeResult:
     """Merge extraction JSON into stored graph (new overrides old on same entity name)."""
     canvas_key = canvas_node_id[:128]
     entities = data.get("entities") or []
@@ -659,6 +694,8 @@ def apply_parsed_extraction_sync(
     # Nodes created or updated from this batch's own `entities` survive the
     # prune below even if they end up with no edges.
     entity_batch_ids: set[uuid.UUID] = set()
+    entities_applied = 0
+    relationships_applied = 0
     for raw in entities:
         if not isinstance(raw, dict):
             continue
@@ -680,6 +717,7 @@ def apply_parsed_extraction_sync(
         if target_existing is None:
             target_existing = _find_node_by_name_sync(session, workflow_id, canvas_key, name)
 
+        entities_applied += 1
         if target_existing:
             target_existing.entity_name = name[:255]
             target_existing.entity_type = ent_type
@@ -723,6 +761,7 @@ def apply_parsed_extraction_sync(
         tgt = _find_node_by_name_sync(session, workflow_id, canvas_key, tgt_name)
         if src is None or tgt is None:
             continue
+        relationships_applied += 1
         stmt = select(AgentMemoryEdge).where(
             AgentMemoryEdge.workflow_id == workflow_id,
             AgentMemoryEdge.canvas_node_id == canvas_key,
@@ -773,9 +812,75 @@ def apply_parsed_extraction_sync(
         canvas_key,
         candidate_node_ids=frozenset(edge_replacement_candidates - entity_batch_ids),
     )
+    return MemoryMergeResult(
+        entities_applied=entities_applied,
+        relationships_applied=relationships_applied,
+    )
 
 
-async def _run_memory_extraction_llm(
+def memory_llm_endpoint(credential_type: str, config: dict[str, Any]) -> tuple[str, str | None]:
+    """API key and base URL a memory extraction call uses for a decrypted credential config."""
+    api_key = config.get("api_key") or ""
+    base_url = config.get("base_url")
+    if not base_url and credential_type == "google":
+        from app.services.llm_service import GOOGLE_OPENAI_BASE_URL
+
+        base_url = GOOGLE_OPENAI_BASE_URL
+    elif base_url and credential_type == "custom":
+        base_url = str(base_url).rstrip("/")
+        if not base_url.endswith("/v1"):
+            base_url = base_url + "/v1"
+    return api_key, base_url
+
+
+def graph_summaries_for_extraction(
+    nodes: list[AgentMemoryNode],
+    edges: list[AgentMemoryEdge],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """The existing graph as the extraction prompt shows it, so the model can merge into it."""
+    nodes_summary = [
+        {"name": n.entity_name, "type": n.entity_type, "properties": n.properties} for n in nodes
+    ]
+    id_to_name = {n.id: n.entity_name for n in nodes}
+    edges_summary = [
+        {
+            "source": id_to_name.get(e.source_node_id, "?"),
+            "target": id_to_name.get(e.target_node_id, "?"),
+            "type": e.relationship_type,
+        }
+        for e in edges
+    ]
+    return nodes_summary, edges_summary
+
+
+def build_memory_insert_payload(
+    text: str,
+    nodes_summary: list[dict[str, Any]],
+    edges_summary: list[dict[str, Any]],
+) -> str:
+    """User message for an AI insert: the pasted text plus the graph it merges into."""
+    body = text.strip()
+    if len(body) > AI_INSERT_MAX_TEXT_CHARS:
+        body = body[:AI_INSERT_MAX_TEXT_CHARS] + "\n…"
+    return (
+        f"Text to add to memory:\n{body}\n\n"
+        f"Existing Graph Nodes:\n{json.dumps(nodes_summary, ensure_ascii=False, default=str)}\n\n"
+        f"Existing Graph Edges:\n{json.dumps(edges_summary, ensure_ascii=False, default=str)}\n"
+    )
+
+
+def insert_only_extraction(parsed: dict[str, Any]) -> dict[str, Any]:
+    """Keep what an AI insert may add; drop revoked_entities so it can never delete nodes."""
+    entities = parsed.get("entities")
+    relationships = parsed.get("relationships")
+    return {
+        "revoked_entities": [],
+        "entities": entities if isinstance(entities, list) else [],
+        "relationships": relationships if isinstance(relationships, list) else [],
+    }
+
+
+async def run_memory_extraction_llm(
     *,
     credential_type: str,
     api_key: str,
@@ -784,6 +889,7 @@ async def _run_memory_extraction_llm(
     user_payload: str,
     trace_context: LLMTraceContext | None,
     router: ModelRouter | None = None,
+    system_instruction: str = _MEMORY_SYSTEM,
 ) -> dict[str, Any]:
     """LLM-only coroutine (no DB); safe to run under asyncio.run in a worker thread."""
     common: dict[str, Any] = {
@@ -791,7 +897,7 @@ async def _run_memory_extraction_llm(
         "api_key": api_key,
         "base_url": base_url,
         "model": model,
-        "system_instruction": _MEMORY_SYSTEM,
+        "system_instruction": system_instruction,
         "user_message": user_payload,
         "temperature": 0.2,
         "trace_context": trace_context,
@@ -853,16 +959,7 @@ def extract_and_merge_memory_sync(
                 credential_type=cred.type.value,
                 config=config,
             )
-            api_key = config.get("api_key") or ""
-            base_url = config.get("base_url")
-            if not base_url and cred.type.value == "google":
-                from app.services.llm_service import GOOGLE_OPENAI_BASE_URL
-
-                base_url = GOOGLE_OPENAI_BASE_URL
-            elif base_url and cred.type.value == "custom":
-                base_url = str(base_url).rstrip("/")
-                if not base_url.endswith("/v1"):
-                    base_url = base_url + "/v1"
+            api_key, base_url = memory_llm_endpoint(cred.type.value, config)
             if not api_key and router is None:
                 logger.warning("Agent memory: no API key on credential")
                 return
@@ -877,10 +974,6 @@ def extract_and_merge_memory_sync(
                 .scalars()
                 .all()
             )
-            existing_nodes_summary = [
-                {"name": n.entity_name, "type": n.entity_type, "properties": n.properties}
-                for n in nodes_list
-            ]
             edges_list = list(
                 session.execute(
                     select(AgentMemoryEdge).where(
@@ -891,15 +984,9 @@ def extract_and_merge_memory_sync(
                 .scalars()
                 .all()
             )
-            id_to_name = {n.id: n.entity_name for n in nodes_list}
-            existing_edges_summary = [
-                {
-                    "source": id_to_name.get(e.source_node_id, "?"),
-                    "target": id_to_name.get(e.target_node_id, "?"),
-                    "type": e.relationship_type,
-                }
-                for e in edges_list
-            ]
+            existing_nodes_summary, existing_edges_summary = graph_summaries_for_extraction(
+                nodes_list, edges_list
+            )
 
             conv_trim = conversation if len(conversation) <= 24000 else conversation[:24000] + "\n…"
             user_payload = (
@@ -910,7 +997,7 @@ def extract_and_merge_memory_sync(
 
             try:
                 llm_out = asyncio.run(
-                    _run_memory_extraction_llm(
+                    run_memory_extraction_llm(
                         credential_type=cred.type.value,
                         api_key=api_key,
                         base_url=base_url,
