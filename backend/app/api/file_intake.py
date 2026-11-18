@@ -22,9 +22,11 @@ from app.db.session import async_session_maker, get_db
 from app.services import file_intake_service, file_storage
 from app.services.execution_cancellation import clear_execution, register_execution
 from app.services.hitl_service import build_public_base_url
+from app.services.pending_execution import needs_local_pending_persist, persist_pending_execution
 from app.services.result_stream import stream_result
 from app.services.secret_tokens import hash_secret
 from app.services.upload_limits import read_upload_file_limited
+from app.services.workflow_access import user_has_workflow_access
 from app.services.workflow_executor import ExecutionResult, WorkflowCancelledError, execute_workflow
 
 router = APIRouter(prefix="/file-intake", tags=["file-intake"])
@@ -49,7 +51,16 @@ async def get_slot_status(
         raise HTTPException(status_code=404, detail="Upload slot not found")
 
     workflow = await db.get(Workflow, slot.workflow_id)
-    if workflow is None or workflow.owner_id != current_user.id:
+    # The owner, or the collaborator whose canvas run minted the slot while they can still
+    # open the workflow; anyone else gets the same 404 as an unknown slot.
+    allowed = workflow is not None and (
+        workflow.owner_id == current_user.id
+        or (
+            slot.created_by_user_id == current_user.id
+            and await user_has_workflow_access(db, workflow, current_user.id)
+        )
+    )
+    if not allowed:
         raise HTTPException(status_code=404, detail="Upload slot not found")
 
     result: dict = {"status": slot.status, "run_id": slot.run_id, "run": None}
@@ -255,20 +266,37 @@ async def upload_to_slot(
                     execution_time_ms=0.0,
                 )
 
-            history = ExecutionHistory(
-                id=execution_id,
-                workflow_id=workflow.id,
-                inputs={
-                    "file": file_payload,
-                    **({"body": slot.initial_inputs} if slot.initial_inputs else {}),
-                },
-                outputs=execution_result.outputs,
-                node_results=execution_result.node_results,
-                status=execution_result.status,
-                execution_time_ms=execution_result.execution_time_ms,
-                trigger_source=file_intake_service.upload_trigger_source(slot.mint_source),
-            )
-            db.add(history)
+            history_inputs = {
+                "file": file_payload,
+                **({"body": slot.initial_inputs} if slot.initial_inputs else {}),
+            }
+            trigger_source = file_intake_service.upload_trigger_source(slot.mint_source)
+            if needs_local_pending_persist(execution_result):
+                # A run paused for review goes through the same fork as every other
+                # trigger, which mints the review request a reviewer answers.
+                history, _ = await persist_pending_execution(
+                    db=db,
+                    workflow=workflow,
+                    enriched_inputs=history_inputs,
+                    execution_result=execution_result,
+                    trigger_source=trigger_source,
+                    credentials_owner_id=workflow.owner_id,
+                    trace_user_id=workflow.owner_id,
+                    public_base_url=base,
+                    history_entry_id=execution_id,
+                )
+            else:
+                history = ExecutionHistory(
+                    id=execution_id,
+                    workflow_id=workflow.id,
+                    inputs=history_inputs,
+                    outputs=execution_result.outputs,
+                    node_results=execution_result.node_results,
+                    status=execution_result.status,
+                    execution_time_ms=execution_result.execution_time_ms,
+                    trigger_source=trigger_source,
+                )
+                db.add(history)
             await db.flush()
 
             slot.run_id = str(history.id)
@@ -283,7 +311,7 @@ async def upload_to_slot(
                 file_size=stored.size_bytes,
                 mime=mime,
             )
-            if execution_result.status not in ("success", "completed"):
+            if execution_result.status not in ("success", "completed", "pending"):
                 await file_intake_service.write_audit(
                     db,
                     event="run_failed",

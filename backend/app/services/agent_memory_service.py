@@ -728,9 +728,17 @@ def apply_parsed_extraction_sync(
             AgentMemoryEdge.canvas_node_id == canvas_key,
             AgentMemoryEdge.source_node_id == src.id,
             AgentMemoryEdge.target_node_id == tgt.id,
-            AgentMemoryEdge.relationship_type == rel_type,
         )
-        existing = session.execute(stmt.limit(1)).scalars().first()
+        # One edge per pair and type, however the type is spelled ("works for", "works_for").
+        rel_key = normalize_relationship_type(rel_type)
+        same_type = [
+            edge
+            for edge in session.execute(stmt).scalars().all()
+            if normalize_relationship_type(edge.relationship_type) == rel_key
+        ]
+        existing = same_type[0] if same_type else None
+        for duplicate in same_type[1:]:
+            session.delete(duplicate)
         if existing:
             existing.properties = props
             existing.confidence = conf

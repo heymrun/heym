@@ -6190,8 +6190,12 @@ class WorkflowExecutor(WorkflowBranchRoutingMixin):
             "split": lambda s, sep=None: (
                 DotList(list(s) if sep == "" else s.split(sep)) if isinstance(s, str) else s
             ),
-            "join": lambda sep, lst: sep.join(lst) if isinstance(lst, list) else lst,
+            "join": lambda sep, lst: DotList(lst).join(sep) if isinstance(lst, list) else lst,
             "replace": lambda s, old, new: s.replace(old, new) if isinstance(s, str) else s,
+            "regexReplace": lambda s, pattern, replacement: (
+                DotStr(s).regexReplace(pattern, replacement) if isinstance(s, str) else s
+            ),
+            "hash": lambda s: DotStr(s).hash() if isinstance(s, str) else s,
             "concat": concat_func,
             "Date": create_date,
             "randomInt": random_int,

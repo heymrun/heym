@@ -216,6 +216,7 @@ Create objects/dictionaries using curly brace syntax with any string keys:
 - `join(separator, list)` - Join list
 - `replace(text, old, new)` - Replace text
 - `regexReplace(text, pattern, replacement)` - Replace with regex pattern
+- `hash(text)` - MD5 hash of the text
 - `base64Encode(text)` - Encode UTF-8 text as standard Base64
 - `base64Decode(text)` - Decode standard Base64 into UTF-8 text
 - `toJson(text)` - Parse a JSON string into an object, array, or value

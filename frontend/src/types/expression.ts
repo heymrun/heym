@@ -611,6 +611,20 @@ export const BUILTIN_FUNCTIONS: CompletionSuggestion[] = [
     description: 'replace($text, "old", "new")',
   },
   {
+    label: "regexReplace",
+    insertText: "regexReplace()",
+    type: "function",
+    detail: "Replace with regex pattern",
+    description: 'regexReplace($text, "[0-9]", "")',
+  },
+  {
+    label: "hash",
+    insertText: "hash()",
+    type: "function",
+    detail: "MD5 hash of the text",
+    description: "hash($text)",
+  },
+  {
     label: "randomInt",
     insertText: "randomInt(0, 100)",
     type: "function",
