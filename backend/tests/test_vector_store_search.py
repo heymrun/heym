@@ -45,7 +45,7 @@ class VectorStoreSearchTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch(
-                "app.api.vector_stores.get_vector_store_with_grant",
+                "app.api.vector_stores.get_vector_store_with_permission",
                 new=AsyncMock(return_value=(self.store, "read")),
             ),
             patch("app.api.vector_stores.decrypt_config", return_value={"url": "q"}),
@@ -85,7 +85,8 @@ class VectorStoreSearchTests(unittest.IsolatedAsyncioTestCase):
         from app.api.vector_stores import search_vector_store
 
         with patch(
-            "app.api.vector_stores.get_vector_store_with_grant", new=AsyncMock(return_value=None)
+            "app.api.vector_stores.get_vector_store_with_permission",
+            new=AsyncMock(return_value=None),
         ):
             with self.assertRaises(HTTPException) as raised:
                 await search_vector_store(

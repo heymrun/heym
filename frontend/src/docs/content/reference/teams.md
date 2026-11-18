@@ -55,7 +55,7 @@ Team shares per resource:
 - `GET/POST/DELETE /api/workflows/{id}/team-shares` – the POST body accepts `permission` (`read` or `write`, default `write`); posting an existing team again updates its permission
 - `GET/POST/DELETE /api/credentials/{id}/team-shares`
 - `GET/POST/DELETE /api/global-variables/{id}/team-shares`
-- `GET/POST/DELETE /api/vector-stores/{id}/team-shares`
+- `GET/POST/DELETE /api/vector-stores/{id}/team-shares` – the POST body accepts `permission` (`read` or `write`, default `read`); posting an existing team again updates its permission
 - `PATCH /api/files/{id}/team-sharing`
 
 ## Related

@@ -3,7 +3,6 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import { AlertTriangle, ChevronDown, ChevronRight, Copy, Database, File, FileUp, Pencil, Plus, Share2, Trash2, Upload, Users, Workflow, X } from "lucide-vue-next";
 
 import type { CredentialListItem } from "@/types/credential";
-import type { Team, TeamShare } from "@/types/team";
 
 import Button from "@/components/ui/Button.vue";
 import Card from "@/components/ui/Card.vue";
@@ -12,18 +11,16 @@ import Input from "@/components/ui/Input.vue";
 import Label from "@/components/ui/Label.vue";
 import Select from "@/components/ui/Select.vue";
 import Textarea from "@/components/ui/Textarea.vue";
-import UserAvatar from "@/components/ui/UserAvatar.vue";
 import VectorStoreIngestJobs from "@/components/VectorStores/VectorStoreIngestJobs.vue";
+import VectorStoreShareDialog from "@/components/VectorStores/VectorStoreShareDialog.vue";
 import { onDismissOverlays } from "@/composables/useOverlayBackHandler";
 import { RAG_FORMATS_LINE } from "@/lib/ragFileTypes";
 import { formatDate, formatFileSize } from "@/lib/utils";
 import {
   credentialsApi,
-  teamsApi,
   vectorStoresApi,
   type DuplicateFile,
   type VectorStoreListItem,
-  type VectorStoreShare,
   type VectorStoreSourceGroup,
 } from "@/services/api";
 
@@ -39,13 +36,6 @@ const uploadingStore = ref<VectorStoreListItem | null>(null);
 
 const showShareDialog = ref(false);
 const sharingStore = ref<VectorStoreListItem | null>(null);
-const storeShares = ref<VectorStoreShare[]>([]);
-const storeTeamShares = ref<TeamShare[]>([]);
-const teams = ref<Team[]>([]);
-const shareEmail = ref("");
-const shareTeamId = ref("");
-const sharingLoading = ref(false);
-const shareError = ref("");
 
 const showEditDialog = ref(false);
 const editingStore = ref<VectorStoreListItem | null>(null);
@@ -184,6 +174,7 @@ async function createVectorStore(): Promise<void> {
       shared_by: null,
       stats: store.stats,
       backend: store.backend,
+      permission: "owner",
     });
     showCreateDialog.value = false;
   } catch (e: unknown) {
@@ -231,6 +222,7 @@ async function cloneVectorStore(store: VectorStoreListItem, event: Event): Promi
       shared_by: null,
       stats: cloned.stats,
       backend: cloned.backend,
+      permission: "owner",
     });
   } catch {
     alert("Failed to clone vector store");
@@ -389,94 +381,15 @@ async function submitUpload(): Promise<void> {
   }
 }
 
-async function openShareDialog(store: VectorStoreListItem, event: Event): Promise<void> {
+function openShareDialog(store: VectorStoreListItem, event: Event): void {
   event.stopPropagation();
   sharingStore.value = store;
-  shareEmail.value = "";
-  shareTeamId.value = "";
-  shareError.value = "";
-  sharingLoading.value = true;
   showShareDialog.value = true;
-  try {
-    const [userShares, teamShares, teamList] = await Promise.all([
-      vectorStoresApi.listShares(store.id),
-      vectorStoresApi.listTeamShares(store.id),
-      teamsApi.list(),
-    ]);
-    storeShares.value = userShares;
-    storeTeamShares.value = teamShares;
-    teams.value = teamList;
-  } catch {
-    storeShares.value = [];
-    storeTeamShares.value = [];
-    teams.value = [];
-  } finally {
-    sharingLoading.value = false;
-  }
 }
 
-async function addShare(): Promise<void> {
-  if (!sharingStore.value || !shareEmail.value.trim()) return;
-  shareError.value = "";
-  sharingLoading.value = true;
-  try {
-    const share = await vectorStoresApi.addShare(sharingStore.value.id, shareEmail.value.trim());
-    if (!storeShares.value.find((s) => s.id === share.id)) {
-      storeShares.value.push(share);
-    }
-    shareEmail.value = "";
-  } catch (e: unknown) {
-    const err = e as { response?: { data?: { detail?: string } } };
-    shareError.value = err.response?.data?.detail || "Failed to share vector store";
-  } finally {
-    sharingLoading.value = false;
-  }
-}
-
-async function removeShare(userId: string): Promise<void> {
-  if (!sharingStore.value) return;
-  try {
-    await vectorStoresApi.removeShare(sharingStore.value.id, userId);
-    storeShares.value = storeShares.value.filter((s) => s.user_id !== userId);
-  } catch {
-    shareError.value = "Failed to remove share";
-  }
-}
-
-const storeTeamOptions = computed(() => {
-  const shared = new Set(storeTeamShares.value.map((s) => s.team_id));
-  return [
-    { value: "", label: "Select a team" },
-    ...teams.value
-      .filter((t) => !shared.has(t.id))
-      .map((t) => ({ value: t.id, label: t.name })),
-  ];
-});
-
-async function addTeamShare(): Promise<void> {
-  if (!sharingStore.value || !shareTeamId.value) return;
-  shareError.value = "";
-  sharingLoading.value = true;
-  try {
-    const share = await vectorStoresApi.addTeamShare(sharingStore.value.id, shareTeamId.value);
-    storeTeamShares.value = [...storeTeamShares.value, share];
-    shareTeamId.value = "";
-  } catch (e: unknown) {
-    const err = e as { response?: { data?: { detail?: string } } };
-    shareError.value = err.response?.data?.detail || "Failed to share with team";
-  } finally {
-    sharingLoading.value = false;
-  }
-}
-
-async function removeTeamShare(teamId: string): Promise<void> {
-  if (!sharingStore.value) return;
-  try {
-    await vectorStoresApi.removeTeamShare(sharingStore.value.id, teamId);
-    storeTeamShares.value = storeTeamShares.value.filter((s) => s.team_id !== teamId);
-  } catch {
-    shareError.value = "Failed to remove team share";
-  }
+/** Owners and write shares add and delete documents; a read share only searches. */
+function canWrite(store: VectorStoreListItem | null): boolean {
+  return store !== null && store.permission !== "read";
 }
 
 function formatVectorCount(stats: VectorStoreListItem["stats"]): string {
@@ -648,7 +561,7 @@ async function deleteItem(pointId: string): Promise<void> {
                   class="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-blue-500/10 text-blue-500"
                 >
                   <Users class="w-3 h-3" />
-                  Shared
+                  Shared · {{ store.permission === "write" ? "Write" : "Read" }}
                 </span>
               </div>
               <p class="text-xs text-muted-foreground">
@@ -657,7 +570,7 @@ async function deleteItem(pointId: string): Promise<void> {
             </div>
           </div>
           <div
-            v-if="!store.is_shared"
+            v-if="canWrite(store)"
             class="flex items-center gap-1"
           >
             <Button
@@ -669,42 +582,44 @@ async function deleteItem(pointId: string): Promise<void> {
             >
               <Upload class="w-4 h-4" />
             </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              class="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-primary h-8 w-8"
-              title="Edit"
-              @click="openEditDialog(store, $event)"
-            >
-              <Pencil class="w-4 h-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              class="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-primary h-8 w-8"
-              title="Clone"
-              @click="cloneVectorStore(store, $event)"
-            >
-              <Copy class="w-4 h-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              class="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-primary h-8 w-8"
-              title="Share"
-              @click="openShareDialog(store, $event)"
-            >
-              <Share2 class="w-4 h-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              class="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive h-8 w-8"
-              title="Delete"
-              @click="openDeleteDialog(store, $event)"
-            >
-              <Trash2 class="w-4 h-4" />
-            </Button>
+            <template v-if="!store.is_shared">
+              <Button
+                variant="ghost"
+                size="icon"
+                class="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-primary h-8 w-8"
+                title="Edit"
+                @click="openEditDialog(store, $event)"
+              >
+                <Pencil class="w-4 h-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                class="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-primary h-8 w-8"
+                title="Clone"
+                @click="cloneVectorStore(store, $event)"
+              >
+                <Copy class="w-4 h-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                class="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-primary h-8 w-8"
+                title="Share"
+                @click="openShareDialog(store, $event)"
+              >
+                <Share2 class="w-4 h-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                class="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive h-8 w-8"
+                title="Delete"
+                @click="openDeleteDialog(store, $event)"
+              >
+                <Trash2 class="w-4 h-4" />
+              </Button>
+            </template>
           </div>
         </div>
 
@@ -719,8 +634,8 @@ async function deleteItem(pointId: string): Promise<void> {
             {{ store.collection_name }}
           </div>
           <div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-            <span v-if="store.is_shared && store.shared_by">
-              Shared by {{ store.shared_by }}
+            <span v-if="store.is_shared && (store.shared_by || store.shared_by_team)">
+              {{ store.shared_by ? `Shared by ${store.shared_by}` : `Shared via ${store.shared_by_team}` }}
             </span>
             <span v-else>
               Created {{ formatDate(store.created_at) }}
@@ -1023,139 +938,13 @@ async function deleteItem(pointId: string): Promise<void> {
       </div>
     </Dialog>
 
-    <Dialog
+    <VectorStoreShareDialog
+      v-if="sharingStore"
       :open="showShareDialog"
-      title="Share Vector Store"
+      :store-id="sharingStore.id"
+      :store-name="sharingStore.name"
       @close="showShareDialog = false"
-    >
-      <div class="space-y-4">
-        <p class="text-sm text-muted-foreground">
-          Share <strong>{{ sharingStore?.name }}</strong> with other users.
-          They will be able to use this vector store in their workflows.
-        </p>
-
-        <div class="space-y-3">
-          <div>
-            <Label class="text-xs">Share with user</Label>
-            <div class="flex gap-2 mt-1">
-              <Input
-                v-model="shareEmail"
-                type="email"
-                placeholder="user@example.com"
-                class="flex-1"
-                @keyup.enter="addShare"
-              />
-              <Button
-                :disabled="!shareEmail.trim() || sharingLoading"
-                @click="addShare"
-              >
-                Share
-              </Button>
-            </div>
-          </div>
-          <div>
-            <Label class="text-xs">Share with team</Label>
-            <div class="flex gap-2 mt-1">
-              <Select
-                v-model="shareTeamId"
-                :options="storeTeamOptions"
-                class="flex-1"
-              />
-              <Button
-                :disabled="!shareTeamId || sharingLoading"
-                @click="addTeamShare"
-              >
-                <Users class="w-4 h-4" />
-                Add
-              </Button>
-            </div>
-          </div>
-        </div>
-
-        <p
-          v-if="shareError"
-          class="text-sm text-destructive"
-        >
-          {{ shareError }}
-        </p>
-
-        <div class="space-y-2">
-          <Label>Shared with users:</Label>
-          <div
-            v-if="storeShares.length > 0"
-            class="space-y-2 max-h-32 overflow-y-auto"
-          >
-            <div
-              v-for="share in storeShares"
-              :key="share.id"
-              class="flex items-center justify-between p-2 rounded bg-muted/50"
-            >
-              <div class="flex min-w-0 items-center gap-2.5">
-                <UserAvatar
-                  :user-id="share.user_id"
-                  :name="share.name"
-                  :email="share.email"
-                  class="h-8 w-8 bg-primary/10 text-xs font-semibold text-primary dark:bg-primary/20 dark:text-accent-foreground"
-                />
-                <div class="min-w-0">
-                  <p class="truncate text-sm font-medium">
-                    {{ share.name }}
-                  </p>
-                  <p class="truncate text-xs text-muted-foreground">
-                    {{ share.email }}
-                  </p>
-                </div>
-              </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                class="h-8 w-8 text-muted-foreground hover:text-destructive"
-                @click="removeShare(share.user_id)"
-              >
-                <X class="w-4 h-4" />
-              </Button>
-            </div>
-          </div>
-          <p
-            v-else-if="!sharingLoading"
-            class="text-sm text-muted-foreground"
-          >
-            No users
-          </p>
-        </div>
-        <div class="space-y-2">
-          <Label>Shared with teams:</Label>
-          <div
-            v-if="storeTeamShares.length > 0"
-            class="space-y-2 max-h-32 overflow-y-auto"
-          >
-            <div
-              v-for="share in storeTeamShares"
-              :key="share.id"
-              class="flex items-center justify-between p-2 rounded bg-muted/50"
-            >
-              <p class="text-sm font-medium">
-                {{ share.team_name }}
-              </p>
-              <Button
-                variant="ghost"
-                size="icon"
-                class="h-8 w-8 text-muted-foreground hover:text-destructive"
-                @click="removeTeamShare(share.team_id)"
-              >
-                <X class="w-4 h-4" />
-              </Button>
-            </div>
-          </div>
-          <p
-            v-else-if="!sharingLoading"
-            class="text-sm text-muted-foreground"
-          >
-            No teams
-          </p>
-        </div>
-      </div>
-    </Dialog>
+    />
 
     <Dialog
       :open="showEditDialog"
@@ -1226,7 +1015,7 @@ async function deleteItem(pointId: string): Promise<void> {
     >
       <template #header-actions>
         <Button
-          v-if="itemsStore && !itemsStore.is_shared"
+          v-if="itemsStore && canWrite(itemsStore)"
           variant="outline"
           size="sm"
           @click="openUploadDialog(itemsStore)"
@@ -1262,6 +1051,7 @@ async function deleteItem(pointId: string): Promise<void> {
           v-if="itemsStore"
           :key="itemsStore.id"
           :store-id="itemsStore.id"
+          :can-dismiss="canWrite(itemsStore)"
           @finished="loadItems"
         />
 
@@ -1325,7 +1115,7 @@ async function deleteItem(pointId: string): Promise<void> {
                 </span>
               </div>
               <Button
-                v-if="!itemsStore?.is_shared"
+                v-if="canWrite(itemsStore)"
                 variant="ghost"
                 size="icon"
                 class="h-7 w-7 text-muted-foreground hover:text-destructive flex-shrink-0"
@@ -1360,7 +1150,7 @@ async function deleteItem(pointId: string): Promise<void> {
                     </p>
                   </div>
                   <Button
-                    v-if="!itemsStore?.is_shared"
+                    v-if="canWrite(itemsStore)"
                     variant="ghost"
                     size="icon"
                     class="h-6 w-6 text-muted-foreground hover:text-destructive flex-shrink-0"

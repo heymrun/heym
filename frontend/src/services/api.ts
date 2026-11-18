@@ -2473,9 +2473,15 @@ export interface VectorStoreListItem {
   updated_at: string;
   is_shared: boolean;
   shared_by: string | null;
+  shared_by_team?: string | null;
   stats: VectorStoreStats | null;
   backend?: string;
+  /** The caller's strongest grant: owner, or a write or read share. */
+  permission: VectorStorePermission;
 }
+
+export type VectorStoreSharePermission = "read" | "write";
+export type VectorStorePermission = "owner" | VectorStoreSharePermission;
 
 export interface VectorStore {
   id: string;
@@ -2488,6 +2494,7 @@ export interface VectorStore {
   updated_at: string;
   stats: VectorStoreStats | null;
   backend?: string;
+  permission: VectorStorePermission;
 }
 
 export interface VectorStoreDeleteResult {
@@ -2501,6 +2508,15 @@ export interface VectorStoreShare {
   user_id: string;
   email: string;
   name: string;
+  permission: VectorStoreSharePermission;
+  shared_at: string;
+}
+
+export interface VectorStoreTeamShare {
+  id: string;
+  team_id: string;
+  team_name: string;
+  permission: VectorStoreSharePermission;
   shared_at: string;
 }
 
@@ -2627,10 +2643,14 @@ export const vectorStoresApi = {
     return response.data;
   },
 
-  addShare: async (id: string, email: string): Promise<VectorStoreShare> => {
+  addShare: async (
+    id: string,
+    email: string,
+    permission: VectorStoreSharePermission = "read",
+  ): Promise<VectorStoreShare> => {
     const response = await api.post<VectorStoreShare>(
       `/vector-stores/${id}/shares`,
-      { email },
+      { email, permission },
     );
     return response.data;
   },
@@ -2638,16 +2658,20 @@ export const vectorStoresApi = {
   removeShare: async (id: string, userId: string): Promise<void> => {
     await api.delete(`/vector-stores/${id}/shares/${userId}`);
   },
-  listTeamShares: async (id: string): Promise<TeamShare[]> => {
-    const response = await api.get<TeamShare[]>(
+  listTeamShares: async (id: string): Promise<VectorStoreTeamShare[]> => {
+    const response = await api.get<VectorStoreTeamShare[]>(
       `/vector-stores/${id}/team-shares`,
     );
     return response.data;
   },
-  addTeamShare: async (id: string, teamId: string): Promise<TeamShare> => {
-    const response = await api.post<TeamShare>(
+  addTeamShare: async (
+    id: string,
+    teamId: string,
+    permission: VectorStoreSharePermission = "read",
+  ): Promise<VectorStoreTeamShare> => {
+    const response = await api.post<VectorStoreTeamShare>(
       `/vector-stores/${id}/team-shares`,
-      { team_id: teamId },
+      { team_id: teamId, permission },
     );
     return response.data;
   },

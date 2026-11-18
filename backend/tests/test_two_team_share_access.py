@@ -259,9 +259,18 @@ class VectorStoreAccessTests(unittest.IsolatedAsyncioTestCase):
         store = VectorStore(name="s", collection_name="c", owner_id=uuid.uuid4())
         store.id = uuid.uuid4()
 
-        result = await vector_stores_api._get_accessible_store(
-            store.id, uuid.uuid4(), _team_db(store)
-        )
+        async def execute(stmt):
+            sql = str(stmt)
+            if "vector_store_team_shares" in sql:
+                return _Result(["read"] * TEAMS)
+            if "vector_store_shares" in sql or "owner_id =" in sql:
+                return _Result([])
+            return _Result([store])
+
+        db = AsyncMock()
+        db.execute = AsyncMock(side_effect=execute)
+
+        result = await vector_stores_api._get_accessible_store(store.id, uuid.uuid4(), db)
 
         self.assertIs(result, store)
 

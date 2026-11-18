@@ -241,8 +241,8 @@ class KnowledgeBaseDocumentTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch(
-                "app.api.vector_stores.get_vector_store_with_grant",
-                AsyncMock(return_value=(store, "shared")),
+                "app.api.vector_stores.get_vector_store_with_permission",
+                AsyncMock(return_value=(store, "read")),
             ),
             patch("app.api.vector_stores.decrypt_config", return_value={"url": "q"}),
             patch(
