@@ -825,7 +825,7 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
       gristFilter: "{}",
       gristSort: "",
       gristLimit: 100,
-      gristRecordIds: "[]",
+      gristRecordIds: "",
       gristRecordDataInputMode: "raw",
       gristFilterInputMode: "raw",
     },

@@ -271,7 +271,17 @@ def execute(ctx: NodeExecutionContext) -> object:
         if not doc_id or not table_id:
             raise ValueError("Grist deleteRecord requires document ID and table ID")
         record_ids_template = node_data.get("gristRecordIds", "")
-        if not record_ids_template:
+        # A Record IDs value that is blank or exactly `[]` is treated as not set,
+        # so single Record ID is used (e.g. from canvas defaults or when cleared).
+        is_batch_empty = (
+            not record_ids_template
+            or (
+                isinstance(record_ids_template, str)
+                and record_ids_template.strip().replace(" ", "") in ("", "[]")
+            )
+            or record_ids_template == []
+        )
+        if is_batch_empty:
             record_id_template = node_data.get("gristRecordId", "")
             record_id = self.evaluate_nonempty_message_template(record_id_template, inputs, node_id)
             if not record_id:

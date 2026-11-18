@@ -18,7 +18,7 @@ from app.services.workflow_executor import WorkflowExecutor
 SECRET = "k_live_grist_secret_9"
 
 
-def _run(data: dict, inputs: dict | None = None) -> tuple[str, str]:
+def _run_node(data: dict, inputs: dict | None = None) -> dict:
     nodes = [
         {
             "id": "start",
@@ -45,7 +45,11 @@ def _run(data: dict, inputs: dict | None = None) -> tuple[str, str]:
         workflow_id=uuid.uuid4(),
         initial_inputs=initial_inputs,
     )
-    row = next(r for r in result.node_results if r["node_label"] == "n")
+    return next(r for r in result.node_results if r["node_label"] == "n")
+
+
+def _run(data: dict, inputs: dict | None = None) -> tuple[str, str]:
+    row = _run_node(data, inputs)
     return row["status"], str(row.get("error") or "")
 
 
@@ -219,6 +223,119 @@ class GristBlankFieldTests(unittest.TestCase):
         self.assertEqual(status, "error")
         self.assertIn("Grist deleteRecord requires record ID(s)", error)
         self.assertEqual(self.sent, [])
+        self.assertNotIn(SECRET, str(self.sent))
+
+    def test_single_record_id_with_batch_empty_brackets_deletes_record(self) -> None:
+        row = _run_node(
+            {
+                "gristOperation": "deleteRecord",
+                "gristDocId": "doc1",
+                "gristTableId": "Table1",
+                "gristRecordId": "7",
+                "gristRecordIds": "[]",
+            }
+        )
+
+        self.assertEqual(row["status"], "success")
+        self.assertEqual(row.get("output", {}).get("deleted"), [7])
+        self.assertEqual(row.get("output", {}).get("count"), 1)
+        self.assertEqual(len(self.sent), 1)
+        self.assertEqual(self.sent[0]["method"], "POST")
+        self.assertEqual(self.sent[0]["url"], "/api/docs/doc1/tables/Table1/data/delete")
+        self.assertEqual(self.sent[0]["json"], [7])
+        self.assertNotIn(SECRET, str(self.sent))
+
+    def test_both_blank_record_ids_in_delete_record_raises_and_sends_no_request(self) -> None:
+        status, error = _run(
+            {
+                "gristOperation": "deleteRecord",
+                "gristDocId": "doc1",
+                "gristTableId": "Table1",
+                "gristRecordId": "",
+                "gristRecordIds": "",
+            }
+        )
+
+        self.assertEqual(status, "error")
+        self.assertIn("Grist deleteRecord requires record ID(s)", error)
+        self.assertEqual(self.sent, [])
+        self.assertNotIn(SECRET, str(self.sent))
+
+    def test_batch_empty_brackets_with_blank_single_id_raises_and_sends_no_request(self) -> None:
+        status, error = _run(
+            {
+                "gristOperation": "deleteRecord",
+                "gristDocId": "doc1",
+                "gristTableId": "Table1",
+                "gristRecordId": "",
+                "gristRecordIds": "[]",
+            }
+        )
+
+        self.assertEqual(status, "error")
+        self.assertIn("Grist deleteRecord requires record ID(s)", error)
+        self.assertEqual(self.sent, [])
+        self.assertNotIn(SECRET, str(self.sent))
+
+    def test_batch_empty_brackets_with_empty_evaluating_single_id_raises_and_sends_no_request(
+        self,
+    ) -> None:
+        status, error = _run(
+            {
+                "gristOperation": "deleteRecord",
+                "gristDocId": "doc1",
+                "gristTableId": "Table1",
+                "gristRecordId": "$start.body.blank",
+                "gristRecordIds": "[]",
+            }
+        )
+
+        self.assertEqual(status, "error")
+        self.assertIn("Grist deleteRecord requires record ID(s)", error)
+        self.assertEqual(self.sent, [])
+        self.assertNotIn(SECRET, str(self.sent))
+
+    def test_batch_record_ids_deletes_multiple_records(self) -> None:
+        row = _run_node(
+            {
+                "gristOperation": "deleteRecord",
+                "gristDocId": "doc1",
+                "gristTableId": "Table1",
+                "gristRecordIds": "[7, 8]",
+            }
+        )
+
+        self.assertEqual(row["status"], "success")
+        self.assertEqual(row.get("output", {}).get("deleted"), [7, 8])
+        self.assertEqual(row.get("output", {}).get("count"), 2)
+        self.assertEqual(len(self.sent), 1)
+        self.assertEqual(self.sent[0]["method"], "POST")
+        self.assertEqual(self.sent[0]["url"], "/api/docs/doc1/tables/Table1/data/delete")
+        self.assertEqual(self.sent[0]["json"], [7, 8])
+        self.assertNotIn(SECRET, str(self.sent))
+
+    def test_batch_expression_resolving_to_empty_list_keeps_count_zero(self) -> None:
+        row = _run_node(
+            {
+                "gristOperation": "deleteRecord",
+                "gristDocId": "doc1",
+                "gristTableId": "Table1",
+                "gristRecordIds": "$start.body.empty_list",
+            },
+            inputs={
+                "headers": {"x-api-key": SECRET},
+                "query": {},
+                "body": {"empty_list": [], "id": "doc123", "blank": "", "tbl": "Table1"},
+            },
+        )
+
+        self.assertEqual(row["status"], "success")
+        self.assertEqual(row.get("output", {}).get("deleted"), [])
+        self.assertEqual(row.get("output", {}).get("count"), 0)
+        self.assertEqual(len(self.sent), 1)
+        self.assertEqual(self.sent[0]["method"], "POST")
+        self.assertEqual(self.sent[0]["url"], "/api/docs/doc1/tables/Table1/data/delete")
+        self.assertEqual(self.sent[0]["json"], [])
         self.assertNotIn(SECRET, str(self.sent))
 
     def test_blank_sort_does_not_append_sort_param(self) -> None:
