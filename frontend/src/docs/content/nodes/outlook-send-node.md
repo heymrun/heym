@@ -36,6 +36,10 @@ A blank Subject or Body stays blank. Every text field accepts `$` expressions, a
 
 An Outlook credential connected before this node existed was granted `Mail.ReadWrite` only, which cannot send. Its triggers keep working. To send with it, add `Mail.Send` to the app's API permissions, then open the credential in **Credentials** and click **Connect** again. Until then the node shows a reminder under the credential and a run fails before sending.
 
+### Exchange Server (on-premises)
+
+An `outlook` credential that signs in to an organization's own Exchange Server sends through Exchange Web Services and keeps a copy in Sent Items. No `Mail.Send` permission or reconnect is involved; see [Exchange Server sign-in](../reference/integrations.md#exchange-server-on-premises).
+
 ## From Address
 
 Exchange decides who may send as which address. Sending from an alias works when the organization allows it, and sending from a shared mailbox needs **Send As** permission on that mailbox. When Microsoft refuses the From address, the node fails with Microsoft's reason.

@@ -23,6 +23,9 @@ from app.db.session import SessionLocal, async_session_maker
 from app.services.credential_access import get_accessible_credential
 from app.services.distributed_lock import lock_service
 from app.services.encryption import decrypt_config
+from app.services.exchange_server.connection import is_ews
+from app.services.exchange_server.mailbox import EwsMailbox
+from app.services.google_triggers.events import ItemWrite
 from app.services.google_triggers.state_store import ClaimedPoll, TriggerStateStore
 from app.services.outlook_service import OutlookApiError, OutlookService
 from app.services.outlook_trigger.config import (
@@ -30,6 +33,7 @@ from app.services.outlook_trigger.config import (
     OutlookTriggerConfig,
     parse_outlook_config,
 )
+from app.services.outlook_trigger.mailbox import GraphMailbox, MailboxClient
 from app.services.outlook_trigger.reader import OutlookRead, apply_after_action, read_new_mail
 from app.services.trigger_run_dispatch import (
     TriggerDispatchNotStartedError,
@@ -45,6 +49,11 @@ MAX_PARALLEL_POLLS = 4
 TRIGGER_SOURCE = "outlook"
 TRIGGER_LABEL = "Outlook Trigger"
 KEY_ID = "outlook"
+# Set on the loaded config so a refused Exchange Server sign-in is not retried until the
+# credential changes; never passed on to the mail clients.
+CREDENTIAL_MARKER = "_heym_credential_updated_at"
+AUTH_BLOCK_KEY = "auth"
+BLOCKED_SCOPE = "auth-blocked"
 
 
 def _active_nodes(nodes: Any) -> list[dict[str, Any]]:
@@ -57,6 +66,14 @@ def _active_nodes(nodes: Any) -> list[dict[str, Any]]:
     ]
 
 
+def mailbox_client(credential_id: str, credential_config: dict[str, Any], db: Any) -> MailboxClient:
+    """Graph for a Microsoft account, EWS for an Exchange Server sign-in."""
+    config = {key: value for key, value in credential_config.items() if key != CREDENTIAL_MARKER}
+    if is_ews(config):
+        return EwsMailbox(config)
+    return GraphMailbox(OutlookService(credential_id, config, db))
+
+
 def _read(
     credential_id: str,
     credential_config: dict[str, Any],
@@ -64,17 +81,24 @@ def _read(
     poll: ClaimedPoll | None,
 ) -> OutlookRead:
     with SessionLocal() as db:
-        service = OutlookService(credential_id, credential_config, db)
+        client = mailbox_client(credential_id, credential_config, db)
         if poll is None:
-            return read_new_mail(service, config, None, None)
-        return read_new_mail(service, config, poll.scope_fingerprint, poll.items)
+            return read_new_mail(client, config, None, None)
+        return read_new_mail(client, config, poll.scope_fingerprint, poll.items)
 
 
 def _act(
     credential_id: str, credential_config: dict[str, Any], message_id: str, action: str
 ) -> None:
     with SessionLocal() as db:
-        apply_after_action(OutlookService(credential_id, credential_config, db), message_id, action)
+        apply_after_action(mailbox_client(credential_id, credential_config, db), message_id, action)
+
+
+def _blocked(poll: ClaimedPoll | None, marker: str) -> bool:
+    """Whether this credential, as it is now, already had its Exchange sign-in refused."""
+    if poll is None or not marker:
+        return False
+    return (poll.items.get(AUTH_BLOCK_KEY) or {}).get("credential") == marker
 
 
 class OutlookTriggerManager:
@@ -197,9 +221,35 @@ class OutlookTriggerManager:
                 return
 
             poll = claim.poll
-            read = await asyncio.to_thread(
-                _read, config.credential_id, credential_config, config, poll
-            )
+            ews = is_ews(credential_config)
+            marker = str(credential_config.get(CREDENTIAL_MARKER) or "")
+            if ews and _blocked(poll, marker):
+                logger.debug(
+                    "Outlook Trigger for workflow %s node %s: Exchange sign-in was refused; "
+                    "waiting for the credential to change",
+                    workflow.id,
+                    node_id,
+                )
+                return
+            try:
+                read = await asyncio.to_thread(
+                    _read, config.credential_id, credential_config, config, poll
+                )
+            except OutlookApiError as exc:
+                if not (ews and exc.status_code == 401):
+                    raise
+                # Retrying every interval would lock the domain account; wait for a new password.
+                await self._block(workflow.id, node_id, config, poll, marker)
+                logger.warning(
+                    "Outlook Trigger for workflow %s node %s: %s; paused until the credential "
+                    "is updated",
+                    workflow.id,
+                    node_id,
+                    exc,
+                )
+                return
+            if poll is not None and AUTH_BLOCK_KEY in poll.items and not read.baseline:
+                read.silent.append(ItemWrite(AUTH_BLOCK_KEY, None))
             if poll is None:
                 await self._store.insert_baseline(
                     workflow_id=workflow.id,
@@ -228,6 +278,29 @@ class OutlookTriggerManager:
                     node_id,
                 )
             await self._run_emails(workflow, node_id, config, poll, read)
+
+    async def _block(
+        self,
+        workflow_id: uuid.UUID,
+        node_id: str,
+        config: OutlookTriggerConfig,
+        poll: ClaimedPoll | None,
+        marker: str,
+    ) -> None:
+        """Remember that this credential's Exchange sign-in was refused."""
+        item = {"credential": marker}
+        if poll is None:
+            await self._store.insert_baseline(
+                workflow_id=workflow_id,
+                node_id=node_id,
+                node_type=OUTLOOK_TRIGGER,
+                scope_fingerprint=BLOCKED_SCOPE,
+                key_id=KEY_ID,
+                items={AUTH_BLOCK_KEY: item},
+                poll_minutes=config.poll_minutes,
+            )
+            return
+        await self._store.consume(poll.state_id, poll.version, [ItemWrite(AUTH_BLOCK_KEY, item)])
 
     async def _run_emails(
         self,
@@ -341,7 +414,10 @@ class OutlookTriggerManager:
     async def _load_credential(
         self, credential_id: str, owner_id: uuid.UUID
     ) -> dict[str, Any] | None:
-        """The credential's config, only if the workflow owner may use it and it is Outlook."""
+        """The credential's config, only if the workflow owner may use it and it is Outlook.
+
+        The config carries when the credential last changed (``CREDENTIAL_MARKER``).
+        """
         try:
             credential_uuid = uuid.UUID(credential_id)
         except ValueError:
@@ -350,7 +426,10 @@ class OutlookTriggerManager:
             credential = await get_accessible_credential(db, credential_uuid, owner_id)
         if credential is None or credential.type != CredentialType.outlook:
             return None
-        return decrypt_config(credential.encrypted_config)
+        config = decrypt_config(credential.encrypted_config)
+        updated_at = getattr(credential, "updated_at", None)
+        config[CREDENTIAL_MARKER] = updated_at.isoformat() if updated_at else ""
+        return config
 
 
 outlook_trigger_manager = OutlookTriggerManager()

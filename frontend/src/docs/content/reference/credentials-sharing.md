@@ -118,6 +118,8 @@ Sharing a [Gmail credential](../nodes/gmail-trigger-node.md) lets the workflows 
 
 Sharing an [Outlook credential](../nodes/outlook-trigger-node.md) lets the workflows of the people you share it with read every email in the connected mailbox, and mark email read or move it to Archive or Deleted Items through an Outlook Trigger's after-run action. Once connected with `Mail.Send`, it also lets their workflows send email as that account through [Outlook Send](../nodes/outlook-send-node.md). It does not allow permanent deletion. Share it only with people you would let read that mailbox and write in its name. Only the credential owner can reconnect its Microsoft authorization.
 
+An Outlook Mail or Outlook Calendar credential that signs in to an Exchange Server holds that user's Windows password. Sharing it lets workflows act as that user on the mailbox or calendar; the password itself is never shown to anyone, the owner included, and only the owner can change it or point the credential at another server.
+
 ## Outlook Calendar permissions
 
 Sharing an [Outlook Calendar credential](../nodes/outlook-calendar-node.md) lets workflows using it read the connected account's calendars and the free/busy of people its organization lets it see, and create, change or delete events as the connected Microsoft account, including sending invitations and cancellations. It gives no access to the mailbox. Only the credential owner can reconnect its Microsoft authorization.

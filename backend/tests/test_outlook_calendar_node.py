@@ -63,6 +63,19 @@ class TestOutlookCalendarNode(unittest.TestCase):
         )
         self.assertEqual(self.service_class.call_args.args[0], "credential")
 
+    def test_an_exchange_server_credential_uses_ews(self) -> None:
+        config = {"auth_mode": "ews", "ews_email": "ada@heym.run"}
+        exchange = MagicMock()
+        with (
+            patch(f"{_MODULE}.decrypt_config", return_value=config),
+            patch(f"{_MODULE}.ExchangeCalendarService", return_value=exchange) as exchange_class,
+        ):
+            execute(context({"credentialId": "credential"}))
+
+        exchange_class.assert_called_once_with(config)
+        exchange.read_availability.assert_called_once()
+        self.service_class.assert_not_called()
+
     def test_read_resolves_the_calendar_expression(self) -> None:
         execute(
             context(

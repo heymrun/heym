@@ -48,6 +48,8 @@ def execute(ctx: NodeExecutionContext) -> object:
     from app.db.models import CredentialType
     from app.db.session import SessionLocal
     from app.services.encryption import decrypt_config
+    from app.services.exchange_server import send as exchange_send
+    from app.services.exchange_server.connection import ews_settings, is_ews
     from app.services.outlook_service import OutlookApiError, OutlookService, has_send_scope
 
     fields = resolve_email_fields(ctx)
@@ -65,7 +67,8 @@ def execute(ctx: NodeExecutionContext) -> object:
             raise ValueError("Outlook credential not found or not accessible")
         config: dict = decrypt_config(cred.encrypted_config)
 
-    if not has_send_scope(config.get("scope")):
+    ews = is_ews(config)
+    if not ews and not has_send_scope(config.get("scope")):
         # Credentials connected before Outlook Send hold Mail.ReadWrite only.
         raise ValueError(
             "Outlook credential cannot send mail yet; reconnect it in Credentials to allow "
@@ -76,8 +79,15 @@ def execute(ctx: NodeExecutionContext) -> object:
         raise ValueError("Email recipient (to) is required")
 
     attachments = load_attachments(ctx, fields, "Outlook Send")
-    message = graph_message(fields, from_address)
+    if ews:
+        try:
+            exchange_send.send_message(config, fields, from_address, attachments)
+        except OutlookApiError as exc:
+            raise ValueError(f"Failed to send email: {exc}") from exc
+        account = ews_settings(config).email
+        return sent_output(fields, len(attachments), **{"from": from_address or account})
 
+    message = graph_message(fields, from_address)
     try:
         with SessionLocal() as db:
             OutlookService(credential_id, config, db).send_message(

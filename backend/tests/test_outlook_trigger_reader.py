@@ -9,6 +9,7 @@ from outlook_fakes import FakeMessage, FakeOutlook, apply_read
 from app.services.outlook_service import OutlookApiError
 from app.services.outlook_trigger import reader
 from app.services.outlook_trigger.config import parse_outlook_config
+from app.services.outlook_trigger.mailbox import GraphMailbox
 from app.services.outlook_trigger.reader import (
     CURSOR_KEY,
     LOOKBACK,
@@ -33,7 +34,7 @@ class ReceivedMailTests(unittest.TestCase):
     def _poll(self, stored: dict | None, config=None):  # noqa: ANN001, ANN202
         config = config or self.config
         scope = mailbox_scope(self.mailbox.address, config) if stored is not None else None
-        read = read_new_mail(self.mailbox, config, scope, stored)
+        read = read_new_mail(GraphMailbox(self.mailbox), config, scope, stored)
         return read, apply_read(stored, read)
 
     def test_the_first_poll_records_a_baseline_of_recent_mail_and_runs_nothing(self) -> None:
@@ -182,7 +183,7 @@ class ReceivedMailTests(unittest.TestCase):
             with self.subTest(config=config, address=address):
                 scope = mailbox_scope(self.mailbox.address, self.config)
                 self.mailbox.address = address
-                read = read_new_mail(self.mailbox, config, scope, stored)
+                read = read_new_mail(GraphMailbox(self.mailbox), config, scope, stored)
                 self.mailbox.address = "me@contoso.com"
                 self.assertTrue(read.baseline)
                 self.assertEqual(read.emails, [])
@@ -215,7 +216,7 @@ class FlaggedMailTests(unittest.TestCase):
 
     def _poll(self, stored: dict | None):  # noqa: ANN202
         scope = mailbox_scope(self.mailbox.address, self.config) if stored is not None else None
-        read = read_new_mail(self.mailbox, self.config, scope, stored)
+        read = read_new_mail(GraphMailbox(self.mailbox), self.config, scope, stored)
         return read, apply_read(stored, read)
 
     def test_mail_flagged_before_the_baseline_never_runs(self) -> None:

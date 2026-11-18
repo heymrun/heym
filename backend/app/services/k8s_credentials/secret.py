@@ -24,12 +24,12 @@ _WRITE_BACK_TYPES = frozenset(
         CredentialType.google_drive,
         CredentialType.google_meet,
         CredentialType.gmail,
-        CredentialType.outlook,
-        CredentialType.outlook_calendar,
         CredentialType.bigquery,
     }
 )
 _WRITE_BACK_WHEN_OAUTH = frozenset({CredentialType.linear, CredentialType.notion})
+# OAuth by default; an Exchange Server sign-in (auth_mode "ews") holds no token.
+_WRITE_BACK_UNLESS_EWS = frozenset({CredentialType.outlook, CredentialType.outlook_calendar})
 
 
 def _split(value: str | None) -> tuple[str, ...]:
@@ -111,6 +111,11 @@ def parse_secret(secret: dict[str, Any]) -> SecretCredential:
         return invalid(str(exc))
     if credential_type in _WRITE_BACK_WHEN_OAUTH and str(config.get("auth_mode") or "") == "oauth":
         return invalid(f"{credential_type.value} in OAuth mode stores refreshed tokens")
+    if credential_type in _WRITE_BACK_UNLESS_EWS and str(config.get("auth_mode") or "") != "ews":
+        return invalid(
+            f"type {credential_type.value} stores refreshed tokens, so it can't be read-only "
+            "unless it signs in to Exchange Server"
+        )
     problem = _validation_problem(credential_type, config)
     if problem:
         return invalid(problem)

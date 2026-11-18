@@ -18,6 +18,7 @@ from app.config import settings
 from app.db.models import Credential, CredentialType, User
 from app.db.session import get_db
 from app.services.encryption import decrypt_config, encrypt_config
+from app.services.exchange_server.connection import is_ews
 from app.services.outlook_service import (
     GRAPH_BASE,
     LOGIN_BASE,
@@ -111,6 +112,10 @@ async def authorize(
     if credential is None:
         raise HTTPException(404, "Outlook credential not found")
     config = decrypt_config(credential.encrypted_config)
+    if is_ews(config):
+        raise HTTPException(
+            400, "This credential signs in to Exchange Server; choose Microsoft account to connect"
+        )
     client_id = str(config.get("client_id", "")).strip()
     if not client_id or not str(config.get("client_secret", "")).strip():
         raise HTTPException(400, "Outlook credential requires client_id and client_secret")

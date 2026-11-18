@@ -40,10 +40,10 @@ def _credential_config(ctx: NodeExecutionContext) -> tuple[str, dict[str, Any]]:
 
 def _raw_message(credential_id: str, config: dict[str, Any], message_id: str) -> bytes | None:
     from app.db.session import SessionLocal
-    from app.services.outlook_service import OutlookService
+    from app.services.outlook_trigger.poller import mailbox_client
 
     with SessionLocal() as db:
-        raw = OutlookService(credential_id, config, db).get_mime(message_id)
+        raw = mailbox_client(credential_id, config, db).get_mime(message_id)
     return raw or None
 
 

@@ -7,6 +7,8 @@ from fastapi import HTTPException
 from app.db.models import CredentialType
 from app.db.session import SessionLocal
 from app.services.encryption import decrypt_config
+from app.services.exchange_server.calendar import ExchangeCalendarService
+from app.services.exchange_server.connection import is_ews
 from app.services.node_execution.base import NodeExecutionContext
 from app.services.outlook_calendar_service import LABEL, OutlookCalendarService
 
@@ -45,8 +47,11 @@ def execute(ctx: NodeExecutionContext) -> object:
         credential = ctx.executor._get_accessible_credential(db, credential_id)
         if not credential or credential.type != CredentialType.outlook_calendar:
             raise HTTPException(400, f"{LABEL}: credential not found, inaccessible or wrong type")
-        service = OutlookCalendarService(
-            str(credential_id), decrypt_config(credential.encrypted_config), db
+        config = decrypt_config(credential.encrypted_config)
+        service: OutlookCalendarService | ExchangeCalendarService = (
+            ExchangeCalendarService(config)
+            if is_ews(config)
+            else OutlookCalendarService(str(credential_id), config, db)
         )
         time_zone = resolve("ocTimeZone", "UTC") or "UTC"
         calendar_id = resolve("ocCalendarId", "primary") or "primary"

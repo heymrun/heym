@@ -55,6 +55,7 @@ from app.services.embedding import (
     embedding_config_from_credential,
 )
 from app.services.encryption import decrypt_config, encrypt_config, mask_api_key
+from app.services.exchange_server import connection as exchange_connection
 from app.services.k8s_credentials.store import CredentialUnavailableError
 from app.services.model_router import ModelRouterConfigError, parse_router_config
 from app.services.opencode_usage_service import fetch_opencode_usage
@@ -64,6 +65,31 @@ from app.services.vector_store import VECTOR_STORE_BACKENDS
 from app.services.vector_store_pg import pgvector_dimension_message
 
 router = APIRouter()
+
+
+def _merge_exchange_config(existing_config: dict, incoming_config: dict) -> dict:
+    """An Exchange Server sign-in; a blank password keeps the stored one for the same login.
+
+    The stored password is never carried to another server or user name: an editor could
+    otherwise point it at a host of their choosing.
+    """
+    incoming = exchange_connection.ews_settings(incoming_config)
+    merged: dict = {
+        "auth_mode": exchange_connection.AUTH_MODE_EWS,
+        "ews_email": incoming.email,
+        "ews_username": str(incoming_config.get("ews_username") or "").strip(),
+        "ews_server": incoming.server,
+        "ews_password": incoming.password,
+    }
+    if not incoming.password and exchange_connection.is_ews(existing_config):
+        stored = exchange_connection.ews_settings(existing_config)
+        same_login = (
+            stored.username.lower() == incoming.username.lower()
+            and stored.server.lower() == incoming.server.lower()
+        )
+        if same_login:
+            merged["ews_password"] = stored.password
+    return merged
 
 
 def merge_credential_config_for_update(
@@ -104,6 +130,11 @@ def merge_credential_config_for_update(
         if incoming_key:
             merged_config["api_key"] = incoming_key
         return merged_config
+
+    if credential_type in (CredentialType.outlook, CredentialType.outlook_calendar) and (
+        exchange_connection.is_ews(incoming_config)
+    ):
+        return _merge_exchange_config(existing_config, incoming_config)
 
     if credential_type == CredentialType.notion:
         merged_config = dict(existing_config)
@@ -483,6 +514,12 @@ def get_masked_value(credential_type: CredentialType, config: dict) -> str | Non
         client_id = config.get("client_id", "")
         return mask_api_key(client_id) if client_id else None
     elif credential_type in (
+        CredentialType.outlook,
+        CredentialType.outlook_calendar,
+    ) and exchange_connection.is_ews(config):
+        settings = exchange_connection.ews_settings(config)
+        return f"Exchange Server ({settings.email})" if settings.email else "Exchange Server"
+    elif credential_type in (
         CredentialType.google_drive,
         CredentialType.google_meet,
         CredentialType.gmail,
@@ -625,6 +662,18 @@ def get_public_credential_fields(
         return {
             "supabase_url": supabase_url,
             "supabase_schema": supabase_schema,
+        }
+    if credential_type in (
+        CredentialType.outlook,
+        CredentialType.outlook_calendar,
+    ) and exchange_connection.is_ews(config):
+        settings = exchange_connection.ews_settings(config)
+        return {
+            "auth_mode": exchange_connection.AUTH_MODE_EWS,
+            "ews_email": settings.email or None,
+            "ews_username": str(config.get("ews_username") or "").strip() or None,
+            "ews_server": settings.server or None,
+            "can_send": "true",
         }
     if credential_type == CredentialType.outlook:
         from app.services.outlook_service import has_send_scope
@@ -1349,6 +1398,29 @@ async def create_credential(
 DECISION_TEST_PROBE_STATE = "Heym decision credential connection test."
 
 
+async def _test_exchange_server(
+    credential_type: CredentialType, config: dict
+) -> CredentialTestResponse:
+    """Sign in to the Exchange Server and open the inbox (Mail) or calendar (Calendar)."""
+    from app.services.outlook_service import OutlookApiError
+
+    if not exchange_connection.is_ews(config):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Connection test is for Exchange Server sign-in; Microsoft accounts use Connect",
+        )
+    validate_credential_config(credential_type, config)
+    try:
+        message = await run_in_threadpool(
+            exchange_connection.check_connection,
+            config,
+            calendar=credential_type == CredentialType.outlook_calendar,
+        )
+    except OutlookApiError as exc:
+        return CredentialTestResponse(success=False, message=str(exc))
+    return CredentialTestResponse(success=True, message=message)
+
+
 async def _test_decision_endpoint(config: dict, model: str) -> CredentialTestResponse:
     """Send the smallest possible evaluation so a bad URL, key or model surfaces here."""
     body = {
@@ -1420,6 +1492,8 @@ async def run_credential_connection_test(
         CredentialType.sentry,
         CredentialType.rag,
         CredentialType.decision,
+        CredentialType.outlook,
+        CredentialType.outlook_calendar,
     }:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1486,12 +1560,21 @@ async def run_credential_connection_test(
             config = {**stored_config, **{k: v for k, v in config.items() if v not in (None, "")}}
         elif test_data.type == CredentialType.decision:
             config = {**stored_config, **{k: v for k, v in config.items() if v not in (None, "")}}
+        elif test_data.type in (CredentialType.outlook, CredentialType.outlook_calendar):
+            config = (
+                merge_credential_config_for_update(test_data.type, stored_config, config)
+                if config
+                else stored_config
+            )
         else:
             config = _merge_notion_test_config(config, stored_config)
 
     if test_data.type == CredentialType.decision:
         validate_credential_config(test_data.type, config)
         return await _test_decision_endpoint(config, str(config.get("model") or ""))
+
+    if test_data.type in (CredentialType.outlook, CredentialType.outlook_calendar):
+        return await _test_exchange_server(test_data.type, config)
 
     if test_data.type == CredentialType.rag:
         # Only the embedding half is exercised here. Validating the vector store
@@ -2494,6 +2577,13 @@ def validate_credential_config(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"{google_label} credential requires client_secret",
             )
+    elif credential_type in (
+        CredentialType.outlook,
+        CredentialType.outlook_calendar,
+    ) and exchange_connection.is_ews(config):
+        problem = exchange_connection.validation_problem(config)
+        if problem:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=problem)
     elif credential_type in (CredentialType.outlook, CredentialType.outlook_calendar):
         outlook_label = (
             "Outlook Calendar" if credential_type == CredentialType.outlook_calendar else "Outlook"

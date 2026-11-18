@@ -52,6 +52,10 @@ Tokens are encrypted in storage and refreshed automatically. `Mail.ReadWrite` le
 4. Optionally list addresses under **Only email sent to**. The account's own addresses (the primary one and its aliases) appear as chips you can click.
 5. Choose what happens **After the run starts**, and turn on **Download attachments to Drive** when a later node needs the files.
 
+### Exchange Server (on-premises)
+
+For an organization that runs its own Exchange Server instead of Microsoft 365, choose **Sign in with → Exchange Server (on-premises)** in the `outlook` credential and enter the email address and the Windows password; the user name (blank signs in with the email address) and the server are optional. Heym reads the mailbox through Exchange Web Services; see [Exchange Server sign-in](../reference/integrations.md#exchange-server-on-premises). Every mailbox works except **Focused** and **Other**, which Exchange Server does not have. If Exchange refuses the password, the trigger stops polling until the credential is updated.
+
 ## Mailboxes
 
 | `outlookMailbox` | Starts a run for |

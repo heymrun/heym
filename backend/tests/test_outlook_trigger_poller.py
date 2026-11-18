@@ -207,6 +207,91 @@ class OutlookPollNodeTests(unittest.IsolatedAsyncioTestCase):
         self.store.consume.assert_not_awaited()
 
 
+EWS_CONFIG = {
+    "auth_mode": "ews",
+    "ews_email": "ada@heym.run",
+    "ews_username": "HEYM\\ada",
+    "ews_password": "pw",
+    "ews_server": "mail.heym.run",
+}
+
+
+class ExchangeSignInTests(unittest.IsolatedAsyncioTestCase):
+    """A refused Exchange sign-in is not retried until the credential changes."""
+
+    setUp = OutlookPollNodeTests.setUp
+
+    def _credential(self, updated_at: str) -> None:
+        self.manager._load_credential.return_value = {
+            **EWS_CONFIG,
+            poller.CREDENTIAL_MARKER: updated_at,
+        }
+
+    async def test_a_refused_first_sign_in_records_a_block_instead_of_a_baseline(self) -> None:
+        self._credential("2026-11-18T10:00:00+00:00")
+        self.store.claim.return_value = Claim(due=True)
+        self.read.side_effect = OutlookApiError(401, "Exchange Server: sign-in failed")
+
+        with self.assertLogs("outlook_trigger", "WARNING"):
+            await self.manager.poll_node(self.workflow, self.node)
+
+        kwargs = self.store.insert_baseline.await_args.kwargs
+        self.assertEqual(kwargs["scope_fingerprint"], poller.BLOCKED_SCOPE)
+        self.assertEqual(
+            kwargs["items"], {poller.AUTH_BLOCK_KEY: {"credential": "2026-11-18T10:00:00+00:00"}}
+        )
+
+    async def test_a_refused_sign_in_on_a_running_trigger_is_remembered(self) -> None:
+        self._credential("v1")
+        self.read.side_effect = OutlookApiError(401, "Exchange Server: sign-in failed")
+
+        with self.assertLogs("outlook_trigger", "WARNING"):
+            await self.manager.poll_node(self.workflow, self.node)
+
+        self.store.consume.assert_awaited_once_with(
+            STATE, 7, [ItemWrite(poller.AUTH_BLOCK_KEY, {"credential": "v1"})]
+        )
+
+    async def test_a_blocked_credential_is_not_tried_again_until_it_changes(self) -> None:
+        self._credential("v1")
+        blocked = ClaimedPoll(
+            STATE, 7, "scope", "outlook", {poller.AUTH_BLOCK_KEY: {"credential": "v1"}}
+        )
+        self.store.claim.return_value = Claim(due=True, poll=blocked)
+
+        await self.manager.poll_node(self.workflow, self.node)
+        self.read.assert_not_called()
+
+        self._credential("v2")
+        self.read.return_value = OutlookRead("scope", [], [])
+        await self.manager.poll_node(self.workflow, self.node)
+        self.read.assert_called_once()
+        self.store.consume.assert_awaited_once_with(
+            STATE, 7, [ItemWrite(poller.AUTH_BLOCK_KEY, None)]
+        )
+
+    async def test_a_microsoft_account_error_is_not_blocked(self) -> None:
+        self.read.side_effect = OutlookApiError(401, "Outlook: credential expired")
+        with self.assertRaises(OutlookApiError):
+            await self.manager.poll_node(self.workflow, self.node)
+        self.store.consume.assert_not_awaited()
+        self.store.insert_baseline.assert_not_awaited()
+
+
+class MailboxClientTests(unittest.TestCase):
+    def test_the_credential_mode_picks_the_client_and_the_marker_is_dropped(self) -> None:
+        ews_client = poller.mailbox_client("c", {**EWS_CONFIG, poller.CREDENTIAL_MARKER: "v"}, None)
+        self.assertEqual(type(ews_client).__name__, "EwsMailbox")
+        self.assertNotIn(poller.CREDENTIAL_MARKER, ews_client._config)
+
+        with patch.object(poller, "OutlookService") as service:
+            graph_client = poller.mailbox_client(
+                "c", {"client_id": "x", poller.CREDENTIAL_MARKER: "v"}, None
+            )
+        self.assertEqual(type(graph_client).__name__, "GraphMailbox")
+        self.assertEqual(service.call_args.args[1], {"client_id": "x"})
+
+
 class OutlookPollOnceTests(unittest.IsolatedAsyncioTestCase):
     async def test_active_nodes_are_polled_and_only_outlook_snapshots_are_pruned(self) -> None:
         store = MagicMock(delete_except=AsyncMock(return_value=0))
@@ -242,7 +327,10 @@ class OutlookPollOnceTests(unittest.IsolatedAsyncioTestCase):
         session.__aenter__ = AsyncMock(return_value=MagicMock())
         session.__aexit__ = AsyncMock(return_value=False)
         for credential, expected in (
-            (SimpleNamespace(type=CredentialType.outlook, encrypted_config="x"), {"ok": 1}),
+            (
+                SimpleNamespace(type=CredentialType.outlook, encrypted_config="x"),
+                {"ok": 1, poller.CREDENTIAL_MARKER: ""},
+            ),
             (SimpleNamespace(type=CredentialType.gmail, encrypted_config="x"), None),
             (None, None),
         ):
