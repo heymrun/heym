@@ -7,7 +7,9 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
+from docx import Document
 from fastapi import HTTPException, UploadFile
+from openpyxl import Workbook
 
 from app.db.models import Credential, CredentialType, VectorStore, VectorStoreIngestJob
 from app.services.ocr_service import OcrResult
@@ -81,10 +83,55 @@ class UploadRouteTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_unknown_binary_file_is_refused(self) -> None:
         with self.assertRaises(HTTPException) as raised:
-            await self._upload("report.docx", b"PK\x03\x04\x00\x00")
+            await self._upload("deck.pptx", b"PK\x03\x04\x00\x00")
 
         self.assertEqual(raised.exception.status_code, 400)
-        self.assertIn("Heym cannot read report.docx", raised.exception.detail)
+        self.assertIn("Heym cannot read deck.pptx", raised.exception.detail)
+        self.service.insert_batch.assert_not_called()
+
+    async def test_word_document_is_added_now(self) -> None:
+        document = Document()
+        document.add_paragraph("Refunds are paid within 14 days.")
+        buffer = io.BytesIO()
+        document.save(buffer)
+
+        response = await self._upload("Policy.docx", buffer.getvalue())
+
+        self.assertEqual(response.status, "done")
+        _, texts, metadata = self.service.insert_batch.call_args.args
+        self.assertIn("Refunds are paid within 14 days.", texts[0])
+        self.assertEqual(metadata[0]["file_type"], "docx")
+        self.assertEqual(metadata[0]["source"], "Policy.docx")
+        self.enqueue.assert_not_called()
+
+    async def test_excel_workbook_is_added_now_one_row_per_chunk(self) -> None:
+        self.service.insert_batch.return_value = ["p1", "p2"]
+        workbook = Workbook()
+        workbook.active.title = "Stock"
+        workbook.active.append(["Item", "Qty"])
+        workbook.active.append(["Bolt", 40])
+        workbook.active.append(["Nut", 12])
+        buffer = io.BytesIO()
+        workbook.save(buffer)
+
+        response = await self._upload("Stock.xlsx", buffer.getvalue())
+
+        self.assertEqual(response.status, "done")
+        self.assertEqual(response.points_inserted, 2)
+        _, texts, metadata = self.service.insert_batch.call_args.args
+        self.assertEqual(texts, ["Item: Bolt | Qty: 40", "Item: Nut | Qty: 12"])
+        self.assertEqual([m["row"] for m in metadata], [2, 3])
+        self.assertEqual({m["sheet"] for m in metadata}, {"Stock"})
+        self.assertEqual({m["file_type"] for m in metadata}, {"xlsx"})
+
+    async def test_broken_word_document_is_unprocessable(self) -> None:
+        with self.assertRaises(HTTPException) as raised:
+            await self._upload("broken.docx", b"PK\x03\x04\x00\x00")
+
+        self.assertEqual(raised.exception.status_code, 422)
+        self.assertEqual(
+            raised.exception.detail, "Heym could not read broken.docx as a Word document."
+        )
         self.service.insert_batch.assert_not_called()
 
     async def test_image_is_read_by_ocr_now(self) -> None:

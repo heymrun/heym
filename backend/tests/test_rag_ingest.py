@@ -2,8 +2,11 @@
 
 import io
 import unittest
+import zipfile
 from unittest.mock import patch
 
+from docx import Document
+from openpyxl import Workbook
 from reportlab.pdfgen import canvas
 
 from app.services import rag_ingest
@@ -20,6 +23,15 @@ def _pdf(*pages: str) -> bytes:
             c.drawString(100, 750, text)
         c.showPage()
     c.save()
+    return buf.getvalue()
+
+
+def _docx(*paragraphs: str) -> bytes:
+    document = Document()
+    for text in paragraphs:
+        document.add_paragraph(text)
+    buf = io.BytesIO()
+    document.save(buf)
     return buf.getvalue()
 
 
@@ -49,6 +61,8 @@ class ClassifyTests(unittest.TestCase):
     def test_known_extensions_in_any_case(self) -> None:
         cases = {
             "a.PDF": RagFileKind.PDF,
+            "contract.DOCX": RagFileKind.DOCX,
+            "budget.XLSX": RagFileKind.XLSX,
             "b.md": RagFileKind.MARKDOWN,
             "c.markdown": RagFileKind.MARKDOWN,
             "d.txt": RagFileKind.TEXT,
@@ -70,12 +84,14 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual(rag_ingest.classify("README", b"# hi"), RagFileKind.TEXT)
 
     def test_unknown_binary_is_refused(self) -> None:
-        self.assertIsNone(rag_ingest.classify("report.docx", b"PK\x03\x04\x00\x00"))
+        self.assertIsNone(rag_ingest.classify("deck.pptx", b"PK\x03\x04\x00\x00"))
 
     def test_refusal_message_names_the_file_and_the_formats(self) -> None:
-        message = rag_ingest.unsupported_message("report.docx")
+        message = rag_ingest.unsupported_message("deck.pptx")
 
-        self.assertIn("report.docx", message)
+        self.assertIn("deck.pptx", message)
+        self.assertIn("Word (DOCX)", message)
+        self.assertIn("Excel (XLSX)", message)
         self.assertIn("audio (mp3, wav, ogg, opus, flac)", message)
         self.assertIn("other plain-text files", message)
 
@@ -137,6 +153,137 @@ class QuickChunkTests(unittest.TestCase):
             rag_ingest.quick_chunks(RagFileKind.PDF, b"not a pdf", "a.pdf", 9)
 
         self.assertEqual(str(raised.exception), "Heym could not read a.pdf as a PDF.")
+
+
+class DocxChunkTests(unittest.TestCase):
+    def test_word_document_is_read_now(self) -> None:
+        data = _docx("Refunds are paid within 14 days.", "Ask finance for exceptions.")
+
+        chunks = rag_ingest.quick_chunks(RagFileKind.DOCX, data, "Policy.docx", len(data))
+
+        self.assertEqual(len(chunks), 1)
+        self.assertEqual(
+            chunks[0].text, "Refunds are paid within 14 days. Ask finance for exceptions."
+        )
+        self.assertEqual(chunks[0].metadata["file_type"], "docx")
+        self.assertEqual(chunks[0].metadata["source"], "Policy.docx")
+        self.assertEqual(chunks[0].metadata["file_size"], len(data))
+
+    def test_background_extraction_reads_it_the_same_way(self) -> None:
+        data = _docx("One paragraph.")
+
+        self.assertEqual(
+            [c.text for c in rag_ingest.extract_chunks(RagFileKind.DOCX, data, "a.docx", 1)],
+            [c.text for c in rag_ingest.quick_chunks(RagFileKind.DOCX, data, "a.docx", 1)],
+        )
+
+    def test_word_document_without_text_fails(self) -> None:
+        data = _docx()
+
+        with self.assertRaises(RagIngestError) as raised:
+            rag_ingest.quick_chunks(RagFileKind.DOCX, data, "empty.docx", len(data))
+
+        self.assertEqual(str(raised.exception), "No text was found in empty.docx.")
+
+    def test_unreadable_word_documents_are_user_errors(self) -> None:
+        other_zip = io.BytesIO()
+        with zipfile.ZipFile(other_zip, "w") as archive:
+            archive.writestr("notes.txt", "not a Word document")
+        cases = {
+            "not a zip": b"PK\x03\x04\x00\x00",
+            "zip without a document": other_zip.getvalue(),
+            "legacy .doc renamed": b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x00" * 64,
+        }
+        for label, data in cases.items():
+            with self.assertRaises(RagIngestError, msg=label) as raised:
+                rag_ingest.quick_chunks(RagFileKind.DOCX, data, "a.docx", len(data))
+
+            self.assertEqual(
+                str(raised.exception), "Heym could not read a.docx as a Word document.", label
+            )
+
+    def test_archive_that_unpacks_too_far_is_a_user_error(self) -> None:
+        data = _docx("x")
+
+        with patch("app.services.office_archive.MAX_UNPACKED_BYTES", 1024):
+            with self.assertRaises(RagIngestError) as raised:
+                rag_ingest.quick_chunks(RagFileKind.DOCX, data, "big.docx", len(data))
+
+        self.assertEqual(str(raised.exception), "big.docx is too large to read once unpacked.")
+
+
+def _xlsx(*rows: list) -> bytes:
+    workbook = Workbook()
+    workbook.active.title = "Orders"
+    for row in rows:
+        workbook.active.append(row)
+    buf = io.BytesIO()
+    workbook.save(buf)
+    return buf.getvalue()
+
+
+class XlsxChunkTests(unittest.TestCase):
+    def test_every_row_is_one_chunk_like_a_csv_row(self) -> None:
+        data = _xlsx(["Order", "Status"], ["A-1", "shipped"], ["A-2", "open"])
+
+        chunks = rag_ingest.quick_chunks(RagFileKind.XLSX, data, "Orders.xlsx", len(data))
+
+        self.assertEqual(
+            [c.text for c in chunks], ["Order: A-1 | Status: shipped", "Order: A-2 | Status: open"]
+        )
+        self.assertEqual(
+            chunks[0].metadata,
+            {
+                "source": "Orders.xlsx",
+                "file_size": len(data),
+                "sheet": "Orders",
+                "row": 2,
+                "file_type": "xlsx",
+            },
+        )
+
+    def test_background_extraction_reads_it_the_same_way(self) -> None:
+        data = _xlsx(["Order"], ["A-1"])
+
+        self.assertEqual(
+            [c.text for c in rag_ingest.extract_chunks(RagFileKind.XLSX, data, "o.xlsx", 1)],
+            ["Order: A-1"],
+        )
+
+    def test_empty_workbook_fails(self) -> None:
+        data = _xlsx()
+
+        with self.assertRaises(RagIngestError) as raised:
+            rag_ingest.quick_chunks(RagFileKind.XLSX, data, "empty.xlsx", len(data))
+
+        self.assertEqual(str(raised.exception), "No text was found in empty.xlsx.")
+
+    def test_unreadable_workbooks_are_user_errors(self) -> None:
+        other_zip = io.BytesIO()
+        with zipfile.ZipFile(other_zip, "w") as archive:
+            archive.writestr("notes.txt", "not a workbook")
+        cases = {
+            "not a zip": b"PK\x03\x04\x00\x00",
+            "zip without a workbook": other_zip.getvalue(),
+            "Word document renamed": _docx("hello"),
+            "legacy .xls renamed": b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x00" * 64,
+        }
+        for label, data in cases.items():
+            with self.assertRaises(RagIngestError, msg=label) as raised:
+                rag_ingest.quick_chunks(RagFileKind.XLSX, data, "a.xlsx", len(data))
+
+            self.assertEqual(
+                str(raised.exception), "Heym could not read a.xlsx as an Excel workbook.", label
+            )
+
+    def test_archive_that_unpacks_too_far_is_a_user_error(self) -> None:
+        data = _xlsx(["x"])
+
+        with patch("app.services.office_archive.MAX_UNPACKED_BYTES", 1024):
+            with self.assertRaises(RagIngestError) as raised:
+                rag_ingest.quick_chunks(RagFileKind.XLSX, data, "big.xlsx", len(data))
+
+        self.assertEqual(str(raised.exception), "big.xlsx is too large to read once unpacked.")
 
 
 class FullExtractionTests(unittest.TestCase):

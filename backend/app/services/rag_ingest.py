@@ -1,23 +1,28 @@
 """How an uploaded file becomes vector store chunks.
 
 The one place that decides which files a vector store takes and how their text is read:
-documents through FileProcessor, images through the Converter's Tesseract OCR, audio through
-the Converter's Whisper transcription, and PDF pages without a text layer through OCR. Upload
-routes call it; nothing else keeps its own list (the frontend mirror is
-`frontend/src/lib/ragFileTypes.ts`).
+documents through FileProcessor (Word documents through docx_text first, Excel workbooks
+through xlsx_rows), images through the Converter's Tesseract OCR, audio through the Converter's Whisper transcription, and PDF pages
+without a text layer through OCR. Upload routes call it; nothing else keeps its own list (the
+frontend mirror is `frontend/src/lib/ragFileTypes.ts`).
 """
 
 from __future__ import annotations
 
 import codecs
 import json
+import zipfile
 from collections.abc import Iterable
 from enum import StrEnum
 
+from docx.opc.exceptions import PackageNotFoundError
 from pypdf.errors import PdfReadError
 
 from app.services import ocr_service, speech_to_text_service
+from app.services.docx_text import docx_text
 from app.services.file_processor import TextChunk, create_file_processor
+from app.services.office_archive import ArchiveTooLargeError
+from app.services.xlsx_rows import xlsx_rows
 
 # Same rule as frontend/src/lib/textFileSniff.ts.
 SNIFF_BYTES = 64 * 1024
@@ -26,6 +31,8 @@ MAX_RAG_OCR_PAGES = 200
 
 class RagFileKind(StrEnum):
     PDF = "pdf"
+    DOCX = "docx"
+    XLSX = "xlsx"
     MARKDOWN = "markdown"
     TEXT = "text"
     CSV = "csv"
@@ -36,6 +43,8 @@ class RagFileKind(StrEnum):
 
 DOCUMENT_EXTENSIONS: dict[str, RagFileKind] = {
     ".pdf": RagFileKind.PDF,
+    ".docx": RagFileKind.DOCX,
+    ".xlsx": RagFileKind.XLSX,
     ".md": RagFileKind.MARKDOWN,
     ".markdown": RagFileKind.MARKDOWN,
     ".txt": RagFileKind.TEXT,
@@ -47,8 +56,8 @@ IMAGE_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".tif", ".tiff", ".webp",
 AUDIO_EXTENSIONS = frozenset({".mp3", ".wav", ".ogg", ".opus", ".flac"})
 
 FORMATS_SENTENCE = (
-    "Vector stores take PDF, Markdown, text, CSV, JSON, images (PNG, JPEG, TIFF, WebP, BMP), "
-    "audio (mp3, wav, ogg, opus, flac) and other plain-text files."
+    "Vector stores take PDF, Word (DOCX), Excel (XLSX), Markdown, text, CSV, JSON, images (PNG, "
+    "JPEG, TIFF, WebP, BMP), audio (mp3, wav, ogg, opus, flac) and other plain-text files."
 )
 
 
@@ -113,6 +122,60 @@ def _pdf_page_texts(data: bytes, filename: str) -> list[str]:
         raise RagIngestError(f"Heym could not read {filename} as a PDF.") from exc
 
 
+def _docx_chunks(data: bytes, filename: str, file_size: int) -> list[TextChunk]:
+    try:
+        text = docx_text(data)
+    except ArchiveTooLargeError as exc:
+        raise RagIngestError(f"{filename} is too large to read once unpacked.") from exc
+    except (
+        zipfile.BadZipFile,
+        PackageNotFoundError,
+        KeyError,
+        ValueError,
+        SyntaxError,
+    ) as exc:
+        raise RagIngestError(f"Heym could not read {filename} as a Word document.") from exc
+    if not text.strip():
+        raise RagIngestError(f"No text was found in {filename}.")
+    return create_file_processor().process_extracted_text(
+        text, filename, file_size, file_type="docx"
+    )
+
+
+def _xlsx_chunks(data: bytes, filename: str, file_size: int) -> list[TextChunk]:
+    try:
+        rows = xlsx_rows(data)
+    except ArchiveTooLargeError as exc:
+        raise RagIngestError(f"{filename} is too large to read once unpacked.") from exc
+    # openpyxl reports a malformed workbook with whichever error its parser meets first.
+    except (
+        zipfile.BadZipFile,
+        KeyError,
+        OSError,
+        ValueError,
+        TypeError,
+        AttributeError,
+        IndexError,
+        SyntaxError,
+    ) as exc:
+        raise RagIngestError(f"Heym could not read {filename} as an Excel workbook.") from exc
+    if not rows:
+        raise RagIngestError(f"No text was found in {filename}.")
+    return [
+        TextChunk(
+            text=row.text,
+            metadata={
+                "source": filename,
+                "file_size": file_size,
+                "sheet": row.sheet,
+                "row": row.row,
+                "file_type": "xlsx",
+            },
+        )
+        for row in rows
+    ]
+
+
 def _image_chunks(data: bytes, filename: str, file_size: int) -> list[TextChunk]:
     result = ocr_service.image_to_text(data, filename=filename, language=ocr_service.AUTO_LANGUAGE)
     if not result.text.strip():
@@ -173,6 +236,10 @@ def _pdf_chunks_with_ocr(data: bytes, filename: str, file_size: int) -> list[Tex
 def _document_chunks(
     kind: RagFileKind, data: bytes, filename: str, file_size: int
 ) -> list[TextChunk]:
+    if kind is RagFileKind.DOCX:
+        return _docx_chunks(data, filename, file_size)
+    if kind is RagFileKind.XLSX:
+        return _xlsx_chunks(data, filename, file_size)
     processor = create_file_processor()
     if kind is RagFileKind.MARKDOWN:
         return processor.process_markdown(data, filename, file_size)

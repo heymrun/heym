@@ -3,14 +3,14 @@ import { readsAsUtf8Text } from "@/lib/textFileSniff";
 /** How a file enters a vector store; mirrors backend/app/services/rag_ingest.py. */
 export type RagFileKind = "document" | "image" | "audio" | "text";
 
-export const RAG_DOCUMENT_EXTENSIONS: readonly string[] = [".pdf", ".md", ".markdown", ".txt", ".csv", ".json"];
+export const RAG_DOCUMENT_EXTENSIONS: readonly string[] = [".pdf", ".docx", ".xlsx", ".md", ".markdown", ".txt", ".csv", ".json"];
 export const RAG_IMAGE_EXTENSIONS: readonly string[] = [".png", ".jpg", ".jpeg", ".tif", ".tiff", ".webp", ".bmp"];
 /** `.opus` is how WhatsApp names its voice notes (Opus in an Ogg container). */
 export const RAG_AUDIO_EXTENSIONS: readonly string[] = [".mp3", ".wav", ".ogg", ".opus", ".flac"];
 
 /** What a vector store takes, for upload dialogs and notices. */
 export const RAG_FORMATS_LINE =
-  "PDF, Markdown, text, CSV, JSON, images (PNG, JPEG, TIFF, WebP, BMP), audio (mp3, wav, ogg, opus, flac) and any other plain-text file";
+  "PDF, Word (DOCX), Excel (XLSX), Markdown, text, CSV, JSON, images (PNG, JPEG, TIFF, WebP, BMP), audio (mp3, wav, ogg, opus, flac) and any other plain-text file";
 
 function extension(name: string): string {
   const dot = name.lastIndexOf(".");
