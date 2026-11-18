@@ -48,6 +48,12 @@ const credentialOptions = computed(() => {
   return options;
 });
 
+const isExchangeServer = computed(
+  (): boolean =>
+    credentials.value.find((item) => item.id === selectedNode.value?.data.credentialId)
+      ?.public_fields?.auth_mode === "ews",
+);
+
 onMounted(async (): Promise<void> => {
   try {
     credentials.value = await credentialsApi.listByType("outlook_calendar");
@@ -147,6 +153,12 @@ onMounted(async (): Promise<void> => {
       </div>
       <p class="text-xs text-muted-foreground">
         {{ option.help }}
+      </p>
+      <p
+        v-if="isExchangeServer && option.key === 'ocTeamsMeeting'"
+        class="text-xs text-muted-foreground"
+      >
+        Exchange Server has no Teams meetings; the event is created without a link.
       </p>
     </div>
     <p

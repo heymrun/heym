@@ -334,6 +334,18 @@ export interface CredentialConfigOutlook {
   tenant: string;
 }
 
+/** Outlook Mail or Outlook Calendar signed in to an on-premises Exchange Server (EWS). */
+export interface CredentialConfigOutlookExchange {
+  auth_mode: "ews";
+  ews_email: string;
+  /** Domain sign-in such as CONTOSO\jane, or the user principal name. */
+  ews_username: string;
+  /** Blank on edit keeps the stored password for the same user name and server. */
+  ews_password: string;
+  /** Host or https EWS address; blank finds it through the domain's Autodiscover record. */
+  ews_server: string;
+}
+
 export interface CredentialConfigGoogleSheets {
   client_id: string;
   client_secret: string;
@@ -410,6 +422,7 @@ export type CredentialConfig =
   | CredentialConfigFlaresolverr
   | CredentialConfigGoogleSheets
   | CredentialConfigOutlook
+  | CredentialConfigOutlookExchange
   | CredentialConfigSupabase
   | CredentialConfigClickHouse
   | CredentialConfigNotion

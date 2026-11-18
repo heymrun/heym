@@ -30,6 +30,7 @@ import {
   type JiraCredentialForm,
 } from "@/components/Credentials/jira/jiraCredentialConfig";
 import OAuthAuthorizeLink from "@/components/Credentials/OAuthAuthorizeLink.vue";
+import OutlookExchangeFields from "@/components/Credentials/OutlookExchangeFields.vue";
 import SlackBotCredentialFields from "@/components/Credentials/SlackBotCredentialFields.vue";
 import { useOAuthPopup } from "@/components/Credentials/useOAuthPopup";
 import Button from "@/components/ui/Button.vue";
@@ -184,6 +185,16 @@ const outlookOAuthConnecting = ref(false);
 const outlookConnectedCredential = ref<import("@/types/credential").Credential | null>(null);
 /** Outlook Mail and Outlook Calendar share one Entra app form; only the permission differs. */
 const isOutlookType = (value: string | undefined): boolean => value === "outlook" || value === "outlook_calendar";
+/** Microsoft account (OAuth, default) or an on-premises Exchange Server (EWS). */
+const outlookAuthMode = ref<"oauth" | "ews">("oauth");
+const outlookEwsEmail = ref("");
+const outlookEwsUsername = ref("");
+const outlookEwsPassword = ref("");
+const outlookEwsServer = ref("");
+const OUTLOOK_AUTH_MODE_OPTIONS = [
+  { value: "oauth", label: "Microsoft account (Outlook.com, Hotmail, Microsoft 365)" },
+  { value: "ews", label: "Exchange Server (on-premises)" },
+];
 const bqClientId = ref("");
 const bqClientSecret = ref("");
 const bqOAuthConnected = ref(false);
@@ -686,6 +697,12 @@ watch(
         outlookOAuthConnected.value =
           isOutlookType(props.credential.type) && !!props.credential.masked_value?.startsWith("connected");
         outlookConnectedCredential.value = null;
+        const outlookFields = isOutlookType(props.credential.type) ? props.credential.public_fields : undefined;
+        outlookAuthMode.value = outlookFields?.auth_mode === "ews" ? "ews" : "oauth";
+        outlookEwsEmail.value = outlookFields?.ews_email ?? "";
+        outlookEwsUsername.value = outlookFields?.ews_username ?? "";
+        outlookEwsPassword.value = "";
+        outlookEwsServer.value = outlookFields?.ews_server ?? "";
         bqClientId.value = "";
         bqClientSecret.value = "";
         bqOAuthConnected.value = props.credential.masked_value === "connected" && props.credential.type === "bigquery";
@@ -818,6 +835,11 @@ watch(
         outlookClientId.value = "";
         outlookClientSecret.value = "";
         outlookTenant.value = "common";
+        outlookAuthMode.value = "oauth";
+        outlookEwsEmail.value = "";
+        outlookEwsUsername.value = "";
+        outlookEwsPassword.value = "";
+        outlookEwsServer.value = "";
         outlookOAuthConnected.value = false;
         outlookConnectedCredential.value = null;
         bqClientId.value = "";
@@ -867,6 +889,14 @@ watch(
     }
   }
 );
+
+const outlookHasStoredPassword = computed(
+  (): boolean =>
+    isEditing.value &&
+    isOutlookType(props.credential?.type) &&
+    props.credential?.public_fields?.auth_mode === "ews",
+);
+const outlookEwsMode = computed((): boolean => isOutlookType(type.value) && outlookAuthMode.value === "ews");
 
 const isValid = computed(() => {
   if (!name.value.trim()) return false;
@@ -986,6 +1016,9 @@ const isValid = computed(() => {
   } else if (type.value === "gmail") {
     return gmailOAuthConnected.value || isEditing.value;
   } else if (isOutlookType(type.value)) {
+    if (outlookAuthMode.value === "ews") {
+      return !!outlookEwsEmail.value.trim() && (!!outlookEwsPassword.value || outlookHasStoredPassword.value);
+    }
     return outlookOAuthConnected.value || isEditing.value;
   } else if (type.value === "google_drive") {
     return gdOAuthConnected.value || isEditing.value;
@@ -1228,6 +1261,14 @@ function buildConfig(): CredentialConfig {
     return {
       client_id: gmailClientId.value.trim(),
       client_secret: gmailClientSecret.value.trim(),
+    };
+  } else if (isOutlookType(type.value) && outlookAuthMode.value === "ews") {
+    return {
+      auth_mode: "ews",
+      ews_email: outlookEwsEmail.value.trim(),
+      ews_username: outlookEwsUsername.value.trim(),
+      ews_password: outlookEwsPassword.value,
+      ews_server: outlookEwsServer.value.trim(),
     };
   } else if (isOutlookType(type.value)) {
     return {
@@ -1728,11 +1769,12 @@ async function handleSave(): Promise<void> {
         type.value !== "google_drive" &&
         type.value !== "google_meet" &&
         type.value !== "gmail" &&
-        !isOutlookType(type.value) &&
+        !(isOutlookType(type.value) && !outlookEwsMode.value) &&
         type.value !== "bigquery" &&
         !(type.value === "linear" && linearAuthMode.value === "oauth") &&
         !(type.value === "notion" && notionAuthMode.value === "oauth") &&
-        (apiKey.value.trim() ||
+        (outlookEwsMode.value ||
+          apiKey.value.trim() ||
           codexAccessToken.value.trim() ||
           !!codexOAuthConfig.value ||
           baseUrl.value.trim() ||
@@ -1809,7 +1851,7 @@ async function handleSave(): Promise<void> {
       saved = gmConnectedCredential.value;
     } else if (type.value === "gmail" && gmailConnectedCredential.value) {
       saved = gmailConnectedCredential.value;
-    } else if (isOutlookType(type.value) && outlookConnectedCredential.value) {
+    } else if (isOutlookType(type.value) && !outlookEwsMode.value && outlookConnectedCredential.value) {
       saved = outlookConnectedCredential.value;
     } else if (type.value === "bigquery" && bqConnectedCredential.value) {
       saved = bqConnectedCredential.value;
@@ -3745,6 +3787,30 @@ async function handleSave(): Promise<void> {
       </template>
 
       <template v-if="isOutlookType(type)">
+        <div class="space-y-2">
+          <Label>Sign in with</Label>
+          <Select
+            :model-value="outlookAuthMode"
+            :options="OUTLOOK_AUTH_MODE_OPTIONS"
+            :disabled="saving || outlookOAuthConnecting"
+            @update:model-value="outlookAuthMode = $event === 'ews' ? 'ews' : 'oauth'"
+          />
+        </div>
+
+        <OutlookExchangeFields
+          v-if="outlookAuthMode === 'ews'"
+          v-model:email="outlookEwsEmail"
+          v-model:username="outlookEwsUsername"
+          v-model:password="outlookEwsPassword"
+          v-model:server="outlookEwsServer"
+          :credential-type="type"
+          :credential-id="isEditing ? props.credential?.id : undefined"
+          :has-stored-password="outlookHasStoredPassword"
+          :disabled="saving"
+        />
+      </template>
+
+      <template v-if="isOutlookType(type) && outlookAuthMode === 'oauth'">
         <div class="space-y-2">
           <Label for="cred-outlook-client-id">Application (client) ID</Label>
           <Input

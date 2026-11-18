@@ -49,6 +49,7 @@ dependencies = [
     "segno>=1.6.1",
     "pywhispercpp>=1.5.1",
     "soundfile>=0.13.1",
+    "exchangelib>=5.5",
 ]
 
 [build-system]

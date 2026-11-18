@@ -155,6 +155,38 @@ class OutlookSendMessageTests(TestCase):
         self.assertEqual(send.call_args.args[1], [("report.pdf", "application/pdf", b"PDFDATA")])
 
 
+EXCHANGE_CONFIG = {
+    "auth_mode": "ews",
+    "ews_email": "ada@heym.run",
+    "ews_username": "HEYM\\ada",
+    "ews_password": "pw",
+    "ews_server": "mail.heym.run",
+}
+
+
+class OutlookSendExchangeTests(TestCase):
+    def test_an_exchange_server_credential_sends_over_ews_without_a_mail_send_scope(self) -> None:
+        with patch("app.services.exchange_server.send.send_message") as ews_send:
+            result, graph_send = _run({**BASE, "attachments": ""}, config=EXCHANGE_CONFIG)
+
+        self.assertEqual(result["status"], "success", result.get("error"))
+        graph_send.assert_not_called()
+        config, fields, from_address, attachments = ews_send.call_args.args
+        self.assertEqual(config["ews_email"], "ada@heym.run")
+        self.assertEqual(
+            (fields.to, fields.subject, from_address, attachments), ("a@x.com", "Hi", "", [])
+        )
+        self.assertEqual(result["output"]["from"], "ada@heym.run")
+
+    def test_an_exchange_refusal_is_reported(self) -> None:
+        refusal = OutlookApiError(403, "Exchange Server: access denied for this mailbox")
+        with patch("app.services.exchange_server.send.send_message", side_effect=refusal):
+            result, _ = _run(BASE, config=EXCHANGE_CONFIG)
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("Failed to send email: Exchange Server: access denied", result["error"])
+
+
 class OutlookSendFailureTests(TestCase):
     def test_a_credential_without_mail_send_asks_for_a_reconnect(self) -> None:
         # Connected before Outlook Send: the trigger works, sending needs a reconnect.

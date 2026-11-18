@@ -18,6 +18,8 @@ from app.models.outlook_schemas import (
 )
 from app.services.credential_access import get_accessible_credential
 from app.services.encryption import decrypt_config
+from app.services.exchange_server.connection import is_ews
+from app.services.exchange_server.mailbox import EwsMailbox
 from app.services.outlook_service import OutlookApiError, OutlookService, account_address
 
 router = APIRouter()
@@ -39,6 +41,8 @@ def _outlook_error(exc: OutlookApiError) -> HTTPException:
 
 
 def _folders(credential_id: uuid.UUID, config: dict) -> list[dict[str, Any]]:
+    if is_ews(config):
+        return EwsMailbox(config).list_folders()
     with SessionLocal() as sync_db:
         return OutlookService(str(credential_id), config, sync_db).list_folders()
 
@@ -95,6 +99,11 @@ async def list_addresses(
 ) -> OutlookAddressesResponse:
     """The account's primary address and its aliases, primary first."""
     config = await _outlook_config(db, credential_id, current_user)
+    if is_ews(config):
+        addresses = EwsMailbox(config).addresses()
+        return OutlookAddressesResponse(
+            addresses=[OutlookAddress(email=address, is_primary=True) for address in addresses]
+        )
     try:
         profile = await asyncio.to_thread(_profile, credential_id, config)
     except OutlookApiError as exc:

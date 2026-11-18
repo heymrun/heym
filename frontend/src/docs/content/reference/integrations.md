@@ -991,7 +991,7 @@ The Gmail credential connects the [Gmail Trigger](../nodes/gmail-trigger-node.md
 
 ## Outlook Mail (OAuth2)
 
-The Outlook Mail credential connects the [Outlook Trigger](../nodes/outlook-trigger-node.md) and [Outlook Send](../nodes/outlook-send-node.md) to Microsoft Graph with your own app registration, the same "Bring Your Own App" model as the Google credentials. It works for Outlook.com, Hotmail and Live accounts and for Microsoft 365 work or school mailboxes.
+The Outlook Mail credential connects the [Outlook Trigger](../nodes/outlook-trigger-node.md) and [Outlook Send](../nodes/outlook-send-node.md) to Microsoft Graph (or, for an organization's own Exchange Server, to Exchange Web Services) with your own app registration, the same "Bring Your Own App" model as the Google credentials. It works for Outlook.com, Hotmail and Live accounts and for Microsoft 365 work or school mailboxes.
 
 ### Setup
 
@@ -1010,6 +1010,23 @@ The Outlook Mail credential connects the [Outlook Trigger](../nodes/outlook-trig
 - Connecting fails with "Allow Heym to read and organize your Outlook mail" when `Mail.ReadWrite` was not granted. Organizations that block user consent need an administrator to grant consent for the app first.
 - For Microsoft 365, prefer this credential over IMAP and SMTP: Exchange Online no longer accepts passwords over IMAP and is retiring them for SMTP.
 
+### Exchange Server (on-premises)
+
+Organizations that run their own Exchange Server (2013 or newer) instead of Microsoft 365 sign in without an app registration. In the credential, choose **Sign in with → Exchange Server (on-premises)** and enter:
+
+- **Email Address**: the mailbox Heym reads and sends from.
+- **User Name** (optional): left blank, Heym signs in with the email address, as Outlook on the web does. Enter `CONTOSO\jane` only if the organization signs in with a domain user name.
+- **Password**: the user's Windows password, the same one used for Outlook.
+- **Server** (optional): the Outlook on the web host without `/owa`, such as `mail.contoso.com`. Left blank, Heym reads the domain's `_autodiscover._tcp` SRV record.
+
+Click **Test Connection** to sign in and open the inbox before saving. Heym connects to `https://<server>/EWS/Exchange.asmx` (Exchange Web Services) with NTLM, or Basic when that is all the server offers, over HTTPS with a verified certificate. The server address passes the same private-network check as the HTTP node.
+
+- The password is stored encrypted and never shown again. Editing the credential keeps it when the user name and server stay the same; changing either asks for it again.
+- When Exchange refuses the password, an Outlook Trigger stops polling until the credential is updated, so a changed password never locks the domain account.
+- Exchange Server has no Focused Inbox, so the trigger's **Focused** and **Other** mailboxes are not offered. **Move to Archive** uses the mailbox's Archive folder, found by name.
+- `$credentials.<name>` has no value for an Exchange Server sign-in; there is no token to hand out.
+- Microsoft 365 mailboxes use the Microsoft account option: Microsoft is switching off Exchange Web Services in Exchange Online.
+
 ### Used By
 
 - [Outlook Trigger node](../nodes/outlook-trigger-node.md)
@@ -1018,7 +1035,7 @@ The Outlook Mail credential connects the [Outlook Trigger](../nodes/outlook-trig
 
 ## Outlook Calendar (OAuth2)
 
-The Outlook Calendar credential connects the [Outlook Calendar node](../nodes/outlook-calendar-node.md) to Microsoft Graph with your own app registration. It works for Outlook.com, Hotmail and Live accounts and for Microsoft 365 work or school calendars. It is a separate credential from Outlook Mail, but the same app registration can serve both.
+The Outlook Calendar credential connects the [Outlook Calendar node](../nodes/outlook-calendar-node.md) to Microsoft Graph with your own app registration, or to an on-premises Exchange Server. It works for Outlook.com, Hotmail and Live accounts and for Microsoft 365 work or school calendars. It is a separate credential from Outlook Mail, but the same app registration can serve both.
 
 ### Setup
 
@@ -1035,6 +1052,10 @@ The Outlook Calendar credential connects the [Outlook Calendar node](../nodes/ou
 - Teams links need a work or school account; personal accounts create events without one.
 - Connecting fails with "Allow Heym to read and edit your Outlook calendar" when `Calendars.ReadWrite` was not granted.
 - After connecting, the credential shows the connected address. Tokens are encrypted and refreshed automatically; Microsoft rotates refresh tokens and Heym keeps the newest one.
+
+### Exchange Server (on-premises)
+
+Choose **Sign in with → Exchange Server (on-premises)** and enter the mailbox's email address, the Windows password and, optionally, the user name and server, as for [Outlook Mail](#exchange-server-on-premises). **Test Connection** opens the calendar. Every operation works: free time comes from the calendar, a colleague's free/busy from Exchange availability, and invitations and cancellations are sent by Exchange. Exchange Server has no Teams meetings, so events are created without a link and `teams_status` is `unavailable` when **Add Teams meeting** is on.
 
 ### Used By
 

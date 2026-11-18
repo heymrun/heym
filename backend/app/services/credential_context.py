@@ -142,6 +142,10 @@ async def credential_context_value(credential: Credential, config: dict[str, Any
         # Google access tokens expire hourly; the stored one is often stale.
         return await asyncio.to_thread(_fresh_google_access_token, credential, config)
     if credential.type in (CredentialType.outlook, CredentialType.outlook_calendar):
+        from app.services.exchange_server.connection import is_ews
+
+        if is_ews(config):
+            return None  # an Exchange Server sign-in has no token to hand out
         return await asyncio.to_thread(_fresh_outlook_access_token, credential, config)
     return config.get("api_key", "")
 

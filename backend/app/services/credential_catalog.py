@@ -161,12 +161,14 @@ CREDENTIAL_TYPE_PURPOSE: dict[CredentialType, str] = {
         "http for operations the nodes lack"
     ),
     CredentialType.outlook: (
-        "Microsoft OAuth app for Outlook and Microsoft 365 mail; Outlook Trigger and Outlook "
-        "Send nodes, Microsoft Graph mail API over http for operations the nodes lack"
+        "Microsoft OAuth app for Outlook and Microsoft 365 mail, or a domain sign-in to an "
+        "on-premises Exchange Server (EWS); Outlook Trigger and Outlook Send nodes, Microsoft "
+        "Graph mail API over http for operations the nodes lack (OAuth only)"
     ),
     CredentialType.outlook_calendar: (
-        "Microsoft OAuth app for Outlook and Microsoft 365 calendars; Outlook Calendar node, "
-        "Microsoft Graph calendar API over http for operations the node lacks"
+        "Microsoft OAuth app for Outlook and Microsoft 365 calendars, or a domain sign-in to an "
+        "on-premises Exchange Server (EWS); Outlook Calendar node, Microsoft Graph calendar API "
+        "over http for operations the node lacks (OAuth only)"
     ),
     CredentialType.bigquery: "Google OAuth client for BigQuery; BigQuery node",
     CredentialType.supabase: "Supabase project URL and key; Supabase node",

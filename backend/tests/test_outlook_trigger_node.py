@@ -163,7 +163,7 @@ class OutlookTriggerNodeTests(unittest.TestCase):
         source = _raw()
         service = MagicMock()
         service.return_value.get_mime.return_value = source
-        with patch("app.services.outlook_service.OutlookService", service):
+        with patch("app.services.outlook_trigger.poller.OutlookService", service):
             self.assertEqual(outlook_attachments._raw_message(CREDENTIAL, {}, "ol-1"), source)
         service.return_value.get_mime.assert_called_once_with("ol-1")
 

@@ -120,6 +120,10 @@ Outlook emails the invitations when the event is created, the changes when it is
 
 **Add Teams meeting** is on by default. Work and school accounts get a Teams meeting with the join link in the invitation. Personal Outlook.com accounts cannot create Teams meetings through Microsoft Graph, so the event is created without one and `teams_status` is `unavailable`. Turn the option off for in-person meetings.
 
+### Exchange Server (on-premises)
+
+An `outlook_calendar` credential can sign in to an organization's own Exchange Server instead of a Microsoft account (**Sign in with → Exchange Server (on-premises)**: email address and Windows password; optional user name and server). Every operation works the same way; a colleague's free/busy comes from Exchange availability. Exchange Server has no Teams, so events are created without a link and `teams_status` is `unavailable`.
+
 ### Updates
 
 Empty fields keep their existing values. Supply both start/end times to reschedule. A supplied attendee list replaces the current guests; use the JSON string `[]` to remove them all. The Teams meeting is kept. Replacing the description of a Teams meeting replaces the invitation text, including the join details Teams added to it; `teams_url` keeps working.

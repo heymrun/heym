@@ -28,14 +28,14 @@ Credentials store API keys and secrets used by workflow nodes. You add them in t
 | [Slack](../nodes/slack-node.md) | Slack Webhook, Slack Bot (Token) | Incoming webhook URL, or a bot token and signing secret for every operation |
 | [IMAP Trigger](../nodes/imap-trigger-node.md) | IMAP | Inbound mailbox connection |
 | [Gmail Trigger](../nodes/gmail-trigger-node.md), [Gmail Send](../nodes/gmail-send-node.md) | Gmail (OAuth2) | Client ID + Client Secret + OAuth2 consent |
-| [Outlook Trigger](../nodes/outlook-trigger-node.md), [Outlook Send](../nodes/outlook-send-node.md) | Outlook Mail (OAuth2) | Application (client) ID + Client Secret + Tenant + OAuth2 consent (`Mail.Send` for sending) |
+| [Outlook Trigger](../nodes/outlook-trigger-node.md), [Outlook Send](../nodes/outlook-send-node.md) | Outlook Mail (OAuth2) | Application (client) ID + Client Secret + Tenant + OAuth2 consent (`Mail.Send` for sending), or an [Exchange Server sign-in](./integrations.md#exchange-server-on-premises): email, `DOMAIN\user` and password |
 | [Send Email](../nodes/send-email-node.md) | SMTP | Mail server |
 | [Redis](../nodes/redis-node.md) | Redis | Connection |
 | [Grist](../nodes/grist-node.md) | Grist | API key + server URL |
 | [Google Sheets](../nodes/google-sheets-node.md) | Google Sheets (OAuth2) | Client ID + Client Secret + OAuth2 consent |
 | [Google Drive](../nodes/google-drive-node.md) | Google Drive (OAuth2) | Client ID + Client Secret + OAuth2 consent |
 | **Google Meet (OAuth2)** | [Google Meet](../nodes/google-meet-node.md) | Google OAuth client ID + client secret, then Connect |
-| [Outlook Calendar](../nodes/outlook-calendar-node.md) | Outlook Calendar (OAuth2) | Application (client) ID + Client Secret + Tenant + OAuth2 consent |
+| [Outlook Calendar](../nodes/outlook-calendar-node.md) | Outlook Calendar (OAuth2) | Exchange Server sign-in (email, `DOMAIN\user`, password), or Application (client) ID + Client Secret + Tenant + OAuth2 consent |
 | [Google Sheets Trigger](../nodes/google-sheets-trigger-node.md) | Google Sheets (OAuth2) | Same credential as the Google Sheets node |
 | [Google Drive Trigger](../nodes/google-drive-trigger-node.md) | Google Drive (OAuth2) | Same credential as the Google Drive node |
 | [BigQuery](../nodes/bigquery-node.md) | BigQuery (OAuth2) | Client ID + Client Secret + OAuth2 consent |

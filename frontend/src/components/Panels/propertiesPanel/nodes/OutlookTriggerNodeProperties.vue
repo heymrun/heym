@@ -37,6 +37,17 @@ const credentialOptions = computed(() => {
 });
 
 const mailbox = computed(() => outlookMailbox(selectedNode.value?.data.outlookMailbox));
+const isExchangeServer = computed(
+  (): boolean =>
+    credentials.value.find((item) => item.id === credentialId.value)?.public_fields?.auth_mode === "ews",
+);
+// Exchange Server has no Focused Inbox; a saved choice stays listed so it can be changed.
+const mailboxOptions = computed(() =>
+  OUTLOOK_MAILBOX_OPTIONS.filter(
+    (option) =>
+      !isExchangeServer.value || !["focused", "other"].includes(option.value) || option.value === mailbox.value,
+  ),
+);
 const afterAction = computed(() => outlookAfterAction(selectedNode.value?.data.outlookAfterAction));
 const aliases = computed<string[]>(() => parseOutlookAliases(selectedNode.value?.data.outlookAliases));
 const flaggedOnly = computed(() => selectedNode.value?.data.outlookFlaggedOnly === true);
@@ -113,7 +124,7 @@ function toggleAddress(address: string): void {
         <Label>Mailbox</Label>
         <Select
           :model-value="mailbox"
-          :options="OUTLOOK_MAILBOX_OPTIONS"
+          :options="mailboxOptions"
           @update:model-value="updateNodeData('outlookMailbox', $event || 'inbox')"
         />
         <SearchableSelect
@@ -129,6 +140,12 @@ function toggleAddress(address: string): void {
         <p class="text-xs text-muted-foreground">
           A run starts when an email is received here. Drafts, Junk Email and Deleted Items never
           start runs.
+        </p>
+        <p
+          v-if="isExchangeServer && (mailbox === 'focused' || mailbox === 'other')"
+          class="text-xs text-amber-500"
+        >
+          Exchange Server has no Focused Inbox; choose another mailbox.
         </p>
       </div>
 
