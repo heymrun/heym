@@ -3323,11 +3323,10 @@ def enforce_workflow_http_method(workflow: Workflow, request: Request, test_run:
         )
 
 
-@router.api_route(
-    "/{workflow_id}/execute",
-    methods=["GET", "POST", "PUT", "DELETE"],
-    response_model=WorkflowExecuteResponse,
-)
+@router.post("/{workflow_id}/execute", response_model=WorkflowExecuteResponse)
+@router.get("/{workflow_id}/execute", response_model=WorkflowExecuteResponse)
+@router.put("/{workflow_id}/execute", response_model=WorkflowExecuteResponse)
+@router.delete("/{workflow_id}/execute", response_model=WorkflowExecuteResponse)
 async def execute_workflow_endpoint(
     workflow_id: uuid.UUID,
     request: Request,
@@ -4090,7 +4089,10 @@ async def clear_execution_history(
     )
 
 
-@router.api_route("/{workflow_id}/execute/stream", methods=["GET", "POST", "PUT", "DELETE"])
+@router.post("/{workflow_id}/execute/stream")
+@router.get("/{workflow_id}/execute/stream")
+@router.put("/{workflow_id}/execute/stream")
+@router.delete("/{workflow_id}/execute/stream")
 async def execute_workflow_stream(
     workflow_id: uuid.UUID,
     request: Request,

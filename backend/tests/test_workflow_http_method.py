@@ -196,10 +196,13 @@ class ExecuteRouteMethodsTests(unittest.TestCase):
     def _methods_for(self, path_suffix: str) -> set[str]:
         from app.api.workflows import router
 
+        methods: set[str] = set()
         for route in router.routes:
             if getattr(route, "path", "") == path_suffix:
-                return {m for m in route.methods if m not in ("HEAD", "OPTIONS")}
-        raise AssertionError(f"route {path_suffix} not registered")
+                methods.update(m for m in route.methods if m not in ("HEAD", "OPTIONS"))
+        if not methods:
+            raise AssertionError(f"route {path_suffix} not registered")
+        return methods
 
     def test_execute_accepts_all_four_verbs(self) -> None:
         self.assertEqual(
