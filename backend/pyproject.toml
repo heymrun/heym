@@ -50,6 +50,7 @@ dependencies = [
     "pywhispercpp>=1.5.1",
     "soundfile>=0.13.1",
     "exchangelib>=5.5",
+    "openpyxl>=3.1.5",
 ]
 
 [build-system]
@@ -80,7 +81,6 @@ filterwarnings = [
 dev = [
     "a2a-sdk==1.2.2",
     "langdetect>=1.0.9",
-    "openpyxl>=3.1.5",
     "pandas>=3.1.0",
     "pdfplumber>=0.11.10",
     "pytest>=9.0.3",

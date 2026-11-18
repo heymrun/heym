@@ -9,6 +9,8 @@ function file(name: string, body: BlobPart = "x"): File {
 describe("ragFileKind", () => {
   it("knows documents, images and audio by extension, in any case", async () => {
     expect(await ragFileKind(file("a.PDF", new Uint8Array([0])))).toBe("document");
+    expect(await ragFileKind(file("Contract.DOCX", new Uint8Array([0x50, 0x4b, 0, 0])))).toBe("document");
+    expect(await ragFileKind(file("Budget.XLSX", new Uint8Array([0x50, 0x4b, 0, 0])))).toBe("document");
     expect(await ragFileKind(file(".md"))).toBe("document");
     expect(await ragFileKind(file("scan.JPEG", new Uint8Array([0])))).toBe("image");
     expect(await ragFileKind(file("call.flac", new Uint8Array([0])))).toBe("audio");
@@ -21,10 +23,12 @@ describe("ragFileKind", () => {
   });
 
   it("refuses binary files it does not know", async () => {
-    expect(await ragFileKind(file("report.docx", new Uint8Array([0x50, 0x4b, 0, 0])))).toBeNull();
+    expect(await ragFileKind(file("deck.pptx", new Uint8Array([0x50, 0x4b, 0, 0])))).toBeNull();
   });
 
   it("names the formats in one line", () => {
+    expect(RAG_FORMATS_LINE).toContain("Word (DOCX)");
+    expect(RAG_FORMATS_LINE).toContain("Excel (XLSX)");
     expect(RAG_FORMATS_LINE).toContain("audio (mp3, wav, ogg, opus, flac)");
   });
 });

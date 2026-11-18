@@ -18,7 +18,7 @@ The **Vectorstores** tab manages vector stores used by [RAG](../nodes/rag-node.m
 ## Uploading Documents
 
 - **Upload files** – Drag and drop or pick several files. A store takes:
-  - **Documents** – PDF, Markdown, text, CSV and JSON
+  - **Documents** – PDF, Word (DOCX), Excel (XLSX), Markdown, text, CSV and JSON
   - **Images** – PNG, JPEG, TIFF, WebP and BMP, read with the same Tesseract OCR as the
     [Converter](../nodes/converter-node.md) node, language detected automatically
   - **Audio** – mp3, wav, ogg, opus (WhatsApp voice notes) and flac, transcribed with the Converter's Whisper model on your
@@ -26,6 +26,13 @@ The **Vectorstores** tab manages vector stores used by [RAG](../nodes/rag-node.m
     (`start_seconds`, `end_seconds`)
   - **Any other plain-text file** – a file such as `notes` or `README` is read as text when
     it is valid UTF-8
+- **Word documents** – the body is read in order: paragraphs, table rows, content controls and
+  text boxes. Tracked changes count as accepted. Headers, footers, footnotes and comments are
+  left out
+- **Excel workbooks** – every worksheet is read. Its first non-empty row names the columns, and
+  each row after it becomes one chunk, `Column: value | Column: value`, as a CSV row does. Each
+  chunk keeps its `sheet` and its `row` number as Excel shows it. A column without a name is
+  called by its letter, and formulas read as the value Excel last saved
 - **Scanned PDFs** – pages without a text layer are read with OCR, up to 200 such pages per file
 - **Background uploads** – audio and PDFs with scanned pages take minutes, so Heym reads them in
   the background. They show at the top of the store's items as *Transcribing* or *Reading scanned
@@ -35,8 +42,8 @@ The **Vectorstores** tab manages vector stores used by [RAG](../nodes/rag-node.m
 - **Duplicate handling** – Choose to override or skip duplicate filenames
 - **Progress** – Upload progress is shown during ingestion
 
-An image without readable text, an audio file without speech, and a binary file of another type
-are refused with a message.
+An image without readable text, a Word document or Excel workbook without text, an audio file
+without speech, and a binary file of another type are refused with a message.
 
 ## Managing Content
 
