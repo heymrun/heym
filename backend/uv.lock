@@ -886,7 +886,7 @@ wheels = [
 
 [[package]]
 name = "heym-backend"
-version = "0.0.162"
+version = "0.0.163"
 source = { editable = "." }
 dependencies = [
     { name = "aio-pika" },
