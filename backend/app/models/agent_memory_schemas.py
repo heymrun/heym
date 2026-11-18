@@ -56,3 +56,24 @@ class EdgeUpdateRequest(BaseModel):
     relationship_type: str | None = Field(default=None, max_length=100)
     properties: dict | None = None
     confidence: float | None = None
+
+
+class MemoryAiInsertRequest(BaseModel):
+    """Text to extract entities and relationships from, with the agent's own model."""
+
+    text: str = Field(min_length=1, max_length=24000)
+    credential_id: uuid.UUID
+    model: str = Field(min_length=1, max_length=200)
+
+
+class MemoryAiInsertResponse(BaseModel):
+    """The graph after the insert, read in the same transaction that wrote it."""
+
+    graph: MemoryGraphResponse
+    entities_applied: int
+    relationships_applied: int
+
+
+class MemoryClearResponse(BaseModel):
+    deleted_nodes: int
+    deleted_edges: int

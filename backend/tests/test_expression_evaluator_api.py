@@ -16,7 +16,7 @@ from app.api.expressions import (
     format_completion_preview,
     preview_completion_expressions,
 )
-from app.services.expression_evaluator import ExpressionEvaluateResponse
+from app.services.expression_evaluator import EXPRESSION_MAX_LENGTH, ExpressionEvaluateResponse
 
 
 class ExpressionEvaluateApiTests(unittest.IsolatedAsyncioTestCase):
@@ -739,11 +739,16 @@ class ExpressionEvaluateApiTests(unittest.IsolatedAsyncioTestCase):
     def test_request_rejects_expression_over_max_length(self) -> None:
         with self.assertRaises(ValidationError):
             ExpressionEvaluateRequest(
-                expression="$" + ("x" * 10001),
+                expression="$" + ("x" * EXPRESSION_MAX_LENGTH),
                 workflow_id=self.workflow_id,
                 current_node_id=self.current_node_id,
                 node_results=[],
             )
+
+    def test_request_accepts_a_long_agent_system_prompt(self) -> None:
+        """An 18,517-character system prompt was rejected with 422 before reaching the dialog."""
+        request = self._request(expression="You are a careful legal assistant. " * 530)
+        self.assertGreater(len(request.expression), 18_517)
 
 
 class ExpressionCompletionPreviewApiTests(unittest.IsolatedAsyncioTestCase):

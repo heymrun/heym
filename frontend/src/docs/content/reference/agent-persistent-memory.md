@@ -17,6 +17,17 @@ Turn it on in the Agent node properties (**Persistent memory (graph)**). A pink 
 
 The dialog renders entities as an animated, force-directed graph — colored circles sized by connection count and clustered by entity type — plus editing and navigation (fit view, tidy layout, keyboard shortcuts). You can **add, edit, or delete** nodes and edges manually; the Source/Target relationship pickers are searchable for graphs with many entities. Selecting a node shows its outgoing and incoming connections, each clickable to jump to that node. Changes apply to **this** agent’s graph only (the graph for the canvas node whose brain you opened).
 
+### AI insert and Clear all
+
+Two buttons sit in the dialog's top-right corner, next to **Reload**:
+
+| Button | What it does |
+|--------|--------------|
+| **AI insert** (sparkles) | Opens a text box. Paste notes, an email, or a document and press **Insert** (Cmd/Ctrl+Enter). The agent's own credential and model read the text and extract entities and relationships, which are merged into this graph the same way post-run extraction merges them: an entity that already exists (same name, case-insensitive) gets the new properties, and a new employer or location replaces the old link. AI insert never deletes an entity. The text can be up to 24,000 characters. |
+| **Clear all** (trash) | After a confirmation, deletes every entity and relationship in this agent's graph. Peers' graphs are not touched. This cannot be undone. |
+
+AI insert is disabled until the agent node has both a **credential** and a **model** selected; hover the button to see why. Clear all is disabled while the graph is empty. Neither action goes on the dialog's Ctrl+Z history, and both clear it, because earlier steps may no longer apply. Both need write access to the workflow.
+
 ## Sharing with other agents
 
 In the memory graph dialog, **Share memory with other agents** lets you attach **peers** that may consume this graph at runtime:

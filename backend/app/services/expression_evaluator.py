@@ -13,7 +13,10 @@ from pydantic import BaseModel
 
 from app.services.expression_syntax import alias_reserved_context_names
 
-EXPRESSION_MAX_LENGTH = 10_000
+# Fields evaluated here include whole agent system prompts, and a run resolves those at any
+# length; the old 10_000 cap made the dialog answer 422 for an 18.5k-character prompt the run
+# accepted. Request size as a whole is bounded by RequestBodySizeLimitMiddleware.
+EXPRESSION_MAX_LENGTH = 100_000
 
 ExpressionResultType = Literal["string", "number", "boolean", "array", "object", "null"]
 
@@ -287,49 +290,56 @@ def should_evaluate_as_multi_ref_condition(
     return True
 
 
-def _code_nesting_depth_before_index(text: str, end_index: int) -> int:
-    """Return nesting depth from ``(``, ``[``, ``{`` before ``end_index`` (strings ignored)."""
+def _code_nesting_depths_at(text: str, indices: list[int]) -> list[int]:
+    """Nesting depth from ``(``, ``[``, ``{`` before each of ``indices`` (strings ignored).
+
+    One pass over ``text`` for all indices, which must be ascending. Scanning from the start once
+    per index made a long template with many ``$`` spans quadratic: 40k characters with ~1,400
+    spans took about 3 s in this check alone, and the evaluate route runs on the event loop.
+    """
+    depths: list[int] = []
     paren = 0
     square = 0
     curly = 0
     index = 0
+    length = len(text)
     in_string: str | None = None
-    while index < end_index:
-        char = text[index]
-        if in_string is not None:
-            if char == "\\" and index + 1 < end_index:
-                index += 2
+    for end_index in indices:
+        while index < end_index:
+            char = text[index]
+            if in_string is not None:
+                if char == "\\" and index + 1 < length:
+                    index += 2
+                    continue
+                if char == in_string:
+                    in_string = None
+                index += 1
                 continue
-            if char == in_string:
-                in_string = None
+            if char in ('"', "'"):
+                in_string = char
+                index += 1
+                continue
+            if char == "(":
+                paren += 1
+            elif char == ")":
+                paren = max(0, paren - 1)
+            elif char == "[":
+                square += 1
+            elif char == "]":
+                square = max(0, square - 1)
+            elif char == "{":
+                curly += 1
+            elif char == "}":
+                curly = max(0, curly - 1)
             index += 1
-            continue
-        if char in ('"', "'"):
-            in_string = char
-            index += 1
-            continue
-        if char == "(":
-            paren += 1
-        elif char == ")":
-            paren = max(0, paren - 1)
-        elif char == "[":
-            square += 1
-        elif char == "]":
-            square = max(0, square - 1)
-        elif char == "{":
-            curly += 1
-        elif char == "}":
-            curly = max(0, curly - 1)
-        index += 1
-    return paren + square + curly
+        depths.append(paren + square + curly)
+    return depths
 
 
 def _any_dollar_span_under_code_nesting(trimmed: str, executor: Any) -> bool:
     """True when at least one ``$`` expression starts inside ``()``, ``[]``, or ``{}``."""
-    for start, _end, _expr in executor._find_expressions(trimmed):
-        if _code_nesting_depth_before_index(trimmed, start) > 0:
-            return True
-    return False
+    starts = sorted(start for start, _end, _expr in executor._find_expressions(trimmed))
+    return any(depth > 0 for depth in _code_nesting_depths_at(trimmed, starts))
 
 
 def _substituted_expression_probe(trimmed: str, executor: Any) -> str | None:

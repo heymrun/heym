@@ -9,9 +9,11 @@ from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from app.services.expression_evaluator import (
+    EXPRESSION_MAX_LENGTH,
     ExpressionEvaluateResponse,
     ExpressionEvaluatorService,
     ExpressionTooLongError,
+    _code_nesting_depths_at,
     build_eval_context,
     build_vars_context,
     classify_type,
@@ -30,6 +32,58 @@ from app.services.workflow_executor import (
     _normalize_js_logical_ops_for_eval,
     execute_workflow,
 )
+
+
+def _reference_nesting_depth_before_index(text: str, end_index: int) -> int:
+    """The per-index scan `_code_nesting_depths_at` replaced, kept to prove they agree."""
+    paren = square = curly = 0
+    index = 0
+    in_string: str | None = None
+    while index < end_index:
+        char = text[index]
+        if in_string is not None:
+            if char == "\\" and index + 1 < end_index:
+                index += 2
+                continue
+            if char == in_string:
+                in_string = None
+            index += 1
+            continue
+        if char in ('"', "'"):
+            in_string = char
+            index += 1
+            continue
+        if char == "(":
+            paren += 1
+        elif char == ")":
+            paren = max(0, paren - 1)
+        elif char == "[":
+            square += 1
+        elif char == "]":
+            square = max(0, square - 1)
+        elif char == "{":
+            curly += 1
+        elif char == "}":
+            curly = max(0, curly - 1)
+        index += 1
+    return paren + square + curly
+
+
+class TestCodeNestingDepthsAt(unittest.TestCase):
+    def test_single_pass_matches_a_fresh_scan_at_every_dollar(self) -> None:
+        import random
+
+        rng = random.Random(1016)
+        alphabet = "()[]{}\"'\\$ab "
+        for _ in range(400):
+            text = "".join(rng.choice(alphabet) for _ in range(rng.randint(0, 80)))
+            starts = [i for i, c in enumerate(text) if c == "$"]
+            expected = [_reference_nesting_depth_before_index(text, i) for i in starts]
+            self.assertEqual(_code_nesting_depths_at(text, starts), expected, text)
+
+    def test_index_past_the_end_and_no_indices(self) -> None:
+        self.assertEqual(_code_nesting_depths_at("(a)[", [0, 1, 3, 4]), [0, 1, 0, 1])
+        self.assertEqual(_code_nesting_depths_at("(a", []), [])
 
 
 class TestShouldEvaluateAsMultiRefCondition(unittest.TestCase):
@@ -1705,7 +1759,22 @@ class TestExpressionEvaluatorServiceEvaluate(unittest.TestCase):
 
     def test_expression_over_length_limit_raises(self) -> None:
         with self.assertRaises(ExpressionTooLongError):
-            self._service().evaluate("$" + ("x" * 10001), {})
+            self._service().evaluate("$" + ("x" * EXPRESSION_MAX_LENGTH), {})
+
+    def test_long_system_prompt_template_resolves_like_a_run(self) -> None:
+        """An agent prompt of ~18.5k characters reached the dialog as a 422 while the run used it.
+
+        The executor puts no cap on a template, so the evaluate dialog must accept one this long.
+        """
+        paragraph = "You are a legal assistant for privacy and AI regulation questions. " * 270
+        template = f"{paragraph}\nClient: $input.client\n{paragraph}"
+        self.assertGreater(len(template), 18_500)
+
+        response = self._service().evaluate(template, {"input": {"client": "Acme"}})
+
+        self.assertIsNone(response.error)
+        self.assertIn("Client: Acme", str(response.result))
+        self.assertEqual(len(str(response.result)), len(template) - len("$input.client") + 4)
 
     def test_response_model_type(self) -> None:
         response = self._service().evaluate("$array(1, 2)", {})

@@ -153,6 +153,9 @@ import type {
   UpdateTeamRequest,
 } from "@/types/team";
 import type {
+  AgentMemoryAiInsertRequest,
+  AgentMemoryAiInsertResponse,
+  AgentMemoryClearResponse,
   AgentMemoryEdgeDTO,
   AgentMemoryGraphResponse,
   AgentMemoryNodeDTO,
@@ -638,6 +641,30 @@ export const workflowApi = {
 
   deleteAgentMemoryEdge: async (workflowId: string, memoryEdgeId: string): Promise<void> => {
     await api.delete(`/workflows/${workflowId}/agent-memory/edges/${memoryEdgeId}`);
+  },
+
+  aiInsertAgentMemory: async (
+    workflowId: string,
+    canvasNodeId: string,
+    body: AgentMemoryAiInsertRequest,
+  ): Promise<AgentMemoryAiInsertResponse> => {
+    const enc = encodeURIComponent(canvasNodeId);
+    const response = await api.post<AgentMemoryAiInsertResponse>(
+      `/workflows/${workflowId}/nodes/${enc}/agent-memory/ai-insert`,
+      body,
+    );
+    return response.data;
+  },
+
+  clearAgentMemoryGraph: async (
+    workflowId: string,
+    canvasNodeId: string,
+  ): Promise<AgentMemoryClearResponse> => {
+    const enc = encodeURIComponent(canvasNodeId);
+    const response = await api.delete<AgentMemoryClearResponse>(
+      `/workflows/${workflowId}/nodes/${enc}/agent-memory/graph`,
+    );
+    return response.data;
   },
 
   create: async (data: {
