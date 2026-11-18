@@ -61,10 +61,15 @@ def execute(ctx: NodeExecutionContext) -> object:
     if not operation:
         raise ValueError("Google Sheets node requires an operation")
 
-    raw_id = self.evaluate_message_template(node_data.get("gsSpreadsheetId", ""), inputs, node_id)
+    raw_id = self.evaluate_nonempty_message_template(
+        node_data.get("gsSpreadsheetId", ""), inputs, node_id
+    )
     spreadsheet_id = GoogleSheetsService.parse_spreadsheet_id(raw_id)
-    sheet_name = self.evaluate_message_template(
-        node_data.get("gsSheetName", "Sheet1"), inputs, node_id
+    if not spreadsheet_id:
+        raise ValueError("Google Sheets node requires a spreadsheet ID")
+    sheet_name = (
+        self.evaluate_nonempty_message_template(node_data.get("gsSheetName", ""), inputs, node_id)
+        or "Sheet1"
     )
     _sr_ev = self.evaluate_message_template(
         str(node_data.get("gsStartRow", "1") or "1"), inputs, node_id
