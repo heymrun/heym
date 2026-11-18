@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from email.utils import formatdate, getaddresses, make_msgid, parseaddr
+from email.utils import formataddr, formatdate, getaddresses, make_msgid, parseaddr
 from typing import Any
 
 from app.services.node_execution.base import NodeExecutionContext
@@ -91,6 +91,22 @@ def recipients(group: str) -> list[tuple[str, str]]:
     if parsed:
         return parsed
     return [("", addr.strip()) for addr in group.split(",") if addr.strip()]
+
+
+def address_header(value: str) -> str:
+    """An address field as it goes in a From/To/Cc/Bcc header.
+
+    A header with a non-ASCII character is written as one encoded-word, addresses included,
+    and a reader then finds no address in it. Each display name is encoded on its own
+    instead, so "José García <jose@example.com>" keeps its address. An ASCII field, or one
+    the parser cannot read, is used as written.
+    """
+    if value.isascii():
+        return value
+    pairs = [(name, addr) for name, addr in getaddresses([value]) if addr]
+    if not pairs or not all(addr.isascii() for _name, addr in pairs):
+        return value
+    return ", ".join(formataddr(pair) for pair in pairs)
 
 
 def is_html_body(body: str) -> bool:
@@ -186,17 +202,17 @@ def build_mime_message(
     """
     msg = MIMEMultipart("mixed")
     if sender:
-        msg["From"] = sender
+        msg["From"] = address_header(sender)
     # RFC 5322 requires Date; Gmail refuses mail without a Message-ID. Relays that do not add
     # missing headers for remote clients (Postfix's default) pass the message on as built.
     msg["Date"] = formatdate(localtime=True)
     domain = parseaddr(sender or account)[1].rpartition("@")[2]
     msg["Message-ID"] = make_msgid(domain=domain or None)
-    msg["To"] = fields.to
+    msg["To"] = address_header(fields.to)
     if fields.cc:
-        msg["Cc"] = fields.cc
+        msg["Cc"] = address_header(fields.cc)
     if bcc_header and fields.bcc:
-        msg["Bcc"] = fields.bcc
+        msg["Bcc"] = address_header(fields.bcc)
     msg["Subject"] = fields.subject
 
     body_part = MIMEMultipart("alternative")

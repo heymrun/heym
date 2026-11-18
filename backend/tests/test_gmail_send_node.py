@@ -3,7 +3,7 @@
 import base64
 import unittest
 import uuid
-from email import message_from_bytes
+from email import message_from_bytes, policy
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -105,6 +105,31 @@ class GmailSendMessageTests(unittest.TestCase):
         self.assertEqual(msg["Subject"], "Hi")
         self.assertIsNotNone(msg["Date"])
         self.assertTrue(msg["Message-ID"].endswith("@example.com>"))
+
+    def test_names_with_accents_keep_the_addresses_gmail_delivers_to(self) -> None:
+        result, send, _ = _run(
+            {
+                **BASE,
+                "to": "José García <jose@x.com>, b@x.com",
+                "cc": '"Müller, Hans" <hans@y.de>',
+                "bcc": "東京チーム <tokyo@x.jp>",
+            }
+        )
+
+        self.assertEqual(result["status"], "success")
+        msg = message_from_bytes(send.call_args.args[0], policy=policy.default)
+        headers = {
+            name: [(a.display_name, a.addr_spec) for a in msg[name].addresses]
+            for name in ("To", "Cc", "Bcc")
+        }
+        self.assertEqual(
+            headers,
+            {
+                "To": [("José García", "jose@x.com"), ("", "b@x.com")],
+                "Cc": [("Müller, Hans", "hans@y.de")],
+                "Bcc": [("東京チーム", "tokyo@x.jp")],
+            },
+        )
 
     def test_a_blank_from_lets_gmail_use_the_account_address(self) -> None:
         result, send, list_send_as = _run(BASE)
