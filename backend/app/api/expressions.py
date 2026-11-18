@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from dataclasses import dataclass
@@ -47,6 +48,9 @@ EXPRESSION_GENERATE_MAX_OUTPUT_TOKENS = 8192
 COMPLETION_PREVIEW_MAX_EXPRESSIONS = 40
 # Previews sit on one dropdown row, so keep them short instead of shipping whole payloads.
 COMPLETION_PREVIEW_MAX_CHARS = 160
+# Candidates are autocomplete suggestions, evaluated up to 40 per keystroke: they keep the short
+# cap even though a single evaluate accepts a whole system prompt.
+COMPLETION_PREVIEW_MAX_EXPRESSION_LENGTH = 10_000
 
 
 class NodeResultItem(BaseModel):
@@ -439,7 +443,9 @@ async def evaluate_expression(
 ) -> ExpressionEvaluateResponse:
     """Evaluate an expression or template using pinned data and last-run node outputs."""
     setup = await build_evaluation_setup(request, http_request, db, current_user)
-    response = setup.service.evaluate(
+    # CPU only, and a long template can take seconds: keep it off the event loop.
+    response = await asyncio.to_thread(
+        setup.service.evaluate,
         request.expression,
         setup.context,
         current_node_id=request.current_node_id,
@@ -474,7 +480,7 @@ async def preview_completion_expressions(
     previews: list[ExpressionCompletionPreviewItem] = []
     for expression in request.expressions:
         candidate = expression.strip()
-        if not candidate or len(candidate) > EXPRESSION_MAX_LENGTH:
+        if not candidate or len(candidate) > COMPLETION_PREVIEW_MAX_EXPRESSION_LENGTH:
             previews.append(ExpressionCompletionPreviewItem(expression=expression))
             continue
 
