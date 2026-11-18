@@ -248,6 +248,9 @@ class GristPathSegmentTests(unittest.TestCase):
     def _run(self, doc_id: str, table_id: str) -> str:
         executor = MagicMock()
         executor.evaluate_message_template.side_effect = lambda value, *_args, **_kw: value
+        executor.evaluate_nonempty_message_template.side_effect = lambda value, *_args, **_kw: str(
+            value or ""
+        )
         client = MagicMock()
         client.get.return_value = _response({"records": []})
 
