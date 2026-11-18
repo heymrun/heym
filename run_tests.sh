@@ -111,6 +111,7 @@ export BACKEND_DIR WORK_DIR
 PYTEST_EXTRA_ARGS="$*"
 export PYTEST_EXTRA_ARGS
 
+xargs_rc=0
 printf '%s\n' "$TEST_DIR"/test_*.py | xargs -P "$JOBS" -n 1 sh -c '
     suite=$1
     name=$(basename "$suite")
@@ -118,7 +119,7 @@ printf '%s\n' "$TEST_DIR"/test_*.py | xargs -P "$JOBS" -n 1 sh -c '
     # Unquoted on purpose: extra pytest flags must word-split.
     uv run pytest "$suite" -v $PYTEST_EXTRA_ARGS > "$WORK_DIR/$name.out" 2>&1
     echo $? > "$WORK_DIR/$name.code"
-' sh
+' sh || xargs_rc=$?
 
 # Report results in a deterministic order
 OVERALL=0
@@ -131,8 +132,16 @@ for f in "$TEST_DIR"/test_*.py; do
     out="$WORK_DIR/$name.out"
     code_file="$WORK_DIR/$name.code"
 
-    code=0
+    # Fail closed: a worker that died before writing a numeric status is a failure.
+    code=""
     [ -f "$code_file" ] && code="$(cat "$code_file")"
+    missing_status=0
+    case "$code" in
+        '' | *[!0-9]*)
+            missing_status=1
+            code=1
+            ;;
+    esac
 
     if [ "$code" -eq 0 ]; then
         marker="PASS"
@@ -150,7 +159,10 @@ for f in "$TEST_DIR"/test_*.py; do
 
     echo ""
     echo "=== [$marker] $name ==="
-    if [ "$code" -ne 0 ]; then
+    if [ "$missing_status" -eq 1 ]; then
+        echo "Worker produced no exit status (it exited early or was killed)."
+        [ -f "$out" ] && cat "$out"
+    elif [ "$code" -ne 0 ]; then
         cat "$out"
     else
         echo "$summary"
@@ -159,6 +171,10 @@ done
 
 echo ""
 echo "----------------------------------------"
+if [ "$xargs_rc" -ne 0 ]; then
+    echo "xargs exited with status $xargs_rc"
+    OVERALL=1
+fi
 TOTAL=$((TOTAL_PASSED + TOTAL_FAILED))
 END_TS=$(date +%s)
 ELAPSED=$((END_TS - START_TS))
