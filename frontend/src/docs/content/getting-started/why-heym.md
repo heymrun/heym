@@ -158,7 +158,7 @@ The [Board tab](../tabs/board-tab.md) is a built-in Kanban board where the colum
 - **Column workflow chains** – Moving a card into a column triggers that column's workflow chain; an **Agentic Kanban Model** (your credential + model) maps card content into workflow inputs and turns outputs back into readable text
 - **Card attachments** – Drop files onto a card; documents are extracted to text and images are passed to vision-capable models before each run
 - **Live run canvas** – Open the active run inside a card and watch it execute on the real workflow canvas, node by node
-- **Team sharing** – Share boards with users or teams with read/write permissions; chains on shared boards run with the owner's credentials, so collaborators never need their own
+- **Team sharing** – Share boards with users or teams with read/write permissions; a chain runs as the user who started it, with their own credentials and global variables, as in the editor
 - **Failure visibility** – Failed cards surface an error-history indicator, and follow-up runs can pause to await comments
 
 The board is a native surface of the platform: cards, workflows, credentials, and live runs all live in one place.

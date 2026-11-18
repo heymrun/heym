@@ -460,6 +460,8 @@ class TestCardEndpoints(unittest.IsolatedAsyncioTestCase):
 
         # Answering a card re-runs the gate column's chain (no-op past the gate).
         answer.assert_awaited_once()
+        # The chains the answer releases run as the user who answered.
+        self.assertEqual(answer.await_args.kwargs["actor_user_id"], user.id)
         added = [call.args[0] for call in db.add.call_args_list]
         activities = [obj for obj in added if type(obj).__name__ == "BoardCardActivity"]
         self.assertEqual(len(activities), 1)
@@ -537,6 +539,7 @@ class TestMoveAndRun(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["move"]["to_column"], "Planning")
         self.assertFalse(kwargs["rerun"])
         self.assertTrue(kwargs["allow_advance"])  # forward move may cascade
+        self.assertEqual(kwargs["actor_user_id"], user.id)  # runs as the user who moved it
         added = [call.args[0] for call in db.add.call_args_list]
         events = [o for o in added if type(o).__name__ == "BoardCardActivity"]
         self.assertTrue(any(a.kind == "event" for a in events))
@@ -731,6 +734,8 @@ class TestMoveAndRun(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertTrue(enqueue.await_args.kwargs["allow_advance"])
+        # The chain runs as the user who pressed Run.
+        self.assertEqual(enqueue.await_args.kwargs["actor_user_id"], user.id)
 
     async def test_follow_up_run_on_gate_column_never_auto_advances(self):
         """Second column (sorted index 1) waits for a comment — even without skip flag."""

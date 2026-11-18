@@ -1035,7 +1035,9 @@ async def create_card_comment(
     # Answering a card that is waiting at the planning gate re-runs its column chain with
     # the answer, which releases the gate and lets the card flow on.
     column = await _get_board_column(db, board, card.column_id)
-    await board_run_service.answer_card_comment(db, card=card, column=column, board=board)
+    await board_run_service.answer_card_comment(
+        db, card=card, column=column, board=board, actor_user_id=current_user.id
+    )
 
     return CardActivityResponse(
         id=activity.id,
@@ -1151,6 +1153,7 @@ async def move_card(
             board=board,
             move={"from_column": source.name, "to_column": target.name},
             rerun=False,
+            actor_user_id=current_user.id,
             allow_advance=forward,
         )
         if result == board_run_service.ENQUEUE_BLOCKED:
@@ -1214,6 +1217,7 @@ async def run_card_chain(
         board=board,
         move=None,
         rerun=True,
+        actor_user_id=current_user.id,
         allow_advance=allow_advance,
     )
     if result != board_run_service.ENQUEUE_STARTED:

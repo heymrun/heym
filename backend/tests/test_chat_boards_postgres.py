@@ -318,7 +318,9 @@ class ChatBoardToolTests(unittest.IsolatedAsyncioTestCase):
         created = await self.add(self.owner, "NDA")
         card_id = created["task"]["id"]
 
-        async def release(db, *, card, column, board):
+        async def release(db, *, card, column, board, actor_user_id):
+            # The chains the answer releases run as the chat's user.
+            self.assertEqual(actor_user_id, self.owner.id)
             card.run_status = "running"
             await db.commit()
             return True

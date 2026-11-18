@@ -202,6 +202,7 @@ def _runner_patches(context, execute_side_effect):
         patch.object(
             board_run_service, "execute_workflow", MagicMock(side_effect=execute_side_effect)
         ),
+        patch.object(board_run_service, "user_has_workflow_access", AsyncMock(return_value=True)),
     ]
 
 
@@ -228,6 +229,7 @@ class TestRunCardChain(unittest.IsolatedAsyncioTestCase):
                             links=links,
                             move=None,
                             rerun=rerun,
+                            actor_user_id=board.owner_id,
                             session_factory=factory,
                         )
                 self.assertEqual(len(calls), 4)
@@ -258,6 +260,7 @@ class TestRunCardChain(unittest.IsolatedAsyncioTestCase):
                 links=links,
                 move={"from_column": "Backlog", "to_column": "Planning"},
                 rerun=False,
+                actor_user_id=board.owner_id,
                 session_factory=factory,
             )
 
@@ -295,6 +298,7 @@ class TestRunCardChain(unittest.IsolatedAsyncioTestCase):
                 links=links[:1],
                 move=None,
                 rerun=True,
+                actor_user_id=board.owner_id,
                 session_factory=factory,
             )
 
@@ -325,6 +329,7 @@ class TestRunCardChain(unittest.IsolatedAsyncioTestCase):
                 links=links[:1],
                 move=None,
                 rerun=True,
+                actor_user_id=board.owner_id,
                 allow_advance=True,
                 session_factory=factory,
             )
@@ -350,6 +355,7 @@ class TestRunCardChain(unittest.IsolatedAsyncioTestCase):
             links=links,
             move=None,
             rerun=True,
+            actor_user_id=board.owner_id,
             session_factory=factory,
         )
 
@@ -384,6 +390,7 @@ class TestRunCardChain(unittest.IsolatedAsyncioTestCase):
                 links=links,
                 move=None,
                 rerun=False,
+                actor_user_id=board.owner_id,
                 session_factory=factory,
             )
 
@@ -427,6 +434,7 @@ class TestRunCardChain(unittest.IsolatedAsyncioTestCase):
                 links=links,
                 move=None,
                 rerun=False,
+                actor_user_id=board.owner_id,
                 session_factory=factory,
             )
         finally:
@@ -469,6 +477,7 @@ class TestRunCardChain(unittest.IsolatedAsyncioTestCase):
             links=links,
             move=None,
             rerun=True,
+            actor_user_id=board.owner_id,
             session_factory=factory,
         )
         return card, session
@@ -520,6 +529,7 @@ class TestResumeCardChain(unittest.IsolatedAsyncioTestCase):
             error=None,
             finished_at=None,
             execution_history_id=history_id,
+            actor_user_id=None,
         )
         history = SimpleNamespace(id=history_id, status=history_status, outputs=outputs)
 
@@ -685,7 +695,7 @@ class TestAnswerCardComment(unittest.IsolatedAsyncioTestCase):
             patch.object(board_run_service, "enqueue_card_chain", AsyncMock()) as enqueue,
         ):
             result = await board_run_service.answer_card_comment(
-                db, card=card, column=column, board=board
+                db, card=card, column=column, board=board, actor_user_id=uuid.uuid4()
             )
 
         self.assertTrue(result)
@@ -703,7 +713,7 @@ class TestAnswerCardComment(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(board_run_service, "_auto_advance", AsyncMock()) as advance:
             result = await board_run_service.answer_card_comment(
-                db, card=card, column=column, board=board
+                db, card=card, column=column, board=board, actor_user_id=uuid.uuid4()
             )
 
         self.assertFalse(result)
@@ -725,7 +735,7 @@ class TestAnswerCardComment(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(board_run_service, "_auto_advance", AsyncMock()) as advance:
             result = await board_run_service.answer_card_comment(
-                db, card=card, column=column, board=board
+                db, card=card, column=column, board=board, actor_user_id=uuid.uuid4()
             )
 
         self.assertFalse(result)
@@ -754,7 +764,13 @@ class TestEnqueueHoldsTaskReference(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(board_run_service, "_run_chain", AsyncMock(return_value=None)):
             result = await board_run_service.enqueue_card_chain(
-                db, card=card, column=column, board=board, move=None, rerun=True
+                db,
+                card=card,
+                column=column,
+                board=board,
+                move=None,
+                rerun=True,
+                actor_user_id=uuid.uuid4(),
             )
             # The task must be strongly referenced so the GC cannot drop it mid-run.
             self.assertEqual(result, board_run_service.ENQUEUE_STARTED)
@@ -823,6 +839,7 @@ class TestSyncRecoveredBoardRun(unittest.IsolatedAsyncioTestCase):
             output={},
             error="Server restarted during execution",
             finished_at=datetime.now(timezone.utc),
+            actor_user_id=None,
         )
         history = SimpleNamespace(
             id=execution_id,
@@ -972,6 +989,7 @@ class TestAutoAdvanceAfterAManualMove(unittest.IsolatedAsyncioTestCase):
             card_id=card.id,
             board_id=uuid.uuid4(),
             from_column_id=development,
+            actor_user_id=None,
             session_factory=lambda: session,
         )
 

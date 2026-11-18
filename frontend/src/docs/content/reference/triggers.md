@@ -30,7 +30,7 @@ Start nodes (no incoming edges) that initiate execution:
 | **Webhook/API** | `POST /api/workflows/{id}/execute` | `anonymous` / `jwt` / `header_auth` |
 | **MCP** | `POST /api/mcp`, `/tools/call`, `/message`, `/sse` | `X-MCP-Key` header or `Authorization: Bearer` (headers only) |
 | **Portal** | `POST /api/portal/{slug}/execute` | Portal session token |
-| **Board** | [Board](../tabs/board-tab.md) card move / follow-up run into a column with a workflow chain (`trigger_source="board"`) | JWT (board owner) |
+| **Board** | [Board](../tabs/board-tab.md) card move / follow-up run into a column with a workflow chain (`trigger_source="board"`) | JWT (runs as the user who moved, ran or answered the card) |
 | **Cron** | Cron scheduler (runs every 60s, evaluates cron expressions) | N/A |
 | **IMAP** | IMAP trigger manager (leader worker, per-node polling interval) | IMAP username/password |
 | **Gmail** | Gmail trigger manager (leader worker, per-node polling interval) | Gmail OAuth2 credential |

@@ -227,6 +227,7 @@ def _board_env(history_status, *, run_status="running", execution_history_id=Non
         output={},
         error=None,
         finished_at=None,
+        actor_user_id=None,
     )
     history = SimpleNamespace(
         id=execution_id, status=history_status, inputs={}, outputs={}, node_results=[]
