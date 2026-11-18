@@ -23,7 +23,8 @@ _BLOCK_TAGS = (
     *("p", "div", "br", "li", "tr", "table", "ul", "ol", "blockquote", "hr"),
     *("h1", "h2", "h3", "h4", "h5", "h6", "section", "article", "header", "footer"),
 )
-_HTML_MARKERS = ("<body", "<div", "<table", "<p>", "<br>", "<br/>", "<br />")
+# The tags that make a body HTML, with or without attributes (<p style="...">, <br/>).
+_HTML_TAG = re.compile(r"<(?:body|div|table|p|br)\b[^>]*>", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -115,7 +116,7 @@ def is_html_body(body: str) -> bool:
     return (
         lowered.startswith("<!doctype html")
         or lowered.startswith("<html")
-        or any(marker in lowered for marker in _HTML_MARKERS)
+        or _HTML_TAG.search(lowered) is not None
     )
 
 

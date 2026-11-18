@@ -176,6 +176,14 @@ class GmailSendMessageTests(unittest.TestCase):
         self.assertIn("text/html", parts)
         self.assertEqual(parts["text/plain"].get_payload(decode=True).decode(), "Hello there")
 
+    def test_html_tags_with_attributes_make_an_html_body(self) -> None:
+        for body in ('<p style="margin:0">Shipped</p>', 'Shipped<br class="gap">Tracking: 42'):
+            with self.subTest(body=body):
+                _, send, _ = _run({**BASE, "emailBody": body})
+
+                kinds = {part.get_content_type() for part in _sent(send).walk()}
+                self.assertTrue({"text/html", "text/plain"} <= kinds, kinds)
+
     def test_blank_fields_stay_blank_and_expressions_resolve(self) -> None:
         _, send, _ = _run({**BASE, "subject": "", "emailBody": "Got $in.text"})
 

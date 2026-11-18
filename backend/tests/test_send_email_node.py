@@ -419,6 +419,25 @@ class SendEmailBodyRenderingTests(unittest.TestCase):
         self.assertIn("text/html", content_types)
         self.assertIn("text/plain", content_types)
 
+    def test_html_tags_with_attributes_make_an_html_body(self) -> None:
+        for body in ('<p style="margin:0">Shipped</p>', 'Shipped<br class="gap">Tracking: 42'):
+            with self.subTest(body=body):
+                nr, server = _run_send_email(
+                    {
+                        "label": "sendEmail",
+                        "credentialId": str(uuid.uuid4()),
+                        "to": "a@x.com",
+                        "subject": "Hi",
+                        "emailBody": body,
+                    },
+                    uuid.uuid4(),
+                    _make_db_mock([]),
+                )
+                self.assertEqual(nr["status"], "success")
+                _, msg = _sent_message(server)
+                kinds = {part.get_content_type() for part in msg.walk()}
+                self.assertTrue({"text/html", "text/plain"} <= kinds, kinds)
+
     def test_the_plain_part_of_an_html_body_reads_as_text(self) -> None:
         html = (
             "<html><head><style>body { font-family: Arial }</style></head><body>"
