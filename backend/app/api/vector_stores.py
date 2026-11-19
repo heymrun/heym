@@ -51,6 +51,7 @@ from app.services.k8s_credentials.store import CredentialUnavailableError
 from app.services.upload_limits import read_upload_file_limited
 from app.services.user_lookup import find_user_by_email
 from app.services.vector_store import (
+    VectorStoreBackend,
     create_vector_store_service_for_credential,
     rag_credential_backend,
 )
@@ -123,7 +124,7 @@ def get_vector_store_service_from_config(config: dict, credential_type: object):
     return create_vector_store_service_for_credential(credential_type, config)
 
 
-def _store_service(credential: Credential):
+def _store_service(credential: Credential) -> VectorStoreBackend:
     """The backend for a store's credential.
 
     A Secret-backed credential with no value in this process is a 503 with the reason, so a

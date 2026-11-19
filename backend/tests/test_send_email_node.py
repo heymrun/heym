@@ -473,6 +473,18 @@ class SendEmailBodyRenderingTests(unittest.TestCase):
                 kinds = {part.get_content_type() for part in msg.walk()}
                 self.assertTrue({"text/html", "text/plain"} <= kinds, kinds)
 
+    def test_a_body_full_of_unclosed_tags_is_read_in_linear_time(self) -> None:
+        import time
+
+        from app.services.email_compose import is_html_body
+
+        # 240 KB of "<p " with no ">": about 7 s when the attributes may run past a "<".
+        body = "<p " * 80000
+        started = time.perf_counter()
+        self.assertFalse(is_html_body(body))
+        self.assertLess(time.perf_counter() - started, 1.0)
+        self.assertTrue(is_html_body(body + "<p>Shipped</p>"))
+
     def test_the_plain_part_of_an_html_body_reads_as_text(self) -> None:
         html = (
             "<html><head><style>body { font-family: Arial }</style></head><body>"

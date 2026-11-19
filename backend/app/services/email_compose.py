@@ -26,7 +26,9 @@ _BLOCK_TAGS = (
     *("h1", "h2", "h3", "h4", "h5", "h6", "section", "article", "header", "footer"),
 )
 # The tags that make a body HTML, with or without attributes (<p style="...">, <br/>).
-_HTML_TAG = re.compile(r"<(?:body|div|table|p|br)\b[^>]*>", re.IGNORECASE)
+# The attributes stop at the next "<" as well as ">", so a body full of unclosed "<p "
+# (a forwarded email, a webhook payload, model output) is scanned in linear time.
+_HTML_TAG = re.compile(r"<(?:body|div|table|p|br)\b[^<>]*>", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
