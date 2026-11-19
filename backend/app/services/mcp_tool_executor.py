@@ -31,6 +31,7 @@ from app.services.mcp_stdio_sandbox import (
     build_sandboxed_command,
     force_remove_container,
 )
+from app.services.url_redaction import redact_url
 
 logger = logging.getLogger(__name__)
 
@@ -215,10 +216,6 @@ def _extract_root_exception(exc: BaseException) -> BaseException:
     return exc
 
 
-def _remove_request_params(url: str) -> str:
-    return urljoin(url, urlparse(url).path)
-
-
 def _post_failure_message(
     session_message: SessionMessage,
     exc: BaseException,
@@ -268,7 +265,7 @@ async def _sse_client_fail_fast(
 
     async with anyio.create_task_group() as tg:
         try:
-            logger.debug("Connecting to SSE endpoint: %s", _remove_request_params(url))
+            logger.debug("Connecting to SSE endpoint: %s", redact_url(url))
             # Build the client directly instead of create_mcp_http_client so the
             # SSRF guard is authoritative: follow_redirects=False stops a
             # guard-approved public URL from being redirected onto an internal
