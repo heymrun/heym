@@ -165,6 +165,12 @@ def _sanitize_workflow_tool_name(name: str) -> str:
     return "".join(c if c.isalnum() or c == "_" else "" for c in tool_name)
 
 
+# Tool names Heym's MCP servers answer themselves, before looking for a workflow.
+BUILT_IN_TOOL_NAMES = frozenset(
+    {mcp_chat_service.MCP_CHAT_TOOL_NAME, mcp_execution_status.MCP_EXECUTION_STATUS_TOOL_NAME}
+)
+
+
 def workflow_tool_names(
     workflows: Sequence[Workflow], owner_id: uuid.UUID | None
 ) -> dict[uuid.UUID, str]:
@@ -186,7 +192,9 @@ def workflow_tool_names(
         )
 
     names: dict[uuid.UUID, str] = {}
-    used: set[str] = set()
+    # Heym's own tools are dispatched before any workflow, so a workflow named "Heym Chat"
+    # takes `heym_chat_2` instead of a name it could never be called by.
+    used: set[str] = set(BUILT_IN_TOOL_NAMES)
     for workflow in sorted(workflows, key=rank):
         base = _sanitize_workflow_tool_name(workflow.name)
         name, suffix = base, 2
