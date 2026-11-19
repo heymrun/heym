@@ -492,3 +492,23 @@ class ClickHouseKeyValueTypesTests(unittest.TestCase):
         )
 
         self.assertEqual(coerced, {"active": "maybe", "count": "lots", "extra": "x"})
+
+    def test_a_datetime_without_an_offset_is_read_in_the_column_zone_or_utc(self) -> None:
+        import datetime as dt
+        from zoneinfo import ZoneInfo
+
+        coerced = self._coerced(
+            {
+                "at": "2026-01-01 10:00:00",
+                "local": "2026-01-01T10:00:00",
+                "kept": "2026-01-01T10:00:00+02:00",
+            },
+            [("at", "DateTime"), ("local", "DateTime64(3, 'Asia/Tokyo')"), ("kept", "DateTime")],
+        )
+
+        self.assertEqual(coerced["at"], dt.datetime(2026, 1, 1, 10, 0, tzinfo=dt.timezone.utc))
+        self.assertEqual(
+            coerced["local"], dt.datetime(2026, 1, 1, 10, 0, tzinfo=ZoneInfo("Asia/Tokyo"))
+        )
+        self.assertEqual(coerced["local"].utcoffset(), dt.timedelta(hours=9))
+        self.assertEqual(coerced["kept"].utcoffset(), dt.timedelta(hours=2))

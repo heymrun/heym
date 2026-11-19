@@ -11,6 +11,7 @@ from ipaddress import IPv4Address, IPv6Address
 from typing import Any
 from urllib.parse import urlparse
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.services.ssrf_guard import guard_http_url
 
@@ -83,6 +84,22 @@ def _ch_param_type(value: Any) -> str:
 _WRAPPER = re.compile(r"^(Nullable|LowCardinality)\((.*)\)$")
 _TRUE_TEXT = frozenset({"true", "1", "yes"})
 _FALSE_TEXT = frozenset({"false", "0", "no"})
+_COLUMN_ZONE = re.compile(r"'([^']+)'")
+
+
+def _column_zone(column_type: str) -> _dt.tzinfo:
+    """The zone a DateTime column names, else UTC.
+
+    The driver reads a datetime without an offset in the worker's local time zone, so the
+    same text would be stored differently depending on where the run happened.
+    """
+    match = _COLUMN_ZONE.search(column_type)
+    if match:
+        try:
+            return ZoneInfo(match.group(1))
+        except (ZoneInfoNotFoundError, ValueError):
+            pass
+    return _dt.timezone.utc
 
 
 def _coerce_text(value: Any, column_type: str | None) -> Any:
@@ -118,7 +135,10 @@ def _coerce_text(value: Any, column_type: str | None) -> Any:
         if inner in ("Date", "Date32"):
             return _dt.date.fromisoformat(text[:10])
         if inner.startswith("DateTime"):
-            return _dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
+            parsed = _dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=_column_zone(inner))
+            return parsed
     except (ValueError, ArithmeticError):
         return value
     return value

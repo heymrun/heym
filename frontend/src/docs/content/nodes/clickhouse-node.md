@@ -66,7 +66,7 @@ This compiles to `WHERE status = {…:String} AND tenant_id = {…:Int64}`. Only
 ## Input Modes (insert / upsert)
 
 - **JSON array** (`raw`): provide a JSON array of row objects in `clickhouseData`. Keys that are missing from a given row are inserted as `NULL`. The column set is the union of keys across all rows.
-- **Key-value** (`selective`): after you select a credential and table, the editor discovers the table columns and creates one value field per column. One row is inserted per execution; each value supports expressions. Each value is read as its column's type: `true`/`false` for Bool, numbers, Decimal, Date and DateTime from ISO text, and an empty value is NULL in a Nullable column.
+- **Key-value** (`selective`): after you select a credential and table, the editor discovers the table columns and creates one value field per column. One row is inserted per execution; each value supports expressions. Each value is read as its column's type: `true`/`false` for Bool, numbers, Decimal, Date and DateTime from ISO text, and an empty value is NULL in a Nullable column. A DateTime without an offset is read in the column's time zone (`DateTime('Asia/Tokyo')`), or UTC when the column names none.
 
 ## Mutations and ClickHouse Semantics
 
