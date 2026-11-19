@@ -462,8 +462,6 @@ async def _run_chain(
                 board = context["board"]
                 run_as = run_as_user_id(actor_user_id, board)
                 run.actor_user_id = run_as
-                # A chain that pauses here resumes later; it keeps this choice.
-                run.allow_advance = allow_advance
                 if not await user_has_workflow_access(db, workflow, run_as):
                     # Checked before input mapping, so nothing about the workflow runs.
                     run.status = "failed"
@@ -870,9 +868,8 @@ async def resume_card_chain(
             )
 
             # The rest of the chain runs as the user who started it, not the one who
-            # answered the review, and advances only if that chain was allowed to.
+            # answered the review.
             actor_user_id = run.actor_user_id
-            allow_advance = getattr(run, "allow_advance", True) is not False
             if remaining:
                 card.run_status = "running"
                 await db.commit()
@@ -884,7 +881,6 @@ async def resume_card_chain(
                     move=None,
                     rerun=False,
                     actor_user_id=actor_user_id,
-                    allow_advance=allow_advance,
                     start_index=next_index,
                     chain_length=len(links),
                     initial_outputs=[{"workflow_name": run.workflow_name, "output": outputs}],
@@ -897,8 +893,6 @@ async def resume_card_chain(
             card_id = card.id
             await db.commit()
 
-        if not allow_advance:
-            return
         await _auto_advance(
             card_id=card_id,
             board_id=board_id,
@@ -1037,7 +1031,6 @@ async def enqueue_card_chain(
         chain_length=len(links),
         status="running",
         actor_user_id=actor_user_id,
-        allow_advance=allow_advance,
     )
     db.add(first_run)
     card.run_status = "running"
@@ -1256,10 +1249,8 @@ async def sync_recovered_board_run(
             links = await _column_links(db, column.id)
             next_index = _next_link_index(links, run)
             remaining = links[next_index:]
-            # The rest of the chain keeps running as the user who started it, and advances
-            # only if that chain was allowed to.
+            # The rest of the chain keeps running as the user who started it.
             actor_user_id = run.actor_user_id
-            allow_advance = getattr(run, "allow_advance", True) is not False
             run.execution_history_id = history.id
             run.active_execution_id = None
             run.finished_at = datetime.now(timezone.utc)
@@ -1361,7 +1352,6 @@ async def sync_recovered_board_run(
                     move=None,
                     rerun=False,
                     actor_user_id=actor_user_id,
-                    allow_advance=allow_advance,
                     start_index=next_index,
                     chain_length=len(links),
                     initial_outputs=previous_outputs,
@@ -1374,8 +1364,6 @@ async def sync_recovered_board_run(
             card_id = card.id
             await db.commit()
 
-        if not allow_advance:
-            return
         await _auto_advance(
             card_id=card_id,
             board_id=board_id,
