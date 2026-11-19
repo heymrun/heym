@@ -82,6 +82,71 @@ class TestRunQuery(unittest.TestCase):
             [{"name": "id", "type": "INTEGER"}, {"name": "name", "type": "STRING"}],
         )
 
+    @staticmethod
+    def _answer(payload: dict) -> MagicMock:
+        response = MagicMock(is_success=True)
+        response.json.return_value = payload
+        return response
+
+    @staticmethod
+    def _page(*ids: int, **extra: object) -> dict:
+        return {
+            "jobComplete": True,
+            "jobReference": {"projectId": "p", "jobId": "job_1", "location": "EU"},
+            "schema": {"fields": [{"name": "id", "type": "INTEGER"}]},
+            "rows": [{"f": [{"v": str(i)}]} for i in ids],
+            "totalRows": "3",
+            **extra,
+        }
+
+    def test_a_query_still_running_after_the_timeout_is_polled_for_its_rows(self) -> None:
+        svc = self._make_service()
+        running = {
+            "jobComplete": False,
+            "jobReference": {"projectId": "p", "jobId": "job_1", "location": "EU"},
+        }
+        with (
+            patch("httpx.post", return_value=self._answer(running)),
+            patch(
+                "httpx.get",
+                side_effect=[self._answer(running), self._answer(self._page(1, 2, 3))],
+            ) as get,
+        ):
+            result = svc.run_query("p", "SELECT id FROM t")
+        self.assertEqual([row["id"] for row in result["rows"]], ["1", "2", "3"])
+        self.assertEqual(get.call_count, 2)
+        self.assertTrue(get.call_args.args[0].endswith("/projects/p/queries/job_1"))
+        self.assertEqual(get.call_args.kwargs["params"]["location"], "EU")
+
+    def test_pages_are_followed_up_to_max_results_or_to_the_end(self) -> None:
+        svc = self._make_service()
+        first = self._page(1, 2, pageToken="next")
+        with (
+            patch("httpx.post", return_value=self._answer(first)),
+            patch("httpx.get", side_effect=[self._answer(self._page(3))]),
+        ):
+            unlimited = svc.run_query("p", "SELECT id FROM t", max_results=0)
+        self.assertEqual([row["id"] for row in unlimited["rows"]], ["1", "2", "3"])
+
+        with (
+            patch("httpx.post", return_value=self._answer(first)),
+            patch("httpx.get") as get,
+        ):
+            capped = svc.run_query("p", "SELECT id FROM t", max_results=2)
+        self.assertEqual([row["id"] for row in capped["rows"]], ["1", "2"])
+        get.assert_not_called()
+
+    def test_a_query_that_never_finishes_fails_instead_of_returning_no_rows(self) -> None:
+        svc = self._make_service()
+        running = {"jobComplete": False, "jobReference": {"projectId": "p", "jobId": "job_1"}}
+        with (
+            patch("httpx.post", return_value=self._answer(running)),
+            patch("httpx.get", return_value=self._answer(running)),
+            self.assertRaises(ValueError) as raised,
+        ):
+            svc.run_query("p", "SELECT id FROM t")
+        self.assertIn("did not finish", str(raised.exception))
+
     def test_run_query_empty_result(self) -> None:
         svc = self._make_service()
         mock_response = MagicMock()
