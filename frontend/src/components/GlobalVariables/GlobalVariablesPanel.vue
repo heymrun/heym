@@ -18,6 +18,7 @@ import Select from "@/components/ui/Select.vue";
 import Textarea from "@/components/ui/Textarea.vue";
 import UserAvatar from "@/components/ui/UserAvatar.vue";
 import { refreshGlobalVariablesCache } from "@/composables/useExpressionCompletion";
+import { globalVariableSavePayload } from "@/lib/globalVariableForm";
 import { formatDate } from "@/lib/utils";
 import { globalVariablesApi, teamsApi } from "@/services/api";
 
@@ -161,21 +162,17 @@ async function saveVariable(): Promise<void> {
   saving.value = true;
   try {
     const value = parseFormValue();
-    const payload = {
-      name: formName.value.trim(),
-      value,
-      value_type: formValueType.value === "auto" ? undefined : formValueType.value,
-    };
+    const payload = globalVariableSavePayload(formName.value, value, formValueType.value);
 
     if (editingId.value) {
-      await globalVariablesApi.update(editingId.value, payload);
+      const saved = await globalVariablesApi.update(editingId.value, payload);
       const idx = variables.value.findIndex((x) => x.id === editingId.value);
       if (idx >= 0) {
         variables.value[idx] = {
           ...variables.value[idx],
-          name: payload.name,
-          value,
-          value_type: formValueType.value === "auto" ? _inferType(value) : formValueType.value,
+          name: saved.name,
+          value: saved.value,
+          value_type: saved.value_type,
         };
       }
     } else {
@@ -190,14 +187,6 @@ async function saveVariable(): Promise<void> {
   } finally {
     saving.value = false;
   }
-}
-
-function _inferType(v: GlobalVariableValue): string {
-  if (typeof v === "boolean") return "boolean";
-  if (typeof v === "number") return "number";
-  if (Array.isArray(v)) return "array";
-  if (typeof v === "object" && v !== null) return "object";
-  return "string";
 }
 
 async function deleteVariable(id: string, event: Event): Promise<void> {

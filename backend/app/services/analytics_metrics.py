@@ -587,8 +587,13 @@ async def compute_workflow_breakdown(
     since: datetime,
     until: datetime,
     limit: int,
+    order_by: str = "executions",
 ) -> list[WorkflowBreakdownRow]:
-    """Per-workflow totals, most executed first, including snapshots of deleted workflows."""
+    """Per-workflow totals, including snapshots of deleted workflows.
+
+    Most executed first; with ``order_by="errors"`` most failed first, so the Most Failed
+    table is not limited to the workflows that run most.
+    """
     if not accessible_workflow_ids:
         return []
     snapshot_scope = snapshot_scope_filter(
@@ -685,5 +690,8 @@ async def compute_workflow_breakdown(
                 ),
             )
         )
-    items.sort(key=lambda item: item.execution_count, reverse=True)
+    if order_by == "errors":
+        items.sort(key=lambda item: (item.error_count, item.execution_count), reverse=True)
+    else:
+        items.sort(key=lambda item: item.execution_count, reverse=True)
     return items[:limit]

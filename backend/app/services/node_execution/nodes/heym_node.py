@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -24,10 +25,16 @@ def _resolve(ctx: NodeExecutionContext, key: str) -> str:
 
 
 def _parse_int(value: str, fallback: int) -> int:
+    """A whole number from a field; "2.0" (a float from an expression) is 2, not the fallback."""
     try:
         return int(value)
     except (TypeError, ValueError):
+        pass
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
         return fallback
+    return int(number) if math.isfinite(number) else fallback
 
 
 def _workflow_summary(workflow: Any) -> dict[str, Any]:

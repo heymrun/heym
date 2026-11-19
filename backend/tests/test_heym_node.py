@@ -102,6 +102,20 @@ class ListWorkflowsTest(HeymNodeTestBase):
 
         self.assertEqual(len(result["workflows"]), 5)
 
+    def test_a_limit_resolved_from_a_float_still_limits(self) -> None:
+        # "$cfg.limit" with a number column holding 2.0 renders as "2.0".
+        for limit, expected in (("2.0", 2), ("2.9", 2), ("abc", 5), ("inf", 5), ("nan", 5)):
+            with self.subTest(limit=limit):
+                owning = _workflow("Owning", self.owner_id)
+                rows = [_workflow(f"W{i}", self.owner_id) for i in range(5)]
+                self.db.execute.side_effect = [self._scalar_one(owning), self._scalars(rows)]
+
+                result = heym_node.execute(
+                    _ctx({"heymOperation": "listWorkflows", "heymLimit": limit})
+                )
+
+                self.assertEqual(len(result["workflows"]), expected)
+
     def test_zero_limit_returns_every_workflow(self) -> None:
         owning = _workflow("Owning", self.owner_id)
         rows = [_workflow(f"W{i}", self.owner_id) for i in range(5)]
@@ -380,6 +394,23 @@ class GetExecutionHistoryTest(HeymNodeTestBase):
                     "heymOperation": "getExecutionHistory",
                     "heymWorkflowId": str(target.id),
                     "heymSinceDays": "7",
+                }
+            )
+        )
+
+        self.assertIsNotNone(result["since"])
+
+    def test_since_days_resolved_from_a_float_still_sets_the_window(self) -> None:
+        owning = _workflow("Owning", self.owner_id)
+        target = _workflow("Target", self.owner_id)
+        self._queue(owning, target, [self._entry("success")], {"success": 1})
+
+        result = heym_node.execute(
+            _ctx(
+                {
+                    "heymOperation": "getExecutionHistory",
+                    "heymWorkflowId": str(target.id),
+                    "heymSinceDays": "1.0",
                 }
             )
         )

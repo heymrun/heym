@@ -3448,10 +3448,12 @@ export const analyticsApi = {
   getWorkflowBreakdown: async (
     options: AnalyticsQueryOptions = {},
     limit: number = 10,
+    orderBy: "executions" | "errors" = "executions",
   ): Promise<WorkflowBreakdownItem[]> => {
     const params: Record<string, string | number> = {
       ...buildAnalyticsQueryParams(options),
       limit,
+      order_by: orderBy,
     };
     const response = await api.get<WorkflowBreakdownResponse>("/analytics/workflows", {
       params,

@@ -2,6 +2,7 @@
 
 import uuid
 from datetime import datetime, timedelta, timezone
+from urllib.parse import quote
 
 import httpx
 
@@ -9,6 +10,12 @@ from app.services.encryption import encrypt_config
 
 _TOKEN_URL = "https://oauth2.googleapis.com/token"
 _BQ_BASE = "https://bigquery.googleapis.com/bigquery/v2"
+_QUERY_TIMEOUT_MS = 10000
+# BigQuery holds jobs.query and jobs.getQueryResults open for up to _QUERY_TIMEOUT_MS before it
+# answers; httpx's 5 s default would give up first. Allow that wait plus time for the answer.
+_QUERY_HTTP_TIMEOUT = httpx.Timeout(_QUERY_TIMEOUT_MS / 1000 + 20, connect=10.0)
+# jobs.getQueryResults waits up to _QUERY_TIMEOUT_MS per call; this bounds the whole wait.
+_MAX_RESULT_POLLS = 60
 
 
 class BigQueryService:
@@ -71,6 +78,37 @@ class BigQueryService:
     def _auth_headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self._get_valid_token()}"}
 
+    @staticmethod
+    def _checked(resp: httpx.Response) -> dict:
+        """The JSON body of a successful BigQuery answer; an API error otherwise."""
+        if not resp.is_success:
+            try:
+                err = resp.json().get("error", {})
+                msg = err.get("message") or resp.text
+            except Exception:
+                msg = resp.text
+            raise ValueError(f"BigQuery API error {resp.status_code}: {msg}")
+        return resp.json()
+
+    def _query_results(
+        self, project_id: str, job: dict, max_results: int, page_token: str | None
+    ) -> dict:
+        """One jobs.getQueryResults call for the query job, waiting up to the timeout."""
+        job_id = str(job.get("jobId") or "")
+        if not job_id:
+            raise ValueError("BigQuery did not return a job reference for the query")
+        params: dict = {"timeoutMs": _QUERY_TIMEOUT_MS}
+        if job.get("location"):
+            params["location"] = job["location"]
+        if max_results > 0:
+            params["maxResults"] = max_results
+        if page_token:
+            params["pageToken"] = page_token
+        url = f"{_BQ_BASE}/projects/{project_id}/queries/{quote(job_id, safe='')}"
+        return self._checked(
+            httpx.get(url, headers=self._auth_headers(), params=params, timeout=_QUERY_HTTP_TIMEOUT)
+        )
+
     def run_query(self, project_id: str, query: str, max_results: int = 1000) -> dict:
         """Run a synchronous BigQuery SQL query and return rows.
 
@@ -81,25 +119,38 @@ class BigQueryService:
         body: dict = {
             "query": query,
             "useLegacySql": False,
-            "timeoutMs": 10000,
+            "timeoutMs": _QUERY_TIMEOUT_MS,
         }
         if max_results > 0:
             body["maxResults"] = max_results
-        resp = httpx.post(url, headers=self._auth_headers(), json=body)
-        if not resp.is_success:
-            try:
-                err = resp.json().get("error", {})
-                msg = err.get("message") or resp.text
-            except Exception:
-                msg = resp.text
-            raise ValueError(f"BigQuery API error {resp.status_code}: {msg}")
-        data = resp.json()
+        data = self._checked(
+            httpx.post(url, headers=self._auth_headers(), json=body, timeout=_QUERY_HTTP_TIMEOUT)
+        )
+
+        # A query still running after timeoutMs answers jobComplete: false with no rows;
+        # its rows come from jobs.getQueryResults, page by page.
+        job = data.get("jobReference") or {}
+        polls = 0
+        while data.get("jobComplete") is False:
+            polls += 1
+            if polls > _MAX_RESULT_POLLS:
+                raise ValueError("BigQuery query did not finish in time; try a smaller query")
+            data = self._query_results(project_id, job, max_results, None)
 
         schema_fields = data.get("schema", {}).get("fields", [])
         schema = [{"name": f["name"], "type": f["type"]} for f in schema_fields]
         field_names = [f["name"] for f in schema_fields]
 
-        raw_rows = data.get("rows", [])
+        raw_rows = list(data.get("rows", []))
+        page_token = data.get("pageToken")
+        while page_token and (max_results == 0 or len(raw_rows) < max_results):
+            remaining = max_results - len(raw_rows) if max_results else 0
+            page = self._query_results(project_id, job, remaining, page_token)
+            raw_rows.extend(page.get("rows", []))
+            page_token = page.get("pageToken")
+        if max_results:
+            raw_rows = raw_rows[:max_results]
+
         rows = []
         for raw_row in raw_rows:
             cells = raw_row.get("f", [])
