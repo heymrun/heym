@@ -22,6 +22,7 @@ from app.db.models import ExecutionHistory, Workflow, execution_started_at
 from app.db.session import async_session_maker
 from app.services.cluster import identity
 from app.services.cluster.attribution import attribution_fields
+from app.services.run_history_encryption import seal_insert_values
 
 
 def _coerce_status_code(value: Any) -> int | None:
@@ -174,6 +175,7 @@ async def persist_run_history(
             "node_analytics_pending": True,
             **attribution_fields(),
         }
+        values = await seal_insert_values(db, values)
         await db.execute(
             pg_insert(ExecutionHistory)
             .values(**values)
@@ -345,22 +347,26 @@ async def record_failed_dispatch(
         workflow = await db.get(Workflow, workflow_id)
         if workflow is None:
             return False
+        values = await seal_insert_values(
+            db,
+            {
+                "id": execution_id,
+                "workflow_id": workflow_id,
+                "inputs": inputs,
+                "outputs": {"error": message},
+                "node_results": [],
+                "status": "error",
+                "execution_time_ms": 0.0,
+                "trigger_source": trigger_source,
+                "started_at": execution_started_at(execution_id, [], 0.0),
+                # The dispatcher recorded this, no one executed it.
+                **attribution_fields(),
+            },
+        )
         inserted = (
             await db.execute(
                 pg_insert(ExecutionHistory)
-                .values(
-                    id=execution_id,
-                    workflow_id=workflow_id,
-                    inputs=inputs,
-                    outputs={"error": message},
-                    node_results=[],
-                    status="error",
-                    execution_time_ms=0.0,
-                    trigger_source=trigger_source,
-                    started_at=execution_started_at(execution_id, [], 0.0),
-                    # The dispatcher recorded this, no one executed it.
-                    **attribution_fields(),
-                )
+                .values(**values)
                 .on_conflict_do_nothing(index_elements=["id"])
                 .returning(ExecutionHistory.id)
             )

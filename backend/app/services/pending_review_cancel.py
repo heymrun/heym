@@ -17,6 +17,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import CodexFollowupRequest, ExecutionHistory, HITLRequest
+from app.services.run_history_encryption import unseal_in_place
 
 CANCELLED_STATUS = "cancelled"
 CANCELLED_OUTPUT: dict[str, str] = {"error": "Execution was cancelled"}
@@ -81,6 +82,7 @@ async def cancel_pending_review_execution(
         )
     ).scalar_one_or_none()
     if history is not None and history.status == "pending":
+        await unseal_in_place(db, history)
         history.status = CANCELLED_STATUS
         history.outputs = dict(CANCELLED_OUTPUT)
         history.node_results = _cancel_pending_node_results(history.node_results)

@@ -142,11 +142,13 @@ A call that starts right away behaves exactly as described under Response Format
 | `queue.size` | Runs waiting right now |
 | `queue.running` | Runs holding a slot right now |
 | `queue.limit` | The workflow's concurrency limit |
-| `status_token` | Anonymous workflows only. Returned once, in this response |
+| `status_token` | Anonymous workflows and workflows with [encrypted run history](./run-history-encryption.md). Returned once, in this response |
 
 ### Status URL
 
 `GET /api/workflows/{workflow_id}/executions/{execution_id}/status` answers with the run's state. Call it with the same credential that started the run: a session or JWT, an [execution token](./execution-tokens.md), or the workflow's custom header. An anonymous workflow has no credential to check, so send the `status_token` from the 202 in the `X-Heym-Run-Token` header. The token is never read from the query string. A wrong or missing token gets `404`, the same as an unknown execution.
+
+For a workflow with [encrypted run history](./run-history-encryption.md), the outputs come back only when the request also carries the run's `status_token` in `X-Heym-Run-Token`, whatever credential it uses. Without it the body has the status, `encrypted: true` and `outputs: null`.
 
 ```json
 {

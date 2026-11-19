@@ -52,6 +52,18 @@ class BuildWorkflowAnalysisContextTests(unittest.TestCase):
         self.assertEqual(ctx["agentNodes"], [])
         self.assertEqual(ctx["llmNodes"], [])
         self.assertFalse(ctx["hasAgentSuite"])
+        self.assertFalse(ctx["runHistoryEncrypted"])
+        self.assertFalse(ctx["isShared"])
+
+    def test_carries_run_history_encryption_and_sharing(self) -> None:
+        ctx = _build_workflow_analysis_context(
+            {"nodes": []},
+            has_alert_configured=False,
+            run_history_encrypted=True,
+            is_shared=True,
+        )
+        self.assertTrue(ctx["runHistoryEncrypted"])
+        self.assertTrue(ctx["isShared"])
 
 
 class WorkflowHasAlertTests(unittest.IsolatedAsyncioTestCase):

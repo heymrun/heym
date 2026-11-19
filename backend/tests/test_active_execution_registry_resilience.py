@@ -83,6 +83,32 @@ class _FakeResult:
         return self._rows[0] if self._rows else None
 
 
+_UNSET: Any = object()
+
+
+async def _plain_active_values(
+    _db: Any,
+    *,
+    workflow_id: uuid.UUID,
+    execution_id: uuid.UUID,
+    inputs: Any = _UNSET,
+    node_results: Any = _UNSET,
+) -> dict[str, Any]:
+    """Run history encryption off: the registry row keeps its values as they are."""
+    values: dict[str, Any] = {}
+    if inputs is not _UNSET:
+        values["inputs"] = inputs
+    if node_results is not _UNSET:
+        values.update(node_results=node_results, encrypted_node_results=None)
+    return values
+
+
+def _without_encryption(test: unittest.TestCase) -> None:
+    patcher = patch("app.services.execution_cancellation.seal_active_values", _plain_active_values)
+    patcher.start()
+    test.addCleanup(patcher.stop)
+
+
 class _FakeSession:
     """Async session stub that honours SAVEPOINT semantics closely enough to test."""
 
@@ -140,6 +166,7 @@ def _session_maker(session: _FakeSession) -> Any:
 class SyncLocalHandlesIsolationTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         _flush()
+        _without_encryption(self)
         self.registry = ActiveExecutionRegistry()
 
     def tearDown(self) -> None:
@@ -238,6 +265,7 @@ class SyncLocalHandlesIsolationTests(unittest.IsolatedAsyncioTestCase):
 class DrainCommandsRetryTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         _flush()
+        _without_encryption(self)
         self.registry = ActiveExecutionRegistry()
         self.registry._running = True
 

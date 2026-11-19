@@ -21,6 +21,7 @@ from app.config import settings
 from app.db.models import ExecutionHistory, HITLRequest, Workflow
 from app.db.session import async_session_maker
 from app.services.hitl_widget_filter import HitlWidgetFilter, ReviewSource, review_steps
+from app.services.run_history_encryption import unseal_in_place
 from app.services.workflow_access import workflow_access_clause
 from app.services.workflow_executor import (
     ExecutionResult,
@@ -759,6 +760,7 @@ async def resume_hitl_request_in_background(request_id: uuid.UUID) -> None:
         history_entry = await db.get(ExecutionHistory, hitl_request.execution_history_id)
         if workflow is None or history_entry is None:
             return
+        await unseal_in_place(db, history_entry)
 
         snapshot = copy.deepcopy(hitl_request.execution_snapshot or {})
         if snapshot.get("seeded_review"):

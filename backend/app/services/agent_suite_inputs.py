@@ -15,6 +15,7 @@ from app.services.llm_provider import is_reasoning_model
 from app.services.llm_service import execute_llm
 from app.services.llm_trace import LLMTraceContext
 from app.services.model_router import build_router_for_credential
+from app.services.run_history_encryption import not_encrypted
 
 MAX_SUITE_RUNS = 20
 
@@ -32,11 +33,11 @@ def unwrap_run_inputs(inputs: Any) -> dict[str, Any]:
 async def previous_run_inputs(
     db: AsyncSession, workflow_id: uuid.UUID
 ) -> tuple[dict[str, Any] | None, datetime | None]:
-    """Inputs of the workflow's most recent run, and when it started."""
+    """Inputs of the workflow's most recent run that is not encrypted, and when it started."""
     row = (
         await db.execute(
             select(ExecutionHistory.inputs, ExecutionHistory.started_at)
-            .where(ExecutionHistory.workflow_id == workflow_id)
+            .where(ExecutionHistory.workflow_id == workflow_id, not_encrypted())
             .order_by(ExecutionHistory.started_at.desc())
             .limit(1)
         )

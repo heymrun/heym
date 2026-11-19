@@ -140,6 +140,7 @@ export const DOCS_MANIFEST: Record<string, DocCategory> = {
       { slug: "sse-streaming", title: "SSE Streaming" },
       { slug: "triggers", title: "Triggers" },
       { slug: "execution-history", title: "Execution History" },
+      { slug: "run-history-encryption", title: "Run History Encryption" },
       { slug: "edit-history", title: "Edit History" },
       { slug: "user-settings", title: "Settings" },
       { slug: "opentelemetry", title: "OpenTelemetry Tracing" },

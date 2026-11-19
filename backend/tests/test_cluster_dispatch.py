@@ -31,6 +31,11 @@ from app.services.cluster.dispatch import (
 from app.services.cluster.run_result_bus import RunResultBus
 
 
+def _unsealed() -> AsyncMock:
+    """Run history encryption off: Core history inserts keep their values."""
+    return AsyncMock(side_effect=lambda _db, values: values)
+
+
 class InProcessDecisionTests(unittest.TestCase):
     def test_a_single_instance_install_never_enqueues(self) -> None:
         self.assertTrue(
@@ -630,6 +635,7 @@ class RecordFailedDispatchTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch("app.services.cluster.run_history.async_session_maker", factory),
             patch("app.services.cluster.run_history.upsert_workflow_analytics_snapshot", snapshot),
+            patch("app.services.cluster.run_history.seal_insert_values", _unsealed()),
         ):
             written = await record_failed_dispatch(
                 execution_id=uuid.uuid4(),
@@ -704,6 +710,7 @@ class RunHistoryLastWriterWinsTests(unittest.IsolatedAsyncioTestCase):
                 "app.services.cluster.run_history.upsert_workflow_analytics_snapshot",
                 new=AsyncMock(),
             ),
+            patch("app.services.cluster.run_history.seal_insert_values", _unsealed()),
         ):
             await persist_run_history(
                 execution_id=uuid.uuid4(),
@@ -862,6 +869,7 @@ class QueuedRunCancellationWorkerTests(unittest.IsolatedAsyncioTestCase):
                     "app.services.cluster.dispatch.upsert_workflow_analytics_snapshot",
                     new=AsyncMock(),
                 ) as mock_analytics,
+                patch("app.services.cluster.dispatch.seal_insert_values", _unsealed()),
             ):
                 await worker._execute_claimed(queued_row)
 
@@ -1044,6 +1052,9 @@ class QueueTraceContextTests(unittest.IsolatedAsyncioTestCase):
         factory.return_value.__aexit__ = AsyncMock(return_value=False)
         with ExitStack() as stack:
             stack.enter_context(patch("app.db.session.async_session_maker", factory))
+            stack.enter_context(
+                patch("app.services.cluster.dispatch.seal_insert_values", _unsealed())
+            )
             for target in (
                 "app.api.workflows.get_credentials_context",
                 "app.api.workflows.collect_referenced_workflows",

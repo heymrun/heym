@@ -88,6 +88,7 @@ def run_history_rows(
             ExecutionHistory.execution_time_ms,
             ExecutionHistory.trigger_source,
             ExecutionHistory.recovered,
+            ExecutionHistory.encrypted,
             ExecutionHistory.executed_by_instance_id,
             ExecutionHistory.executed_by_instance_name,
         )
@@ -134,6 +135,7 @@ def run_history_rows(
         RunHistory.execution_time_ms,
         RunHistory.trigger_source,
         literal(False).label("recovered"),
+        literal(False).label("encrypted"),
         # Chat/assistant runs are not workflow executions and have no
         # instance of their own; the union needs matching columns.
         cast(null(), String).label("executed_by_instance_id"),

@@ -46,6 +46,7 @@ from app.services.execution_cancellation import (
 )
 from app.services.global_variables_service import get_global_variables_context
 from app.services.hitl_service import build_default_public_base_url, persist_pending_hitl_execution
+from app.services.run_history_encryption import open_run_payload_or_placeholders
 from app.services.workflow_access import user_has_workflow_access
 from app.services.workflow_executor import (
     WorkflowCancelledError,
@@ -850,7 +851,7 @@ async def resume_card_chain(
                 await db.commit()
                 return
 
-            outputs = history.outputs or {}
+            outputs = (await open_run_payload_or_placeholders(db, history)).outputs
             run.status = "success"
             run.output = outputs
             await _record_output_activity(
@@ -1313,7 +1314,7 @@ async def sync_recovered_board_run(
                 await db.commit()
                 return
 
-            outputs = history.outputs or {}
+            outputs = (await open_run_payload_or_placeholders(db, history)).outputs
             run.status = "success"
             run.output = outputs
             run.error = None
