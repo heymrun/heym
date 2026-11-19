@@ -5,6 +5,7 @@ under its read-only database role and show exactly what Heym shows. The snapshot
 stays in ``app.api.analytics``: Work never writes.
 """
 
+import math
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -90,10 +91,9 @@ def calculate_percentile(values: list[float], percentile: float) -> float:
     if not values:
         return 0.0
     sorted_values = sorted(values)
-    index = int(len(sorted_values) * percentile / 100)
-    if index >= len(sorted_values):
-        index = len(sorted_values) - 1
-    return sorted_values[index]
+    # The value at rank ceil(n * p / 100): the median of two runs is the faster one.
+    index = math.ceil(len(sorted_values) * percentile / 100) - 1
+    return sorted_values[min(max(index, 0), len(sorted_values) - 1)]
 
 
 def time_saved_minutes_for_runs(
