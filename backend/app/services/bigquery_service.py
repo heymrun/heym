@@ -1,5 +1,6 @@
 """Google BigQuery REST API client with OAuth2 token management."""
 
+import uuid
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -124,7 +125,9 @@ class BigQueryService:
         Returns {insertedCount, success}.
         """
         url = f"{_BQ_BASE}/projects/{project_id}/datasets/{dataset_id}/tables/{table_id}/insertAll"
-        insert_rows = [{"insertId": str(i), "json": row} for i, row in enumerate(rows)]
+        # BigQuery drops a row whose insertId it saw in about the last minute, and still
+        # answers success; ids numbered per call ("0", "1") collide between runs.
+        insert_rows = [{"insertId": str(uuid.uuid4()), "json": row} for row in rows]
         body = {"rows": insert_rows, "skipInvalidRows": False, "ignoreUnknownValues": False}
         resp = httpx.post(url, headers=self._auth_headers(), json=body)
         if not resp.is_success:

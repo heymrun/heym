@@ -645,8 +645,15 @@ def apply_parsed_extraction_sync(
     workflow_id: uuid.UUID,
     canvas_node_id: str,
     data: dict[str, Any],
+    *,
+    prune_replaced: bool = True,
 ) -> MemoryMergeResult:
-    """Merge extraction JSON into stored graph (new overrides old on same entity name)."""
+    """Merge extraction JSON into stored graph (new overrides old on same entity name).
+
+    A new single-slot link ("works for", "lives in") replaces the old one. With
+    ``prune_replaced`` the entity that link left without edges is deleted too; an AI insert
+    passes False, since it never deletes an entity.
+    """
     canvas_key = canvas_node_id[:128]
     entities = data.get("entities") or []
     relationships = data.get("relationships") or []
@@ -806,12 +813,13 @@ def apply_parsed_extraction_sync(
     session.flush()
     # Scoped to only the nodes touched by an edge replacement or revoke cascade
     # above, minus anything this batch's `entities` created or updated.
-    prune_isolated_nodes_sync(
-        session,
-        workflow_id,
-        canvas_key,
-        candidate_node_ids=frozenset(edge_replacement_candidates - entity_batch_ids),
-    )
+    if prune_replaced:
+        prune_isolated_nodes_sync(
+            session,
+            workflow_id,
+            canvas_key,
+            candidate_node_ids=frozenset(edge_replacement_candidates - entity_batch_ids),
+        )
     return MemoryMergeResult(
         entities_applied=entities_applied,
         relationships_applied=relationships_applied,

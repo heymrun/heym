@@ -52,6 +52,24 @@ class TestGetScheduleEvents(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(events[0].scheduled_at, datetime(2026, 10, 19, 18, 0, tzinfo=timezone.utc))
 
+    async def test_the_repeated_hour_lists_what_the_scheduler_runs(self) -> None:
+        # 2026-10-25 in Berlin: 02:00-03:00 happens twice. The scheduler runs a fixed-time job
+        # once, at the first 02:30, and keeps wildcard-hour jobs in real time.
+        tz = ZoneInfo("Europe/Berlin")
+        start = datetime(2026, 10, 24, 22, 0, tzinfo=timezone.utc)
+        end = datetime(2026, 10, 25, 4, 0, tzinfo=timezone.utc)
+
+        def utc_times(expr: str) -> list[str]:
+            events = cron_occurrences([_make_workflow([_cron_node(expr)])], start, end, tz)
+            return [event.scheduled_at.strftime("%H:%M") for event in events]
+
+        self.assertEqual(utc_times("30 2 * * *"), ["00:30"])
+        self.assertEqual(utc_times("0 2 * * *"), ["00:00"])
+        self.assertEqual(
+            utc_times("30 * * * *"), ["22:30", "23:30", "00:30", "01:30", "02:30", "03:30"]
+        )
+        self.assertEqual(utc_times("*/30 2 * * *"), ["00:00", "00:30", "01:00", "01:30"])
+
     async def test_inactive_cron_filtered_out(self) -> None:
         start = datetime(2026, 4, 17, 0, 0, 0, tzinfo=timezone.utc)
         end = datetime(2026, 4, 17, 23, 59, 59, tzinfo=timezone.utc)

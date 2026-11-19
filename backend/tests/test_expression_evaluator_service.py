@@ -1587,6 +1587,31 @@ class TestExpressionEvaluatorServiceEvaluate(unittest.TestCase):
         self.assertEqual(response.result_type, "number")
         self.assertTrue(response.preserved_type)
 
+    def test_add_hours_and_minutes_count_real_time_across_dst(self) -> None:
+        berlin_tz = ZoneInfo("Europe/Berlin")
+        cases = [
+            # Autumn: 24 h from noon is 11:00 the next day, not 12:00 (25 h).
+            ('$Date("2026-10-24T12:00:00").addHours(24).toISO()', "2026-10-25T11:00:00+01:00"),
+            ('$Date("2026-10-25T01:30:00").addHours(2).toISO()', "2026-10-25T02:30:00+01:00"),
+            # Spring: 02:00-03:00 does not exist in Berlin.
+            ('$Date("2026-03-29T01:30:00").addHours(1).format("HH:mm")', "03:30"),
+            ('$Date("2026-03-29T01:30:00").addMinutes(90).format("HH:mm")', "04:00"),
+            # Days stay calendar days, and nothing changes away from a DST change.
+            ('$Date("2026-10-24T12:00:00").addDays(1).toISO()', "2026-10-25T12:00:00+01:00"),
+            ('$Date("2026-06-10T12:00:00").addHours(24).toISO()', "2026-06-11T12:00:00+02:00"),
+        ]
+        executor = WorkflowExecutor(nodes=[], edges=[])
+        executor.configured_timezone = berlin_tz
+        with patch(
+            "app.services.workflow_executor.get_configured_timezone", return_value=berlin_tz
+        ):
+            for expression, expected in cases:
+                with self.subTest(expression=expression):
+                    self.assertEqual(
+                        executor.resolve_expression(expression, {}, preserve_type=True), expected
+                    )
+                    self.assertEqual(self._service().evaluate(expression, {}).result, expected)
+
     def test_date_format_callable_uses_default_pattern(self) -> None:
         response = self._service().evaluate('$Date("2024-01-15T08:09:10+00:00").format', {})
         self.assertEqual(response.result, "2024-01-15 08:09:10")

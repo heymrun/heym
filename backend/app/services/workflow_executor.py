@@ -1408,14 +1408,21 @@ class DotDateTime:
     def add_days(self, n: int) -> "DotDateTime":
         return self.addDays(n)
 
+    def _elapsed(self, delta: timedelta) -> "DotDateTime":
+        """Real elapsed time: across a DST change the wall clock moves by one hour more or less."""
+        zone = self._dt.tzinfo
+        if zone is None:
+            return DotDateTime(self._dt + delta)
+        return DotDateTime((self._dt.astimezone(timezone.utc) + delta).astimezone(zone))
+
     def addHours(self, n: int) -> "DotDateTime":  # noqa: N802
-        return DotDateTime(self._dt + timedelta(hours=n))
+        return self._elapsed(timedelta(hours=n))
 
     def add_hours(self, n: int) -> "DotDateTime":
         return self.addHours(n)
 
     def addMinutes(self, n: int) -> "DotDateTime":  # noqa: N802
-        return DotDateTime(self._dt + timedelta(minutes=n))
+        return self._elapsed(timedelta(minutes=n))
 
     def add_minutes(self, n: int) -> "DotDateTime":
         return self.addMinutes(n)

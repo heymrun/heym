@@ -190,6 +190,27 @@ class TestWorkflowDurationHandler(unittest.IsolatedAsyncioTestCase):
         )
         observation = await workflow_duration.evaluate(_ctx(db, config, window_minutes=30))
         self.assertEqual(observation.observed_value, calculate_percentile(values, 95))
+        # Nearest rank: the 95th of 100 runs, not the 96th.
+        self.assertEqual(observation.observed_value, 95.0)
+
+    def test_percentile_is_the_nearest_rank(self):
+        from app.api.analytics import calculate_percentile
+
+        cases = [
+            ([100.0, 200.0], 50, 100.0),
+            ([100.0, 200.0, 300.0, 400.0], 50, 200.0),
+            ([100.0, 200.0, 300.0], 50, 200.0),
+            ([float(v) for v in range(1, 21)], 95, 19.0),
+            ([float(v) for v in range(1, 101)], 99, 99.0),
+            ([400.0, 100.0, 300.0, 200.0], 95, 400.0),
+            ([5.0], 50, 5.0),
+            ([1.0, 2.0], 0, 1.0),
+            ([1.0, 2.0], 100, 2.0),
+            ([], 95, 0.0),
+        ]
+        for values, percentile, expected in cases:
+            with self.subTest(values=values, percentile=percentile):
+                self.assertEqual(calculate_percentile(values, percentile), expected)
 
     async def test_min_samples_suppresses(self):
         db = MagicMock()

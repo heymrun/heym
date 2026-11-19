@@ -185,6 +185,8 @@ class AiInsertMemoryApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(merged_payload["revoked_entities"], [])
         self.assertEqual(merged_payload["entities"], [{"name": "Ada", "type": "person"}])
         self.assertEqual(self.apply.call_args.args[1:3], (self.workflow_id, "agent-1"))
+        # A replaced employer or location keeps its entity: an insert never deletes one.
+        self.assertEqual(self.apply.call_args.kwargs, {"prune_replaced": False})
 
         self.assertEqual(result.entities_applied, 1)
         self.assertEqual(result.relationships_applied, 1)
@@ -382,6 +384,79 @@ class MergeResultCountsPostgreSqlTests(unittest.TestCase):
         # the revoked Acme survived because an insert never revokes.
         self.assertEqual(names, ["Ada", "acme"])
         self.assertEqual(edge_count, 1)
+
+    def _graph_after_new_employer(self, **merge_options: bool) -> tuple[list[str], list[str]]:
+        """Ana works for Globex; merge "Ana works for Acme" and read the graph back."""
+        with SessionLocal() as db:
+            ana, globex = (
+                AgentMemoryNode(
+                    id=uuid.uuid4(),
+                    workflow_id=self.workflow_id,
+                    canvas_node_id="agent-1",
+                    entity_name=name,
+                    entity_type=entity_type,
+                    properties={},
+                    confidence=1.0,
+                )
+                for name, entity_type in (("Ana", "person"), ("Globex", "organization"))
+            )
+            db.add_all([ana, globex])
+            db.flush()
+            db.add(
+                AgentMemoryEdge(
+                    id=uuid.uuid4(),
+                    workflow_id=self.workflow_id,
+                    canvas_node_id="agent-1",
+                    source_node_id=ana.id,
+                    target_node_id=globex.id,
+                    relationship_type="works for",
+                    properties={},
+                    confidence=1.0,
+                )
+            )
+            db.flush()
+            apply_parsed_extraction_sync(
+                db,
+                self.workflow_id,
+                "agent-1",
+                {
+                    "entities": [
+                        {"name": "Ana", "type": "person"},
+                        {"name": "Acme", "type": "organization"},
+                    ],
+                    "relationships": [{"source": "Ana", "target": "Acme", "type": "works for"}],
+                },
+                **merge_options,
+            )
+            db.commit()
+            nodes = db.execute(
+                select(AgentMemoryNode).where(AgentMemoryNode.workflow_id == self.workflow_id)
+            ).scalars()
+            by_id = {node.id: node.entity_name for node in nodes}
+            edges = db.execute(
+                select(AgentMemoryEdge).where(AgentMemoryEdge.workflow_id == self.workflow_id)
+            ).scalars()
+            links = [
+                f"{by_id[e.source_node_id]} {e.relationship_type} {by_id[e.target_node_id]}"
+                for e in edges
+            ]
+            db.execute(
+                delete(AgentMemoryNode).where(AgentMemoryNode.workflow_id == self.workflow_id)
+            )
+            db.commit()
+        return sorted(by_id.values()), links
+
+    def test_an_insert_replaces_the_old_employer_link_but_keeps_the_entity(self) -> None:
+        names, links = self._graph_after_new_employer(prune_replaced=False)
+
+        self.assertEqual(names, ["Acme", "Ana", "Globex"])
+        self.assertEqual(links, ["Ana works for Acme"])
+
+    def test_post_run_extraction_still_drops_the_employer_left_without_links(self) -> None:
+        names, links = self._graph_after_new_employer()
+
+        self.assertEqual(names, ["Acme", "Ana"])
+        self.assertEqual(links, ["Ana works for Acme"])
 
 
 if __name__ == "__main__":

@@ -41,6 +41,7 @@ from app.services.heym_event_service import (
 )
 from app.services.hitl_service import build_default_public_base_url, persist_pending_hitl_execution
 from app.services.node_analytics_rollup import roll_up_node_analytics
+from app.services.schedule_events import skips_repeated_wall_time
 from app.services.timezone_utils import get_configured_timezone
 from app.services.workflow_executor import (
     WorkflowCancelledError,
@@ -51,13 +52,6 @@ from app.services.workflow_executor import (
 logger = logging.getLogger("cron_scheduler")
 
 EXECUTION_HISTORY_TOAST_RECLAIM_JOB = "execution_history_toast_reclaim"
-
-
-def _is_repeated_wall_time(moment: datetime) -> bool:
-    """Whether this is the second occurrence of a wall time repeated when clocks go back."""
-    if moment.tzinfo is None or moment.fold == 0:
-        return False
-    return moment.replace(fold=0).utcoffset() != moment.utcoffset()
 
 
 class CronScheduler:
@@ -219,12 +213,9 @@ class CronScheduler:
             return None
 
         local_slot = prev_time.replace(tzinfo=now.tzinfo)
-        hour_pinned = schedule.expanded[1] != ["*"]
-        minute_wildcard = "*" in schedule.expressions[0]
-        if _is_repeated_wall_time(local_slot) and hour_pinned and not minute_wildcard:
-            # Clocks went back: like cron, a job at a fixed time runs once, at the first
-            # 02:30. Jobs with a wildcard or step in the hour or the minute (`*/5 2 * * *`)
-            # keep running in real time through the repeated hour.
+        if skips_repeated_wall_time(schedule, local_slot):
+            # Clocks went back: a job at a fixed time runs once, at the first 02:30. The
+            # Schedules tab lists the same slots (schedule_events.cron_occurrences).
             return None
 
         # Compare real instants. Two datetimes sharing one ZoneInfo compare and subtract
