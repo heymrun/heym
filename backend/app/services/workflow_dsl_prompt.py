@@ -4497,7 +4497,7 @@ Create objects/dictionaries directly using curly brace syntax with any string ke
 - `.contains(text)` - Check if contains substring
 - `.startswith(prefix)` / `.endswith(suffix)` - Check prefix/suffix
 - `.indexOf(text)` - Find position (-1 if not found)
-- `.replace(old, new)` - Replace first occurrence
+- `.replace(old, new)` - Replace every occurrence (the same as `.replaceAll`)
 - `.replaceAll(old, new)` - Replace all occurrences
 - `.regexReplace(pattern, replacement)` - Replace with regex pattern
 - `.hash()` - MD5 hash of the string
