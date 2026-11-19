@@ -20,8 +20,8 @@ The **Switch** node routes execution to different paths based on matching a valu
 
 ## Edge Handles
 
-- Each case gets a source handle (index 0, 1, 2, …)
-- Default handle for non-matching values
+- Each case gets a source handle named after its index: `case-0`, `case-1`, `case-2`, …
+- `default` for non-matching values
 
 ## Example
 
@@ -36,7 +36,7 @@ The **Switch** node routes execution to different paths based on matching a valu
 }
 ```
 
-Connect edges with `sourceHandle` set to the case index (0, 1, 2) or the default handle for unmatched values.
+Connect edges with `sourceHandle` set to `case-0`, `case-1`, `case-2`, … for the cases in order, or `default` for unmatched values.
 
 ## Related
 

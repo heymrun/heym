@@ -1320,7 +1320,7 @@ Example - judge and locate a dog in an uploaded photo:
 
 ### 6. condition (If/Else Branch)
 - **Purpose**: Branch workflow based on condition
-- **Inputs**: 1 | **Outputs**: 2 (true path: output-0, false path: output-1)
+- **Inputs**: 1 | **Outputs**: 2 (true path: sourceHandle "true", false path: sourceHandle "false")
 - **Data fields**:
   - `label`: Node identifier
   - `condition`: JavaScript-like expression (e.g., `$previousNodeLabel.text.length > 0`)
