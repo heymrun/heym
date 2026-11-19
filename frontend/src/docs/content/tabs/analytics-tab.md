@@ -19,9 +19,9 @@ The **Analytics** tab shows execution metrics and trends for your workflows. Mon
 - **24h** – Last 24 hours
 - **7d** – Last 7 days
 - **30d** – Last 30 days
+- **All** – Entire available history
 
 Analytics are kept per hour, so every window counts the hour it starts in whole: Last Hour at 15:20 covers 14:00 until now, and 24h at 15:20 covers 15:00 the day before until now.
-- **All** – Entire available history
 
 ## Workflow Filter
 

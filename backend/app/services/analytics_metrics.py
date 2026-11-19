@@ -282,7 +282,8 @@ async def _stats_from_history(
     if workflow_id is not None:
         query_filter = ExecutionHistory.workflow_id == workflow_id
 
-    since_24h = max(start_at, end_at - timedelta(hours=24))
+    # On the hour, like the 24h window, so "Last 24h" matches the 24h total.
+    since_24h = max(start_at, normalize_bucket_start(end_at - timedelta(hours=24)))
     all_executions = (
         await db.execute(
             select(*_HISTORY_COLUMNS).where(
@@ -348,7 +349,8 @@ async def compute_analytics_stats(
         return AnalyticsStats()
 
     since, resolved_end = resolve_time_window(time_range, start_at=start_at, end_at=end_at)
-    since_24h = max(since, resolved_end - timedelta(hours=24))
+    # On the hour, like the 24h window, so "Last 24h" matches the 24h total.
+    since_24h = max(since, normalize_bucket_start(resolved_end - timedelta(hours=24)))
 
     scope_filter = snapshot_scope_filter(
         user_id=user_id,

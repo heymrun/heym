@@ -213,3 +213,71 @@ class AnalyticsHistoryFallbackPostgresTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((stats.total_executions, stats.success_count), (4, 3))
         self.assertEqual(stats.time_saved_minutes, 15.0)
         self.assertEqual(breakdown[0].time_saved_minutes, stats.time_saved_minutes)
+
+
+class AnalyticsLast24hCaptionPostgresTests(unittest.IsolatedAsyncioTestCase):
+    """On the 24h range, the "Last 24h" caption counts the same runs as the total."""
+
+    async def asyncSetUp(self) -> None:
+        self.engine = create_async_engine(settings.database_url, poolclass=NullPool)
+        try:
+            async with self.engine.connect() as conn:
+                await conn.execute(text("SELECT 1"))
+        except Exception:
+            await self.engine.dispose()
+            self.skipTest("PostgreSQL database is not reachable")
+        now = datetime.now(timezone.utc)
+        if now.minute < 2 or now.minute > 57:
+            self.skipTest("too close to the hour for a stable starting-hour bucket")
+        first_hour = analytics_metrics.normalize_bucket_start(now - timedelta(hours=24))
+        last_hour = analytics_metrics.normalize_bucket_start(now - timedelta(hours=1))
+        self.user = User(
+            email=f"analytics-caption-{uuid.uuid4()}@example.com", hashed_password="x", name="A"
+        )
+        async with AsyncSession(self.engine, expire_on_commit=False) as db:
+            db.add(self.user)
+            await db.flush()
+            self.workflow = Workflow(name="Invoices", owner_id=self.user.id, nodes=[], edges=[])
+            db.add(self.workflow)
+            await db.flush()
+            for hour, runs in ((first_hour, 4), (last_hour, 3)):
+                db.add(
+                    WorkflowAnalyticsSnapshot(
+                        workflow_id=self.workflow.id,
+                        owner_id=self.user.id,
+                        workflow_name_snapshot="Invoices",
+                        bucket_start=hour,
+                        total_executions=runs,
+                        success_count=runs,
+                        error_count=0,
+                        latency_sample_count=runs,
+                        total_latency_ms=100.0 * runs,
+                        max_latency_ms=100.0,
+                        last_run_at=hour + timedelta(minutes=30),
+                    )
+                )
+            await db.commit()
+
+    async def asyncTearDown(self) -> None:
+        async with AsyncSession(self.engine) as db:
+            await db.execute(
+                delete(WorkflowAnalyticsSnapshot).where(
+                    WorkflowAnalyticsSnapshot.workflow_id == self.workflow.id
+                )
+            )
+            await db.execute(delete(Workflow).where(Workflow.id == self.workflow.id))
+            await db.execute(delete(User).where(User.id == self.user.id))
+            await db.commit()
+        await self.engine.dispose()
+
+    async def test_last_24h_matches_the_24h_total(self) -> None:
+        async with AsyncSession(self.engine) as db:
+            stats = await analytics_metrics.compute_analytics_stats(
+                db,
+                user_id=self.user.id,
+                accessible_workflow_ids=[self.workflow.id],
+                workflow_id=None,
+                time_range="24h",
+            )
+        self.assertEqual(stats.total_executions, 7)
+        self.assertEqual(stats.total_executions_24h, 7)
