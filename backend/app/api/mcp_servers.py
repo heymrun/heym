@@ -23,6 +23,7 @@ from app.api.mcp import (
     _mcp_stream_headers,
     _mcp_tool_result_jsonrpc_response,
     _reject_if_sse_channel_missing,
+    _reject_streamable_stream_get,
     _run_mcp_protocol_limited,
     _run_mcp_protocol_limited_with_session,
     _schedule_legacy_sse_jsonrpc_response,
@@ -423,6 +424,7 @@ async def named_server_sse(
     request: Request,
     server: tuple[User, MCPServer] = Depends(_get_named_server_context_for_sse),
 ) -> StreamingResponse:
+    _reject_streamable_stream_get(request)
     user, mcp_server = server
     if not mcp_sse_channels.can_register():
         raise HTTPException(

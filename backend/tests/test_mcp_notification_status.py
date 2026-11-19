@@ -3,6 +3,7 @@
 import unittest
 import uuid
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -48,6 +49,39 @@ class McpNotificationStatusTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["id"], 1)
         self.assertIn("result", response.json())
+
+    def _legacy_sse_paths(self) -> tuple[str, str]:
+        return "/api/mcp/sse", f"/api/mcp/servers/{SERVER.id}/sse"
+
+    def test_a_streamable_session_get_on_a_legacy_sse_url_gets_405(self) -> None:
+        # After a 202, Streamable HTTP clients GET the same URL with their session id.
+        for path in self._legacy_sse_paths():
+            with self.subTest(path=path):
+                with (
+                    patch.object(mcp.mcp_session_store, "create", return_value="tok") as create,
+                    # Without the guard the stream opens; close it at once instead of hanging.
+                    patch(
+                        "starlette.requests.Request.is_disconnected", AsyncMock(return_value=True)
+                    ),
+                ):
+                    response = self.client.get(path, headers={"Mcp-Session-Id": "abc"})
+
+                self.assertEqual(response.status_code, 405)
+                self.assertEqual(response.headers.get("allow"), "POST")
+                create.assert_not_called()
+
+    def test_a_plain_get_on_a_legacy_sse_url_still_opens_the_stream(self) -> None:
+        for path in self._legacy_sse_paths():
+            with self.subTest(path=path):
+                with patch(
+                    "starlette.requests.Request.is_disconnected", AsyncMock(return_value=True)
+                ):
+                    with self.client.stream("GET", path) as response:
+                        self.assertEqual(response.status_code, 200)
+                        lines = list(response.iter_lines())
+
+                self.assertIn("event: endpoint", lines)
+                self.assertTrue(any("message?session=" in line for line in lines))
 
 
 if __name__ == "__main__":

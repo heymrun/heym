@@ -441,6 +441,22 @@ def _reject_if_sse_channel_missing(request: Request) -> None:
     )
 
 
+def _reject_streamable_stream_get(request: Request) -> None:
+    """Refuse a Streamable HTTP client's GET on a legacy SSE URL.
+
+    After a notification gets 202, Streamable HTTP clients may GET the same URL with their
+    `Mcp-Session-Id` to open the optional server stream. On the legacy `/sse` URLs that GET
+    would open a legacy session that stays idle and counts toward MCP_SSE_MAX_SESSIONS. A
+    legacy SSE client has no session id at that point, so it still gets its stream.
+    """
+    if request.headers.get("mcp-session-id"):
+        raise HTTPException(
+            status_code=status.HTTP_405_METHOD_NOT_ALLOWED,
+            detail="This server does not offer a stream on GET for a Streamable HTTP session.",
+            headers={"Allow": "POST"},
+        )
+
+
 def _initialize_response(request: Request, msg: MCPJSONRPCRequest) -> dict[str, Any]:
     """Answer `initialize`, and keep what a legacy SSE client declared on its channel."""
     session_token = request.query_params.get("session")
@@ -1806,6 +1822,7 @@ async def mcp_sse_endpoint(
     request: Request,
     mcp_user: User = Depends(get_mcp_user_for_sse),
 ) -> StreamingResponse:
+    _reject_streamable_stream_get(request)
     # Issue a short-lived session token so the long-lived credential
     # (MCP API key or OAuth bearer) never appears in the message endpoint URL
     # or server access logs.
