@@ -223,12 +223,17 @@ def place_skill(
 
 def _bundle_from_skill(node: dict[str, Any], index: int) -> SkillBundle:
     skill = (node.get("data") or {})["skills"][index]
+    # A .md or .py file that was not UTF-8 in its zip is stored as base64. It travels with its
+    # encoding, since _record drops every stored .md and .py file the bundle does not carry.
     files = tuple(
-        ArchiveFile(item["path"], item.get("content") or "")
+        ArchiveFile(
+            item["path"],
+            item.get("content") or "",
+            "base64" if item.get("encoding") == "base64" else "text",
+        )
         for item in skill.get("files") or []
         if isinstance(item, dict)
         and isinstance(item.get("path"), str)
-        and (item.get("encoding") or "text") == "text"
         and str(item["path"]).lower().endswith((".md", ".py"))
     )
     return SkillBundle(
