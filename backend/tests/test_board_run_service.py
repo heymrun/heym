@@ -608,6 +608,47 @@ class TestResumeCardChain(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["initial_outputs"][0]["output"], {"text": "answered"})
         advance.assert_not_awaited()
 
+    async def test_a_chain_that_may_not_advance_stays_put_after_the_review(self):
+        # A card moved back into this column (or run with "don't advance") paused here.
+        history_id, card, run, session, links, factory = self._env(
+            history_status="success",
+            outputs={"text": "approved"},
+            chain_position=0,
+            chain_length=1,
+            remaining_links=[],
+        )
+        run.allow_advance = False
+
+        with (
+            patch.object(board_run_service, "_column_links", AsyncMock(return_value=links)),
+            patch.object(board_run_service, "_auto_advance", AsyncMock()) as advance,
+            patch.object(board_run_service, "_spawn_chain", MagicMock()),
+        ):
+            await board_run_service.resume_card_chain(history_id, session_factory=factory)
+
+        self.assertEqual((run.status, card.run_status), ("success", "success"))
+        advance.assert_not_awaited()
+
+    async def test_the_rest_of_the_chain_keeps_the_no_advance_choice(self):
+        remaining = [{"workflow_id": uuid.uuid4(), "workflow_name": "WF2", "position": 1}]
+        history_id, card, run, session, links, factory = self._env(
+            history_status="success",
+            outputs={"text": "approved"},
+            chain_position=0,
+            chain_length=2,
+            remaining_links=remaining,
+        )
+        run.allow_advance = False
+
+        with (
+            patch.object(board_run_service, "_column_links", AsyncMock(return_value=links)),
+            patch.object(board_run_service, "_auto_advance", AsyncMock()),
+            patch.object(board_run_service, "_spawn_chain", MagicMock()) as spawn,
+        ):
+            await board_run_service.resume_card_chain(history_id, session_factory=factory)
+
+        self.assertIs(spawn.call_args.kwargs["allow_advance"], False)
+
     async def test_failed_resume_fails_the_card_and_skips_the_rest(self):
         remaining = [{"workflow_id": uuid.uuid4(), "workflow_name": "WF2", "position": 1}]
         history_id, card, run, session, links, factory = self._env(
@@ -780,6 +821,38 @@ class TestEnqueueHoldsTaskReference(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0)
             await asyncio.sleep(0)
         self.assertEqual(len(board_run_service._BACKGROUND_CHAIN_TASKS), 0)
+
+    async def test_the_first_run_records_whether_the_chain_may_advance(self):
+        for allow_advance in (True, False):
+            with self.subTest(allow_advance=allow_advance):
+                card = SimpleNamespace(id=uuid.uuid4(), run_status="idle")
+                column = SimpleNamespace(id=uuid.uuid4())
+                board = SimpleNamespace(id=uuid.uuid4())
+                link = SimpleNamespace(workflow_id=uuid.uuid4(), position=0)
+                lock_res = MagicMock()
+                lock_res.first.return_value = (card.id,)
+                active_res = MagicMock()
+                active_res.scalars.return_value.all.return_value = []
+                links_res = MagicMock()
+                links_res.all.return_value = [(link, "WF")]
+                db = AsyncMock()
+                db.add = MagicMock()
+                db.execute = AsyncMock(side_effect=[lock_res, active_res, links_res])
+
+                with patch.object(board_run_service, "_spawn_chain", MagicMock()):
+                    await board_run_service.enqueue_card_chain(
+                        db,
+                        card=card,
+                        column=column,
+                        board=board,
+                        move={"from_column": "Done", "to_column": "Dev"},
+                        rerun=False,
+                        actor_user_id=uuid.uuid4(),
+                        allow_advance=allow_advance,
+                    )
+
+                (first_run,) = [call.args[0] for call in db.add.call_args_list]
+                self.assertIs(first_run.allow_advance, allow_advance)
 
 
 class TestFailOpenRuns(unittest.IsolatedAsyncioTestCase):
