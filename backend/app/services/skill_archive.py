@@ -12,6 +12,7 @@ import base64
 import binascii
 import io
 import zipfile
+import zlib
 from dataclasses import dataclass
 from typing import Literal
 
@@ -25,6 +26,8 @@ PROMPT_TOTAL_CHARS = 24_000
 _IGNORED_DIRS = {"__MACOSX"}
 _IGNORED_NAMES = {".DS_Store"}
 _SKILL_MARKDOWN = "skill.md"
+# General purpose bit 0: the member is encrypted, and reading it needs a password.
+_ENCRYPTED_FLAG = 0x1
 
 
 @dataclass(frozen=True)
@@ -131,7 +134,14 @@ def read_zip(raw: bytes) -> ZipRead:
             if total > MAX_UNCOMPRESSED_BYTES:
                 notes.append("Stopped reading: the zip expands past 8 MB.")
                 break
-            data = archive.read(info)
+            if info.flag_bits & _ENCRYPTED_FLAG:
+                notes.append(f"Skipped {path}: the file is password-protected.")
+                continue
+            try:
+                data = archive.read(info)
+            except (zipfile.BadZipFile, zlib.error, NotImplementedError, EOFError):
+                notes.append(f"Skipped {path}: the file is damaged or could not be unpacked.")
+                continue
             text = _read_text(data)
             if text is None:
                 binaries.append(ArchiveFile(path, base64.b64encode(data).decode(), "base64"))

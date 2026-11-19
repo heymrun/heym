@@ -2,6 +2,7 @@
 
 import base64
 import io
+import struct
 import unittest
 import zipfile
 
@@ -86,6 +87,41 @@ class SkillArchiveTests(unittest.TestCase):
 
         self.assertEqual(decode_zip_payload(encoded), raw)
         self.assertIsNone(decode_zip_payload("hello"))
+
+    def test_a_password_protected_member_becomes_a_note(self) -> None:
+        raw = bytearray(
+            _zip({"greeter/SKILL.md": "---\nname: greeter\n---\n", "greeter/notes.txt": "café"})
+        )
+        # Set general purpose bit 0 (encrypted) on every local and central header, as a
+        # password-protecting zip tool does.
+        for signature, flag_offset in ((b"PK\x03\x04", 6), (b"PK\x01\x02", 8)):
+            index = raw.find(signature)
+            while index >= 0:
+                flags = struct.unpack_from("<H", raw, index + flag_offset)[0]
+                struct.pack_into("<H", raw, index + flag_offset, flags | 0x1)
+                index = raw.find(signature, index + 4)
+
+        reading = read_zip(bytes(raw))
+
+        self.assertEqual(reading.skills, ())
+        self.assertIn("Skipped greeter/SKILL.md: the file is password-protected.", reading.notes)
+        self.assertIn("password-protected", prompt_for_zip("greeter.zip", reading))
+
+    def test_a_damaged_member_becomes_a_note_and_the_rest_is_read(self) -> None:
+        raw = bytearray(
+            _zip({"broken.txt": "Bonjour from Zürich", "SKILL.md": "---\nname: tidy\n---\n"})
+        )
+        # _zip stores members uncompressed; flip a byte of the first member's data (after its
+        # 30-byte local header and name) so it no longer matches its CRC.
+        data_start = 30 + len("broken.txt")
+        raw[data_start + 2] ^= 0xFF
+
+        reading = read_zip(bytes(raw))
+
+        self.assertIn(
+            "Skipped broken.txt: the file is damaged or could not be unpacked.", reading.notes
+        )
+        self.assertEqual([skill.name for skill in reading.skills], ["tidy"])
 
 
 if __name__ == "__main__":
