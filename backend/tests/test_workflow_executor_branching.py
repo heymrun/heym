@@ -480,6 +480,122 @@ class WorkflowExecutorBranchingTests(unittest.TestCase):
             {"a": "success", "only": "success", "m": "success", "o": "success"},
         )
 
+    @staticmethod
+    def _statuses(nodes: list[dict], edges: list[dict], x: int = 0) -> dict[str, list[str]]:
+        result = WorkflowExecutor(nodes=nodes, edges=edges).execute(
+            workflow_id=uuid.uuid4(), initial_inputs={"body": {"x": x}}
+        )
+        statuses: dict[str, list[str]] = {}
+        for row in result.node_results:
+            statuses.setdefault(row["node_id"], []).append(row["status"])
+        return statuses
+
+    @staticmethod
+    def _set_node(node_id: str, value: str = "x") -> dict:
+        return {
+            "id": node_id,
+            "type": "set",
+            "data": {"label": node_id, "mappings": [{"key": "v", "value": value}]},
+        }
+
+    @staticmethod
+    def _condition_node(node_id: str, expression: str = "$userInput.body.x > 1") -> dict:
+        return {
+            "id": node_id,
+            "type": "condition",
+            "data": {"label": node_id, "condition": expression},
+        }
+
+    def test_condition_skips_an_agent_whose_tool_is_its_other_input(self) -> None:
+        nodes = [
+            {"id": "in", "type": "textInput", "data": {"label": "userInput"}},
+            self._condition_node("c"),
+            {
+                "id": "ag",
+                "type": "agent",
+                "data": {"label": "ag", "userMessage": "hi", "credentialId": str(uuid.uuid4())},
+            },
+            self._set_node("t"),
+        ]
+        edges = [
+            {"id": "e1", "source": "in", "target": "c"},
+            {"id": "e2", "source": "c", "target": "ag", "sourceHandle": "true"},
+            {"id": "e3", "source": "t", "target": "ag", "targetHandle": "tool-input"},
+        ]
+
+        self.assertEqual(self._statuses(nodes, edges)["ag"], ["skipped"])
+
+    def test_condition_skips_a_branch_node_the_trigger_also_feeds(self) -> None:
+        nodes = [
+            {"id": "in", "type": "textInput", "data": {"label": "userInput"}},
+            self._condition_node("c"),
+            self._set_node("n"),
+        ]
+        edges = [
+            {"id": "e1", "source": "in", "target": "c"},
+            {"id": "e2", "source": "c", "target": "n", "sourceHandle": "true"},
+            {"id": "e3", "source": "in", "target": "n"},
+        ]
+
+        self.assertEqual(self._statuses(nodes, edges)["n"], ["skipped"])
+
+    def _nested_conditions_into_merge(self, second: str) -> dict[str, list[str]]:
+        nodes = [
+            {"id": "in", "type": "textInput", "data": {"label": "userInput"}},
+            self._condition_node("c1"),
+            self._condition_node("c2", second),
+            self._set_node("a1"),
+            self._set_node("a2"),
+            {"id": "m", "type": "merge", "data": {"label": "m", "inputCount": 2}},
+            {"id": "o", "type": "output", "data": {"label": "o", "message": "done"}},
+        ]
+        edges = [
+            {"id": "e1", "source": "in", "target": "c1"},
+            {"id": "e2", "source": "in", "target": "c2"},
+            {"id": "e3", "source": "c1", "target": "a1", "sourceHandle": "true"},
+            {"id": "e4", "source": "c2", "target": "a2", "sourceHandle": "true"},
+            {"id": "e5", "source": "a1", "target": "m", "targetHandle": "input-0"},
+            {"id": "e6", "source": "a2", "target": "m", "targetHandle": "input-1"},
+            {"id": "e7", "source": "m", "target": "o"},
+        ]
+        return self._statuses(nodes, edges)
+
+    def test_merge_skipped_when_every_input_was_skipped_by_another_condition(self) -> None:
+        statuses = self._nested_conditions_into_merge("$userInput.body.x > 1")
+
+        self.assertEqual((statuses["m"], statuses["o"]), (["skipped"], ["skipped"]))
+
+    def test_merge_runs_when_another_condition_keeps_one_input(self) -> None:
+        statuses = self._nested_conditions_into_merge("$userInput.body.x < 1")
+
+        self.assertEqual((statuses["a1"], statuses["a2"]), (["skipped"], ["success"]))
+        self.assertEqual((statuses["m"], statuses["o"]), (["success"], ["success"]))
+
+    def test_loop_done_node_fed_by_a_parallel_branch_keeps_the_loop_rule(self) -> None:
+        nodes = [
+            {"id": "in", "type": "textInput", "data": {"label": "userInput"}},
+            {
+                "id": "lp",
+                "type": "loop",
+                "data": {"label": "lp", "arrayExpression": "$array('a').add('b')"},
+            },
+            self._set_node("body", "$lp.item"),
+            self._set_node("p"),
+            self._set_node("d", "$lp.branch"),
+        ]
+        edges = [
+            {"id": "e1", "source": "in", "target": "lp"},
+            {"id": "e2", "source": "lp", "target": "body", "sourceHandle": "loop"},
+            {"id": "e3", "source": "body", "target": "lp", "targetHandle": "loop"},
+            {"id": "e4", "source": "lp", "target": "d", "sourceHandle": "done"},
+            {"id": "e5", "source": "in", "target": "p"},
+            {"id": "e6", "source": "p", "target": "d"},
+        ]
+
+        # The Loop node keeps its own rule: Merge/Output preservation applies to Condition
+        # and Switch only, so this graph behaves as it did before.
+        self.assertEqual(self._statuses(nodes, edges)["d"], ["skipped"])
+
     def test_http_success_skips_error_handle_branch(self) -> None:
         nodes = [
             {

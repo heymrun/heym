@@ -92,6 +92,7 @@ def execute(ctx: NodeExecutionContext) -> object:
                     active_targets=self.get_downstream_nodes(node_id, "done"),
                     inactive_targets=self.get_downstream_nodes(node_id, "loop"),
                     inactive_stop_node_ids={node_id},
+                    keep_fed_joins=False,
                 )
         else:
             with self.lock:
@@ -101,5 +102,6 @@ def execute(ctx: NodeExecutionContext) -> object:
                     inactive_targets=self.get_downstream_nodes(node_id, "done"),
                     active_exclude_node_ids={node_id},
                     inactive_stop_node_ids={node_id},
+                    keep_fed_joins=False,
                 )
     return output
