@@ -470,6 +470,9 @@ async def named_server_sse_post(
     if accepted is not None:
         return accepted
     msg = MCPJSONRPCRequest(**body)
+    if msg.id is None:
+        # Streamable HTTP: a notification gets 202 Accepted with no body, like a response.
+        return Response(status_code=status.HTTP_202_ACCEPTED)
     if _is_mcp_tool_call_with_response(msg):
         return _stream_mcp_jsonrpc_response(
             msg=msg,
