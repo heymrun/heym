@@ -2809,18 +2809,52 @@ class WorkflowExecutor(WorkflowBranchRoutingMixin):
         inactive_targets: list[str],
         active_exclude_node_ids: set[str] | None = None,
         inactive_stop_node_ids: set[str] | None = None,
+        keep_fed_joins: bool = True,
     ) -> None:
-        """Skip only nodes exclusive to inactive targets; keep shared downstream merge nodes active."""
+        """Skip only nodes exclusive to inactive targets; keep shared downstream merge nodes active.
+
+        With ``keep_fed_joins``, a Merge or an Output that a live input outside the skipped
+        branch still feeds stays active, with what follows it. An input from a node already
+        skipped, or from inside the branch, does not count.
+        """
         preserved_node_ids = self.get_reachable_node_ids(
             active_targets,
             exclude_node_ids=active_exclude_node_ids,
         )
+        if keep_fed_joins:
+            preserved_node_ids |= self._joins_fed_outside_branch(
+                node_id, inactive_targets, preserved_node_ids | (inactive_stop_node_ids or set())
+            )
         for target in inactive_targets:
             self.mark_branch_as_skipped(
                 target,
                 preserve_node_ids=preserved_node_ids,
                 stop_node_ids=inactive_stop_node_ids,
             )
+
+    def _joins_fed_outside_branch(
+        self, node_id: str, start_node_ids: list[str], stop_node_ids: set[str]
+    ) -> set[str]:
+        """Return the Merge and Output nodes below the starts that a live input still feeds."""
+        input_edges = [
+            edge for edge in self.get_active_edges() if edge.get("targetHandle") != "tool-input"
+        ]
+        kept: set[str] = set()
+        while True:
+            branch = self.get_reachable_node_ids(
+                start_node_ids, exclude_node_ids=stop_node_ids | kept
+            )
+            dead = branch | self.skipped_nodes | {node_id}
+            fed = {
+                edge["target"]
+                for edge in input_edges
+                if edge["target"] in branch
+                and self.nodes.get(edge["target"], {}).get("type") in ("merge", "output")
+                and edge["source"] not in dead
+            }
+            if not fed:
+                return kept
+            kept |= fed
 
     def get_loop_body_node_ids(self, loop_node_id: str, edges: list[dict]) -> set[str]:
         """Return nodes in a loop body, stopping before the loop-back edge reaches the loop node."""

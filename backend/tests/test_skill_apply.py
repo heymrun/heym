@@ -121,6 +121,44 @@ class PlaceSkillTests(unittest.TestCase):
         self.assertEqual(skill["content"], "Read it carefully.")
         self.assertEqual(skill["files"][0]["content"], "def run():\n    return 1\n")
 
+    def test_a_binary_asset_is_written_as_base64(self) -> None:
+        bundle = SkillBundle(
+            name="invoice-helper",
+            content="Read the invoice.",
+            files=(
+                ArchiveFile("main.py", "print(1)\n"),
+                ArchiveFile("logo.png", "iVBORw0=", "base64"),
+            ),
+            directory="helper",
+        )
+
+        placed = place_skill([_agent("a1", "Clerk")], bundle)
+
+        files = placed.nodes[0]["data"]["skills"][0]["files"]
+        self.assertEqual(
+            {item["path"]: item["encoding"] for item in files},
+            {"main.py": "text", "logo.png": "base64"},
+        )
+        self.assertEqual(next(i for i in files if i["path"] == "logo.png")["content"], "iVBORw0=")
+
+    def test_a_skill_markdown_edit_keeps_the_bundles_asset(self) -> None:
+        bundle = SkillBundle(
+            name="invoice-helper",
+            content="old",
+            files=(ArchiveFile("logo.png", "iVBORw0=", "base64"),),
+            directory="",
+        )
+
+        placed = place_skill(
+            [_agent("a1", "Clerk")], bundle, edits=[FileEdit("SKILL.md", "Read it carefully.")]
+        )
+
+        skill = placed.nodes[0]["data"]["skills"][0]
+        self.assertEqual(skill["content"], "Read it carefully.")
+        self.assertEqual(
+            skill["files"], [{"path": "logo.png", "content": "iVBORw0=", "encoding": "base64"}]
+        )
+
     def test_a_new_workflow_is_one_agent_with_the_skill(self) -> None:
         name, nodes, edges = new_skill_workflow(BUNDLE, "cred-1", "gpt-4o")
 

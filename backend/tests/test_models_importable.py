@@ -26,6 +26,7 @@ _MODULES = (
     "app.services.schedule_events",
     "app.services.run_history_list",
     "app.services.run_history_meta",
+    "app.services.url_redaction",
 )
 _PROBE = (
     "import importlib, sys\n"

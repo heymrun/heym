@@ -57,6 +57,9 @@ class ClickHouseBlankFieldTests(unittest.TestCase):
         client = MagicMock()
 
         def query(sql: str, parameters: dict | None = None) -> MagicMock:
+            if sql.startswith("DESCRIBE TABLE"):
+                # Key-value inserts read the column types first.
+                return MagicMock(result_rows=[("id", "String"), ("note", "String")])
             self.sent.append((sql, parameters or {}))
             return MagicMock(column_names=["id"], result_rows=[("7",)])
 
@@ -122,7 +125,12 @@ class BigQueryBlankFieldTests(unittest.TestCase):
     def setUp(self) -> None:
         self.sent: list[dict] = []
 
-        def post(url: str, headers: dict, json: dict) -> httpx.Response:  # noqa: A002
+        def post(
+            url: str,
+            headers: dict,
+            json: dict,  # noqa: A002
+            timeout: httpx.Timeout | None = None,
+        ) -> httpx.Response:
             self.sent.append({"url": url, "json": json})
             request = httpx.Request("POST", url)
             return httpx.Response(200, json={"schema": {"fields": []}, "rows": []}, request=request)

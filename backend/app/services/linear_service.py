@@ -206,11 +206,15 @@ class LinearService:
         after: str | None = None,
         fetch_all: bool = False,
     ) -> dict[str, Any]:
-        """List members of a team."""
+        """List a team's memberships, each with its ``user``.
+
+        ``Team.members`` returns ``User`` nodes, which have no ``user`` field; the membership
+        records under ``Team.memberships`` do, and keep the ``members[].user`` output shape.
+        """
         query = """
         query TeamMembers($teamId: String!, $first: Int!, $after: String) {
           team(id: $teamId) {
-            members(first: $first, after: $after) {
+            memberships(first: $first, after: $after) {
               nodes {
                 id
                 user { id name email displayName active }
@@ -234,7 +238,7 @@ class LinearService:
             if team is None:
                 raise ValueError(f"Linear team not found: {team_id}")
             team_payload = self._expect_object(team, "team")
-            return self._connection_page(team_payload.get("members"), "team.members")
+            return self._connection_page(team_payload.get("memberships"), "team.memberships")
 
         if fetch_all:
             return self._list_all_pages(_fetch_page, after=after)

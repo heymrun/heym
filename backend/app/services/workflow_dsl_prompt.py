@@ -1331,7 +1331,7 @@ Example - judge and locate a dog in an uploaded photo:
 - **Data fields**:
   - `label`: Node identifier
   - `expression`: Value to evaluate (e.g., `$previousNodeLabel.category`)
-  - `cases`: Array of case values ["case1", "case2"]
+  - `cases`: Array of case values ["case1", "case2"]. A null or missing value matches the case `null`; a boolean matches `true` / `false`
 
 ### 8. execute (Call Another Workflow)
 - **Purpose**: Call/execute another workflow (sub-workflow)
@@ -1590,6 +1590,7 @@ The http node ALWAYS returns a structured response object:
 - **Data fields**:
   - `label`: Node identifier
   - `inputCount`: Number of inputs to wait for (default 2)
+- **Skipped inputs**: when a condition or switch skips the branch behind some inputs, the merge still runs with the inputs that arrive; skipped inputs are absent from `merged`. When every input is skipped, the merge is skipped too, with the nodes after it.
 
 **WHEN TO USE MERGE**:
 - ONLY use when user explicitly asks to "merge", "combine", "collect", "join results together"
@@ -2149,10 +2150,10 @@ Using any of these reserved names will cause conflicts with built-in functionali
 
 **Type Coercion**:
 - `"auto"` (default): Automatically detects the type from the value
-- `"string"`: Forces conversion to string
+- `"string"`: Forces conversion to string. Booleans, null, objects and arrays become JSON text (`true`, `null`, `{"a": 1}`), so compare with `"true"`, not `"True"`
 - `"number"`: Parses as integer or float
 - `"boolean"`: Converts to true/false (strings "true", "1", "yes" become true)
-- `"array"`: Wraps non-array values in an array
+- `"array"`: Wraps non-array values in an array; a null or missing value becomes `[]`
 - `"object"`: Wraps non-object values in {"value": ...}
 
 **Example - Setting a Variable**:
@@ -3176,7 +3177,7 @@ Each row object includes **`rowIndex`**: the 1-based sheet row number (useful fo
   - `clickhouseRowId`: Value matched against the `id` column for `getById`.
   - `clickhouseInputMode`: `"raw"` (JSON in `clickhouseData`) | `"selective"` (key/value `clickhouseMappings`) for `insert` / `upsert`.
   - `clickhouseData`: JSON array of row objects for `insert`/`upsert`, or JSON object of column values for `update`. Supports expressions.
-  - `clickhouseMappings`: Array of `{key, value}` pairs used when `clickhouseInputMode` is `"selective"`; the editor auto-populates keys from discovered ClickHouse columns.
+  - `clickhouseMappings`: Array of `{key, value}` pairs used when `clickhouseInputMode` is `"selective"`; the editor auto-populates keys from discovered ClickHouse columns. Each value is read as its column type (`true`/`false` for Bool, numbers, Decimal, Date and DateTime from ISO text); an empty value is NULL in a Nullable column, and a DateTime without an offset is read in the column's time zone, or UTC when the column names none.
 - **Operation → required fields → output**:
 
 | Operation | Required | Output |

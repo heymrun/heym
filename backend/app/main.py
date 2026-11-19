@@ -132,6 +132,7 @@ from app.services.rabbitmq_consumer import rabbitmq_consumer_manager
 from app.services.rabbitmq_pool import RabbitMQPool
 from app.services.redis_pool import close_all_pools as close_redis_pools
 from app.services.redis_pool import warm_up_pools as warm_up_redis_pools
+from app.services.url_redaction import install_url_redaction_filters, redact_url
 from app.services.version_check import get_version_status
 from app.services.websocket_trigger_service import websocket_trigger_manager
 from app.services.workflow_executor import close_http_client
@@ -141,6 +142,7 @@ logging.basicConfig(
     level=getattr(logging, LOG_LEVEL, logging.INFO),
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
 )
+install_url_redaction_filters()
 logger = logging.getLogger("winston")
 
 
@@ -205,6 +207,7 @@ async def _reinstall_plugin_dependencies() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    install_url_redaction_filters()
     logger.info("Starting Heym AI Workflow Platform v%s", settings.resolved_version)
     # In cluster mode, only an instance compatible with the cluster may lead.
     lock_service.set_eligibility(cluster_registry.may_lead)
@@ -310,7 +313,8 @@ class WinstonLoggingMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
         start_time = time.time()
         client_ip = get_client_ip(request)
-        logger.info("request %s %s %s", request.method, request.url.path, client_ip)
+        path = redact_url(request.url.path)
+        logger.info("request %s %s %s", request.method, path, client_ip)
         try:
             response = await call_next(request)
         except Exception as exc:
@@ -318,7 +322,7 @@ class WinstonLoggingMiddleware(BaseHTTPMiddleware):
             logger.exception(
                 "error %s %s %sms %s %s",
                 request.method,
-                request.url.path,
+                path,
                 f"{duration:.2f}",
                 client_ip,
                 str(exc),
@@ -328,7 +332,7 @@ class WinstonLoggingMiddleware(BaseHTTPMiddleware):
         logger.info(
             "response %s %s %s %sms %s",
             request.method,
-            request.url.path,
+            path,
             response.status_code,
             f"{duration:.2f}",
             client_ip,

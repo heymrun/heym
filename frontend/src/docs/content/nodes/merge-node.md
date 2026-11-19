@@ -35,7 +35,7 @@ The **Merge** node waits for multiple parallel inputs and combines them into a s
 }
 ```
 
-Connect multiple branches to the merge node. The node waits for all inputs before producing output.
+Connect multiple branches to the merge node. The node waits for all inputs before producing output. When a Condition or Switch skips the branch behind some inputs, the merge runs with the inputs that arrive, and the skipped ones are absent from `merged`. When every input is skipped, the merge and the nodes after it are skipped too.
 
 ## Related
 
