@@ -727,6 +727,179 @@ class RunHistoryLastWriterWinsTests(unittest.IsolatedAsyncioTestCase):
         # A late real result replaces the queue's empty failure row; its nodes get counted.
         self.assertIn("NODE_ANALYTICS_PENDING", compiled.split("DO UPDATE SET")[1])
 
+    async def test_sub_workflow_runs_record_analytics_snapshots_in_same_transaction(self) -> None:
+        from app.services.cluster.run_history import persist_run_history
+        from app.services.workflow_executor import SubWorkflowExecution
+
+        db = MagicMock()
+        db.execute = AsyncMock()
+        db.commit = AsyncMock()
+        added_entries: list = []
+        db.add = MagicMock(side_effect=added_entries.append)
+
+        factory = MagicMock()
+        factory.return_value.__aenter__ = AsyncMock(return_value=db)
+        factory.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        sub_id_1 = uuid.uuid4()
+        sub_id_2 = uuid.uuid4()
+        sub_exec_1 = SubWorkflowExecution(
+            workflow_id=str(sub_id_1),
+            inputs={"secret_pass": "123", "val": 1},
+            outputs={"out": "done"},
+            status="success",
+            execution_time_ms=25.0,
+            workflow_name="Child One",
+        )
+        sub_exec_2 = SubWorkflowExecution(
+            workflow_id=str(sub_id_2),
+            inputs={"sub2": "input"},
+            outputs={"sub2": "output"},
+            status="error",
+            execution_time_ms=10.0,
+            workflow_name="",
+        )
+        parent_wf_id = uuid.uuid4()
+        parent_owner_id = uuid.uuid4()
+        result = SimpleNamespace(
+            status="success",
+            outputs={"ok": True},
+            node_results=[],
+            execution_time_ms=100.0,
+            sub_workflow_executions=[sub_exec_1, sub_exec_2],
+        )
+
+        def redactor(value: Any) -> Any:
+            if isinstance(value, dict) and "secret_pass" in value:
+                return {**value, "secret_pass": "[REDACTED]"}
+            return value
+
+        mock_upsert = AsyncMock()
+        with (
+            patch("app.services.cluster.run_history.async_session_maker", factory),
+            patch(
+                "app.services.cluster.run_history.upsert_workflow_analytics_snapshot",
+                new=mock_upsert,
+            ),
+        ):
+            await persist_run_history(
+                execution_id=uuid.uuid4(),
+                workflow_id=parent_wf_id,
+                owner_id=parent_owner_id,
+                workflow_name="Parent Workflow",
+                inputs={},
+                trigger_source="API",
+                result=result,
+                redact=redactor,
+            )
+
+        # Both sub-workflows marked as history_written
+        self.assertTrue(sub_exec_1.history_written)
+        self.assertTrue(sub_exec_2.history_written)
+
+        # ExecutionHistory rows added for both
+        self.assertEqual(len(added_entries), 2)
+        history_1, history_2 = added_entries
+        self.assertEqual(history_1.workflow_id, sub_id_1)
+        self.assertEqual(history_1.inputs, {"secret_pass": "[REDACTED]", "val": 1})
+        self.assertEqual(history_1.status, "success")
+        self.assertEqual(history_1.execution_time_ms, 25.0)
+        self.assertEqual(history_1.trigger_source, "SUB_WORKFLOW")
+
+        self.assertEqual(history_2.workflow_id, sub_id_2)
+        self.assertEqual(history_2.status, "error")
+        self.assertEqual(history_2.execution_time_ms, 10.0)
+
+        # upsert_workflow_analytics_snapshot called 3 times: 1 parent + 2 children
+        self.assertEqual(mock_upsert.await_count, 3)
+
+        parent_call = mock_upsert.await_args_list[0]
+        self.assertEqual(parent_call.kwargs["workflow_id"], parent_wf_id)
+        self.assertEqual(parent_call.kwargs["owner_id"], parent_owner_id)
+        self.assertEqual(parent_call.kwargs["workflow_name_snapshot"], "Parent Workflow")
+        self.assertEqual(parent_call.kwargs["status"], "success")
+        self.assertEqual(parent_call.kwargs["execution_time_ms"], 100.0)
+
+        child_1_call = mock_upsert.await_args_list[1]
+        self.assertEqual(child_1_call.kwargs["workflow_id"], sub_id_1)
+        self.assertIsNone(child_1_call.kwargs["owner_id"])
+        self.assertEqual(child_1_call.kwargs["workflow_name_snapshot"], "Child One")
+        self.assertEqual(child_1_call.kwargs["status"], "success")
+        self.assertEqual(child_1_call.kwargs["execution_time_ms"], 25.0)
+
+        child_2_call = mock_upsert.await_args_list[2]
+        self.assertEqual(child_2_call.kwargs["workflow_id"], sub_id_2)
+        self.assertIsNone(child_2_call.kwargs["owner_id"])
+        # Blank name falls back to "Sub-workflow"
+        self.assertEqual(child_2_call.kwargs["workflow_name_snapshot"], "Sub-workflow")
+        self.assertEqual(child_2_call.kwargs["status"], "error")
+        self.assertEqual(child_2_call.kwargs["execution_time_ms"], 10.0)
+
+        # All written in one transaction
+        db.commit.assert_awaited_once()
+
+    async def test_sub_workflow_dict_executions_record_analytics_snapshots(self) -> None:
+        from app.services.cluster.run_history import persist_run_history
+
+        db = MagicMock()
+        db.execute = AsyncMock()
+        db.commit = AsyncMock()
+        added_entries: list = []
+        db.add = MagicMock(side_effect=added_entries.append)
+
+        factory = MagicMock()
+        factory.return_value.__aenter__ = AsyncMock(return_value=db)
+        factory.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        sub_id = uuid.uuid4()
+        sub_dict = {
+            "workflow_id": str(sub_id),
+            "inputs": {"x": 1},
+            "outputs": {"y": 2},
+            "node_results": [],
+            "status": "success",
+            "execution_time_ms": 12.3,
+            "workflow_name": "Dict Child",
+            "trigger_source": "SUB_WORKFLOW",
+        }
+        parent_wf_id = uuid.uuid4()
+        parent_owner_id = uuid.uuid4()
+        result = SimpleNamespace(
+            status="success",
+            outputs={},
+            node_results=[],
+            execution_time_ms=50.0,
+            sub_workflow_executions=[sub_dict],
+        )
+
+        mock_upsert = AsyncMock()
+        with (
+            patch("app.services.cluster.run_history.async_session_maker", factory),
+            patch(
+                "app.services.cluster.run_history.upsert_workflow_analytics_snapshot",
+                new=mock_upsert,
+            ),
+        ):
+            await persist_run_history(
+                execution_id=uuid.uuid4(),
+                workflow_id=parent_wf_id,
+                owner_id=parent_owner_id,
+                workflow_name="Parent",
+                inputs={},
+                trigger_source="cron",
+                result=result,
+            )
+
+        self.assertEqual(len(added_entries), 1)
+        self.assertEqual(added_entries[0].workflow_id, sub_id)
+        self.assertEqual(mock_upsert.await_count, 2)
+        child_call = mock_upsert.await_args_list[1]
+        self.assertEqual(child_call.kwargs["workflow_id"], sub_id)
+        self.assertIsNone(child_call.kwargs["owner_id"])
+        self.assertEqual(child_call.kwargs["workflow_name_snapshot"], "Dict Child")
+        self.assertEqual(child_call.kwargs["status"], "success")
+        self.assertEqual(child_call.kwargs["execution_time_ms"], 12.3)
+
 
 class DispatchHandoffLifecycleTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
