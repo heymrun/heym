@@ -256,7 +256,7 @@ class ExecuteMcpToolSessionToolListTests(unittest.IsolatedAsyncioTestCase):
             def __init__(self, *_args, **_kwargs) -> None:
                 self.initialize = AsyncMock(side_effect=lambda: calls.append("initialize"))
                 self.list_tools = AsyncMock(
-                    side_effect=lambda: (
+                    side_effect=lambda **_kwargs: (
                         calls.append("list_tools")
                         or SimpleNamespace(tools=[SimpleNamespace(name="search")])
                     )
