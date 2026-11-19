@@ -80,6 +80,50 @@ def _ch_param_type(value: Any) -> str:
     return "String"
 
 
+_WRAPPER = re.compile(r"^(Nullable|LowCardinality)\((.*)\)$")
+_TRUE_TEXT = frozenset({"true", "1", "yes"})
+_FALSE_TEXT = frozenset({"false", "0", "no"})
+
+
+def _coerce_text(value: Any, column_type: str | None) -> Any:
+    """A key-value field's text as the column's type; anything unreadable is left as is.
+
+    Every key-value field resolves to text, and the driver encodes text by the column
+    type: "false" is a true Bool, "" is 0 in a Nullable(Int32), a Date refuses a string.
+    """
+    if not isinstance(value, str) or not column_type:
+        return value
+    inner = column_type.strip()
+    nullable = False
+    while match := _WRAPPER.match(inner):
+        nullable = nullable or match.group(1) == "Nullable"
+        inner = match.group(2).strip()
+    text = value.strip()
+    if text == "" and nullable:
+        return None
+    try:
+        if inner == "Bool":
+            lowered = text.lower()
+            if lowered in _TRUE_TEXT:
+                return True
+            if lowered in _FALSE_TEXT:
+                return False
+            return value
+        if inner.startswith(("Int", "UInt")):
+            return int(text)
+        if inner.startswith("Float"):
+            return float(text)
+        if inner.startswith("Decimal"):
+            return Decimal(text)
+        if inner in ("Date", "Date32"):
+            return _dt.date.fromisoformat(text[:10])
+        if inner.startswith("DateTime"):
+            return _dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except (ValueError, ArithmeticError):
+        return value
+    return value
+
+
 class ClickHouseService:
     """Synchronous ClickHouse client wrapper."""
 
@@ -214,6 +258,13 @@ class ClickHouseService:
         )
         rows = self._rows_to_dicts(result)
         return {"row": rows[0] if rows else None, "success": True}
+
+    def coerce_text_rows(self, table: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Key-value rows with each text value read as its column's type (DESCRIBE TABLE)."""
+        types = {column["name"]: column["type"] for column in self.list_columns(table)["columns"]}
+        return [
+            {key: _coerce_text(value, types.get(key)) for key, value in row.items()} for row in rows
+        ]
 
     def list_columns(self, table: str) -> dict[str, Any]:
         """Discover a table's columns (name + type) via DESCRIBE TABLE."""
