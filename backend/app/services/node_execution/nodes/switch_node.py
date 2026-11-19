@@ -12,6 +12,9 @@ def _value_texts(value: object) -> set[str]:
     """
     if isinstance(value, bool):
         return {"true" if value else "false", str(value)}
+    if value is None:
+        # The node's output shows null, which is what a case is written as.
+        return {"null", str(value)}
     return {str(value)}
 
 
