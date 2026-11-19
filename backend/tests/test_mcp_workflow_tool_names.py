@@ -83,6 +83,35 @@ class WorkflowToolNamesTests(unittest.TestCase):
         self.assertEqual(names[shared_older.id], "invoice_sync_3")
 
 
+class BuiltInToolNameTests(unittest.TestCase):
+    def test_a_workflow_named_like_a_built_in_tool_starts_at_2(self) -> None:
+        chat = _workflow("Heym Chat", 3)
+        status = _workflow("heym execution status", 2)
+        other = _workflow("Invoice sync", 1)
+
+        names = workflow_tool_names([chat, status, other], owner_id=None)
+
+        self.assertEqual(names[chat.id], "heym_chat_2")
+        self.assertEqual(names[status.id], "heym_execution_status_2")
+        self.assertEqual(names[other.id], "invoice_sync")
+
+    def test_the_tools_list_has_no_repeated_name_and_the_workflow_is_found(self) -> None:
+        import asyncio
+
+        from app.api.mcp import build_tools_with_chat, find_workflow_tool
+
+        chat = _workflow("Heym Chat", 1)
+        with patch("app.api.mcp.extract_input_fields_from_workflow", lambda _w: []):
+            tools = asyncio.run(
+                build_tools_with_chat([chat], SimpleNamespace(enabled=True), owner_id=chat.owner_id)
+            )
+        names = [tool.name for tool in tools]
+
+        self.assertEqual(len(names), len(set(names)))
+        self.assertIn("heym_chat_2", names)
+        self.assertIs(find_workflow_tool([chat], "heym_chat_2", chat.owner_id), chat)
+
+
 class DuplicateWorkflowToolCallTests(unittest.IsolatedAsyncioTestCase):
     async def _list_and_call(
         self, dispatch: object, workflows: list, user: SimpleNamespace | None = None

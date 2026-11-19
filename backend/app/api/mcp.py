@@ -165,6 +165,12 @@ def _sanitize_workflow_tool_name(name: str) -> str:
     return "".join(c if c.isalnum() or c == "_" else "" for c in tool_name)
 
 
+# Tool names Heym's MCP servers answer themselves, before looking for a workflow.
+BUILT_IN_TOOL_NAMES = frozenset(
+    {mcp_chat_service.MCP_CHAT_TOOL_NAME, mcp_execution_status.MCP_EXECUTION_STATUS_TOOL_NAME}
+)
+
+
 def workflow_tool_names(
     workflows: Sequence[Workflow], owner_id: uuid.UUID | None
 ) -> dict[uuid.UUID, str]:
@@ -186,7 +192,9 @@ def workflow_tool_names(
         )
 
     names: dict[uuid.UUID, str] = {}
-    used: set[str] = set()
+    # Heym's own tools are dispatched before any workflow, so a workflow named "Heym Chat"
+    # takes `heym_chat_2` instead of a name it could never be called by.
+    used: set[str] = set(BUILT_IN_TOOL_NAMES)
     for workflow in sorted(workflows, key=rank):
         base = _sanitize_workflow_tool_name(workflow.name)
         name, suffix = base, 2
@@ -431,6 +439,22 @@ def _reject_if_sse_channel_missing(request: Request) -> None:
             "for MCP SSE traffic or use Streamable HTTP."
         ),
     )
+
+
+def _reject_streamable_stream_get(request: Request) -> None:
+    """Refuse a Streamable HTTP client's GET on a legacy SSE URL.
+
+    After a notification gets 202, Streamable HTTP clients may GET the same URL with their
+    `Mcp-Session-Id` to open the optional server stream. On the legacy `/sse` URLs that GET
+    would open a legacy session that stays idle and counts toward MCP_SSE_MAX_SESSIONS. A
+    legacy SSE client has no session id at that point, so it still gets its stream.
+    """
+    if request.headers.get("mcp-session-id"):
+        raise HTTPException(
+            status_code=status.HTTP_405_METHOD_NOT_ALLOWED,
+            detail="This server does not offer a stream on GET for a Streamable HTTP session.",
+            headers={"Allow": "POST"},
+        )
 
 
 def _initialize_response(request: Request, msg: MCPJSONRPCRequest) -> dict[str, Any]:
@@ -1542,6 +1566,8 @@ async def _dispatch_mcp_jsonrpc(
             db, target_workflow.nodes, actor_user_id=mcp_user.id
         )
         credentials_context = await get_credentials_context_for_user(db, mcp_user.id)
+        # As the REST tools/call and named servers do: $global reads and writes work here too.
+        global_variables_context = await get_global_variables_context(db, mcp_user.id)
 
         execution_id = uuid.uuid4()
         cancel_event = register_execution(
@@ -1566,6 +1592,7 @@ async def _dispatch_mcp_jsonrpc(
                 execution_id=execution_id,
                 run_in_thread=True,
                 credentials_context=credentials_context,
+                global_variables_context=global_variables_context,
                 trace_user_id=mcp_user.id,
                 actor_user_id=mcp_user.id,
                 started_by_user_id=mcp_user.id,
@@ -1676,6 +1703,15 @@ async def _dispatch_mcp_jsonrpc(
                         execution_time_ms=sub_exec.execution_time_ms,
                     )
 
+                await _persist_global_variables_from_execution(
+                    db,
+                    mcp_user.id,
+                    target_workflow.nodes,
+                    workflow_cache,
+                    execution_result.node_results,
+                    execution_result.sub_workflow_executions,
+                )
+
                 _add_mcp_workflow_trace(
                     db,
                     user_id=mcp_user.id,
@@ -1703,11 +1739,11 @@ async def _dispatch_mcp_jsonrpc(
                 error=str(e),
             )
             await db.flush()
-            return {
-                "jsonrpc": "2.0",
-                "id": msg.id,
-                "error": {"code": -32603, "message": f"Execution error: {str(e)}"},
-            }
+            # A tool that fails while running is a tool result with isError (MCP spec), as on
+            # named servers; JSON-RPC errors are for protocol problems such as an unknown tool.
+            return _mcp_tool_result_jsonrpc_response(
+                msg.id, f"Execution error: {str(e)}", is_error=True
+            )
         finally:
             clear_active_execution(
                 execution_id, handle=getattr(cancel_event, "_execution_handle", None)
@@ -1764,6 +1800,9 @@ async def mcp_sse_post_endpoint(
     if accepted is not None:
         return accepted
     msg = MCPJSONRPCRequest(**body)
+    if msg.id is None:
+        # Streamable HTTP: a notification gets 202 Accepted with no body, like a response.
+        return Response(status_code=status.HTTP_202_ACCEPTED)
     if _is_mcp_tool_call_with_response(msg):
         return _stream_mcp_jsonrpc_response(
             msg=msg,
@@ -1791,6 +1830,7 @@ async def mcp_sse_endpoint(
     request: Request,
     mcp_user: User = Depends(get_mcp_user_for_sse),
 ) -> StreamingResponse:
+    _reject_streamable_stream_get(request)
     # Issue a short-lived session token so the long-lived credential
     # (MCP API key or OAuth bearer) never appears in the message endpoint URL
     # or server access logs.
