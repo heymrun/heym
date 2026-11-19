@@ -39,6 +39,9 @@ const workflows = ref<WorkflowListItem[]>([]);
 const autoRefresh = ref(false);
 const refreshInterval = ref<number | null>(null);
 const workflowBreakdown = ref<WorkflowBreakdownItem[] | null>(null);
+// Most Failed gets its own list, ordered by errors: a workflow that fails often but runs
+// less than the busiest ten is not in the Most Used list.
+const failedBreakdown = ref<WorkflowBreakdownItem[] | null>(null);
 const nodeTypeAnalytics = ref<NodeTypeAnalytics | null>(null);
 const route = useRoute();
 const router = useRouter();
@@ -475,11 +478,11 @@ const mostUsedWorkflows = computed<WorkflowBreakdownItem[]>(() => {
 });
 
 const mostFailedWorkflows = computed<WorkflowBreakdownItem[]>(() => {
-  if (!workflowBreakdown.value || workflowId.value) {
+  if (!failedBreakdown.value || workflowId.value) {
     return [];
   }
   return sortItems(
-    workflowBreakdown.value.filter((item) => item.error_count > 0),
+    failedBreakdown.value.filter((item) => item.error_count > 0),
     failedSortKey.value,
     failedSortDir.value,
   );
@@ -502,20 +505,25 @@ async function loadData(options: LoadOptions = {}): Promise<void> {
       analyticsApi.getStats(workflowId.value, activeAnalyticsQuery.value),
       analyticsApi.getMetrics(workflowId.value, activeAnalyticsQuery.value),
     ] as const;
-    const breakdownRequest =
-      workflowId.value === undefined
-        ? analyticsApi.getWorkflowBreakdown(activeAnalyticsQuery.value, 10)
-        : Promise.resolve<WorkflowBreakdownItem[] | null>(null);
+    const allWorkflows = workflowId.value === undefined;
+    const breakdownRequest = allWorkflows
+      ? analyticsApi.getWorkflowBreakdown(activeAnalyticsQuery.value, 10)
+      : Promise.resolve<WorkflowBreakdownItem[] | null>(null);
+    const failedRequest = allWorkflows
+      ? analyticsApi.getWorkflowBreakdown(activeAnalyticsQuery.value, 10, "errors")
+      : Promise.resolve<WorkflowBreakdownItem[] | null>(null);
 
-    const [statsData, metricsData, breakdownData, nodeTypeData] = await Promise.all([
+    const [statsData, metricsData, breakdownData, failedData, nodeTypeData] = await Promise.all([
       ...baseRequests,
       breakdownRequest,
+      failedRequest,
       analyticsApi.getNodeTypeAnalytics(workflowId.value, activeAnalyticsQuery.value),
     ]);
     if (sequence !== loadSequence) return;
     stats.value = statsData;
     metrics.value = metricsData;
     workflowBreakdown.value = breakdownData;
+    failedBreakdown.value = failedData;
     nodeTypeAnalytics.value = nodeTypeData;
   } catch (err) {
     if (sequence !== loadSequence) return;

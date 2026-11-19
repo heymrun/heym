@@ -281,3 +281,88 @@ class AnalyticsLast24hCaptionPostgresTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(stats.total_executions, 7)
         self.assertEqual(stats.total_executions_24h, 7)
+
+
+class AnalyticsMostFailedPostgresTests(unittest.IsolatedAsyncioTestCase):
+    """Most Failed reads a list ordered by errors, not the ten most-run workflows."""
+
+    async def asyncSetUp(self) -> None:
+        self.engine = create_async_engine(settings.database_url, poolclass=NullPool)
+        try:
+            async with self.engine.connect() as conn:
+                await conn.execute(text("SELECT 1"))
+        except Exception:
+            await self.engine.dispose()
+            self.skipTest("PostgreSQL database is not reachable")
+        hour = analytics_metrics.normalize_bucket_start(
+            datetime.now(timezone.utc) - timedelta(hours=2)
+        )
+        self.user = User(
+            email=f"analytics-failed-{uuid.uuid4()}@example.com", hashed_password="x", name="A"
+        )
+        async with AsyncSession(self.engine, expire_on_commit=False) as db:
+            db.add(self.user)
+            await db.flush()
+            self.workflows = [
+                Workflow(name=f"W{index + 1}", owner_id=self.user.id, nodes=[], edges=[])
+                for index in range(11)
+            ]
+            db.add_all(self.workflows)
+            await db.flush()
+            for index, workflow in enumerate(self.workflows):
+                failing = index == 10
+                runs = 20 if failing else 100
+                db.add(
+                    WorkflowAnalyticsSnapshot(
+                        workflow_id=workflow.id,
+                        owner_id=self.user.id,
+                        workflow_name_snapshot=workflow.name,
+                        bucket_start=hour,
+                        total_executions=runs,
+                        success_count=0 if failing else runs,
+                        error_count=runs if failing else 0,
+                        latency_sample_count=runs,
+                        total_latency_ms=100.0 * runs,
+                        max_latency_ms=100.0,
+                        last_run_at=hour + timedelta(minutes=30),
+                    )
+                )
+            await db.commit()
+
+    async def asyncTearDown(self) -> None:
+        async with AsyncSession(self.engine) as db:
+            await db.execute(
+                delete(WorkflowAnalyticsSnapshot).where(
+                    WorkflowAnalyticsSnapshot.owner_id == self.user.id
+                )
+            )
+            await db.execute(delete(Workflow).where(Workflow.owner_id == self.user.id))
+            await db.execute(delete(User).where(User.id == self.user.id))
+            await db.commit()
+        await self.engine.dispose()
+
+    async def test_a_rarely_run_failing_workflow_tops_the_errors_order(self) -> None:
+        async with AsyncSession(self.engine) as db:
+            user = (await db.execute(select(User).where(User.id == self.user.id))).scalar_one()
+            by_errors = await analytics_api.get_workflow_breakdown(
+                time_range="24h",
+                start_at=None,
+                end_at=None,
+                limit=10,
+                order_by="errors",
+                current_user=user,
+                db=db,
+            )
+            by_runs = await analytics_api.get_workflow_breakdown(
+                time_range="24h",
+                start_at=None,
+                end_at=None,
+                limit=10,
+                order_by="executions",
+                current_user=user,
+                db=db,
+            )
+        self.assertEqual(by_errors.items[0].workflow_name, "W11")
+        self.assertEqual(by_errors.items[0].error_count, 20)
+        self.assertNotIn("W11", [item.workflow_name for item in by_runs.items])
+        self.assertEqual(len(by_runs.items), 10)

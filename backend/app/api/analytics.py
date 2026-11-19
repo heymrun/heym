@@ -1,7 +1,7 @@
 import uuid
 from dataclasses import asdict
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, or_, select
@@ -413,6 +413,9 @@ async def get_workflow_breakdown(
     start_at: datetime | None = Query(None, description="Custom range start in ISO 8601"),
     end_at: datetime | None = Query(None, description="Custom range end in ISO 8601"),
     limit: int = Query(10, ge=1, le=100, description="Maximum number of workflows to return"),
+    order_by: Literal["executions", "errors"] = Query(
+        "executions", description="Most executed first, or most failed first"
+    ),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> WorkflowBreakdownResponse:
@@ -440,6 +443,7 @@ async def get_workflow_breakdown(
         since=since,
         until=resolved_end,
         limit=limit,
+        order_by=order_by,
     )
     return WorkflowBreakdownResponse(items=[WorkflowBreakdownItem(**asdict(row)) for row in rows])
 
