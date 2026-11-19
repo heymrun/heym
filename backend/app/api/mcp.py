@@ -1538,6 +1538,8 @@ async def _dispatch_mcp_jsonrpc(
             db, target_workflow.nodes, actor_user_id=mcp_user.id
         )
         credentials_context = await get_credentials_context_for_user(db, mcp_user.id)
+        # As the REST tools/call and named servers do: $global reads and writes work here too.
+        global_variables_context = await get_global_variables_context(db, mcp_user.id)
 
         execution_id = uuid.uuid4()
         cancel_event = register_execution(
@@ -1562,6 +1564,7 @@ async def _dispatch_mcp_jsonrpc(
                 execution_id=execution_id,
                 run_in_thread=True,
                 credentials_context=credentials_context,
+                global_variables_context=global_variables_context,
                 trace_user_id=mcp_user.id,
                 actor_user_id=mcp_user.id,
                 cancel_event=cancel_event,
@@ -1667,6 +1670,15 @@ async def _dispatch_mcp_jsonrpc(
                         status=sub_exec.status,
                         execution_time_ms=sub_exec.execution_time_ms,
                     )
+
+                await _persist_global_variables_from_execution(
+                    db,
+                    mcp_user.id,
+                    target_workflow.nodes,
+                    workflow_cache,
+                    execution_result.node_results,
+                    execution_result.sub_workflow_executions,
+                )
 
                 _add_mcp_workflow_trace(
                     db,
