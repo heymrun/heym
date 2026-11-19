@@ -54,6 +54,25 @@ def schedule_workflows_clause(user_id: uuid.UUID, include_shared: bool) -> Colum
     return Workflow.owner_id == user_id
 
 
+def _is_repeated_wall_time(moment: datetime) -> bool:
+    """Whether this is the second occurrence of a wall time repeated when clocks go back."""
+    if moment.tzinfo is None or moment.fold == 0:
+        return False
+    return moment.replace(fold=0).utcoffset() != moment.utcoffset()
+
+
+def skips_repeated_wall_time(cron: croniter, moment: datetime) -> bool:
+    """Whether ``moment`` is a slot the scheduler leaves out when clocks go back.
+
+    Like cron, a job at a fixed time runs once, at the first 02:30. Jobs with a wildcard or
+    step in the hour or the minute (`*/5 2 * * *`) keep running in real time through the
+    repeated hour. The scheduler and the Schedules tab share this rule.
+    """
+    hour_pinned = cron.expanded[1] != ["*"]
+    minute_wildcard = "*" in cron.expressions[0]
+    return _is_repeated_wall_time(moment) and hour_pinned and not minute_wildcard
+
+
 def cron_occurrences(
     workflows: Iterable[CronWorkflow],
     start: datetime,
@@ -81,6 +100,8 @@ def cron_occurrences(
                     next_dt = cron.get_next(datetime)
                     if next_dt > end_tz:
                         break
+                    if skips_repeated_wall_time(cron, next_dt):
+                        continue
                     events.append(
                         ScheduleOccurrence(
                             workflow_id=workflow.id,
