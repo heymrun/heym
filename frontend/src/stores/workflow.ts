@@ -2316,6 +2316,21 @@ export const useWorkflowStore = defineStore("workflow", () => {
     }
   }
 
+  async function deleteExecutionHistoryEntry(entryId: string): Promise<void> {
+    if (!currentWorkflow.value) return;
+    try {
+      await workflowApi.deleteWorkflowHistoryEntry(currentWorkflow.value.id, entryId);
+    } catch (error) {
+      showToast("Failed to delete the run", "error", 3000);
+      throw error;
+    }
+    executionHistoryList.value = executionHistoryList.value.filter((item) => item.id !== entryId);
+    const nextDetails = new Map(executionHistoryDetails.value);
+    nextDetails.delete(entryId);
+    executionHistoryDetails.value = nextDetails;
+    executionHistoryTotal.value = Math.max(0, executionHistoryTotal.value - 1);
+  }
+
   function openPropertiesPanel(
     fieldToFocus?: string,
     options?: { skipPrimaryExpand?: boolean },
@@ -3974,6 +3989,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
     getLatestNodeResult,
     clearCanvas,
     clearExecutionHistory,
+    deleteExecutionHistoryEntry,
     fetchExecutionHistory,
     fetchMoreExecutionHistory,
     propertiesPanelOpen,

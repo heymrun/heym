@@ -586,6 +586,10 @@ class ExecutionHistoryListResponse(BaseModel):
     encrypted: bool = False
     executed_by_instance_id: str | None = None
     executed_by_instance_name: str | None = None
+    executed_by_user_id: uuid.UUID | None = None
+    executed_by_user_name: str | None = None
+    # Whether the caller may delete this run: the workflow owner, or the user whose chat run it is.
+    can_delete: bool = False
 
 
 class HistoryListResponse(BaseModel):

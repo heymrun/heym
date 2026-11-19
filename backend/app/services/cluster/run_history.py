@@ -144,6 +144,7 @@ async def persist_run_history(
     trigger_source: str | None,
     result: Any,
     redact: Callable[[Any], Any] | None = None,
+    started_by_user_id: uuid.UUID | None = None,
 ) -> None:
     """Write the run, its analytics bucket, and any sub-workflow runs.
 
@@ -173,6 +174,7 @@ async def persist_run_history(
             ),
             # A late real result replaces the queue's empty failure row: count its nodes.
             "node_analytics_pending": True,
+            "executed_by_user_id": started_by_user_id,
             **attribution_fields(),
         }
         values = await seal_insert_values(db, values)
@@ -219,6 +221,7 @@ async def persist_pending_run_history(
     credentials_owner_id: uuid.UUID | None,
     result: Any,
     redact: Callable[[Any], Any] | None = None,
+    started_by_user_id: uuid.UUID | None = None,
 ) -> None:
     """Mint a paused run's review request where the run actually paused.
 
@@ -248,6 +251,7 @@ async def persist_pending_run_history(
         )
         for name, value in attribution_fields().items():
             setattr(history_entry, name, value)
+        history_entry.executed_by_user_id = started_by_user_id
         await upsert_workflow_analytics_snapshot(
             db,
             workflow_id=workflow_id,

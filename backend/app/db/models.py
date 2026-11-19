@@ -745,6 +745,10 @@ class ExecutionHistory(Base):
     encryption_key_user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True
     )
+    # The signed-in user who started the run. Null for triggers and for rows that predate it.
+    executed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
 
     workflow: Mapped["Workflow"] = relationship("Workflow", back_populates="executions")
     hitl_requests: Mapped[list["HITLRequest"]] = relationship(

@@ -614,6 +614,7 @@ async def _dispatch_named_server_jsonrpc(
                 global_variables_context=global_variables_context,
                 trace_user_id=user.id,
                 actor_user_id=user.id,
+                started_by_user_id=user.id,
                 cancel_event=cancel_event,
                 timeout_seconds=getattr(target_workflow, "workflow_timeout_seconds", None),
                 concurrency_limit=target_workflow.concurrency_limit,
@@ -656,6 +657,7 @@ async def _dispatch_named_server_jsonrpc(
                     public_base_url=build_default_public_base_url(),
                     history_entry_id=execution_id,
                 )
+                history_entry.executed_by_user_id = user.id
                 await upsert_workflow_analytics_snapshot(
                     db,
                     workflow_id=target_workflow.id,
@@ -679,6 +681,7 @@ async def _dispatch_named_server_jsonrpc(
                     status=execution_result.status,
                     execution_time_ms=execution_result.execution_time_ms,
                     trigger_source="MCP",
+                    executed_by_user_id=user.id,
                 )
                 db.add(history_entry)
 

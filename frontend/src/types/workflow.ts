@@ -1374,6 +1374,10 @@ export interface AllExecutionHistoryEntryLight {
   encrypted?: boolean;
   executed_by_instance_id?: string | null;
   executed_by_instance_name?: string | null;
+  /** The signed-in user who started the run; null for cron, webhook and messaging triggers. */
+  executed_by_user_id?: string | null;
+  executed_by_user_name?: string | null;
+  can_delete?: boolean;
 }
 
 export interface HistoryListResponse<T = AllExecutionHistoryEntryLight> {

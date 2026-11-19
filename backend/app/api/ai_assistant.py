@@ -2559,6 +2559,7 @@ async def run_execute_workflow_tool(
                 trace_user_id=user_id,
                 public_base_url=public_base_url,
             )
+            history_entry.executed_by_user_id = user_id
             history_entry_id = str(history_entry.id)
             await upsert_workflow_analytics_snapshot(
                 db,
@@ -2582,6 +2583,7 @@ async def run_execute_workflow_tool(
                 execution_time_ms=execution_result.execution_time_ms,
                 trigger_source=trigger_source,
                 node_analytics_pending=pending_on_first_write(execution_result),
+                executed_by_user_id=user_id,
             )
             db.add(history_entry)
             if execution_result.allow_downstream_pending:
