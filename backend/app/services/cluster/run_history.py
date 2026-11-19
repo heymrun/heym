@@ -195,9 +195,10 @@ async def persist_run_history(
             execution_time_ms=result.execution_time_ms,
         )
         for sub_exec in result.sub_workflow_executions:
+            sub_id = uuid.UUID(sub_exec.workflow_id)
             db.add(
                 ExecutionHistory(
-                    workflow_id=uuid.UUID(sub_exec.workflow_id),
+                    workflow_id=sub_id,
                     inputs=clean(sub_exec.inputs),
                     outputs=clean(sub_exec.outputs),
                     node_results=clean(sub_exec.node_results),
@@ -206,6 +207,15 @@ async def persist_run_history(
                     trigger_source=sub_exec.trigger_source,
                     **attribution_fields(),
                 )
+            )
+            sub_exec.history_written = True
+            await upsert_workflow_analytics_snapshot(
+                db,
+                workflow_id=sub_id,
+                owner_id=None,
+                workflow_name_snapshot=sub_exec.workflow_name or "Sub-workflow",
+                status=sub_exec.status,
+                execution_time_ms=sub_exec.execution_time_ms,
             )
         await db.commit()
 
