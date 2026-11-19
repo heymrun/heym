@@ -618,6 +618,7 @@ async def _dispatch_named_server_jsonrpc(
                 timeout_seconds=getattr(target_workflow, "workflow_timeout_seconds", None),
                 concurrency_limit=target_workflow.concurrency_limit,
                 on_queued="return",
+                mint_status_token=bool(getattr(target_workflow, "encrypt_run_history", False)),
             )
             if isinstance(execution_result, workflow_concurrency.Admission):
                 text, is_error = mcp_execution_status.admission_tool_text(execution_result)

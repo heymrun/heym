@@ -19,6 +19,11 @@ from typing import Any, Literal
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import async_session_maker
+from app.services.run_history_encryption import (
+    open_active_inputs,
+    queue_inputs_for_display,
+    seal_active_values,
+)
 
 ACTIVE_EXECUTION_STALE_AFTER_SECONDS = 300
 # Heartbeats stop the moment the owning worker dies; wait this long before
@@ -618,6 +623,7 @@ def _build_active_execution_upsert(
     running_node_started_at_ms: dict[str, float],
     node_results: list[dict[str, Any]],
     worker_id: str | None = None,
+    encrypted_node_results: str | None = None,
 ) -> Any:
     """Insert-or-refresh one active execution row.
 
@@ -643,6 +649,7 @@ def _build_active_execution_upsert(
         "running_node_ids": running_node_ids,
         "running_node_started_at_ms": running_node_started_at_ms,
         "node_results": node_results,
+        "encrypted_node_results": encrypted_node_results,
     }
     stmt = pg_insert(ActiveWorkflowExecution).values(
         execution_id=execution_id,
@@ -690,6 +697,13 @@ def _build_active_execution_upsert(
                 stmt.excluded.node_results,
             ),
             else_=ActiveWorkflowExecution.node_results,
+        ),
+        "encrypted_node_results": case(
+            (
+                func.json_array_length(stmt.excluded.node_results) > 0,
+                stmt.excluded.encrypted_node_results,
+            ),
+            else_=ActiveWorkflowExecution.encrypted_node_results,
         ),
     }
     return stmt.on_conflict_do_update(index_elements=["execution_id"], set_=update_set)
@@ -893,13 +907,19 @@ class ActiveExecutionRegistry:
         )
 
         heartbeat_time = now if is_active_local_owner else (command.enqueued_at or now)
+        sealed = await seal_active_values(
+            session,
+            workflow_id=command.workflow_id,
+            execution_id=command.execution_id,
+            inputs=command.inputs or {},
+        )
         await session.execute(
             _build_active_execution_upsert(
                 execution_id=command.execution_id,
                 workflow_id=command.workflow_id,
                 started_at=command.started_at or heartbeat_time,
                 heartbeat_at=heartbeat_time,
-                inputs=command.inputs or {},
+                inputs=sealed["inputs"],
                 trigger_source=command.trigger_source,
                 actor_user_id=command.actor_user_id,
                 recoverable=command.recoverable,
@@ -1006,20 +1026,28 @@ class ActiveExecutionRegistry:
         handle_worker_id = (
             f"{_WORKER_ID}:{handle.registration_token}" if handle.registration_token else _WORKER_ID
         )
+        sealed = await seal_active_values(
+            session,
+            workflow_id=handle.workflow_id,
+            execution_id=execution_id,
+            inputs=dict(handle.inputs),
+            node_results=node_results,
+        )
         await session.execute(
             _build_active_execution_upsert(
                 execution_id=execution_id,
                 workflow_id=handle.workflow_id,
                 started_at=handle.started_at,
                 heartbeat_at=now,
-                inputs=dict(handle.inputs),
+                inputs=sealed["inputs"],
                 trigger_source=handle.trigger_source,
                 actor_user_id=handle.actor_user_id,
                 recoverable=handle.recoverable,
                 running_node_ids=running_node_ids,
                 running_node_started_at_ms=running_node_started_at_ms,
-                node_results=node_results,
+                node_results=sealed["node_results"],
                 worker_id=handle_worker_id,
+                encrypted_node_results=sealed["encrypted_node_results"],
             )
         )
         logger.info("Recreated missing active execution registry row for %s", execution_id)
@@ -1105,17 +1133,24 @@ class ActiveExecutionRegistry:
                     "heartbeat_at": now,
                     "worker_id": handle_worker_id,
                 }
-                if progress_changed:
-                    update_values.update(
-                        running_node_ids=running_node_ids,
-                        running_node_started_at_ms=running_node_started_at_ms,
-                        node_results=node_results,
-                    )
                 # Each row gets its own savepoint: a single unwritable row (a corrupt
                 # page, a lock timeout) must not abort the heartbeats of every other
                 # execution on this worker, which would make them all look orphaned.
                 try:
                     async with session.begin_nested():
+                        if progress_changed:
+                            sealed = await seal_active_values(
+                                session,
+                                workflow_id=handle.workflow_id,
+                                execution_id=execution_id,
+                                node_results=node_results,
+                            )
+                            update_values.update(
+                                running_node_ids=running_node_ids,
+                                running_node_started_at_ms=running_node_started_at_ms,
+                                node_results=sealed["node_results"],
+                                encrypted_node_results=sealed["encrypted_node_results"],
+                            )
                         result = await session.execute(
                             update(ActiveWorkflowExecution)
                             .where(
@@ -1205,6 +1240,11 @@ async def request_persisted_execution_cancel(
         STATUS_WAITING_FOR_MAIN,
     )
     from app.services.execution_cancel_bus import publish_execution_cancel
+    from app.services.run_history_encryption import (
+        open_queue_inputs,
+        seal_active_values,
+        seal_insert_values,
+    )
 
     now = _utcnow()
     marked_rows: int | None = None
@@ -1234,7 +1274,22 @@ async def request_persisted_execution_cancel(
                 .with_for_update()
             )
             queue_row = queue_res.scalar_one_or_none()
+            queue_inputs: dict = {}
             if queue_row is not None:
+                queue_inputs = (
+                    await open_queue_inputs(
+                        db,
+                        workflow_id=workflow_id,
+                        execution_id=execution_id,
+                        inputs=queue_row.inputs,
+                    )
+                    or {}
+                )
+                active_inputs = (
+                    await seal_active_values(
+                        db, workflow_id=workflow_id, execution_id=execution_id, inputs=queue_inputs
+                    )
+                )["inputs"]
                 if queue_row.status in (STATUS_QUEUED, STATUS_WAITING_FOR_MAIN):
                     queue_row.status = STATUS_DONE
                     queue_row.error = None
@@ -1249,20 +1304,24 @@ async def request_persisted_execution_cancel(
                         "error": None,
                         "instance": identity.instance_name(),
                     }
+                    values = await seal_insert_values(
+                        db,
+                        {
+                            "id": execution_id,
+                            "workflow_id": workflow_id,
+                            "inputs": queue_inputs,
+                            "outputs": {"error": "Execution was cancelled"},
+                            "node_results": [],
+                            "status": "cancelled",
+                            "execution_time_ms": 0.0,
+                            "trigger_source": queue_row.trigger_source,
+                            "started_at": execution_started_at(execution_id, [], 0.0),
+                            **attribution_fields(),
+                        },
+                    )
                     await db.execute(
                         pg_insert(ExecutionHistory)
-                        .values(
-                            id=execution_id,
-                            workflow_id=workflow_id,
-                            inputs=queue_row.inputs or {},
-                            outputs={"error": "Execution was cancelled"},
-                            node_results=[],
-                            status="cancelled",
-                            execution_time_ms=0.0,
-                            trigger_source=queue_row.trigger_source,
-                            started_at=execution_started_at(execution_id, [], 0.0),
-                            **attribution_fields(),
-                        )
+                        .values(**values)
                         .on_conflict_do_nothing(index_elements=["id"])
                     )
                     from app.db.models import Workflow
@@ -1296,7 +1355,7 @@ async def request_persisted_execution_cancel(
                             worker_id=queue_row.claimed_by_process or "cancelled_in_queue",
                             started_at=queue_row.enqueued_at or now,
                             heartbeat_at=now,
-                            inputs=queue_row.inputs or {},
+                            inputs=active_inputs,
                             trigger_source=queue_row.trigger_source,
                             actor_user_id=queue_row.actor_user_id,
                             recoverable=False,
@@ -1320,7 +1379,7 @@ async def request_persisted_execution_cancel(
                             worker_id=queue_row.claimed_by_process or "claimed",
                             started_at=queue_row.claimed_at or now,
                             heartbeat_at=now,
-                            inputs=queue_row.inputs or {},
+                            inputs=active_inputs,
                             trigger_source=queue_row.trigger_source,
                             actor_user_id=queue_row.actor_user_id,
                             recoverable=True,
@@ -1567,7 +1626,12 @@ async def claim_orphaned_executions(
                     ClaimedOrphan(
                         execution_id=row.execution_id,
                         workflow_id=row.workflow_id,
-                        inputs=row.inputs or {},
+                        inputs=await open_active_inputs(
+                            session,
+                            workflow_id=row.workflow_id,
+                            execution_id=row.execution_id,
+                            inputs=row.inputs,
+                        ),
                         trigger_source=row.trigger_source,
                         actor_user_id=row.actor_user_id,
                         attempt=row.attempt + 1,
@@ -1623,7 +1687,7 @@ async def list_persisted_active_executions_for_user(
             workflow_id=q_row.workflow_id,
             workflow_name=q_row.name,
             started_at=q_row.enqueued_at or _utcnow(),
-            inputs=dict(q_row.inputs or {}),
+            inputs=dict(queue_inputs_for_display(q_row.inputs)),
             running_node_ids=[],
             node_results=[],
         )
@@ -1662,7 +1726,7 @@ async def list_persisted_active_executions_for_user(
             workflow_id=row.workflow_id,
             workflow_name=row.name,
             started_at=row.started_at,
-            inputs=dict(row.inputs or {}),
+            inputs=dict(queue_inputs_for_display(row.inputs)),
             running_node_ids=list(row.running_node_ids or []),
             node_results=list(row.node_results or []),
         )

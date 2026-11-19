@@ -99,6 +99,7 @@ Returns execution-history entries for one workflow, or for every workflow you ca
 | `$nodeLabel.total` | Total matching executions **before** the limit |
 | `$nodeLabel.by_status` | Counts keyed by status, for example `{ "success": 41, "error": 3 }` |
 | `$nodeLabel.since` | Start of the window, or `null` for the full history |
+| `$nodeLabel.encrypted_skipped` | Runs left out of `executions` because their workflow [encrypts its run history](../reference/run-history-encryption.md) |
 
 Entries carry both `inputs` and `outputs` - what the run received and what it answered - but never `node_results`: the per-node trace is the largest column in the table and would dwarf everything downstream. Fetch a single execution through the API when you need the full trace.
 

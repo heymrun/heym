@@ -82,7 +82,7 @@ The browser reports the path, so a `page.view` line shows where a user says they
 
 ### Workflows
 
-`workflow.create` · `workflow.update` · `workflow.delete` · `workflow.version_revert` · `workflow.run` · `workflow.history_view` · `workflow.history_clear` · `workflow.share_add` · `workflow.share_remove` · `workflow.team_share_add` · `workflow.team_share_remove` · `workflow.execution_token_create` · `workflow.execution_token_revoke`
+`workflow.create` · `workflow.update` · `workflow.delete` · `workflow.version_revert` · `workflow.run` · `workflow.history_view` · `workflow.history_unlock` · `workflow.live_run_unlock` · `workflow.history_clear` · `workflow.run_history_encryption` · `workflow.share_add` · `workflow.share_remove` · `workflow.team_share_add` · `workflow.team_share_remove` · `workflow.execution_token_create` · `workflow.execution_token_revoke`
 
 `workflow.run` is written when a run is started through the API: the editor's Run button, the execute endpoint with a session, API key or webhook, the chat portal, and MCP tools. It records who started it, how, and how it ended:
 
@@ -95,6 +95,12 @@ The browser reports the path, so a `page.view` line shows where a user says they
 Runs started by a schedule, a trigger node, a queue or an event are not audit lines. They execute on whichever instance claimed them and are recorded in Run History with their trigger source and the instance that ran them.
 
 `workflow.history_view` is written when someone opens a workflow's run history. The small lookup that shows a workflow's latest run in the dashboard preview is not a history view and is not logged. `workflow.history_view` records `owned=false` when a collaborator reads someone else's run history. `workflow.delete` records `outcome=denied` with `reason=not_owner` when a collaborator tries to delete.
+
+`workflow.history_unlock` is written each time someone unlocks an [encrypted run](./run-history-encryption.md), whoever they are: the owner, a collaborator, or an instance administrator. It carries `execution_id`, `owned`, `permission` (`write` or `read`) and `admin`. A user without access to the workflow gets `outcome=denied`, and a run that can no longer be decrypted gets `outcome=failure` with `reason=undecryptable`. `workflow.live_run_unlock` is written when someone confirms watching a still-running encrypted run on the canvas, with the same fields. `workflow.run_history_encryption` is written when the owner turns encryption on or off, with `enabled` and `previous`; a collaborator who tries gets `outcome=denied` with `reason=not_owner`.
+
+```
+[winston.audit] audit action=workflow.history_unlock outcome=success actor_id=8f2c1b04-3d5a-4f21-9c7e-1a2b3c4d5e6f actor_email=alex@example.com target=workflow:3a91d7e2-55c8-4b19-b0a1-9e8d7c6b5a43 target_name="Payroll intake" execution_id=c1d2e3f4-0a1b-4c2d-8e3f-5a6b7c8d9e0f owned=false permission=read admin=false
+```
 
 ### Credentials
 

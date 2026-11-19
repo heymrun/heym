@@ -37,6 +37,17 @@ from app.db.models import (
 from app.db.session import async_session_maker
 from app.services.cluster import identity, run_queue
 from app.services.cluster.attribution import attribution_fields
+from app.services.run_history_encryption import (
+    RunHistoryUnavailableError,
+    is_sealed_queue_value,
+    open_queue_inputs,
+    open_queue_result,
+    open_run_payload,
+    queue_inputs_for_display,
+    redacted_queue_result,
+    seal_insert_values,
+    seal_queue_inputs,
+)
 from app.services.secret_tokens import hash_secret
 from app.services.workflow_access import workflow_access_clause
 
@@ -336,12 +347,12 @@ async def admit(run: HeldRun) -> Admission:
                 queue=QueueInfo(position=0, size=waiting, running=running, limit=cfg.limit),
             )
         token = secrets.token_urlsafe(32) if run.mint_status_token else None
+        values = held_values(run, cfg=cfg, now=now, token=token)
+        values["inputs"] = await seal_queue_inputs(
+            db, workflow_id=run.workflow_id, execution_id=run.execution_id, inputs=run.inputs
+        )
         try:
-            await db.execute(
-                WorkflowRunQueue.__table__.insert().values(
-                    **held_values(run, cfg=cfg, now=now, token=token)
-                )
-            )
+            await db.execute(WorkflowRunQueue.__table__.insert().values(**values))
         except StatementError as error:
             # Inputs can hold request data; keep them out of the exception text.
             error.hide_parameters = True
@@ -370,21 +381,26 @@ async def _close_held_locked(
     row.result = terminal_summary(
         execution_id=row.execution_id, workflow_id=row.workflow_id, status=status, message=message
     )
-    await db.execute(
-        pg_insert(ExecutionHistory)
-        .values(
-            id=row.execution_id,
-            workflow_id=row.workflow_id,
-            inputs=row.inputs,
-            outputs={"error": message},
-            node_results=[],
-            status=status,
-            execution_time_ms=0.0,
-            trigger_source=row.trigger_source,
-            started_at=execution_started_at(row.execution_id, [], 0.0),
+    inputs = await open_queue_inputs(
+        db, workflow_id=row.workflow_id, execution_id=row.execution_id, inputs=row.inputs
+    )
+    values = await seal_insert_values(
+        db,
+        {
+            "id": row.execution_id,
+            "workflow_id": row.workflow_id,
+            "inputs": inputs,
+            "outputs": {"error": message},
+            "node_results": [],
+            "status": status,
+            "execution_time_ms": 0.0,
+            "trigger_source": row.trigger_source,
+            "started_at": execution_started_at(row.execution_id, [], 0.0),
             **attribution_fields(),
-        )
-        .on_conflict_do_nothing(index_elements=["id"])
+        },
+    )
+    await db.execute(
+        pg_insert(ExecutionHistory).values(**values).on_conflict_do_nothing(index_elements=["id"])
     )
     workflow = await db.get(Workflow, row.workflow_id)
     if workflow is not None:
@@ -662,12 +678,21 @@ async def _queue_info(db: AsyncSession, workflow_id: uuid.UUID, concurrency_seq:
 
 
 async def build_status_body(
-    workflow_id: uuid.UUID, execution_id: uuid.UUID
+    workflow_id: uuid.UUID,
+    execution_id: uuid.UUID,
+    *,
+    run_token: str | None = None,
+    trusted: bool = False,
 ) -> dict[str, Any] | None:
     """The status URL's body: the queue row when there is one, else the history row.
 
     A queue row records how its run ended, but a run that paused for review ends it as
     `pending` and finishes later in its history row alone, so a pause reads that row.
+
+    An encrypted run's outputs come back only to the caller that started it: one that
+    presents the run token its queued response returned, or its own stream (`trusted`).
+    Anyone else gets the status with `encrypted: true` and no outputs; the audited unlock
+    in History is the way to read them.
     """
     base: dict[str, Any] = {
         "execution_id": str(execution_id),
@@ -684,11 +709,33 @@ async def build_status_body(
                 )
             )
         ).scalar_one_or_none()
+        may_open = trusted or (
+            row is not None and status_token_matches(row.status_token_hash, run_token)
+        )
         if row is not None:
+            result = row.result
+            sealed = is_sealed_queue_value(result)
+            hidden = False
+            if sealed:
+                hidden = not may_open
+                try:
+                    result = (
+                        await open_queue_result(
+                            db, workflow_id=workflow_id, execution_id=execution_id, result=result
+                        )
+                        if may_open
+                        else redacted_queue_result(result)
+                    )
+                except RunHistoryUnavailableError:
+                    result, hidden = redacted_queue_result(result), True
             body = {
                 **base,
-                **status_view(row_status=row.status, result=row.result, error=row.error),
+                **status_view(row_status=row.status, result=result, error=row.error),
             }
+            if sealed:
+                body["encrypted"] = True
+            if hidden:
+                body["outputs"] = None
             if row.status == run_queue.STATUS_HELD and row.concurrency_seq is not None:
                 info = await _queue_info(db, workflow_id, row.concurrency_seq)
                 body["queue"] = info.as_dict()
@@ -697,21 +744,35 @@ async def build_status_body(
             paused = body
         history = (
             await db.execute(
-                select(
-                    ExecutionHistory.status,
-                    ExecutionHistory.outputs,
-                    ExecutionHistory.execution_time_ms,
-                ).where(
+                select(ExecutionHistory).where(
                     ExecutionHistory.id == execution_id,
                     ExecutionHistory.workflow_id == workflow_id,
                 )
             )
-        ).first()
-    if history is None:
-        return paused
+        ).scalar_one_or_none()
+        if history is None:
+            return paused
+        if not history.encrypted:
+            return {
+                **base,
+                **history_view(
+                    status=history.status,
+                    outputs=history.outputs,
+                    execution_time_ms=history.execution_time_ms,
+                ),
+            }
+        outputs = None
+        if may_open:
+            try:
+                outputs = (await open_run_payload(db, history)).outputs
+            except RunHistoryUnavailableError:
+                outputs = None
     return {
         **base,
-        **history_view(status=history[0], outputs=history[1], execution_time_ms=history[2]),
+        **history_view(
+            status=history.status, outputs=outputs, execution_time_ms=history.execution_time_ms
+        ),
+        "encrypted": True,
     }
 
 
@@ -759,7 +820,7 @@ async def list_held_runs_for_user(db: AsyncSession, user_id: uuid.UUID) -> list[
                 workflow_id=workflow_id,
                 workflow_name=name,
                 enqueued_at=enqueued_at,
-                inputs=inputs or {},
+                inputs=queue_inputs_for_display(inputs),
                 position=seen[workflow_id],
                 size=sizes[workflow_id],
             )

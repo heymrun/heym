@@ -40,7 +40,15 @@ def build_execution_status_tool() -> MCPTool:
                 "execution_id": MCPToolInputProperty(
                     type="string",
                     description="The execution_id returned by the queued tool call.",
-                )
+                ),
+                "run_token": MCPToolInputProperty(
+                    type="string",
+                    description=(
+                        "The run_token returned by the queued tool call, when it returned one. "
+                        "The outputs of a workflow with encrypted run history come back only "
+                        "with it."
+                    ),
+                ),
             },
             required=["execution_id"],
         ),
@@ -57,6 +65,8 @@ def admission_tool_text(admission: workflow_concurrency.Admission) -> tuple[str,
         "queue": admission.queue.as_dict() if admission.queue else None,
         "next_step": NEXT_STEP,
     }
+    if admission.status_token:
+        payload["run_token"] = admission.status_token
     return json.dumps(payload, indent=2), False
 
 
@@ -90,7 +100,12 @@ async def run_execution_status_tool(
     workflow_id = await _workflow_of_execution(execution_id)
     if workflow_id is None or workflow_id not in {w.id for w in workflows}:
         return not_found
-    body = await workflow_concurrency.build_status_body(workflow_id, execution_id)
+    raw_token = arguments.get("run_token")
+    body = await workflow_concurrency.build_status_body(
+        workflow_id,
+        execution_id,
+        run_token=raw_token if isinstance(raw_token, str) else None,
+    )
     if body is None:
         return not_found
     return json.dumps(body, indent=2, ensure_ascii=False, default=str), False

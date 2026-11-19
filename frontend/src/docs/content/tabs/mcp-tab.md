@@ -51,7 +51,7 @@ A workflow with a [concurrency limit](../reference/webhooks.md#concurrency-limit
 }
 ```
 
-The client polls the `heym_execution_status` tool with that `execution_id`. It returns the same body as the [status URL](../reference/webhooks.md#status-url): `queued` with the current position, `running`, then `success` or `error` with the outputs. It only finds runs of workflows that the same server exposes. The tool is listed on the default server and on each named server only while at least one of its workflows has a concurrency limit. When the workflow's queue is full, the call returns an error, "Concurrency queue is full".
+The client polls the `heym_execution_status` tool with that `execution_id`. It returns the same body as the [status URL](../reference/webhooks.md#status-url): `queued` with the current position, `running`, then `success` or `error` with the outputs. It only finds runs of workflows that the same server exposes. For a workflow with [encrypted run history](../reference/run-history-encryption.md), the queued result also carries a `run_token`; pass it to `heym_execution_status` as `run_token` to get the outputs, which otherwise come back as `null` with `encrypted: true`. The tool is listed on the default server and on each named server only while at least one of its workflows has a concurrency limit. When the workflow's queue is full, the call returns an error, "Concurrency queue is full".
 
 ### Memory tools: get_user_memory and set_user_memory
 

@@ -35,6 +35,7 @@ import ExpressionEvaluateFallbackDialog from "@/components/ui/ExpressionEvaluate
 import AnalysisPanel from "@/components/Panels/AnalysisPanel.vue";
 import DebugPanel from "@/components/Panels/DebugPanel.vue";
 import ExecutionHistoryDialog from "@/components/Panels/ExecutionHistoryDialog.vue";
+import LiveRunUnlockDialog from "@/components/Panels/LiveRunUnlockDialog.vue";
 import NodePanel from "@/components/Panels/NodePanel.vue";
 import PropertiesPanel from "@/components/Panels/PropertiesPanel.vue";
 import MobileCanvasExecutionDetail from "@/components/Panels/propertiesPanel/MobileCanvasExecutionDetail.vue";
@@ -46,6 +47,7 @@ import Label from "@/components/ui/Label.vue";
 import Select from "@/components/ui/Select.vue";
 import Textarea from "@/components/ui/Textarea.vue";
 import Tooltip from "@/components/ui/Tooltip.vue";
+import { hasOpenDialog } from "@/composables/useDialogStack";
 import { onDismissOverlays, pushOverlayState } from "@/composables/useOverlayBackHandler";
 import { getDocPath } from "@/docs/manifest";
 import { joinOriginAndPath } from "@/lib/appUrl";
@@ -568,11 +570,18 @@ function ensurePendingExecutionStream(): void {
   stopPendingExecutionStream();
   pendingExecutionStreamHistoryId = historyId;
   pendingExecutionStreamAbortController = new AbortController();
+  const unlocked = workflowStore.executionHistoryDetails.get(historyId)?.unlocked === true;
 
   workflowApi.streamWorkflowHistoryEntry(
     workflowId.value,
     historyId,
     (serverHistory) => {
+      if (serverHistory.encrypted && !unlocked) {
+        // A paused encrypted run, even one started here, keeps its data until it is unlocked.
+        stopPendingExecutionStream();
+        workflowStore.requestHistoryUnlock(historyId);
+        return;
+      }
       const entry = workflowStore.executionHistoryDetails.get(serverHistory.id) ?? {
         id: serverHistory.id,
         started_at: serverHistory.started_at,
@@ -605,6 +614,8 @@ function ensurePendingExecutionStream(): void {
           highlight: serverHistory.highlight ?? null,
         },
         trigger_source: serverHistory.trigger_source ?? null,
+        encrypted: serverHistory.encrypted ?? false,
+        unlocked,
       };
       workflowStore.applyExecutionHistoryEntry(nextEntry);
     },
@@ -617,6 +628,7 @@ function ensurePendingExecutionStream(): void {
       schedulePendingExecutionReconnect(historyId);
     },
     pendingExecutionStreamAbortController.signal,
+    unlocked,
   );
 }
 
@@ -639,6 +651,10 @@ async function handleKeyDown(event: KeyboardEvent): Promise<void> {
   // Expression evaluate dialog owns this shortcut while open (apply + close).
   if (isMeta && event.key === "Enter") {
     if (showCommandPalette.value) {
+      return;
+    }
+    // A dialog in front of the canvas (History, Share, ...) keeps the run behind it idle.
+    if (hasOpenDialog()) {
       return;
     }
     if (document.querySelector("[data-expression-evaluate-dialog]")) {
@@ -753,6 +769,11 @@ async function bringExecutionFromRoute(): Promise<void> {
     route.params.id !== routeWorkflowId ||
     workflowStore.currentWorkflow?.id !== routeWorkflowId
   ) {
+    return;
+  }
+  if (entry.encrypted && !entry.unlocked) {
+    // An encrypted run, finished or waiting for review, opens only after an audited unlock.
+    workflowStore.requestHistoryUnlock(entry.id);
     return;
   }
   workflowStore.applyExecutionHistoryEntry(entry);
@@ -1741,6 +1762,8 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
       :open="historyOpen"
       @close="historyOpen = false"
     />
+
+    <LiveRunUnlockDialog />
 
     <WorkflowEditHistoryDialog
       :open="editHistoryOpen"

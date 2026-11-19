@@ -381,11 +381,11 @@ describe("shipped release registry", () => {
     const catalog = buildReleaseTourCatalog(RELEASE_REGISTRY);
 
     expect(catalog?.slides.map((slide) => slide.id)).toEqual([
+      "run-history-encryption",
       "mail-send",
       "outlook-calendar",
       "outlook-trigger",
       "gmail-trigger",
-      "mcp-endpoint",
     ]);
   });
 
@@ -402,7 +402,7 @@ describe("shipped release registry", () => {
     expect(tours.map((tour) => tour.tourVisual)).toContain("outlook-trigger");
     expect(tours.map((tour) => tour.tourVisual)).toContain("gmail-trigger");
     expect(tours.map((tour) => tour.tourVisual)).toContain("outlook-calendar");
-    expect(tours.map((tour) => tour.tourVisual)).toContain("mcp-endpoint");
+    expect(tours.map((tour) => tour.tourVisual)).toContain("run-history-encryption");
     for (const tour of tours) {
       expect(TOUR_VISUALS[tour.tourVisual], `missing visual for "${tour.tourVisual}"`)
         .toBeDefined();

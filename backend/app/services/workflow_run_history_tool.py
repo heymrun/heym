@@ -10,7 +10,9 @@ to read a pile of run payloads just to answer "how many times did this run?":
    run: inputs, outputs, and a compacted per-node trace.
 
 All filtering happens in SQL, scoped to one workflow the caller can reach. Nothing
-is fetched and then searched in Python.
+is fetched and then searched in Python. Encrypted runs are counted but never read: they
+are left out of the run rows (`encrypted_runs_skipped` says how many) and their detail
+is refused; only the History dialog's audited unlock decrypts a run.
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import ExecutionHistory
+from app.services.run_history_encryption import not_encrypted
 from app.services.workflow_access import get_accessible_workflow
 
 DEFAULT_RUN_LIMIT = 20
@@ -123,6 +126,16 @@ async def _load_run_detail(
     run = result.scalar_one_or_none()
     if run is None:
         return {"error": "Execution not found for this workflow"}
+    if run.encrypted:
+        return {
+            "error": (
+                "This run's history is encrypted. Its inputs and outputs can only be "
+                "viewed by unlocking the run in the History dialog."
+            ),
+            "execution_id": str(run.id),
+            "run_status": run.status,
+            "encrypted": True,
+        }
 
     node_results = run.node_results if isinstance(run.node_results, list) else []
     nodes = [_node_row(item) for item in node_results[:_MAX_DETAIL_NODES]]
@@ -188,9 +201,13 @@ async def _load_run_metadata(
         if last_at is not None and (last_run is None or last_at > last_run):
             last_run = last_at
 
-    runs_query = select(ExecutionHistory).where(*scope)
+    runs_query = select(ExecutionHistory).where(*scope, not_encrypted())
+    encrypted_query = (
+        select(func.count()).select_from(ExecutionHistory).where(*scope, ~not_encrypted())
+    )
     if status_filter:
         runs_query = runs_query.where(ExecutionHistory.status == status_filter)
+        encrypted_query = encrypted_query.where(ExecutionHistory.status == status_filter)
     run_rows = (
         (
             await db.execute(
@@ -204,12 +221,19 @@ async def _load_run_metadata(
     matching_runs = status_counts.get(status_filter, 0) if status_filter else total_runs
     latest = (
         await db.execute(
-            select(ExecutionHistory.id, ExecutionHistory.status, ExecutionHistory.started_at)
+            select(
+                ExecutionHistory.id,
+                ExecutionHistory.status,
+                ExecutionHistory.started_at,
+                ExecutionHistory.encrypted,
+            )
             .where(*scope)
             .order_by(ExecutionHistory.started_at.desc())
             .limit(1)
         )
     ).first()
+    encrypted_runs = int((await db.execute(encrypted_query)).scalar_one() or 0)
+    matching_runs = max(matching_runs - encrypted_runs, 0)
 
     return {
         "workflow_id": str(workflow_id),
@@ -224,6 +248,7 @@ async def _load_run_metadata(
                 "execution_id": str(latest[0]),
                 "status": latest[1],
                 "started_at": _iso(latest[2]),
+                "encrypted": bool(latest[3]),
             }
             if latest is not None
             else None
@@ -234,6 +259,7 @@ async def _load_run_metadata(
         "offset": offset,
         "returned": len(run_rows),
         "has_more": offset + len(run_rows) < matching_runs,
+        "encrypted_runs_skipped": encrypted_runs,
         "runs": [
             {
                 "execution_id": str(run.id),
@@ -244,7 +270,13 @@ async def _load_run_metadata(
             }
             for run in run_rows
         ],
-        "hint": "Pass execution_id from runs to get inputs, outputs and the per-node trace.",
+        "hint": (
+            "Pass execution_id from runs to get inputs, outputs and the per-node trace. "
+            "Encrypted runs count in total_runs and status_counts but are not listed; "
+            "their data is only visible by unlocking them in the History dialog."
+            if encrypted_runs
+            else "Pass execution_id from runs to get inputs, outputs and the per-node trace."
+        ),
     }
 
 

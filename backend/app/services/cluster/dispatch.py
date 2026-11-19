@@ -60,6 +60,11 @@ from app.services.execution_cancellation import (
     relinquish_execution,
 )
 from app.services.k8s_credentials.store import store as k8s_credential_store
+from app.services.run_history_encryption import (
+    is_sealed_queue_value,
+    open_queue_inputs,
+    seal_insert_values,
+)
 from app.services.workflow_executor import (
     WorkflowCancelledError,
     WorkflowTimeoutError,
@@ -811,6 +816,15 @@ class RunQueueWorker:
             from app.services.global_variables_service import get_global_variables_context
             from app.services.hitl_service import build_default_public_base_url
 
+            # A sealed queue row (encrypted run history) is opened here, for this run only.
+            if is_sealed_queue_value(row.inputs):
+                async with async_session_maker() as db:
+                    row.inputs = await open_queue_inputs(
+                        db,
+                        workflow_id=row.workflow_id,
+                        execution_id=row.execution_id,
+                        inputs=row.inputs,
+                    )
             # Without this the run is invisible to the cancel bus and to recovery.
             cancel_event = register_execution(
                 workflow_id=row.workflow_id,
@@ -1002,20 +1016,24 @@ class RunQueueWorker:
                     select(Workflow.owner_id, Workflow.name).where(Workflow.id == row.workflow_id)
                 )
                 wf_row = wf_res.first()
+                values = await seal_insert_values(
+                    db,
+                    {
+                        "id": row.execution_id,
+                        "workflow_id": row.workflow_id,
+                        "inputs": row.inputs,
+                        "outputs": {"error": "Execution was cancelled"},
+                        "node_results": [],
+                        "status": "cancelled",
+                        "execution_time_ms": 0.0,
+                        "trigger_source": row.trigger_source,
+                        "started_at": execution_started_at(row.execution_id, [], 0.0),
+                        **attribution_fields(),
+                    },
+                )
                 await db.execute(
                     pg_insert(ExecutionHistory)
-                    .values(
-                        id=row.execution_id,
-                        workflow_id=row.workflow_id,
-                        inputs=row.inputs,
-                        outputs={"error": "Execution was cancelled"},
-                        node_results=[],
-                        status="cancelled",
-                        execution_time_ms=0.0,
-                        trigger_source=row.trigger_source,
-                        started_at=execution_started_at(row.execution_id, [], 0.0),
-                        **attribution_fields(),
-                    )
+                    .values(**values)
                     .on_conflict_do_nothing(index_elements=["id"])
                 )
                 if wf_row is not None:

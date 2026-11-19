@@ -12,11 +12,12 @@ import { getSentryOperationMetadata } from "@/lib/sentryExpressionFields";
 import { replaceNodeLabelRefs } from "@/lib/utils";
 import { workflowRunNodeIds } from "@/lib/workflowRunScope";
 import { normalizeWorkflowEdges } from "@/lib/workflowEdges";
-import { lastWrittenWorkflowRevision, workflowApi } from "@/services/api";
+import { EncryptedRunLockedError, lastWrittenWorkflowRevision, workflowApi } from "@/services/api";
 import { isRevisionAfter, pickPreferredRevision } from "@/lib/workflowRevision";
 import { useToast } from "@/composables/useToast";
 import type {
   AgentProgressEntry,
+  AllExecutionHistoryEntry,
   AllExecutionHistoryEntryLight,
   ExecutionHistoryEntry,
   ExecutionResult,
@@ -451,6 +452,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
       inputs: h.inputs,
       status: h.status as "running" | "success" | "error" | "pending" | "skipped" | "failed",
       recovered: h.recovered,
+      encrypted: h.encrypted ?? false,
       result: {
         workflow_id: h.workflow_id,
         status: h.status as "success" | "error" | "pending",
@@ -461,6 +463,15 @@ export const useWorkflowStore = defineStore("workflow", () => {
         highlight: h.highlight ?? null,
       },
     };
+  }
+
+  /** Shows an unlocked encrypted run in the history dialog for the rest of the session. */
+  function applyUnlockedHistoryEntry(entry: AllExecutionHistoryEntry): void {
+    const converted = convertServerHistoryToEntry({
+      ...entry,
+      workflow_id: entry.workflow_id ?? currentWorkflow.value?.id ?? "",
+    });
+    upsertExecutionHistoryEntry({ ...converted, trigger_source: entry.trigger_source, unlocked: true });
   }
 
   function upsertExecutionHistoryEntry(entry: ExecutionHistoryEntry): void {
@@ -534,7 +545,10 @@ export const useWorkflowStore = defineStore("workflow", () => {
       executionHistoryList.value = items;
       executionHistoryTotal.value = total;
       if (!keepDetails) {
-        executionHistoryDetails.value = new Map();
+        // Unlocked runs stay unlocked while the list reloads, so a search can still find them.
+        executionHistoryDetails.value = new Map(
+          [...executionHistoryDetails.value].filter(([, entry]) => entry.unlocked),
+        );
       }
     } catch {
       if (currentWorkflow.value?.id !== workflowId) return;
@@ -584,8 +598,17 @@ export const useWorkflowStore = defineStore("workflow", () => {
   ): Promise<ExecutionHistoryEntry | null> {
     const workflowId = currentWorkflow.value?.id;
     if (!workflowId) return null;
-    const cached = !force ? executionHistoryDetails.value.get(entryId) : undefined;
+    const known = executionHistoryDetails.value.get(entryId);
+    const cached = !force ? known : undefined;
     if (cached) return cached;
+    if (known?.unlocked) {
+      // An unlocked run stays unlocked on refresh; re-reading it is audited like the first time.
+      try {
+        return await refreshUnlockedEntry(entryId);
+      } catch {
+        return null;
+      }
+    }
     isHistoryDetailLoading.value = true;
     try {
       const serverHistory = await workflowApi.getWorkflowHistoryEntry(
@@ -1898,7 +1921,50 @@ export const useWorkflowStore = defineStore("workflow", () => {
     }
   }
 
-  async function observeExecution(executionId: string): Promise<void> {
+  /** An encrypted run that needs an audited unlock before this canvas may show it. */
+  const lockedLiveExecutionId = ref<string | null>(null);
+  /** "live": a running run to stream; "history": a recorded run, such as one paused for review. */
+  const lockedRunKind = ref<"live" | "history">("live");
+
+  function requestHistoryUnlock(entryId: string): void {
+    lockedRunKind.value = "history";
+    lockedLiveExecutionId.value = entryId;
+  }
+
+  /** Re-reads an encrypted run through the audited unlock and keeps it unlocked. */
+  async function refreshUnlockedEntry(entryId: string): Promise<ExecutionHistoryEntry | null> {
+    const unlocked = await workflowApi.unlockHistoryEntry(entryId);
+    applyUnlockedHistoryEntry(unlocked);
+    return executionHistoryDetails.value.get(entryId) ?? null;
+  }
+
+  async function unlockHistoryOnCanvas(entryId: string): Promise<void> {
+    const entry = await refreshUnlockedEntry(entryId);
+    if (entry) applyExecutionHistoryEntry(entry);
+  }
+
+  function unlockLiveExecution(): void {
+    const executionId = lockedLiveExecutionId.value;
+    const kind = lockedRunKind.value;
+    lockedLiveExecutionId.value = null;
+    lockedRunKind.value = "live";
+    if (!executionId) return;
+    if (kind === "history") {
+      void unlockHistoryOnCanvas(executionId);
+      return;
+    }
+    void observeExecution(executionId, { unlock: true });
+  }
+
+  function dismissLockedLiveExecution(): void {
+    lockedLiveExecutionId.value = null;
+    lockedRunKind.value = "live";
+  }
+
+  async function observeExecution(
+    executionId: string,
+    options: { unlock?: boolean } = {},
+  ): Promise<void> {
     const workflowId = currentWorkflow.value?.id;
     if (!workflowId || !executionId) return;
     if (isExecuting.value && currentExecutionId.value === executionId) return;
@@ -1925,6 +1991,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
     while (!streamAbort.signal.aborted) {
       let completed = false;
       let executionGone = false;
+      let locked = false;
 
       await new Promise<void>((resolve) => {
         workflowApi.streamActiveExecution(
@@ -1968,9 +2035,11 @@ export const useWorkflowStore = defineStore("workflow", () => {
           async (result) => {
             completed = true;
             const historyId = result.execution_history_id;
-            const historyEntry = historyId
-              ? await fetchExecutionHistoryEntry(historyId, true)
-              : null;
+            // The stream already carries an unlocked run's real result.
+            const historyEntry =
+              historyId && !options.unlock
+                ? await fetchExecutionHistoryEntry(historyId, true)
+                : null;
             // A cancelled run is persisted without per-node results; keep what was
             // streamed so the log does not empty out on Stop.
             const streamedRows = nodeResults.value.filter(
@@ -1987,7 +2056,10 @@ export const useWorkflowStore = defineStore("workflow", () => {
             isObservingExecution.value = false;
             resolve();
           },
-          (_error) => resolve(),
+          (error) => {
+            locked = error instanceof EncryptedRunLockedError;
+            resolve();
+          },
           () => resolve(),
           streamAbort.signal,
           (data) => {
@@ -2055,12 +2127,30 @@ export const useWorkflowStore = defineStore("workflow", () => {
             executionGone = true;
             resolve();
           },
+          options.unlock === true,
         );
       });
 
       if (completed || streamAbort.signal.aborted) return;
 
-      const historyEntry = await fetchExecutionHistoryEntry(executionId, true);
+      if (locked) {
+        // Encrypted run: nothing is shown until the viewer confirms the audited unlock.
+        lockedRunKind.value = "live";
+        lockedLiveExecutionId.value = executionId;
+        isObservingExecution.value = false;
+        isExecuting.value = false;
+        runningNodeIds.value.clear();
+        abortController.value = null;
+        currentExecutionId.value = null;
+        currentExecutionWorkflowId.value = null;
+        clearNodeStatuses();
+        return;
+      }
+
+      // An unlocked view reconnects instead: History would only return placeholders.
+      const historyEntry = options.unlock
+        ? null
+        : await fetchExecutionHistoryEntry(executionId, true);
       if (historyEntry?.result) {
         applyExecutionHistoryEntry(historyEntry);
         isObservingExecution.value = false;
@@ -3812,6 +3902,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
     isHistoryDetailLoading,
     fetchExecutionHistoryEntry,
     upsertExecutionHistoryEntry,
+    applyUnlockedHistoryEntry,
     applyExecutionHistoryEntry,
     applyExecutionResultSnapshot,
     isExecuting,
@@ -3870,6 +3961,11 @@ export const useWorkflowStore = defineStore("workflow", () => {
     clearNodeStatuses,
     executeWorkflow,
     observeExecution,
+    lockedLiveExecutionId,
+    lockedRunKind,
+    requestHistoryUnlock,
+    unlockLiveExecution,
+    dismissLockedLiveExecution,
     disconnectExecutionObservation,
     stopExecution,
     stopExecutionIfCurrent,

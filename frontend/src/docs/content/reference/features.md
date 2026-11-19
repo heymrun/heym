@@ -643,6 +643,10 @@ Execution history records workflow runs: inputs, outputs, node results, status, 
 
 See also [SSE Streaming](./sse-streaming.md), [Human-in-the-Loop](./human-in-the-loop.md), and [Traces](../tabs/traces-tab.md).
 
+### [Run History Encryption](./run-history-encryption.md)
+
+For production workflows whose runs must not be visible to anyone by default, the workflow owner and instance administrators included, the owner can switch on **Encrypt run history** in the workflow-level **Properties** panel. From that moment, every run of the workflow, editor test runs and sub-workflow runs included, stores its inputs, outputs and node results encrypted with AES-256-GCM under a per-owner key that no API ever returns. Both history dialogs show such runs with a lock icon and without their data; anyone with at least read access can click **Unlock**, confirm, and see the run, decrypted on the server for that request. Watching a still-running run of such a workflow on the canvas asks for the same confirmation first. Every unlock and every change of the setting is written to the [audit log](./audit.md). Chat and MCP run history tools, the [Heym node](../nodes/heym-node.md) and Evals sample inputs leave encrypted runs out and report how many they skipped, while counts, durations, analytics and alerts keep including them. A queued run's leftover queue row is sealed too, and its status URL returns outputs only with the run token its queued response returned. Turning the setting off affects new runs only. The [Workflow Analysis](./workflow-analysis.md) report suggests it for workflows that process personal data or are shared, and [Heym Work](./heym-work.md) unlocks runs through the same audited step.
+
 ### Execution Highlights
 
 After a live run — or after **Bring to Canvas** — a dismissible **Execution Highlights** popup appears in the top-right of the Canvas, listing what each node produced in execution order. It's a quick way to inspect per-node output without opening each node; close it with the **✕**, and it reopens on the next run. Highlights are also shown on dashboard runs. See [Execution History](./execution-history.md) for details.

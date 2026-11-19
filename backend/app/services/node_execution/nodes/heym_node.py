@@ -127,6 +127,7 @@ def execute(ctx: NodeExecutionContext) -> object:
 
     from app.db import session as db_session
     from app.db.models import ExecutionHistory, Workflow
+    from app.services.run_history_encryption import not_encrypted
     from app.services.workflow_access import workflow_access_clause
 
     operation = str(ctx.node_data.get("heymOperation", "")).strip()
@@ -212,20 +213,37 @@ def execute(ctx: NodeExecutionContext) -> object:
             by_status: dict[str, int] = {status: int(count) for status, count in count_rows}
             total = sum(by_status.values())
 
+            # Encrypted runs are counted above but never listed: only an audited unlock
+            # in the History dialog reads them.
+            encrypted_skipped = int(
+                db.execute(
+                    select(func.count())
+                    .select_from(ExecutionHistory)
+                    .where(*filters, ~not_encrypted())
+                ).scalar_one()
+                or 0
+            )
+
             # Only the requested slice is fetched, and never the node_results trace.
             if all_workflows:
                 query = (
                     select(ExecutionHistory, Workflow.name)
                     .join(Workflow, Workflow.id == ExecutionHistory.workflow_id)
-                    .options(defer(ExecutionHistory.node_results))
-                    .where(*filters)
+                    .options(
+                        defer(ExecutionHistory.node_results),
+                        defer(ExecutionHistory.encrypted_payload),
+                    )
+                    .where(*filters, not_encrypted())
                     .order_by(ExecutionHistory.started_at.desc())
                 )
             else:
                 query = (
                     select(ExecutionHistory)
-                    .options(defer(ExecutionHistory.node_results))
-                    .where(*filters)
+                    .options(
+                        defer(ExecutionHistory.node_results),
+                        defer(ExecutionHistory.encrypted_payload),
+                    )
+                    .where(*filters, not_encrypted())
                     .order_by(ExecutionHistory.started_at.desc())
                 )
             if limit > NO_LIST_LIMIT:
@@ -249,6 +267,7 @@ def execute(ctx: NodeExecutionContext) -> object:
                 "executions": executions,
                 "total": total,
                 "by_status": by_status,
+                "encrypted_skipped": encrypted_skipped,
                 "since": since.isoformat() if since else None,
             }
 

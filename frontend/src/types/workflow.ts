@@ -43,6 +43,7 @@ export interface Workflow {
   sse_enabled: boolean;
   sse_node_config: Record<string, SseNodeConfig>;
   auto_recover_runs: boolean;
+  encrypt_run_history?: boolean;
   error_workflow_id: string | null;
   minutes_saved_per_run: number | null;
   workflow_timeout_seconds: number | null;
@@ -1332,6 +1333,9 @@ export interface ExecutionHistoryEntry {
   result: ExecutionResult | null;
   trigger_source?: string | null;
   recovered?: boolean;
+  encrypted?: boolean;
+  /** Set once the user unlocked an encrypted run in this session. */
+  unlocked?: boolean;
   executed_by_instance_id?: string | null;
   executed_by_instance_name?: string | null;
 }
@@ -1349,6 +1353,8 @@ export interface AllExecutionHistoryEntry {
   started_at: string;
   trigger_source?: string | null;
   recovered?: boolean;
+  encrypted?: boolean;
+  unlocked?: boolean;
   executed_by_instance_id?: string | null;
   executed_by_instance_name?: string | null;
   highlight?: HighlightPayload | null;
@@ -1365,6 +1371,7 @@ export interface AllExecutionHistoryEntryLight {
   execution_time_ms: number;
   trigger_source?: string | null;
   recovered?: boolean;
+  encrypted?: boolean;
   executed_by_instance_id?: string | null;
   executed_by_instance_name?: string | null;
 }
@@ -1415,6 +1422,8 @@ export interface ServerExecutionHistory {
   started_at: string;
   trigger_source?: string | null;
   recovered?: boolean;
+  /** Encrypted runs carry placeholders until unlocked. */
+  encrypted?: boolean;
   highlight?: HighlightPayload | null;
 }
 

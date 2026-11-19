@@ -371,6 +371,7 @@ class WorkflowResponse(BaseModel):
     concurrency_limit: int | None = None
     concurrency_max_queue: int | None = None
     concurrency_max_wait_seconds: int | None = None
+    encrypt_run_history: bool = False
     owner_name: str | None = None
     # What the requesting user may do: the owner and write shares edit, read shares view and run.
     permission: WorkflowSharePermission = "write"
@@ -545,6 +546,8 @@ class ExecutionHistoryResponse(BaseModel):
     started_at: datetime
     trigger_source: str | None = None
     recovered: bool = False
+    # Encrypted runs carry placeholders here; the unlock endpoint returns the real values.
+    encrypted: bool = False
     highlight: HighlightPayloadSchema | None = None
 
     class Config:
@@ -564,6 +567,7 @@ class ExecutionHistoryWithWorkflowResponse(BaseModel):
     started_at: datetime
     trigger_source: str | None = None
     recovered: bool = False
+    encrypted: bool = False
     highlight: HighlightPayloadSchema | None = None
 
 
@@ -579,6 +583,7 @@ class ExecutionHistoryListResponse(BaseModel):
     execution_time_ms: float
     trigger_source: str | None = None
     recovered: bool = False
+    encrypted: bool = False
     executed_by_instance_id: str | None = None
     executed_by_instance_name: str | None = None
 
@@ -586,6 +591,14 @@ class ExecutionHistoryListResponse(BaseModel):
 class HistoryListResponse(BaseModel):
     total: int
     items: list[ExecutionHistoryListResponse]
+
+
+class RunHistoryEncryptionUpdate(BaseModel):
+    enabled: bool
+
+
+class RunHistoryEncryptionResponse(BaseModel):
+    encrypt_run_history: bool
 
 
 class WorkflowExecutionQueueInfo(BaseModel):
@@ -605,6 +618,7 @@ class WorkflowExecutionStatusResponse(BaseModel):
     outputs: Any | None = None
     error: str | None = None
     execution_time_ms: float | None = None
+    encrypted: bool = False
 
 
 class ActiveExecutionItem(BaseModel):

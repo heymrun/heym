@@ -202,12 +202,20 @@ class GetExecutionHistoryTest(HeymNodeTestBase):
         result.all.return_value = list(counts.items())
         return result
 
-    def _queue(self, owning: MagicMock, target: MagicMock, rows: list, counts: dict) -> None:
-        """Queue the four statements the handler issues, in order."""
+    def _encrypted(self, count: int = 0) -> MagicMock:
+        result = MagicMock()
+        result.scalar_one.return_value = count
+        return result
+
+    def _queue(
+        self, owning: MagicMock, target: MagicMock, rows: list, counts: dict, encrypted: int = 0
+    ) -> None:
+        """Queue the five statements the handler issues, in order."""
         self.db.execute.side_effect = [
             self._scalar_one(owning),
             self._scalar_one(target),
             self._counts(counts),
+            self._encrypted(encrypted),
             self._entries(rows),
         ]
 
@@ -246,6 +254,22 @@ class GetExecutionHistoryTest(HeymNodeTestBase):
         self.assertEqual(result["by_status"], {"success": 2, "error": 1})
         self.assertEqual(result["workflow_name"], "Target")
         self.assertIsNone(result["since"])
+
+    def test_encrypted_runs_are_counted_but_never_listed(self) -> None:
+        owning = _workflow("Owning", self.owner_id)
+        target = _workflow("Target", self.owner_id)
+        self._queue(owning, target, [self._entry("success")], {"success": 3}, encrypted=2)
+
+        result = heym_node.execute(
+            _ctx({"heymOperation": "getExecutionHistory", "heymWorkflowId": str(target.id)})
+        )
+
+        self.assertEqual(result["encrypted_skipped"], 2)
+        self.assertEqual(result["total"], 3)
+        listing = str(
+            self.db.execute.call_args_list[-1].args[0].compile(dialect=postgresql.dialect())
+        )
+        self.assertIn("execution_history.encrypted IS false", listing)
 
     def test_entry_carries_outputs_but_never_node_results(self) -> None:
         owning = _workflow("Owning", self.owner_id)
@@ -312,7 +336,7 @@ class GetExecutionHistoryTest(HeymNodeTestBase):
             )
         )
 
-        counts_sql, slice_sql = [
+        counts_sql, _encrypted_sql, slice_sql = [
             str(call.args[0].compile(dialect=postgresql.dialect()))
             for call in self.db.execute.call_args_list[2:]
         ]
@@ -365,12 +389,13 @@ class GetExecutionHistoryTest(HeymNodeTestBase):
     # `heymWorkflowId` of `all` reads the history of every workflow the owner can reach.
 
     def _queue_all(self, rows: list[tuple[MagicMock, str]], counts: dict[str, int]) -> None:
-        """Queue the three statements the handler issues: owner, breakdown, slice."""
+        """Queue the four statements the handler issues: owner, breakdown, encrypted, slice."""
         sliced = MagicMock()
         sliced.all.return_value = rows
         self.db.execute.side_effect = [
             self._scalar_one(_workflow("Owning", self.owner_id)),
             self._counts(counts),
+            self._encrypted(),
             sliced,
         ]
 
@@ -396,7 +421,7 @@ class GetExecutionHistoryTest(HeymNodeTestBase):
 
         self._run_all()
 
-        self.assertEqual(self.db.execute.call_count, 3)
+        self.assertEqual(self.db.execute.call_count, 4)
 
     def test_all_workflows_value_is_case_insensitive(self) -> None:
         self._queue_all([(self._entry("success"), "Alpha")], {"success": 1})
@@ -408,7 +433,7 @@ class GetExecutionHistoryTest(HeymNodeTestBase):
 
         self._run_all(heymLimit="1", heymStatus="success", heymSinceDays="3")
 
-        counts_sql, slice_sql = [
+        counts_sql, _encrypted_sql, slice_sql = [
             str(call.args[0].compile(dialect=postgresql.dialect()))
             for call in self.db.execute.call_args_list[1:]
         ]

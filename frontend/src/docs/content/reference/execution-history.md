@@ -156,6 +156,10 @@ This is especially useful for portal runs and long-lived workflows that may wait
 
 Use **Copy** next to Inputs or Outputs to copy the JSON to the clipboard.
 
+## Encrypted runs
+
+When a workflow has **Encrypt run history** on, its runs show a lock icon and open as **Encrypted run** without inputs, outputs or node results. Click **Unlock** and confirm to decrypt the run on the server; the unlock is written to the audit log. A locked run cannot be brought to the canvas, and **Open live** on a running one asks for the same confirmation. See [Run History Encryption](./run-history-encryption.md).
+
 ## Clear History
 
 - **Per-workflow**: In the Editor history dialog, click **Clear history** to remove runs for the current workflow.
@@ -176,6 +180,7 @@ The canvas and dashboard history dialogs keep their run controls on one row and 
 - [Operations Runbook (L1): Queue backlog](./operations-runbook.md#queue-backlog-or-apparently-stuck-runs) - Distinguish queued, held, interrupted, and recovered executions before replay
 - [Triggers](./triggers.md) – How workflows are started; history records `trigger_source` (including `board` for runs started by [Board](../tabs/board-tab.md) card moves and follow-ups)
 - [Human-in-the-Loop](./human-in-the-loop.md) – Pending review URLs and resume behavior
+- [Run History Encryption](./run-history-encryption.md): Encrypt a workflow's runs and unlock them with an audit trail
 - [Edit History](./edit-history.md) – Version control for workflow saves (revert, diff)
 - [Quick Start](../getting-started/quick-start.md) – Build and run your first workflow
 - [Workflows Tab](../tabs/workflows-tab.md) – Create and manage workflows
