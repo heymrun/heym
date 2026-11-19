@@ -255,6 +255,67 @@ class StatsEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.by_model[0].output_tokens_per_second, 500.0)
         # A speed across mixed models means nothing, so "Other" carries none.
         self.assertIsNone(response.by_model[-1].output_tokens_per_second)
+        self.assertTrue(response.by_model[-1].is_priced)
+        self.assertEqual(response.kpis.unpriced_models, [])
+
+    async def test_an_unpriced_model_folded_into_other_is_still_listed(self):
+        db = AsyncMock()
+        kpi_result = MagicMock()
+        kpi_result.one = MagicMock(
+            return_value=MagicMock(
+                total_calls=55,
+                error_calls=0,
+                cancelled_calls=0,
+                prompt_tokens=1000,
+                completion_tokens=0,
+                total_tokens=1000,
+                avg_elapsed_ms=10.0,
+            )
+        )
+        m_result = MagicMock()
+        m_result.all = MagicMock(
+            return_value=[
+                MagicMock(
+                    model=f"m{i}",
+                    provider="openai",
+                    calls=10 - i,
+                    total_tokens=1000 - i * 50,
+                    prompt_tokens=500,
+                    completion_tokens=500,
+                    speed_tokens=500,
+                    speed_wait_ms=1000.0,
+                )
+                for i in range(10)
+            ]
+        )
+        empty = MagicMock()
+        empty.all = MagicMock(return_value=[])
+        db.execute = AsyncMock(side_effect=[kpi_result, m_result, empty])
+
+        async def fake_resolve(_db, _uid, pairs):
+            # m3 ranks inside the top 8, m9 ends up in "Other"; neither has a price.
+            return [
+                (None, False) if name in ("m3", "m9") else (Decimal("0.01"), True)
+                for name, _p, _c in pairs
+            ]
+
+        with (
+            patch("app.api.traces.resolve_costs_for_user", side_effect=fake_resolve),
+            patch("app.api.traces.ensure_pricing_synced", AsyncMock(return_value=False)),
+        ):
+            response = await get_trace_stats(
+                range="7d",
+                source=None,
+                credential_id=None,
+                workflow_id=None,
+                status_filter=None,
+                search=None,
+                current_user=self.user,
+                db=db,
+            )
+        self.assertEqual(response.kpis.unpriced_models, ["m3", "m9"])
+        self.assertFalse(response.by_model[-1].is_priced)
+        self.assertTrue(response.by_model[-1].is_other)
 
 
 class OutputSpeedTests(unittest.TestCase):
