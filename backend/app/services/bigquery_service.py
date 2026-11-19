@@ -11,6 +11,9 @@ from app.services.encryption import encrypt_config
 _TOKEN_URL = "https://oauth2.googleapis.com/token"
 _BQ_BASE = "https://bigquery.googleapis.com/bigquery/v2"
 _QUERY_TIMEOUT_MS = 10000
+# BigQuery holds jobs.query and jobs.getQueryResults open for up to _QUERY_TIMEOUT_MS before it
+# answers; httpx's 5 s default would give up first. Allow that wait plus time for the answer.
+_QUERY_HTTP_TIMEOUT = httpx.Timeout(_QUERY_TIMEOUT_MS / 1000 + 20, connect=10.0)
 # jobs.getQueryResults waits up to _QUERY_TIMEOUT_MS per call; this bounds the whole wait.
 _MAX_RESULT_POLLS = 60
 
@@ -102,7 +105,9 @@ class BigQueryService:
         if page_token:
             params["pageToken"] = page_token
         url = f"{_BQ_BASE}/projects/{project_id}/queries/{quote(job_id, safe='')}"
-        return self._checked(httpx.get(url, headers=self._auth_headers(), params=params))
+        return self._checked(
+            httpx.get(url, headers=self._auth_headers(), params=params, timeout=_QUERY_HTTP_TIMEOUT)
+        )
 
     def run_query(self, project_id: str, query: str, max_results: int = 1000) -> dict:
         """Run a synchronous BigQuery SQL query and return rows.
@@ -118,7 +123,9 @@ class BigQueryService:
         }
         if max_results > 0:
             body["maxResults"] = max_results
-        data = self._checked(httpx.post(url, headers=self._auth_headers(), json=body))
+        data = self._checked(
+            httpx.post(url, headers=self._auth_headers(), json=body, timeout=_QUERY_HTTP_TIMEOUT)
+        )
 
         # A query still running after timeoutMs answers jobComplete: false with no rows;
         # its rows come from jobs.getQueryResults, page by page.

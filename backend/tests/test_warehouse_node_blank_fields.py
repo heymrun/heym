@@ -122,7 +122,12 @@ class BigQueryBlankFieldTests(unittest.TestCase):
     def setUp(self) -> None:
         self.sent: list[dict] = []
 
-        def post(url: str, headers: dict, json: dict) -> httpx.Response:  # noqa: A002
+        def post(
+            url: str,
+            headers: dict,
+            json: dict,  # noqa: A002
+            timeout: httpx.Timeout | None = None,
+        ) -> httpx.Response:
             self.sent.append({"url": url, "json": json})
             request = httpx.Request("POST", url)
             return httpx.Response(200, json={"schema": {"fields": []}, "rows": []}, request=request)
