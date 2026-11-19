@@ -781,6 +781,7 @@ class RunHistoryLastWriterWinsTests(unittest.IsolatedAsyncioTestCase):
                 "app.services.cluster.run_history.upsert_workflow_analytics_snapshot",
                 new=mock_upsert,
             ),
+            patch("app.services.cluster.run_history.seal_insert_values", _unsealed()),
         ):
             await persist_run_history(
                 execution_id=uuid.uuid4(),
