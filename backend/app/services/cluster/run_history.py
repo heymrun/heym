@@ -195,47 +195,27 @@ async def persist_run_history(
             execution_time_ms=result.execution_time_ms,
         )
         for sub_exec in result.sub_workflow_executions:
-            if isinstance(sub_exec, dict):
-                raw_id = sub_exec.get("workflow_id")
-                sub_id = raw_id if isinstance(raw_id, uuid.UUID) else uuid.UUID(str(raw_id))
-                sub_inputs = sub_exec.get("inputs")
-                sub_outputs = sub_exec.get("outputs")
-                sub_node_results = sub_exec.get("node_results")
-                sub_status = sub_exec.get("status")
-                sub_execution_time_ms = sub_exec.get("execution_time_ms", 0.0)
-                sub_trigger_source = sub_exec.get("trigger_source", "SUB_WORKFLOW")
-                sub_workflow_name = sub_exec.get("workflow_name") or "Sub-workflow"
-            else:
-                raw_id = sub_exec.workflow_id
-                sub_id = raw_id if isinstance(raw_id, uuid.UUID) else uuid.UUID(str(raw_id))
-                sub_inputs = sub_exec.inputs
-                sub_outputs = sub_exec.outputs
-                sub_node_results = sub_exec.node_results
-                sub_status = sub_exec.status
-                sub_execution_time_ms = sub_exec.execution_time_ms
-                sub_trigger_source = sub_exec.trigger_source
-                sub_workflow_name = getattr(sub_exec, "workflow_name", None) or "Sub-workflow"
-                sub_exec.history_written = True
-
+            sub_id = uuid.UUID(sub_exec.workflow_id)
             db.add(
                 ExecutionHistory(
                     workflow_id=sub_id,
-                    inputs=clean(sub_inputs),
-                    outputs=clean(sub_outputs),
-                    node_results=clean(sub_node_results),
-                    status=sub_status,
-                    execution_time_ms=sub_execution_time_ms,
-                    trigger_source=sub_trigger_source,
+                    inputs=clean(sub_exec.inputs),
+                    outputs=clean(sub_exec.outputs),
+                    node_results=clean(sub_exec.node_results),
+                    status=sub_exec.status,
+                    execution_time_ms=sub_exec.execution_time_ms,
+                    trigger_source=sub_exec.trigger_source,
                     **attribution_fields(),
                 )
             )
+            sub_exec.history_written = True
             await upsert_workflow_analytics_snapshot(
                 db,
                 workflow_id=sub_id,
                 owner_id=None,
-                workflow_name_snapshot=sub_workflow_name,
-                status=sub_status,
-                execution_time_ms=sub_execution_time_ms,
+                workflow_name_snapshot=sub_exec.workflow_name or "Sub-workflow",
+                status=sub_exec.status,
+                execution_time_ms=sub_exec.execution_time_ms,
             )
         await db.commit()
 

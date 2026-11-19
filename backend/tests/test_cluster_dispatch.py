@@ -838,68 +838,6 @@ class RunHistoryLastWriterWinsTests(unittest.IsolatedAsyncioTestCase):
         # All written in one transaction
         db.commit.assert_awaited_once()
 
-    async def test_sub_workflow_dict_executions_record_analytics_snapshots(self) -> None:
-        from app.services.cluster.run_history import persist_run_history
-
-        db = MagicMock()
-        db.execute = AsyncMock()
-        db.commit = AsyncMock()
-        added_entries: list = []
-        db.add = MagicMock(side_effect=added_entries.append)
-
-        factory = MagicMock()
-        factory.return_value.__aenter__ = AsyncMock(return_value=db)
-        factory.return_value.__aexit__ = AsyncMock(return_value=False)
-
-        sub_id = uuid.uuid4()
-        sub_dict = {
-            "workflow_id": str(sub_id),
-            "inputs": {"x": 1},
-            "outputs": {"y": 2},
-            "node_results": [],
-            "status": "success",
-            "execution_time_ms": 12.3,
-            "workflow_name": "Dict Child",
-            "trigger_source": "SUB_WORKFLOW",
-        }
-        parent_wf_id = uuid.uuid4()
-        parent_owner_id = uuid.uuid4()
-        result = SimpleNamespace(
-            status="success",
-            outputs={},
-            node_results=[],
-            execution_time_ms=50.0,
-            sub_workflow_executions=[sub_dict],
-        )
-
-        mock_upsert = AsyncMock()
-        with (
-            patch("app.services.cluster.run_history.async_session_maker", factory),
-            patch(
-                "app.services.cluster.run_history.upsert_workflow_analytics_snapshot",
-                new=mock_upsert,
-            ),
-        ):
-            await persist_run_history(
-                execution_id=uuid.uuid4(),
-                workflow_id=parent_wf_id,
-                owner_id=parent_owner_id,
-                workflow_name="Parent",
-                inputs={},
-                trigger_source="cron",
-                result=result,
-            )
-
-        self.assertEqual(len(added_entries), 1)
-        self.assertEqual(added_entries[0].workflow_id, sub_id)
-        self.assertEqual(mock_upsert.await_count, 2)
-        child_call = mock_upsert.await_args_list[1]
-        self.assertEqual(child_call.kwargs["workflow_id"], sub_id)
-        self.assertIsNone(child_call.kwargs["owner_id"])
-        self.assertEqual(child_call.kwargs["workflow_name_snapshot"], "Dict Child")
-        self.assertEqual(child_call.kwargs["status"], "success")
-        self.assertEqual(child_call.kwargs["execution_time_ms"], 12.3)
-
 
 class DispatchHandoffLifecycleTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
