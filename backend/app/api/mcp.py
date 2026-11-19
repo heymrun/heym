@@ -1715,11 +1715,11 @@ async def _dispatch_mcp_jsonrpc(
                 error=str(e),
             )
             await db.flush()
-            return {
-                "jsonrpc": "2.0",
-                "id": msg.id,
-                "error": {"code": -32603, "message": f"Execution error: {str(e)}"},
-            }
+            # A tool that fails while running is a tool result with isError (MCP spec), as on
+            # named servers; JSON-RPC errors are for protocol problems such as an unknown tool.
+            return _mcp_tool_result_jsonrpc_response(
+                msg.id, f"Execution error: {str(e)}", is_error=True
+            )
         finally:
             clear_active_execution(
                 execution_id, handle=getattr(cancel_event, "_execution_handle", None)
