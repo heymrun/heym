@@ -424,6 +424,62 @@ class WorkflowExecutorBranchingTests(unittest.TestCase):
         self.assertEqual(results["searchResult"]["status"], "success")
         self.assertEqual(result.outputs, {"searchResult": {"result": "hello"}})
 
+    def _condition_beside_a_parallel_branch(self, x: int) -> tuple[str, dict, dict]:
+        nodes = [
+            {"id": "in", "type": "textInput", "data": {"label": "userInput"}},
+            {
+                "id": "p",
+                "type": "set",
+                "data": {"label": "p", "mappings": [{"key": "v", "value": "parallel"}]},
+            },
+            {
+                "id": "c",
+                "type": "condition",
+                "data": {"label": "cond", "condition": "$userInput.body.x > 1"},
+            },
+            {
+                "id": "a",
+                "type": "set",
+                "data": {"label": "a", "mappings": [{"key": "v", "value": "branch"}]},
+            },
+            {"id": "only", "type": "set", "data": {"label": "onlyTrue", "mappings": []}},
+            {"id": "m", "type": "merge", "data": {"label": "merged", "inputCount": 2}},
+            {"id": "o", "type": "output", "data": {"label": "result", "message": "done"}},
+        ]
+        edges = [
+            {"id": "e1", "source": "in", "target": "p"},
+            {"id": "e2", "source": "in", "target": "c"},
+            {"id": "e3", "source": "c", "target": "a", "sourceHandle": "true"},
+            {"id": "e4", "source": "a", "target": "only"},
+            {"id": "e5", "source": "p", "target": "m", "targetHandle": "input-0"},
+            {"id": "e6", "source": "a", "target": "m", "targetHandle": "input-1"},
+            {"id": "e7", "source": "m", "target": "o"},
+        ]
+        result = WorkflowExecutor(nodes=nodes, edges=edges).execute(
+            workflow_id=uuid.uuid4(), initial_inputs={"body": {"x": x}}
+        )
+        status = {row["node_id"]: row["status"] for row in result.node_results}
+        return result.status, status, result.outputs
+
+    def test_condition_keeps_a_merge_that_a_parallel_branch_also_feeds(self) -> None:
+        run_status, status, outputs = self._condition_beside_a_parallel_branch(0)
+
+        self.assertEqual(run_status, "success")
+        # Only the false-skipped branch is skipped; the Merge and the Output run.
+        self.assertEqual(status["a"], "skipped")
+        self.assertEqual(status["only"], "skipped")
+        self.assertEqual((status["m"], status["o"]), ("success", "success"))
+        self.assertEqual(outputs, {"result": {"result": "done"}})
+
+    def test_condition_on_the_feeding_branch_runs_everything(self) -> None:
+        run_status, status, _outputs = self._condition_beside_a_parallel_branch(5)
+
+        self.assertEqual(run_status, "success")
+        self.assertEqual(
+            {node: status[node] for node in ("a", "only", "m", "o")},
+            {"a": "success", "only": "success", "m": "success", "o": "success"},
+        )
+
     def test_http_success_skips_error_handle_branch(self) -> None:
         nodes = [
             {

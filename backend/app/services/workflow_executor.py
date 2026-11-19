@@ -2810,17 +2810,23 @@ class WorkflowExecutor(WorkflowBranchRoutingMixin):
         active_exclude_node_ids: set[str] | None = None,
         inactive_stop_node_ids: set[str] | None = None,
     ) -> None:
-        """Skip only nodes exclusive to inactive targets; keep shared downstream merge nodes active."""
+        """Skip only nodes exclusive to inactive targets; keep shared downstream merge nodes active.
+
+        A node that another, parallel branch also feeds (a Merge or an Output) stays active,
+        as error-branch routing keeps it (``get_exclusive_branch_node_ids``).
+        """
         preserved_node_ids = self.get_reachable_node_ids(
             active_targets,
             exclude_node_ids=active_exclude_node_ids,
         )
-        for target in inactive_targets:
-            self.mark_branch_as_skipped(
-                target,
-                preserve_node_ids=preserved_node_ids,
-                stop_node_ids=inactive_stop_node_ids,
+        self.skipped_nodes.update(
+            self.get_exclusive_branch_node_ids(
+                root_node_id=node_id,
+                start_node_ids=inactive_targets,
+                edges=self.edges,
+                preserve_node_ids=preserved_node_ids | (inactive_stop_node_ids or set()),
             )
+        )
 
     def get_loop_body_node_ids(self, loop_node_id: str, edges: list[dict]) -> set[str]:
         """Return nodes in a loop body, stopping before the loop-back edge reaches the loop node."""
