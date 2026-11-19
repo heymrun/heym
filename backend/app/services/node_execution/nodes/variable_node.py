@@ -84,7 +84,9 @@ def execute(ctx: NodeExecutionContext) -> object:
             else:
                 resolved_value = bool(resolved_value)
         elif var_type == "array":
-            if not isinstance(resolved_value, list):
+            if resolved_value is None:
+                resolved_value = []
+            elif not isinstance(resolved_value, list):
                 resolved_value = [resolved_value]
         elif var_type == "object":
             if not isinstance(resolved_value, dict):

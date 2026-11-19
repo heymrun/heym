@@ -56,6 +56,14 @@ class VariableArrayTypeTests(unittest.TestCase):
 
         self.assertEqual(value, ["hello"])
 
+    def test_a_null_or_missing_value_is_an_empty_list(self) -> None:
+        values = _run(
+            [("tags", "$userInput.body.tag", "array"), ("more", "$userInput.body.none", "array")],
+            {"tag": None},
+        )
+
+        self.assertEqual(values, [[], []])
+
 
 class VariableStringTypeTests(unittest.TestCase):
     def test_booleans_null_objects_and_lists_become_json_text(self) -> None:
