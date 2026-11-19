@@ -89,6 +89,8 @@ OPERATOR_CASES: list[tuple[str, str, Expected]] = [
     ("strSubstr", "$sample.text.trim().substr(5, 8)", "Workflow"),
     ("strReplace", "$sample.text.trim().replace('Heym', 'Flow')", "Flow Workflow"),
     ("strReplaceAll", "$sample.text.trim().replaceAll(' ', '-')", "Heym-Workflow"),
+    # .replace changes every occurrence, like .replaceAll (docs and DSL prompt say so).
+    ("strReplaceEvery", "$sample.text.trim().replace('o', '0')", "Heym W0rkfl0w"),
     ("strStartswith", "$sample.text.trim().startswith('Heym')", True),
     ("strEndswith", "$sample.text.trim().endswith('Workflow')", True),
     ("strContains", "$sample.text.contains('Work')", True),

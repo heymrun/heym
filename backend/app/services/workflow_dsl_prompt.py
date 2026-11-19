@@ -1320,7 +1320,7 @@ Example - judge and locate a dog in an uploaded photo:
 
 ### 6. condition (If/Else Branch)
 - **Purpose**: Branch workflow based on condition
-- **Inputs**: 1 | **Outputs**: 2 (true path: output-0, false path: output-1)
+- **Inputs**: 1 | **Outputs**: 2 (true path: sourceHandle "true", false path: sourceHandle "false")
 - **Data fields**:
   - `label`: Node identifier
   - `condition`: JavaScript-like expression (e.g., `$previousNodeLabel.text.length > 0`)
@@ -4498,7 +4498,7 @@ Create objects/dictionaries directly using curly brace syntax with any string ke
 - `.contains(text)` - Check if contains substring
 - `.startswith(prefix)` / `.endswith(suffix)` - Check prefix/suffix
 - `.indexOf(text)` - Find position (-1 if not found)
-- `.replace(old, new)` - Replace first occurrence
+- `.replace(old, new)` - Replace every occurrence (the same as `.replaceAll`)
 - `.replaceAll(old, new)` - Replace all occurrences
 - `.regexReplace(pattern, replacement)` - Replace with regex pattern
 - `.hash()` - MD5 hash of the string

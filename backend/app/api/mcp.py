@@ -1482,6 +1482,10 @@ async def _dispatch_mcp_jsonrpc(
     if msg.method == "initialize":
         return _initialize_response(request, msg)
 
+    if msg.method == "ping":
+        # MCP base protocol: the receiver answers a ping with an empty result.
+        return {"jsonrpc": "2.0", "id": msg.id, "result": {}}
+
     if msg.method == "tools/list":
         workflows = await get_user_mcp_workflows(db, mcp_user.id)
         chat_settings = await agent_settings.get_global_agent_settings(db, mcp_user.id)

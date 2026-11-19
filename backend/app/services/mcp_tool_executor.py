@@ -569,6 +569,25 @@ async def _open_transport(
         raise ValueError(f"Unknown MCP transport: {transport}")
 
 
+# A server could hand back a cursor forever; this bounds how many tools/list pages are read.
+MAX_TOOL_LIST_PAGES = 100
+
+
+async def _list_all_tools(session: ClientSession) -> list[Any]:
+    """Every tool the server lists, following ``nextCursor`` page by page (MCP pagination)."""
+    tools: list[Any] = []
+    cursor: str | None = None
+    seen_cursors: set[str] = set()
+    for _page in range(MAX_TOOL_LIST_PAGES):
+        result = await session.list_tools(cursor=cursor)
+        tools.extend(result.tools)
+        cursor = getattr(result, "nextCursor", None)
+        if not cursor or cursor in seen_cursors:
+            break
+        seen_cursors.add(cursor)
+    return tools
+
+
 async def _list_mcp_tools_async(connection: dict[str, Any], timeout: float) -> list[dict[str, Any]]:
     """List tools from MCP server (async)."""
     conn = _normalize_connection(connection)
@@ -584,8 +603,7 @@ async def _list_mcp_tools_async(connection: dict[str, Any], timeout: float) -> l
             read_timeout_seconds=read_timeout,
         ) as session:
             await session.initialize()
-            result = await session.list_tools()
-            for tool in result.tools:
+            for tool in await _list_all_tools(session):
                 tools_out.append(_mcp_tool_to_openai_format(tool, conn, connection_id, label))
     return tools_out
 
@@ -606,12 +624,12 @@ async def _execute_mcp_tool_async(
             read_timeout_seconds=read_timeout,
         ) as session:
             await session.initialize()
-            tools_result = await session.list_tools()
+            all_tools = await _list_all_tools(session)
             selected_tool = next(
-                (tool for tool in tools_result.tools if getattr(tool, "name", None) == tool_name),
+                (tool for tool in all_tools if getattr(tool, "name", None) == tool_name),
                 None,
             )
-            available_tool_names = [tool.name for tool in tools_result.tools]
+            available_tool_names = [tool.name for tool in all_tools]
             if selected_tool is None:
                 available_preview = ", ".join(available_tool_names[:20])
                 if len(available_tool_names) > 20:
