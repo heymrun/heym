@@ -103,7 +103,8 @@ def execute(ctx: NodeExecutionContext) -> object:
     # _build_context and store_node_output cache can skip O(N) re-wrapping.
     # DotList/DotStr are list/str subclasses — JSON-serializable as their base types.
     # For other types the coercion above changed resolved_value, so sync vars_value.
-    if var_type not in ("array", "auto"):
+    # An "array" value that was not a list was wrapped above; that wrapped list is the value.
+    if var_type != "auto" and not (var_type == "array" and isinstance(vars_value, list)):
         vars_value = resolved_value
 
     output = {
