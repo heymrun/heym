@@ -57,5 +57,28 @@ class VariableArrayTypeTests(unittest.TestCase):
         self.assertEqual(value, ["hello"])
 
 
+class VariableStringTypeTests(unittest.TestCase):
+    def test_booleans_null_objects_and_lists_become_json_text(self) -> None:
+        cases = [
+            (True, "true"),
+            (False, "false"),
+            (None, "null"),
+            ({"a": 1, "city": "Zürich"}, '{"a": 1, "city": "Zürich"}'),
+            ([1, "b"], '[1, "b"]'),
+        ]
+        for value, expected in cases:
+            with self.subTest(value=value):
+                (text,) = _run([("x", "$userInput.body.v", "string")], {"v": value})
+
+                self.assertEqual(text, expected)
+
+    def test_numbers_and_text_are_unchanged(self) -> None:
+        for value, expected in ((5, "5"), (2.5, "2.5"), ("vip", "vip")):
+            with self.subTest(value=value):
+                (text,) = _run([("x", "$userInput.body.v", "string")], {"v": value})
+
+                self.assertEqual(text, expected)
+
+
 if __name__ == "__main__":
     unittest.main()

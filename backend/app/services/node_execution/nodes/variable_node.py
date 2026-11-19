@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 
 from app.services.node_execution.base import NodeExecutionContext
@@ -53,7 +54,12 @@ def execute(ctx: NodeExecutionContext) -> object:
 
     if var_type != "auto":
         if var_type == "string":
-            resolved_value = str(resolved_value)
+            if isinstance(resolved_value, (bool, dict, list)) or resolved_value is None:
+                # As the input JSON and the expression dialog show it: true, null, {"a": 1},
+                # not Python's True, None, {'a': 1}.
+                resolved_value = json.dumps(resolved_value, ensure_ascii=False, default=str)
+            else:
+                resolved_value = str(resolved_value)
         elif var_type == "number":
             try:
                 if isinstance(resolved_value, str):
