@@ -596,6 +596,51 @@ class WorkflowExecutorBranchingTests(unittest.TestCase):
         # and Switch only, so this graph behaves as it did before.
         self.assertEqual(self._statuses(nodes, edges)["d"], ["skipped"])
 
+    def _skipped_after_condition_and_error_branch(self, order: list[str]) -> set[str]:
+        """A Condition skips one Merge input, a failed HTTP node's error routing the other."""
+        nodes = [
+            {"id": "in", "type": "textInput", "data": {"label": "userInput"}},
+            self._condition_node("c"),
+            self._set_node("a"),
+            {"id": "h", "type": "http", "data": {"label": "h", "curl": "curl https://x.test"}},
+            self._set_node("b"),
+            self._set_node("e"),
+            {"id": "m", "type": "merge", "data": {"label": "m", "inputCount": 2}},
+            {"id": "o", "type": "output", "data": {"label": "o", "message": "done"}},
+        ]
+        edges = [
+            {"id": "1", "source": "in", "target": "c"},
+            {"id": "2", "source": "c", "target": "a", "sourceHandle": "true"},
+            {"id": "3", "source": "a", "target": "m", "targetHandle": "input-0"},
+            {"id": "4", "source": "in", "target": "h"},
+            {"id": "5", "source": "h", "target": "b", "sourceHandle": "output"},
+            {"id": "6", "source": "h", "target": "e", "sourceHandle": "error"},
+            {"id": "7", "source": "b", "target": "m", "targetHandle": "input-1"},
+            {"id": "8", "source": "m", "target": "o"},
+        ]
+        executor = WorkflowExecutor(nodes=nodes, edges=edges)
+        # The two routing calls the executor makes, in a fixed order instead of thread order.
+        for step in order:
+            if step == "condition":
+                executor.skip_branch_targets_preserving_shared_downstream(
+                    "c",
+                    active_targets=executor.get_downstream_nodes("c", "false"),
+                    inactive_targets=executor.get_downstream_nodes("c", "true"),
+                )
+            else:
+                executor._handle_error_branch_routing("h")
+        return set(executor.skipped_nodes)
+
+    def test_merge_skipped_when_the_condition_decides_before_the_error_branch(self) -> None:
+        skipped = self._skipped_after_condition_and_error_branch(["condition", "error"])
+
+        self.assertEqual(skipped, {"a", "b", "m", "o"})
+
+    def test_merge_skipped_when_the_error_branch_decides_before_the_condition(self) -> None:
+        skipped = self._skipped_after_condition_and_error_branch(["error", "condition"])
+
+        self.assertEqual(skipped, {"a", "b", "m", "o"})
+
     def test_http_success_skips_error_handle_branch(self) -> None:
         nodes = [
             {
