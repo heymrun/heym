@@ -243,20 +243,35 @@ def supports_generate_content(model: dict) -> bool:
     return methods is None or "generateContent" in methods
 
 
+GOOGLE_MODEL_LIST_PAGE_SIZE = 1000
+GOOGLE_MODEL_LIST_MAX_PAGES = 10
+
+
 async def fetch_google_models(api_key: str) -> list[LLMModel]:
     try:
         async with httpx.AsyncClient(
             timeout=10.0,
             headers={"User-Agent": HEYM_USER_AGENT},
         ) as client:
-            response = await client.get(
-                f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
-            )
-            response.raise_for_status()
-            data = response.json()
+            raw_models: list[dict] = []
+            page_token: str | None = None
+            for _ in range(GOOGLE_MODEL_LIST_MAX_PAGES):
+                params = {"key": api_key, "pageSize": GOOGLE_MODEL_LIST_PAGE_SIZE}
+                if page_token:
+                    params["pageToken"] = page_token
+                response = await client.get(
+                    "https://generativelanguage.googleapis.com/v1beta/models",
+                    params=params,
+                )
+                response.raise_for_status()
+                data = response.json()
+                raw_models.extend(data.get("models", []))
+                page_token = data.get("nextPageToken")
+                if not page_token:
+                    break
 
             models = []
-            for model in data.get("models", []):
+            for model in raw_models:
                 model_name = model.get("name", "").replace("models/", "")
                 display_name = model.get("displayName", model_name)
                 if "gemini" in model_name.lower() and supports_generate_content(model):

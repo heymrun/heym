@@ -169,3 +169,40 @@ class TestGoogleModelDiscovery(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             sorted(m.id for m in models), ["gemini-2.5-flash", "gemini-legacy-without-field"]
         )
+
+    async def test_follows_next_page_token_to_list_every_model(self) -> None:
+        pages = [
+            {
+                "models": [
+                    {
+                        "name": "models/gemini-2.5-flash",
+                        "supportedGenerationMethods": ["generateContent"],
+                    }
+                ],
+                "nextPageToken": "page-2",
+            },
+            {
+                "models": [
+                    {
+                        "name": "models/gemini-3-pro",
+                        "supportedGenerationMethods": ["generateContent"],
+                    }
+                ]
+            },
+        ]
+        responses = []
+        for page in pages:
+            response = MagicMock()
+            response.raise_for_status = MagicMock()
+            response.json.return_value = page
+            responses.append(response)
+        client = MagicMock()
+        client.get = AsyncMock(side_effect=responses)
+        client.__aenter__ = AsyncMock(return_value=client)
+        client.__aexit__ = AsyncMock(return_value=None)
+        with patch("app.services.llm_provider.httpx.AsyncClient", return_value=client):
+            models = await fetch_google_models("key")
+        self.assertEqual(sorted(m.id for m in models), ["gemini-2.5-flash", "gemini-3-pro"])
+        self.assertEqual(client.get.await_count, 2)
+        second_params = client.get.await_args_list[1].kwargs["params"]
+        self.assertEqual(second_params["pageToken"], "page-2")
