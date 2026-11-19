@@ -144,6 +144,7 @@ async def persist_run_history(
     trigger_source: str | None,
     result: Any,
     redact: Callable[[Any], Any] | None = None,
+    started_by_user_id: uuid.UUID | None = None,
 ) -> None:
     """Write the run, its analytics bucket, and any sub-workflow runs.
 
@@ -173,6 +174,7 @@ async def persist_run_history(
             ),
             # A late real result replaces the queue's empty failure row: count its nodes.
             "node_analytics_pending": True,
+            "executed_by_user_id": started_by_user_id,
             **attribution_fields(),
         }
         values = await seal_insert_values(db, values)
@@ -193,9 +195,10 @@ async def persist_run_history(
             execution_time_ms=result.execution_time_ms,
         )
         for sub_exec in result.sub_workflow_executions:
+            sub_id = uuid.UUID(sub_exec.workflow_id)
             db.add(
                 ExecutionHistory(
-                    workflow_id=uuid.UUID(sub_exec.workflow_id),
+                    workflow_id=sub_id,
                     inputs=clean(sub_exec.inputs),
                     outputs=clean(sub_exec.outputs),
                     node_results=clean(sub_exec.node_results),
@@ -204,6 +207,15 @@ async def persist_run_history(
                     trigger_source=sub_exec.trigger_source,
                     **attribution_fields(),
                 )
+            )
+            sub_exec.history_written = True
+            await upsert_workflow_analytics_snapshot(
+                db,
+                workflow_id=sub_id,
+                owner_id=None,
+                workflow_name_snapshot=sub_exec.workflow_name or "Sub-workflow",
+                status=sub_exec.status,
+                execution_time_ms=sub_exec.execution_time_ms,
             )
         await db.commit()
 
@@ -219,6 +231,7 @@ async def persist_pending_run_history(
     credentials_owner_id: uuid.UUID | None,
     result: Any,
     redact: Callable[[Any], Any] | None = None,
+    started_by_user_id: uuid.UUID | None = None,
 ) -> None:
     """Mint a paused run's review request where the run actually paused.
 
@@ -248,6 +261,7 @@ async def persist_pending_run_history(
         )
         for name, value in attribution_fields().items():
             setattr(history_entry, name, value)
+        history_entry.executed_by_user_id = started_by_user_id
         await upsert_workflow_analytics_snapshot(
             db,
             workflow_id=workflow_id,

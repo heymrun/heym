@@ -36,6 +36,7 @@ import type {
 import ActiveExecutionStatusLabel from "@/components/Panels/ActiveExecutionStatusLabel.vue";
 import { activeExecutionStatus } from "@/components/Panels/activeExecutionStatus";
 import ExecutionHistoryAskAiButton from "@/components/Panels/ExecutionHistoryAskAiButton.vue";
+import ExecutionHistoryStarterBadge from "@/components/Panels/ExecutionHistoryStarterBadge.vue";
 import ExecutionHistoryTimeline from "@/components/Panels/ExecutionHistoryTimeline.vue";
 import ExecutionHistoryViewToggle from "@/components/Panels/ExecutionHistoryViewToggle.vue";
 import RunHistoryUnlockNotice from "@/components/Panels/RunHistoryUnlockNotice.vue";
@@ -685,6 +686,31 @@ async function clearAllHistory(): Promise<void> {
   }
 }
 
+async function deleteEntry(entryId: string): Promise<void> {
+  if (!confirm("Delete this run? This cannot be undone.")) return;
+  const visibleIds = filteredExecutionHistory.value.map((item) => item.id);
+  const index = visibleIds.indexOf(entryId);
+  const neighborId = visibleIds[index + 1] ?? visibleIds[index - 1] ?? null;
+  try {
+    await workflowApi.deleteHistoryEntry(entryId);
+  } catch {
+    error.value = "Failed to delete the run";
+    return;
+  }
+  error.value = "";
+  executionHistory.value = executionHistory.value.filter((item) => item.id !== entryId);
+  totalCount.value = Math.max(0, totalCount.value - 1);
+  const cache = new Map(entryDetailsCache.value);
+  cache.delete(entryId);
+  entryDetailsCache.value = cache;
+  if (selectedId.value !== entryId) return;
+  selectedId.value = neighborId;
+  expandedNodes.value = new Set();
+  if (neighborId) {
+    await ensureEntryLoaded(neighborId);
+  }
+}
+
 async function cancelActiveExecution(item: ActiveExecutionItem): Promise<void> {
   isCancellingId.value = item.execution_id;
   try {
@@ -1279,72 +1305,96 @@ function bringToCanvas(): void {
           class="space-y-2 max-h-48 overflow-auto pr-2"
           @scroll.passive="onListScroll"
         >
-          <button
+          <div
             v-for="entry in filteredExecutionHistory"
             :key="entry.id"
-            class="w-full text-left p-3 rounded-md border bg-muted/20 hover:bg-muted/40 transition-colors"
-            :class="cn(selectedEntry?.id === entry.id && 'border-primary/60 bg-primary/10')"
-            :title="entryTitle(entry)"
-            :data-execution-id="entry.id"
-            :data-testid="`all-execution-history-entry-${entry.id}`"
-            @click="handleEntryClick($event, entry)"
-            @dblclick="handleEntryDoubleClick($event, entry)"
+            class="group relative"
           >
-            <div class="flex items-center justify-between gap-2">
-              <div class="flex items-center gap-2 min-w-0 flex-1">
-                <Clock class="w-4 h-4 text-muted-foreground shrink-0" />
-                <span class="text-sm font-medium truncate">{{ formatTime(entry.started_at) }}</span>
-                <span
-                  v-if="getHistoryStatusBadgeClass(entry.status)"
-                  class="px-1.5 py-0.5 text-[10px] font-semibold rounded uppercase shrink-0 hidden sm:inline"
-                  :class="getHistoryStatusBadgeClass(entry.status)"
-                >
-                  {{ entry.status }}
-                </span>
-                <span
-                  v-if="entry.trigger_source"
-                  class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-violet-500/20 text-violet-400 uppercase shrink-0 hidden sm:inline"
-                >
-                  {{ entry.trigger_source }}
-                </span>
-                <span
-                  v-if="entry.executed_by_instance_name"
-                  :title="entry.executed_by_instance_id ?? ''"
-                  class="max-w-[45%] truncate px-1.5 py-0.5 text-[10px] font-semibold rounded bg-sky-500/20 text-sky-400 shrink-0"
-                >
-                  {{ entry.executed_by_instance_name }}
-                </span>
-                <span
-                  v-if="entry.recovered"
-                  class="px-1 py-0.5 rounded bg-amber-500/20 text-amber-400 shrink-0 hidden sm:inline-flex items-center"
-                  title="This run was automatically re-run after a server restart"
-                >
-                  <RotateCcw class="w-3 h-3" />
-                </span>
-                <span
-                  v-if="entry.encrypted"
-                  class="px-1 py-0.5 rounded bg-primary/15 text-primary dark:text-violet-300 shrink-0 inline-flex items-center"
-                  title="Encrypted run"
-                  data-testid="run-history-encrypted-badge"
-                >
-                  <Lock class="w-3 h-3" />
-                </span>
+            <button
+              class="w-full text-left p-3 rounded-md border bg-muted/20 hover:bg-muted/40 transition-colors"
+              :class="cn(selectedEntry?.id === entry.id && 'border-primary/60 bg-primary/10')"
+              :title="entryTitle(entry)"
+              :data-execution-id="entry.id"
+              :data-testid="`all-execution-history-entry-${entry.id}`"
+              @click="handleEntryClick($event, entry)"
+              @dblclick="handleEntryDoubleClick($event, entry)"
+            >
+              <div class="flex items-center justify-between gap-2">
+                <div class="flex items-center gap-2 min-w-0 flex-1">
+                  <Clock class="w-4 h-4 text-muted-foreground shrink-0" />
+                  <span class="text-sm font-medium truncate">{{ formatTime(entry.started_at) }}</span>
+                  <span
+                    v-if="getHistoryStatusBadgeClass(entry.status)"
+                    class="px-1.5 py-0.5 text-[10px] font-semibold rounded uppercase shrink-0 hidden sm:inline"
+                    :class="getHistoryStatusBadgeClass(entry.status)"
+                  >
+                    {{ entry.status }}
+                  </span>
+                  <span
+                    v-if="entry.trigger_source"
+                    class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-violet-500/20 text-violet-400 uppercase shrink-0 hidden sm:inline"
+                  >
+                    {{ entry.trigger_source }}
+                  </span>
+                  <ExecutionHistoryStarterBadge
+                    :user-id="entry.executed_by_user_id"
+                    :name="entry.executed_by_user_name"
+                    size="md"
+                    class="max-w-[45%] shrink-0"
+                  />
+                  <span
+                    v-if="entry.executed_by_instance_name"
+                    :title="entry.executed_by_instance_id ?? ''"
+                    class="max-w-[45%] truncate px-1.5 py-0.5 text-[10px] font-semibold rounded bg-sky-500/20 text-sky-400 shrink-0"
+                  >
+                    {{ entry.executed_by_instance_name }}
+                  </span>
+                  <span
+                    v-if="entry.recovered"
+                    class="px-1 py-0.5 rounded bg-amber-500/20 text-amber-400 shrink-0 hidden sm:inline-flex items-center"
+                    title="This run was automatically re-run after a server restart"
+                  >
+                    <RotateCcw class="w-3 h-3" />
+                  </span>
+                  <span
+                    v-if="entry.encrypted"
+                    class="px-1 py-0.5 rounded bg-primary/15 text-primary dark:text-violet-300 shrink-0 inline-flex items-center"
+                    title="Encrypted run"
+                    data-testid="run-history-encrypted-badge"
+                  >
+                    <Lock class="w-3 h-3" />
+                  </span>
+                </div>
+                <component
+                  :is="getStatusIcon(entry.status)"
+                  class="w-5 h-5 shrink-0"
+                  :class="getStatusColor(entry.status)"
+                />
               </div>
-              <component
-                :is="getStatusIcon(entry.status)"
-                class="w-5 h-5 shrink-0"
-                :class="getStatusColor(entry.status)"
-              />
-            </div>
-            <div class="text-xs text-muted-foreground mt-1">
-              <template v-if="entry.status === 'pending'">
-                {{ entry.workflow_name }} · Pending human review
-              </template>
-              <template v-else>
-                {{ entry.workflow_name }} · {{ entry.execution_time_ms.toFixed(2) }}ms
-              </template>
-            </div>
-          </button>
+              <div
+                class="text-xs text-muted-foreground mt-1"
+                :class="entry.can_delete && 'pr-9'"
+              >
+                <template v-if="entry.status === 'pending'">
+                  {{ entry.workflow_name }} · Pending human review
+                </template>
+                <template v-else>
+                  {{ entry.workflow_name }} · {{ entry.execution_time_ms.toFixed(2) }}ms
+                </template>
+              </div>
+            </button>
+            <button
+              v-if="entry.can_delete"
+              type="button"
+              class="absolute bottom-2 right-3 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
+              title="Delete this run"
+              aria-label="Delete this run"
+              :data-testid="`all-execution-history-delete-${entry.id}`"
+              @click.stop="deleteEntry(entry.id)"
+            >
+              <Trash2 class="w-3.5 h-3.5" />
+            </button>
+          </div>
           <div
             v-if="loadingMore"
             class="flex justify-center py-2"

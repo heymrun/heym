@@ -247,11 +247,9 @@ async def fetch_google_models(api_key: str) -> list[LLMModel]:
     try:
         async with httpx.AsyncClient(
             timeout=10.0,
-            headers={"User-Agent": HEYM_USER_AGENT},
+            headers={"User-Agent": HEYM_USER_AGENT, "x-goog-api-key": api_key},
         ) as client:
-            response = await client.get(
-                f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
-            )
+            response = await client.get("https://generativelanguage.googleapis.com/v1beta/models")
             response.raise_for_status()
             data = response.json()
 

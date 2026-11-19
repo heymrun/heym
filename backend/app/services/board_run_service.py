@@ -631,6 +631,7 @@ async def _run_chain(
                         public_base_url=public_base_url,
                         history_entry_id=execution_id,
                     )
+                    history_entry.executed_by_user_id = actor_user_id
                     run.status = "pending"
                     run.active_execution_id = None
                     run.execution_history_id = history_entry.id
@@ -660,6 +661,7 @@ async def _run_chain(
                     status=result.status,
                     execution_time_ms=result.execution_time_ms,
                     trigger_source="board",
+                    executed_by_user_id=actor_user_id,
                 )
                 db.add(history_entry)
                 await db.flush()

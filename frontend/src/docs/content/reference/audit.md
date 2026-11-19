@@ -82,7 +82,7 @@ The browser reports the path, so a `page.view` line shows where a user says they
 
 ### Workflows
 
-`workflow.create` · `workflow.update` · `workflow.delete` · `workflow.version_revert` · `workflow.run` · `workflow.history_view` · `workflow.history_unlock` · `workflow.live_run_unlock` · `workflow.history_clear` · `workflow.run_history_encryption` · `workflow.share_add` · `workflow.share_remove` · `workflow.team_share_add` · `workflow.team_share_remove` · `workflow.execution_token_create` · `workflow.execution_token_revoke`
+`workflow.create` · `workflow.update` · `workflow.delete` · `workflow.version_revert` · `workflow.run` · `workflow.history_view` · `workflow.history_unlock` · `workflow.live_run_unlock` · `workflow.history_clear` · `workflow.history_delete` · `workflow.run_history_encryption` · `workflow.share_add` · `workflow.share_remove` · `workflow.team_share_add` · `workflow.team_share_remove` · `workflow.execution_token_create` · `workflow.execution_token_revoke`
 
 `workflow.run` is written when a run is started through the API: the editor's Run button, the execute endpoint with a session, API key or webhook, the chat portal, and MCP tools. It records who started it, how, and how it ended:
 
@@ -93,6 +93,8 @@ The browser reports the path, so a `page.view` line shows where a user says they
 `execution_id` links the line to the run in Run History. `outcome` is `failure` when the run ended in `error`, `cancelled` or `timeout`. A run parked for human review or held in the concurrency queue is a `success` line with `status=pending` or `status=queued`. A call with no signed-in user, such as an anonymous webhook or a portal visitor, has no `actor_id` or `actor_email`. Inputs and outputs are never written.
 
 Runs started by a schedule, a trigger node, a queue or an event are not audit lines. They execute on whichever instance claimed them and are recorded in Run History with their trigger source and the instance that ran them.
+
+`workflow.history_delete` is written when someone deletes one run from History. It carries `execution_id`, and `encrypted` for a workflow run; a collaborator who tries gets `outcome=denied` with `reason=not_owner`. Deleting your own chat run is written with `run_type=chat`.
 
 `workflow.history_view` is written when someone opens a workflow's run history. The small lookup that shows a workflow's latest run in the dashboard preview is not a history view and is not logged. `workflow.history_view` records `owned=false` when a collaborator reads someone else's run history. `workflow.delete` records `outcome=denied` with `reason=not_owner` when a collaborator tries to delete.
 
