@@ -2799,10 +2799,10 @@ class LLMService:
         _log_request("Google Gemini Image", url, request_body)
 
         start_time = time.time()
-        async with httpx.AsyncClient(headers={"User-Agent": HEYM_USER_AGENT}) as client:
+        headers = {"User-Agent": HEYM_USER_AGENT, "x-goog-api-key": self.api_key}
+        async with httpx.AsyncClient(headers=headers) as client:
             response = await client.post(
                 url,
-                params={"key": self.api_key},
                 json=request_body,
                 timeout=120.0,
             )
@@ -2900,10 +2900,10 @@ class LLMService:
         )
 
         start_time = time.time()
-        async with httpx.AsyncClient(headers={"User-Agent": HEYM_USER_AGENT}) as client:
+        headers = {"User-Agent": HEYM_USER_AGENT, "x-goog-api-key": self.api_key}
+        async with httpx.AsyncClient(headers=headers) as client:
             response = await client.post(
                 url,
-                params={"key": self.api_key},
                 json=request_body,
                 timeout=120.0,
             )
