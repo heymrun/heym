@@ -475,7 +475,10 @@ async def ai_insert_memory(
     extraction = insert_only_extraction(parsed)
 
     def _merge(sync_sess: Session) -> MemoryMergeResult:
-        return apply_parsed_extraction_sync(sync_sess, workflow_id, canvas_key, extraction)
+        # The old employer or location loses its link but stays: an insert never deletes.
+        return apply_parsed_extraction_sync(
+            sync_sess, workflow_id, canvas_key, extraction, prune_replaced=False
+        )
 
     merged = await db.run_sync(_merge)
     await db.flush()
