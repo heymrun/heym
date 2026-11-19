@@ -79,13 +79,37 @@ class RedactUrlTests(unittest.TestCase):
                 "https://example.com/api?password=secret-pass",
                 "https://example.com/api?password=[REDACTED]",
             ),
+            (
+                "https://mcp.example.com/sse?auth=secret-auth-token",
+                "https://mcp.example.com/sse?auth=[REDACTED]",
+            ),
+            (
+                "https://example.com/api?auth=secret",
+                "https://example.com/api?auth=[REDACTED]",
+            ),
+            (
+                "https://mybucket.s3.amazonaws.com/file.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=d41d8cd98f00b204e9800998ecf8427e",
+                "https://mybucket.s3.amazonaws.com/file.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=[REDACTED]",
+            ),
+            (
+                "https://storage.googleapis.com/mybucket/file.png?GoogleAccessId=service@app.com&X-Goog-Signature=abcdef123456",
+                "https://storage.googleapis.com/mybucket/file.png?GoogleAccessId=service@app.com&X-Goog-Signature=[REDACTED]",
+            ),
+            (
+                "https://example.com/webhook?timestamp=123&client_signature=secret_sig_value",
+                "https://example.com/webhook?timestamp=123&client_signature=[REDACTED]",
+            ),
+            (
+                "https://example.com/webhook?req_sig=secret_sig_value",
+                "https://example.com/webhook?req_sig=[REDACTED]",
+            ),
         ]
         for url, expected in cases:
             with self.subTest(url=url):
                 self.assertEqual(redact_url(url), expected)
 
     def test_harmless_query_params_preserved(self) -> None:
-        url = "https://example.com/v1/models?pageSize=20&pageToken=next_page_abc123&limit=50&offset=0&wait=true"
+        url = "https://example.com/v1/models?pageSize=20&pageToken=next_page_abc123&limit=50&offset=0&wait=true&author=john"
         self.assertEqual(redact_url(url), url)
 
     def test_mixed_query_params_redacts_only_sensitive(self) -> None:
@@ -215,6 +239,22 @@ class RedactUrlTests(unittest.TestCase):
                 "/api/file-intake/u/intake_token_123",
                 "/api/file-intake/u/[REDACTED]",
             ),
+            (
+                "/review/hitl_token_123",
+                "/review/[REDACTED]",
+            ),
+            (
+                "https://heym.example.com/review/hitl_token_123",
+                "https://heym.example.com/review/[REDACTED]",
+            ),
+            (
+                "/review/hitl_token_123/decision",
+                "/review/[REDACTED]/decision",
+            ),
+            (
+                "/api/review/hitl_token_123",
+                "/api/review/[REDACTED]",
+            ),
         ]
         for url, expected in cases:
             with self.subTest(url=url):
@@ -227,6 +267,9 @@ class RedactUrlTests(unittest.TestCase):
             "/api/health",
             "/api/workflows",
             "/api/auth/me",
+            "/review",
+            "/reviews",
+            "/api/reviews",
         ]
         for url in cases:
             with self.subTest(url=url):
@@ -239,7 +282,10 @@ class RedactUrlTests(unittest.TestCase):
             "https://discord.com/api/webhooks/123/tok",
             "/api/files/dl/secret",
             "/api/hitl/secret/decision",
+            "/review/secret",
             "/api/mcp/message?session=tok",
+            "https://mcp.example.com/sse?auth=tok",
+            "https://s3.amazonaws.com/b/k?X-Amz-Signature=sig",
         ]
         for url in urls:
             with self.subTest(url=url):
@@ -308,6 +354,57 @@ class UvicornAccessFilterTests(unittest.TestCase):
             record.args,
             ("127.0.0.1", "GET", "/api/health?check=ready", "1.1", 200),
         )
+
+    def test_redacts_review_token(self) -> None:
+        record = logging.LogRecord(
+            name="uvicorn.access",
+            level=logging.INFO,
+            pathname="uvicorn/protocols/http",
+            lineno=1,
+            msg='%s - "%s %s HTTP/%s" %d',
+            args=("127.0.0.1", "GET", "/review/hitl-review-token-456", "1.1", 307),
+            exc_info=None,
+        )
+
+        self.filter.filter(record)
+
+        self.assertEqual(
+            record.args,
+            ("127.0.0.1", "GET", "/review/[REDACTED]", "1.1", 307),
+        )
+        self.assertNotIn("hitl-review-token-456", record.args[2])
+
+    def test_redacts_auth_and_presigned_signature(self) -> None:
+        record = logging.LogRecord(
+            name="uvicorn.access",
+            level=logging.INFO,
+            pathname="uvicorn/protocols/http",
+            lineno=1,
+            msg='%s - "%s %s HTTP/%s" %d',
+            args=(
+                "127.0.0.1",
+                "GET",
+                "/api/mcp/sse?auth=secret-sse-auth&X-Amz-Signature=secret-sig-789",
+                "1.1",
+                200,
+            ),
+            exc_info=None,
+        )
+
+        self.filter.filter(record)
+
+        self.assertEqual(
+            record.args,
+            (
+                "127.0.0.1",
+                "GET",
+                "/api/mcp/sse?auth=[REDACTED]&X-Amz-Signature=[REDACTED]",
+                "1.1",
+                200,
+            ),
+        )
+        self.assertNotIn("secret-sse-auth", record.args[2])
+        self.assertNotIn("secret-sig-789", record.args[2])
 
 
 class HttpClientAndLlmProviderLoggingTests(unittest.IsolatedAsyncioTestCase):
@@ -400,6 +497,41 @@ class WinstonLoggingMiddlewareTests(unittest.IsolatedAsyncioTestCase):
             all_logs = " ".join(capture.messages)
             self.assertIn("/api/files/dl/[REDACTED]", all_logs)
             self.assertNotIn("secret-token-xyz", all_logs)
+        finally:
+            winston_logger.removeHandler(capture)
+            winston_logger.setLevel(original_level)
+
+    async def test_middleware_redacts_review_route(self) -> None:
+        from starlette.requests import Request
+        from starlette.responses import Response
+
+        from app.main import WinstonLoggingMiddleware
+
+        middleware = WinstonLoggingMiddleware(app=None)  # type: ignore[arg-type]
+        winston_logger = logging.getLogger("winston")
+        original_level = winston_logger.level
+        winston_logger.setLevel(logging.INFO)
+        capture = _LogCaptureHandler()
+        winston_logger.addHandler(capture)
+        try:
+            scope = {
+                "type": "http",
+                "method": "GET",
+                "path": "/review/hitl-review-token-789",
+                "headers": [],
+                "client": ("127.0.0.1", 12345),
+            }
+            request = Request(scope)
+
+            async def call_next(req: Request) -> Response:
+                return Response("ok", status_code=307)
+
+            response = await middleware.dispatch(request, call_next)
+            self.assertEqual(response.status_code, 307)
+
+            all_logs = " ".join(capture.messages)
+            self.assertIn("/review/[REDACTED]", all_logs)
+            self.assertNotIn("hitl-review-token-789", all_logs)
         finally:
             winston_logger.removeHandler(capture)
             winston_logger.setLevel(original_level)

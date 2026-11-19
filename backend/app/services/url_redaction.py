@@ -14,12 +14,14 @@ from urllib.parse import unquote, urlsplit, urlunsplit
 from app.services.agent_tool_observability import _is_sensitive_key
 
 _REDACTED = "[REDACTED]"
-_URL_SENSITIVE_EXACT_KEYS = frozenset({"key", "session", "sig", "signature"})
+_URL_SENSITIVE_EXACT_KEYS = frozenset({"auth", "key", "session", "sig", "signature"})
 
 
 def _is_sensitive_query_param(name: str) -> bool:
     norm = name.strip().lower().replace("-", "_")
     if norm in _URL_SENSITIVE_EXACT_KEYS:
+        return True
+    if norm.endswith("signature") or norm.endswith("_sig"):
         return True
     return _is_sensitive_key(name)
 
@@ -69,6 +71,8 @@ def _redact_path(hostname: str, path: str) -> str:
     path = re.sub(r"^(/?(?:api/)?codex/followups/)[^/]+(/.*)?$", rf"\1{_REDACTED}\2", path)
     # /api/file-intake/u/{token}
     path = re.sub(r"^(/?(?:api/)?file-intake/u/)[^/]+(/.*)?$", rf"\1{_REDACTED}\2", path)
+    # /review/{token} (backend alias for HITL review links)
+    path = re.sub(r"^(/?(?:api/)?review/)[^/]+(/.*)?$", rf"\1{_REDACTED}\2", path)
     # /api/hitl/{token}
     m = re.match(r"^(/?(?:api/)?hitl/)([^/]+)(/.*)?$", path)
     if m:
@@ -84,13 +88,13 @@ def redact_url(url: str) -> str:
     """Return the URL with secrets replaced by [REDACTED].
 
     Replaces:
-    - Values of sensitive query parameters (key, session, sig, signature, api_key, token, etc.)
+    - Values of sensitive query parameters (key, session, sig, signature, api_key, token, auth, etc.)
     - User info (e.g. https://user:pass@host -> https://[REDACTED]@host)
     - Known secret path segments:
       - Telegram: /bot<token>/...
       - Slack: hooks.slack.com/services/...
       - Discord: /webhooks/<id>/<token>[/...]
-      - Heym capability links: /api/files/dl/<token>, /api/hitl/<token>,
+      - Heym capability links: /api/files/dl/<token>, /api/hitl/<token>, /review/<token>,
         /api/codex/followups/<token>, /api/file-intake/u/<token>
     """
     if not url or not isinstance(url, str):
