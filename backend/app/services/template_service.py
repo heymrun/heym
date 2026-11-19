@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -63,6 +63,18 @@ async def can_view_template(
     return _is_template_visible(template, user, user_team_ids)
 
 
+def _matches_search(search: str | None, *fields: object) -> bool:
+    """Whether a template's name, description, a tag or a node type contains ``search``.
+
+    The Templates tab searches all four, so the match runs here on the loaded rows: tags
+    and node types live in JSON columns, where a text cast escapes non-ASCII letters.
+    """
+    if not search:
+        return True
+    term = search.casefold()
+    return any(isinstance(field, str) and term in field.casefold() for field in fields)
+
+
 async def list_workflow_templates(
     db: AsyncSession,
     user: User,
@@ -76,21 +88,23 @@ async def list_workflow_templates(
     - include templates with visibility='specific_users' when the user's email is in shared_with
     """
     stmt = select(WorkflowTemplate).options(selectinload(WorkflowTemplate.author))
-
-    if search:
-        term = f"%{search.lower()}%"
-        stmt = stmt.where(
-            or_(
-                WorkflowTemplate.name.ilike(term),
-                WorkflowTemplate.description.ilike(term),
-            )
-        )
     stmt = stmt.order_by(WorkflowTemplate.created_at.desc())
     result = await db.execute(stmt)
     templates = list(result.scalars().all())
 
     user_team_ids = await _get_user_team_ids(db, user.id)
-    return [t for t in templates if _is_template_visible(t, user, user_team_ids)]
+    return [
+        t
+        for t in templates
+        if _is_template_visible(t, user, user_team_ids)
+        and _matches_search(
+            search,
+            t.name,
+            t.description,
+            *(t.tags or []),
+            *(node.get("type") for node in t.nodes or [] if isinstance(node, dict)),
+        )
+    ]
 
 
 async def list_node_templates(
@@ -100,21 +114,17 @@ async def list_node_templates(
 ) -> list[NodeTemplate]:
     """Return all node templates visible to this user (same rules as workflows)."""
     stmt = select(NodeTemplate).options(selectinload(NodeTemplate.author))
-
-    if search:
-        term = f"%{search.lower()}%"
-        stmt = stmt.where(
-            or_(
-                NodeTemplate.name.ilike(term),
-                NodeTemplate.description.ilike(term),
-            )
-        )
     stmt = stmt.order_by(NodeTemplate.created_at.desc())
     result = await db.execute(stmt)
     templates = list(result.scalars().all())
 
     user_team_ids = await _get_user_team_ids(db, user.id)
-    return [t for t in templates if _is_template_visible(t, user, user_team_ids)]
+    return [
+        t
+        for t in templates
+        if _is_template_visible(t, user, user_team_ids)
+        and _matches_search(search, t.name, t.description, *(t.tags or []), t.node_type)
+    ]
 
 
 async def get_workflow_template_unchecked(

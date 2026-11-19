@@ -153,17 +153,18 @@ def bucket_keys(since: datetime, until: datetime, bucket_delta: timedelta) -> li
 def time_range_start(time_range: str, *, now: datetime | None = None) -> datetime:
     """Start of a named window (1h, 3h, 6h, 24h, 7d, 30d, all); unknown names mean 7d.
 
-    The rollups are hourly, so the hour windows start on the hour: the hour the window starts
-    in is counted whole instead of being dropped (1h at 15:20 starts at 14:00).
+    The rollups are hourly, so every window starts on the hour: the hour the window starts
+    in is counted whole instead of being dropped (1h at 15:20 starts at 14:00, 24h at 15:20
+    starts at 15:00 the day before).
     """
     current_time = now or datetime.now(timezone.utc)
     time_ranges = {
         "1h": normalize_bucket_start(current_time - timedelta(hours=1)),
         "3h": normalize_bucket_start(current_time - timedelta(hours=3)),
         "6h": normalize_bucket_start(current_time - timedelta(hours=6)),
-        "24h": current_time - timedelta(hours=24),
-        "7d": current_time - timedelta(days=7),
-        "30d": current_time - timedelta(days=30),
+        "24h": normalize_bucket_start(current_time - timedelta(hours=24)),
+        "7d": normalize_bucket_start(current_time - timedelta(days=7)),
+        "30d": normalize_bucket_start(current_time - timedelta(days=30)),
         "all": datetime.min.replace(tzinfo=timezone.utc),
     }
     return time_ranges.get(time_range, time_ranges["7d"])
@@ -253,6 +254,22 @@ async def _percentiles_from_history(
     )
 
 
+async def _time_saved_minutes(
+    db: AsyncSession, success_by_workflow: dict[uuid.UUID | None, int]
+) -> float:
+    """Minutes saved over the window, from each workflow's current per-run estimate."""
+    rate_by_workflow: dict[uuid.UUID, float] = {}
+    rate_ids = [wid for wid in success_by_workflow if wid is not None]
+    if rate_ids:
+        rate_rows = await db.execute(
+            select(Workflow.id, Workflow.minutes_saved_per_run).where(Workflow.id.in_(rate_ids))
+        )
+        for rid, rate in rate_rows.all():
+            if rate:
+                rate_by_workflow[rid] = float(rate)
+    return compute_time_saved_minutes(success_by_workflow, rate_by_workflow)
+
+
 async def _stats_from_history(
     db: AsyncSession,
     *,
@@ -265,7 +282,8 @@ async def _stats_from_history(
     if workflow_id is not None:
         query_filter = ExecutionHistory.workflow_id == workflow_id
 
-    since_24h = max(start_at, end_at - timedelta(hours=24))
+    # On the hour, like the 24h window, so "Last 24h" matches the 24h total.
+    since_24h = max(start_at, normalize_bucket_start(end_at - timedelta(hours=24)))
     all_executions = (
         await db.execute(
             select(*_HISTORY_COLUMNS).where(
@@ -290,6 +308,12 @@ async def _stats_from_history(
     error_count = sum(1 for e in all_executions if e.status == "error")
     latencies = [e.execution_time_ms for e in all_executions if e.execution_time_ms > 0]
     latencies_24h = [e.execution_time_ms for e in last_24h_executions if e.execution_time_ms > 0]
+    success_by_workflow: dict[uuid.UUID | None, int] = {}
+    for execution in all_executions:
+        if execution.status == "success":
+            success_by_workflow[execution.workflow_id] = (
+                success_by_workflow.get(execution.workflow_id, 0) + 1
+            )
     return AnalyticsStats(
         total_executions=total_executions,
         success_count=success_count,
@@ -304,6 +328,7 @@ async def _stats_from_history(
         success_count_24h=sum(1 for e in last_24h_executions if e.status == "success"),
         error_count_24h=sum(1 for e in last_24h_executions if e.status == "error"),
         avg_latency_24h_ms=sum(latencies_24h) / len(latencies_24h) if latencies_24h else 0.0,
+        time_saved_minutes=await _time_saved_minutes(db, success_by_workflow),
     )
 
 
@@ -324,7 +349,8 @@ async def compute_analytics_stats(
         return AnalyticsStats()
 
     since, resolved_end = resolve_time_window(time_range, start_at=start_at, end_at=end_at)
-    since_24h = max(since, resolved_end - timedelta(hours=24))
+    # On the hour, like the 24h window, so "Last 24h" matches the 24h total.
+    since_24h = max(since, normalize_bucket_start(resolved_end - timedelta(hours=24)))
 
     scope_filter = snapshot_scope_filter(
         user_id=user_id,
@@ -395,15 +421,6 @@ async def compute_analytics_stats(
         success_by_workflow[row.workflow_id] = (
             success_by_workflow.get(row.workflow_id, 0) + row.success_count
         )
-    rate_by_workflow: dict[uuid.UUID, float] = {}
-    rate_ids = [wid for wid in success_by_workflow if wid is not None]
-    if rate_ids:
-        rate_rows = await db.execute(
-            select(Workflow.id, Workflow.minutes_saved_per_run).where(Workflow.id.in_(rate_ids))
-        )
-        for rid, rate in rate_rows.all():
-            if rate:
-                rate_by_workflow[rid] = float(rate)
 
     return AnalyticsStats(
         total_executions=total_executions,
@@ -421,7 +438,7 @@ async def compute_analytics_stats(
         avg_latency_24h_ms=(
             total_latency_ms_24h / latency_sample_count_24h if latency_sample_count_24h > 0 else 0.0
         ),
-        time_saved_minutes=compute_time_saved_minutes(success_by_workflow, rate_by_workflow),
+        time_saved_minutes=await _time_saved_minutes(db, success_by_workflow),
     )
 
 

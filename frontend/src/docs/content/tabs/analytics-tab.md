@@ -15,11 +15,13 @@ The **Analytics** tab shows execution metrics and trends for your workflows. Mon
 
 ## Time Range
 
-- **1h**, **3h**, **6h** – Last hour, 3 hours, or 6 hours. Analytics are kept per hour, so these count the hour the window starts in whole: Last Hour at 15:20 covers 14:00 until now
+- **1h**, **3h**, **6h** – Last hour, 3 hours, or 6 hours
 - **24h** – Last 24 hours
 - **7d** – Last 7 days
 - **30d** – Last 30 days
 - **All** – Entire available history
+
+Analytics are kept per hour, so every window counts the hour it starts in whole: Last Hour at 15:20 covers 14:00 until now, and 24h at 15:20 covers 15:00 the day before until now.
 
 ## Workflow Filter
 

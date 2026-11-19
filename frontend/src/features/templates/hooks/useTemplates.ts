@@ -2,6 +2,7 @@ import { computed, ref, watch } from "vue";
 
 import { templatesApi } from "@/services/api";
 import type { NodeTemplate, TemplateKind, WorkflowTemplate } from "../types/template.types";
+import { nodeTemplateMatches, workflowTemplateMatches } from "../lib/templateSearch";
 
 export function useTemplates(initialKind: TemplateKind = "workflow") {
   const kind = ref<TemplateKind>(initialKind);
@@ -44,24 +45,12 @@ export function useTemplates(initialKind: TemplateKind = "workflow") {
 
   const filteredWorkflowTemplates = computed<WorkflowTemplate[]>(() => {
     if (!searchQuery.value) return workflowTemplates.value;
-    const q = searchQuery.value.toLowerCase();
-    return workflowTemplates.value.filter(
-      (t) =>
-        t.name.toLowerCase().includes(q) ||
-        (t.description ?? "").toLowerCase().includes(q) ||
-        t.tags.some((tag) => tag.toLowerCase().includes(q)),
-    );
+    return workflowTemplates.value.filter((t) => workflowTemplateMatches(t, searchQuery.value));
   });
 
   const filteredNodeTemplates = computed<NodeTemplate[]>(() => {
     if (!searchQuery.value) return nodeTemplates.value;
-    const q = searchQuery.value.toLowerCase();
-    return nodeTemplates.value.filter(
-      (t) =>
-        t.name.toLowerCase().includes(q) ||
-        (t.description ?? "").toLowerCase().includes(q) ||
-        t.tags.some((tag) => tag.toLowerCase().includes(q)),
-    );
+    return nodeTemplates.value.filter((t) => nodeTemplateMatches(t, searchQuery.value));
   });
 
   return {

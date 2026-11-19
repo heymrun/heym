@@ -317,6 +317,8 @@ async def compute_trace_stats(
     other_calls = 0
     other_tokens = 0
     other_cost = Decimal("0")
+    # Models folded into "Other" still need a pricing row; the notice names them.
+    other_unpriced: list[str] = []
     for idx, (row, (cost, is_priced)) in enumerate(zip(by_model_rows, model_costs, strict=False)):
         cost_value = cost if cost is not None else Decimal("0")
         if idx < TOP_MODELS:
@@ -337,6 +339,8 @@ async def compute_trace_stats(
             other_calls += int(row.calls)
             other_tokens += int(row.total_tokens or 0)
             other_cost += cost_value
+            if not is_priced:
+                other_unpriced.append(row.model or "(unknown)")
     if other_calls > 0:
         by_model.append(
             TraceModelRow(
@@ -345,7 +349,7 @@ async def compute_trace_stats(
                 calls=other_calls,
                 total_tokens=other_tokens,
                 cost_usd=other_cost,
-                is_priced=True,
+                is_priced=not other_unpriced,
                 is_other=True,
             )
         )
@@ -379,7 +383,10 @@ async def compute_trace_stats(
             total_tokens=int(kpi_row.total_tokens or 0),
             total_cost_usd=sum((m.cost_usd for m in by_model), Decimal("0")),
             avg_latency_ms=float(kpi_row.avg_elapsed_ms or 0.0),
-            unpriced_models=[m.model for m in by_model if not m.is_priced and not m.is_other],
+            unpriced_models=[
+                *(m.model for m in by_model if not m.is_priced and not m.is_other),
+                *other_unpriced,
+            ],
         ),
         by_model=by_model,
         by_time=[

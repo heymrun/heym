@@ -453,7 +453,10 @@ async def update_folder(
     if "icon" in data.model_fields_set:
         folder.icon = data.icon or None
 
-    if data.parent_id is not None:
+    if "parent_id" in data.model_fields_set and data.parent_id is None:
+        # The docs: `null` means root, as the all-zero UUID does.
+        folder.parent_id = None
+    elif data.parent_id is not None:
         if data.parent_id == folder_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
