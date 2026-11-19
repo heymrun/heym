@@ -119,6 +119,19 @@ class TestInsertRows(unittest.TestCase):
         self.assertEqual(len(call_body["rows"]), 2)
         self.assertEqual(call_body["rows"][0]["json"], {"id": 1, "name": "Alice"})
 
+    def test_insert_ids_are_unique_across_calls(self) -> None:
+        # BigQuery drops a row whose insertId it saw in about the last minute.
+        svc = self._make_service()
+        mock_response = MagicMock()
+        mock_response.json.return_value = {}
+        ids: list[str] = []
+        with patch("httpx.post", return_value=mock_response) as mock_post:
+            for rows in ([{"event": "signup"}, {"event": "login"}], [{"event": "logout"}]):
+                svc.insert_rows("my-project", "my-dataset", "events", rows)
+                ids += [row["insertId"] for row in mock_post.call_args[1]["json"]["rows"]]
+        self.assertEqual(len(ids), 3)
+        self.assertEqual(len(set(ids)), 3)
+
     def test_insert_rows_api_error_raises(self) -> None:
         svc = self._make_service()
         mock_response = MagicMock()
