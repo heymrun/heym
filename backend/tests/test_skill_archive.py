@@ -17,12 +17,13 @@ def _zip(files: dict[str, str | bytes]) -> bytes:
 
 
 class SkillArchiveTests(unittest.TestCase):
-    def test_a_skill_zip_keeps_markdown_and_python_and_skips_macos_metadata(self) -> None:
+    def test_a_skill_zip_keeps_every_file_and_skips_macos_metadata(self) -> None:
         raw = _zip(
             {
                 "helper/SKILL.md": "---\nname: invoice-helper\n---\nRead the invoice.",
                 "helper/main.py": "def run():\n    return 1\n",
                 "helper/notes.md": "extra",
+                "helper/templates/rates.csv": "code,rate\nA,1\n",
                 "__MACOSX/helper/._SKILL.md": "junk",
                 ".DS_Store": "junk",
                 "helper/logo.png": b"\x89PNG\x00\x00",
@@ -36,10 +37,32 @@ class SkillArchiveTests(unittest.TestCase):
         self.assertEqual(skill.name, "invoice-helper")
         self.assertIn("Read the invoice.", skill.content)
         self.assertEqual(
-            {item.path: item.content for item in skill.files},
-            {"main.py": "def run():\n    return 1\n", "notes.md": "extra"},
+            {item.path: (item.encoding, item.content) for item in skill.files},
+            {
+                "main.py": ("text", "def run():\n    return 1\n"),
+                "notes.md": ("text", "extra"),
+                "templates/rates.csv": ("text", "code,rate\nA,1\n"),
+                "logo.png": ("base64", base64.b64encode(b"\x89PNG\x00\x00").decode()),
+            },
         )
-        self.assertTrue(any("logo.png" in note for note in reading.notes))
+        self.assertEqual(reading.notes, ())
+
+    def test_a_binary_file_outside_every_skill_folder_is_skipped(self) -> None:
+        reading = read_zip(
+            _zip({"helper/SKILL.md": "---\nname: tidy\n---\n", "cover.png": b"\x89PNG\x00"})
+        )
+
+        self.assertEqual(reading.skills[0].files, ())
+        self.assertTrue(any("cover.png" in note for note in reading.notes))
+
+    def test_the_prompt_lists_assets_by_path_and_never_shows_base64(self) -> None:
+        png = b"\x89PNG\x00" * 40
+        reading = read_zip(_zip({"h/SKILL.md": "---\nname: tidy\n---\nTidy.", "h/logo.png": png}))
+
+        text = prompt_for_zip("tidy.zip", reading)
+
+        self.assertIn("logo.png", text)
+        self.assertNotIn(base64.b64encode(png).decode()[:24], text)
 
     def test_a_zip_without_skill_markdown_is_context_only(self) -> None:
         reading = read_zip(_zip({"readme.txt": "hello", "src/app.py": "print(1)\n"}))

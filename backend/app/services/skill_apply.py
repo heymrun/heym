@@ -108,7 +108,7 @@ def _editable(path: str) -> bool:
 def overlay(bundle: SkillBundle | None, edits: list[FileEdit], *, name: str) -> SkillBundle:
     """The skill to write: the bundle, then any file edits on top."""
     content = bundle.content if bundle is not None else ""
-    files = {item.path: item.content for item in bundle.files} if bundle is not None else {}
+    files = {item.path: item for item in bundle.files} if bundle is not None else {}
     for edit in edits:
         path = edit.path.replace("\\", "/").strip().lstrip("/")
         if not path or ".." in path.split("/"):
@@ -116,20 +116,15 @@ def overlay(bundle: SkillBundle | None, edits: list[FileEdit], *, name: str) -> 
         if _is_skill_markdown(path):
             content = edit.content
         elif _editable(path):
-            files[path] = edit.content
-    return SkillBundle(
-        name=name,
-        content=content,
-        files=tuple(ArchiveFile(path, text) for path, text in files.items()),
-        directory="",
-    )
+            files[path] = ArchiveFile(path, edit.content)
+    return SkillBundle(name=name, content=content, files=tuple(files.values()), directory="")
 
 
 def _record(existing: dict[str, Any] | None, bundle: SkillBundle) -> dict[str, Any]:
     """A skill object. Files already stored and absent from the bundle stay."""
     current = existing if isinstance(existing, dict) else {}
     kept: list[dict[str, Any]] = []
-    incoming = {item.path: item.content for item in bundle.files}
+    incoming = {item.path for item in bundle.files}
     for item in current.get("files") or []:
         if not isinstance(item, dict):
             continue
@@ -138,7 +133,8 @@ def _record(existing: dict[str, Any] | None, bundle: SkillBundle) -> dict[str, A
             continue
         kept.append(item)
     files = kept + [
-        {"path": item.path, "content": item.content, "encoding": "text"} for item in bundle.files
+        {"path": item.path, "content": item.content, "encoding": item.encoding}
+        for item in bundle.files
     ]
     record = {
         "id": str(current.get("id") or uuid.uuid4()),
