@@ -1,8 +1,9 @@
 """Read a chat zip and separate skill bundles from ordinary files.
 
-A skill bundle is a directory that contains ``SKILL.md`` plus any ``.py`` and extra
-``.md`` files beside it. The model sees a short summary. ``apply_skill`` writes the
-original bytes, so a later reply cannot drop a Python file the prompt left out.
+A skill bundle is a directory that contains ``SKILL.md`` plus every file below it: Python,
+extra Markdown, and assets. A binary asset travels as base64, which the agent node stores
+as it is. The model sees a short summary. ``apply_skill`` writes the original bytes, so a
+later reply cannot drop a file the prompt left out.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ import binascii
 import io
 import zipfile
 from dataclasses import dataclass
+from typing import Literal
 
 MAX_ZIP_BYTES = 8 * 1024 * 1024
 MAX_UNCOMPRESSED_BYTES = 8 * 1024 * 1024
@@ -27,10 +29,11 @@ _SKILL_MARKDOWN = "skill.md"
 
 @dataclass(frozen=True)
 class ArchiveFile:
-    """One text file from the archive."""
+    """One file from the archive: text as it is, or a binary file as base64."""
 
     path: str
     content: str
+    encoding: Literal["text", "base64"] = "text"
 
 
 @dataclass(frozen=True)
@@ -110,6 +113,7 @@ def read_zip(raw: bytes) -> ZipRead:
         return ZipRead((), (), ("The attachment is not a zip file.",))
 
     texts: list[ArchiveFile] = []
+    binaries: list[ArchiveFile] = []
     notes: list[str] = []
     total = 0
     with archive:
@@ -127,18 +131,25 @@ def read_zip(raw: bytes) -> ZipRead:
             if total > MAX_UNCOMPRESSED_BYTES:
                 notes.append("Stopped reading: the zip expands past 8 MB.")
                 break
-            text = _read_text(archive.read(info))
+            data = archive.read(info)
+            text = _read_text(data)
             if text is None:
-                notes.append(f"Skipped binary file {path}.")
+                binaries.append(ArchiveFile(path, base64.b64encode(data).decode(), "base64"))
                 continue
             texts.append(ArchiveFile(path, text))
 
-    skills, rest = _skills_from(texts)
-    return ZipRead(tuple(skills), tuple(rest), tuple(notes))
+    skills, rest = _skills_from(texts + binaries)
+    kept_text = [item for item in rest if item.encoding == "text"]
+    notes.extend(f"Skipped binary file {item.path}." for item in rest if item.encoding == "base64")
+    return ZipRead(tuple(skills), tuple(kept_text), tuple(notes))
 
 
 def _skills_from(files: list[ArchiveFile]) -> tuple[list[SkillBundle], list[ArchiveFile]]:
-    marks = [item for item in files if item.path.rsplit("/", 1)[-1].lower() == _SKILL_MARKDOWN]
+    marks = [
+        item
+        for item in files
+        if item.encoding == "text" and item.path.rsplit("/", 1)[-1].lower() == _SKILL_MARKDOWN
+    ]
     if not marks:
         return [], files
     bundles: list[SkillBundle] = []
@@ -157,8 +168,6 @@ def _skills_from(files: list[ArchiveFile]) -> tuple[list[SkillBundle], list[Arch
                 continue
             if item.path.rsplit("/", 1)[-1].lower() == _SKILL_MARKDOWN:
                 continue
-            if not item.path.lower().endswith((".md", ".py")):
-                continue
             relative = item.path[len(prefix) :]
             if any(relative.startswith(f"{folder[len(prefix) :]}/") for folder in nested):
                 continue
@@ -167,7 +176,9 @@ def _skills_from(files: list[ArchiveFile]) -> tuple[list[SkillBundle], list[Arch
             directory.rsplit("/", 1)[-1] if directory else "skill"
         )
         relative = tuple(
-            ArchiveFile(item.path[len(prefix) :] if prefix else item.path, item.content)
+            ArchiveFile(
+                item.path[len(prefix) :] if prefix else item.path, item.content, item.encoding
+            )
             for item in owned
         )
         bundles.append(
