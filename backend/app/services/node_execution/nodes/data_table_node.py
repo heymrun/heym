@@ -248,7 +248,7 @@ def execute(ctx: NodeExecutionContext) -> object:
 
         elif operation == "getById":
             row_id_template = node_data.get("dataTableRowId", "")
-            row_id = self.evaluate_message_template(row_id_template, inputs, node_id)
+            row_id = self.evaluate_nonempty_message_template(row_id_template, inputs, node_id)
             if not row_id:
                 raise ValueError("DataTable getById requires a row ID")
             row = (
@@ -306,7 +306,7 @@ def execute(ctx: NodeExecutionContext) -> object:
 
         elif operation == "update":
             row_id_template = node_data.get("dataTableRowId", "")
-            row_id = self.evaluate_message_template(row_id_template, inputs, node_id)
+            row_id = self.evaluate_nonempty_message_template(row_id_template, inputs, node_id)
             if not row_id:
                 raise ValueError("DataTable update requires a row ID")
 
@@ -350,7 +350,7 @@ def execute(ctx: NodeExecutionContext) -> object:
 
         elif operation == "remove":
             row_id_template = node_data.get("dataTableRowId", "")
-            row_id = self.evaluate_message_template(row_id_template, inputs, node_id)
+            row_id = self.evaluate_nonempty_message_template(row_id_template, inputs, node_id)
             if not row_id:
                 raise ValueError("DataTable remove requires a row ID")
 
