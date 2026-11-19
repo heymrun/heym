@@ -424,6 +424,223 @@ class WorkflowExecutorBranchingTests(unittest.TestCase):
         self.assertEqual(results["searchResult"]["status"], "success")
         self.assertEqual(result.outputs, {"searchResult": {"result": "hello"}})
 
+    def _condition_beside_a_parallel_branch(self, x: int) -> tuple[str, dict, dict]:
+        nodes = [
+            {"id": "in", "type": "textInput", "data": {"label": "userInput"}},
+            {
+                "id": "p",
+                "type": "set",
+                "data": {"label": "p", "mappings": [{"key": "v", "value": "parallel"}]},
+            },
+            {
+                "id": "c",
+                "type": "condition",
+                "data": {"label": "cond", "condition": "$userInput.body.x > 1"},
+            },
+            {
+                "id": "a",
+                "type": "set",
+                "data": {"label": "a", "mappings": [{"key": "v", "value": "branch"}]},
+            },
+            {"id": "only", "type": "set", "data": {"label": "onlyTrue", "mappings": []}},
+            {"id": "m", "type": "merge", "data": {"label": "merged", "inputCount": 2}},
+            {"id": "o", "type": "output", "data": {"label": "result", "message": "done"}},
+        ]
+        edges = [
+            {"id": "e1", "source": "in", "target": "p"},
+            {"id": "e2", "source": "in", "target": "c"},
+            {"id": "e3", "source": "c", "target": "a", "sourceHandle": "true"},
+            {"id": "e4", "source": "a", "target": "only"},
+            {"id": "e5", "source": "p", "target": "m", "targetHandle": "input-0"},
+            {"id": "e6", "source": "a", "target": "m", "targetHandle": "input-1"},
+            {"id": "e7", "source": "m", "target": "o"},
+        ]
+        result = WorkflowExecutor(nodes=nodes, edges=edges).execute(
+            workflow_id=uuid.uuid4(), initial_inputs={"body": {"x": x}}
+        )
+        status = {row["node_id"]: row["status"] for row in result.node_results}
+        return result.status, status, result.outputs
+
+    def test_condition_keeps_a_merge_that_a_parallel_branch_also_feeds(self) -> None:
+        run_status, status, outputs = self._condition_beside_a_parallel_branch(0)
+
+        self.assertEqual(run_status, "success")
+        # Only the false-skipped branch is skipped; the Merge and the Output run.
+        self.assertEqual(status["a"], "skipped")
+        self.assertEqual(status["only"], "skipped")
+        self.assertEqual((status["m"], status["o"]), ("success", "success"))
+        self.assertEqual(outputs, {"result": {"result": "done"}})
+
+    def test_condition_on_the_feeding_branch_runs_everything(self) -> None:
+        run_status, status, _outputs = self._condition_beside_a_parallel_branch(5)
+
+        self.assertEqual(run_status, "success")
+        self.assertEqual(
+            {node: status[node] for node in ("a", "only", "m", "o")},
+            {"a": "success", "only": "success", "m": "success", "o": "success"},
+        )
+
+    @staticmethod
+    def _statuses(nodes: list[dict], edges: list[dict], x: int = 0) -> dict[str, list[str]]:
+        result = WorkflowExecutor(nodes=nodes, edges=edges).execute(
+            workflow_id=uuid.uuid4(), initial_inputs={"body": {"x": x}}
+        )
+        statuses: dict[str, list[str]] = {}
+        for row in result.node_results:
+            statuses.setdefault(row["node_id"], []).append(row["status"])
+        return statuses
+
+    @staticmethod
+    def _set_node(node_id: str, value: str = "x") -> dict:
+        return {
+            "id": node_id,
+            "type": "set",
+            "data": {"label": node_id, "mappings": [{"key": "v", "value": value}]},
+        }
+
+    @staticmethod
+    def _condition_node(node_id: str, expression: str = "$userInput.body.x > 1") -> dict:
+        return {
+            "id": node_id,
+            "type": "condition",
+            "data": {"label": node_id, "condition": expression},
+        }
+
+    def test_condition_skips_an_agent_whose_tool_is_its_other_input(self) -> None:
+        nodes = [
+            {"id": "in", "type": "textInput", "data": {"label": "userInput"}},
+            self._condition_node("c"),
+            {
+                "id": "ag",
+                "type": "agent",
+                "data": {"label": "ag", "userMessage": "hi", "credentialId": str(uuid.uuid4())},
+            },
+            self._set_node("t"),
+        ]
+        edges = [
+            {"id": "e1", "source": "in", "target": "c"},
+            {"id": "e2", "source": "c", "target": "ag", "sourceHandle": "true"},
+            {"id": "e3", "source": "t", "target": "ag", "targetHandle": "tool-input"},
+        ]
+
+        self.assertEqual(self._statuses(nodes, edges)["ag"], ["skipped"])
+
+    def test_condition_skips_a_branch_node_the_trigger_also_feeds(self) -> None:
+        nodes = [
+            {"id": "in", "type": "textInput", "data": {"label": "userInput"}},
+            self._condition_node("c"),
+            self._set_node("n"),
+        ]
+        edges = [
+            {"id": "e1", "source": "in", "target": "c"},
+            {"id": "e2", "source": "c", "target": "n", "sourceHandle": "true"},
+            {"id": "e3", "source": "in", "target": "n"},
+        ]
+
+        self.assertEqual(self._statuses(nodes, edges)["n"], ["skipped"])
+
+    def _nested_conditions_into_merge(self, second: str) -> dict[str, list[str]]:
+        nodes = [
+            {"id": "in", "type": "textInput", "data": {"label": "userInput"}},
+            self._condition_node("c1"),
+            self._condition_node("c2", second),
+            self._set_node("a1"),
+            self._set_node("a2"),
+            {"id": "m", "type": "merge", "data": {"label": "m", "inputCount": 2}},
+            {"id": "o", "type": "output", "data": {"label": "o", "message": "done"}},
+        ]
+        edges = [
+            {"id": "e1", "source": "in", "target": "c1"},
+            {"id": "e2", "source": "in", "target": "c2"},
+            {"id": "e3", "source": "c1", "target": "a1", "sourceHandle": "true"},
+            {"id": "e4", "source": "c2", "target": "a2", "sourceHandle": "true"},
+            {"id": "e5", "source": "a1", "target": "m", "targetHandle": "input-0"},
+            {"id": "e6", "source": "a2", "target": "m", "targetHandle": "input-1"},
+            {"id": "e7", "source": "m", "target": "o"},
+        ]
+        return self._statuses(nodes, edges)
+
+    def test_merge_skipped_when_every_input_was_skipped_by_another_condition(self) -> None:
+        statuses = self._nested_conditions_into_merge("$userInput.body.x > 1")
+
+        self.assertEqual((statuses["m"], statuses["o"]), (["skipped"], ["skipped"]))
+
+    def test_merge_runs_when_another_condition_keeps_one_input(self) -> None:
+        statuses = self._nested_conditions_into_merge("$userInput.body.x < 1")
+
+        self.assertEqual((statuses["a1"], statuses["a2"]), (["skipped"], ["success"]))
+        self.assertEqual((statuses["m"], statuses["o"]), (["success"], ["success"]))
+
+    def test_loop_done_node_fed_by_a_parallel_branch_keeps_the_loop_rule(self) -> None:
+        nodes = [
+            {"id": "in", "type": "textInput", "data": {"label": "userInput"}},
+            {
+                "id": "lp",
+                "type": "loop",
+                "data": {"label": "lp", "arrayExpression": "$array('a').add('b')"},
+            },
+            self._set_node("body", "$lp.item"),
+            self._set_node("p"),
+            self._set_node("d", "$lp.branch"),
+        ]
+        edges = [
+            {"id": "e1", "source": "in", "target": "lp"},
+            {"id": "e2", "source": "lp", "target": "body", "sourceHandle": "loop"},
+            {"id": "e3", "source": "body", "target": "lp", "targetHandle": "loop"},
+            {"id": "e4", "source": "lp", "target": "d", "sourceHandle": "done"},
+            {"id": "e5", "source": "in", "target": "p"},
+            {"id": "e6", "source": "p", "target": "d"},
+        ]
+
+        # The Loop node keeps its own rule: Merge/Output preservation applies to Condition
+        # and Switch only, so this graph behaves as it did before.
+        self.assertEqual(self._statuses(nodes, edges)["d"], ["skipped"])
+
+    def _skipped_after_condition_and_error_branch(self, order: list[str]) -> set[str]:
+        """A Condition skips one Merge input, a failed HTTP node's error routing the other."""
+        nodes = [
+            {"id": "in", "type": "textInput", "data": {"label": "userInput"}},
+            self._condition_node("c"),
+            self._set_node("a"),
+            {"id": "h", "type": "http", "data": {"label": "h", "curl": "curl https://x.test"}},
+            self._set_node("b"),
+            self._set_node("e"),
+            {"id": "m", "type": "merge", "data": {"label": "m", "inputCount": 2}},
+            {"id": "o", "type": "output", "data": {"label": "o", "message": "done"}},
+        ]
+        edges = [
+            {"id": "1", "source": "in", "target": "c"},
+            {"id": "2", "source": "c", "target": "a", "sourceHandle": "true"},
+            {"id": "3", "source": "a", "target": "m", "targetHandle": "input-0"},
+            {"id": "4", "source": "in", "target": "h"},
+            {"id": "5", "source": "h", "target": "b", "sourceHandle": "output"},
+            {"id": "6", "source": "h", "target": "e", "sourceHandle": "error"},
+            {"id": "7", "source": "b", "target": "m", "targetHandle": "input-1"},
+            {"id": "8", "source": "m", "target": "o"},
+        ]
+        executor = WorkflowExecutor(nodes=nodes, edges=edges)
+        # The two routing calls the executor makes, in a fixed order instead of thread order.
+        for step in order:
+            if step == "condition":
+                executor.skip_branch_targets_preserving_shared_downstream(
+                    "c",
+                    active_targets=executor.get_downstream_nodes("c", "false"),
+                    inactive_targets=executor.get_downstream_nodes("c", "true"),
+                )
+            else:
+                executor._handle_error_branch_routing("h")
+        return set(executor.skipped_nodes)
+
+    def test_merge_skipped_when_the_condition_decides_before_the_error_branch(self) -> None:
+        skipped = self._skipped_after_condition_and_error_branch(["condition", "error"])
+
+        self.assertEqual(skipped, {"a", "b", "m", "o"})
+
+    def test_merge_skipped_when_the_error_branch_decides_before_the_condition(self) -> None:
+        skipped = self._skipped_after_condition_and_error_branch(["error", "condition"])
+
+        self.assertEqual(skipped, {"a", "b", "m", "o"})
+
     def test_http_success_skips_error_handle_branch(self) -> None:
         nodes = [
             {

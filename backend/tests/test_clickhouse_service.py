@@ -342,6 +342,7 @@ class TestClickHouseExecutorBranch(unittest.TestCase):
         executor.evaluate_nonempty_message_template = lambda tpl, inputs, node_id: tpl
         fake_service = MagicMock()
         fake_service.insert.return_value = {"count": 1, "success": True}
+        fake_service.coerce_text_rows.side_effect = lambda _table, rows: rows
         with (
             patch.object(
                 WorkflowExecutor,
@@ -358,6 +359,8 @@ class TestClickHouseExecutorBranch(unittest.TestCase):
             ),
         ):
             output = self._execute(executor, node_data)
+        # Key-value text is read as the table's column types before the insert.
+        fake_service.coerce_text_rows.assert_called_once_with("events", [{"name": "Alice"}])
         fake_service.insert.assert_called_once_with("events", [{"name": "Alice"}])
         self.assertTrue(output["success"])
 
@@ -418,3 +421,94 @@ class TestClickHousePool(unittest.TestCase):
         self.assertIs(c1, c2)  # same connection reused
         self.assertIsNot(c1, c3)  # different host -> new client
         self.assertEqual(len(created), 2)
+
+
+class ClickHouseKeyValueTypesTests(unittest.TestCase):
+    """Key-value fields resolve to text; each value is read as its column's type."""
+
+    def _coerced(self, row: dict, columns: list[tuple[str, str]]) -> dict:
+        from types import SimpleNamespace
+
+        from app.services.clickhouse_service import ClickHouseService
+
+        client = MagicMock()
+        client.query.return_value = SimpleNamespace(result_rows=columns)
+        service = ClickHouseService({"host": "h"})
+        with patch.object(ClickHouseService, "_client", return_value=client):
+            (coerced,) = service.coerce_text_rows("events", [row])
+        return coerced
+
+    def test_text_becomes_the_column_type(self) -> None:
+        import datetime as dt
+        from decimal import Decimal
+
+        coerced = self._coerced(
+            {
+                "active": "false",
+                "on": "TRUE",
+                "score": "",
+                "count": "42",
+                "ratio": "0.5",
+                "price": "9.99",
+                "day": "2026-01-01",
+                "at": "2026-01-01T10:00:00Z",
+                "name": "",
+                "tag": "café",
+            },
+            [
+                ("active", "Bool"),
+                ("on", "Nullable(Bool)"),
+                ("score", "Nullable(Int32)"),
+                ("count", "UInt64"),
+                ("ratio", "Float64"),
+                ("price", "Decimal(10, 2)"),
+                ("day", "Date"),
+                ("at", "DateTime64(3, 'UTC')"),
+                ("name", "String"),
+                ("tag", "LowCardinality(String)"),
+            ],
+        )
+
+        self.assertEqual(
+            coerced,
+            {
+                "active": False,
+                "on": True,
+                "score": None,
+                "count": 42,
+                "ratio": 0.5,
+                "price": Decimal("9.99"),
+                "day": dt.date(2026, 1, 1),
+                "at": dt.datetime(2026, 1, 1, 10, 0, tzinfo=dt.timezone.utc),
+                "name": "",
+                "tag": "café",
+            },
+        )
+
+    def test_unreadable_text_and_unknown_columns_are_left_as_written(self) -> None:
+        coerced = self._coerced(
+            {"active": "maybe", "count": "lots", "extra": "x"},
+            [("active", "Bool"), ("count", "Int32")],
+        )
+
+        self.assertEqual(coerced, {"active": "maybe", "count": "lots", "extra": "x"})
+
+    def test_a_datetime_without_an_offset_is_read_in_the_column_zone_or_utc(self) -> None:
+        import datetime as dt
+        from zoneinfo import ZoneInfo
+
+        coerced = self._coerced(
+            {
+                "at": "2026-01-01 10:00:00",
+                "local": "2026-01-01T10:00:00",
+                "kept": "2026-01-01T10:00:00+02:00",
+            },
+            [("at", "DateTime"), ("local", "DateTime64(3, 'Asia/Tokyo')"), ("kept", "DateTime")],
+        )
+
+        self.assertEqual(coerced["at"], dt.datetime(2026, 1, 1, 10, 0, tzinfo=dt.timezone.utc))
+        self.assertEqual(
+            coerced["local"], dt.datetime(2026, 1, 1, 10, 0, tzinfo=ZoneInfo("Asia/Tokyo"))
+        )
+        self.assertEqual(coerced["local"].utcoffset(), dt.timedelta(hours=9))
+        self.assertEqual(coerced["kept"].utcoffset(), dt.timedelta(hours=2))

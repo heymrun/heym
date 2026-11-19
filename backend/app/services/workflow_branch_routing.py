@@ -214,8 +214,11 @@ class WorkflowBranchRoutingMixin:
                 if not incoming_edges:
                     continue
 
+                # An input whose node is already skipped (by a Condition, say) feeds nothing.
                 depends_only_on_root_or_exclusive_nodes = all(
-                    edge["source"] == root_node_id or edge["source"] in exclusive_node_ids
+                    edge["source"] == root_node_id
+                    or edge["source"] in exclusive_node_ids
+                    or edge["source"] in self.skipped_nodes
                     for edge in incoming_edges
                 )
                 if depends_only_on_root_or_exclusive_nodes:

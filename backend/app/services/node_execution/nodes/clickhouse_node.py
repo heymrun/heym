@@ -97,10 +97,20 @@ def execute(ctx: NodeExecutionContext) -> object:
         return service.count(_resolve("clickhouseTable"), filters=_resolve_filters())
     if operation == "getById":
         return service.get_by_id(_resolve("clickhouseTable"), _resolve("clickhouseRowId"))
+
+    def _rows_for(table: str) -> list:
+        rows = _resolve_rows()
+        if str(node_data.get("clickhouseInputMode", "raw") or "raw").strip() == "selective":
+            # Key-value fields resolve to text; read each as its column's type.
+            rows = service.coerce_text_rows(table, rows)
+        return rows
+
     if operation == "insert":
-        return service.insert(_resolve("clickhouseTable"), _resolve_rows())
+        table = _resolve("clickhouseTable")
+        return service.insert(table, _rows_for(table))
     if operation == "upsert":
-        return service.upsert(_resolve("clickhouseTable"), _resolve_rows())
+        table = _resolve("clickhouseTable")
+        return service.upsert(table, _rows_for(table))
     if operation == "update":
         raw_data = render_json_template(
             self, str(node_data.get("clickhouseData", "{}") or "{}"), inputs, node_id

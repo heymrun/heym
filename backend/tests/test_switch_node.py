@@ -59,6 +59,13 @@ class SwitchBooleanCaseTests(unittest.TestCase):
         self.assertEqual(_route("gold", ["silver", "gold"])[0], "case-1")
         self.assertEqual(_route("bronze", ["silver", "gold"]), ("default", ["defaultPath"]))
 
+    def test_a_null_value_matches_the_case_null(self) -> None:
+        # The node's output shows null, which is what a user copies into the case.
+        self.assertEqual(_route(None, ["null", "x"]), ("case-0", ["case0Path"]))
+        self.assertEqual(_route(None, ["None", "x"])[0], "case-0")
+        self.assertEqual(_route(None, ["x"]), ("default", ["defaultPath"]))
+        self.assertEqual(_route("null", ["null"])[0], "case-0")
+
 
 if __name__ == "__main__":
     unittest.main()

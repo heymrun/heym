@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 
 from app.services.node_execution.base import NodeExecutionContext
@@ -53,7 +54,12 @@ def execute(ctx: NodeExecutionContext) -> object:
 
     if var_type != "auto":
         if var_type == "string":
-            resolved_value = str(resolved_value)
+            if isinstance(resolved_value, (bool, dict, list)) or resolved_value is None:
+                # As the input JSON and the expression dialog show it: true, null, {"a": 1},
+                # not Python's True, None, {'a': 1}.
+                resolved_value = json.dumps(resolved_value, ensure_ascii=False, default=str)
+            else:
+                resolved_value = str(resolved_value)
         elif var_type == "number":
             try:
                 if isinstance(resolved_value, str):
@@ -78,7 +84,9 @@ def execute(ctx: NodeExecutionContext) -> object:
             else:
                 resolved_value = bool(resolved_value)
         elif var_type == "array":
-            if not isinstance(resolved_value, list):
+            if resolved_value is None:
+                resolved_value = []
+            elif not isinstance(resolved_value, list):
                 resolved_value = [resolved_value]
         elif var_type == "object":
             if not isinstance(resolved_value, dict):
@@ -103,7 +111,8 @@ def execute(ctx: NodeExecutionContext) -> object:
     # _build_context and store_node_output cache can skip O(N) re-wrapping.
     # DotList/DotStr are list/str subclasses — JSON-serializable as their base types.
     # For other types the coercion above changed resolved_value, so sync vars_value.
-    if var_type not in ("array", "auto"):
+    # An "array" value that was not a list was wrapped above; that wrapped list is the value.
+    if var_type != "auto" and not (var_type == "array" and isinstance(vars_value, list)):
         vars_value = resolved_value
 
     output = {

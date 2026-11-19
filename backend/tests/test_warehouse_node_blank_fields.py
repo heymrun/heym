@@ -57,6 +57,9 @@ class ClickHouseBlankFieldTests(unittest.TestCase):
         client = MagicMock()
 
         def query(sql: str, parameters: dict | None = None) -> MagicMock:
+            if sql.startswith("DESCRIBE TABLE"):
+                # Key-value inserts read the column types first.
+                return MagicMock(result_rows=[("id", "String"), ("note", "String")])
             self.sent.append((sql, parameters or {}))
             return MagicMock(column_names=["id"], result_rows=[("7",)])
 
