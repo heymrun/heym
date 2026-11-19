@@ -256,7 +256,7 @@ class LinearServiceTests(unittest.TestCase):
             {
                 "data": {
                     "team": {
-                        "members": {
+                        "memberships": {
                             "nodes": [{"user": {"id": "user-1", "name": "Ada"}}],
                             "pageInfo": {"hasNextPage": False, "endCursor": None},
                         }
@@ -269,6 +269,11 @@ class LinearServiceTests(unittest.TestCase):
         result = service.list_team_members("team-1")
 
         self.assertEqual(result["nodes"][0]["user"]["name"], "Ada")
+        # Team.members returns User nodes, which have no `user` field: Linear rejects the
+        # query. The membership records carry `user`.
+        query = client.post.call_args.kwargs["json"]["query"]
+        self.assertIn("memberships(first: $first, after: $after)", query)
+        self.assertNotIn("members(first", query)
 
     def test_create_issue_sends_only_provided_optional_fields(self) -> None:
         client = MagicMock()
