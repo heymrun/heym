@@ -26,7 +26,14 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSON, JSONB, UUID
 from sqlalchemy.engine import Connection
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, validates
+from sqlalchemy.orm import (
+    DeclarativeBase,
+    Mapped,
+    Session,
+    mapped_column,
+    relationship,
+    validates,
+)
 from sqlalchemy.sql.elements import ColumnElement
 
 
@@ -379,6 +386,10 @@ class Workflow(Base):
     concurrency_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
     concurrency_max_queue: Mapped[int | None] = mapped_column(Integer, nullable=True)
     concurrency_max_wait_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Runs written while this is on keep their inputs, outputs and node results encrypted.
+    encrypt_run_history: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False
+    )
     scheduled_for_deletion: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True
     )
@@ -724,6 +735,16 @@ class ExecutionHistory(Base):
     # True until the node analytics rollup has counted this run (see
     # app/services/node_analytics_rollup.py). Rows written before migration 148 read false.
     node_analytics_pending: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # An encrypted run keeps placeholders in inputs/outputs/node_results and the real values
+    # in encrypted_payload, under the key of encryption_key_user_id
+    # (app/services/run_history_encryption.py).
+    encrypted: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    encrypted_payload: Mapped[str | None] = mapped_column(Text, nullable=True)
+    encryption_key_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
 
     workflow: Mapped["Workflow"] = relationship("Workflow", back_populates="executions")
     hitl_requests: Mapped[list["HITLRequest"]] = relationship(
@@ -732,6 +753,34 @@ class ExecutionHistory(Base):
     codex_followup_requests: Mapped[list["CodexFollowupRequest"]] = relationship(
         "CodexFollowupRequest", back_populates="execution_history", cascade="all, delete-orphan"
     )
+
+
+class UserHistoryKey(Base):
+    """A user's run history key: random, Fernet-wrapped under ENCRYPTION_KEY.
+
+    It stands in for the user id, which other users see through shares and teams. No API
+    schema carries it; it is read only to encrypt and decrypt run history.
+    """
+
+    __tablename__ = "user_history_keys"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    wrapped_key: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+@event.listens_for(Session, "before_flush")
+def seal_encrypted_run_history(
+    session: Session, _flush_context: object, _instances: object
+) -> None:
+    """Encrypt every run history row of a workflow with run history encryption on."""
+    if not any(isinstance(obj, ExecutionHistory) for obj in (*session.new, *session.dirty)):
+        return
+    from app.services.run_history_encryption import seal_session_rows
+
+    seal_session_rows(session)
 
 
 @event.listens_for(ExecutionHistory, "before_insert")
@@ -836,6 +885,9 @@ class ActiveWorkflowExecution(Base):
     running_node_ids: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     running_node_started_at_ms: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     node_results: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    # For a workflow with run history encryption, node_results holds a skeleton and the
+    # real results are sealed here; inputs are a sealed envelope.
+    encrypted_node_results: Mapped[str | None] = mapped_column(Text, nullable=True)
     trigger_source: Mapped[str | None] = mapped_column(String(50), nullable=True)
     actor_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

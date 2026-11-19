@@ -243,6 +243,14 @@ const api = axios.create({
 
 let requestGuard: ((config: InternalAxiosRequestConfig) => string | null) | null = null;
 
+/** A live run of a workflow with encrypted run history: watching it needs an audited unlock. */
+export class EncryptedRunLockedError extends Error {
+  constructor() {
+    super("This run is encrypted. Unlock it to watch it live.");
+    this.name = "EncryptedRunLockedError";
+  }
+}
+
 /** Lets a mode refuse requests before they leave, e.g. writes while following someone. */
 export function setRequestGuard(
   guard: ((config: InternalAxiosRequestConfig) => string | null) | null,
@@ -797,10 +805,12 @@ export const workflowApi = {
     onDone: () => void,
     onError: (error: Error) => void,
     signal?: AbortSignal,
+    unlock = false,
   ): void => {
     const API_URL = import.meta.env.VITE_API_URL || "";
+    const query = unlock ? "?unlock=true" : "";
 
-    fetch(`${API_URL}/api/workflows/${workflowId}/history/${entryId}/stream`, {
+    fetch(`${API_URL}/api/workflows/${workflowId}/history/${entryId}/stream${query}`, {
       method: "GET",
       credentials: "include",
       headers: { ...heymClientHeaders },
@@ -891,11 +901,13 @@ export const workflowApi = {
     onAgentProgress?: (data: AgentProgressEvent) => void,
     onLlmBatchProgress?: (data: LLMBatchProgressEvent) => void,
     onExecutionGone?: () => void,
+    unlock = false,
   ): void => {
     const API_URL = import.meta.env.VITE_API_URL || "";
+    const query = unlock ? "?unlock=true" : "";
 
     fetch(
-      `${API_URL}/api/workflows/${workflowId}/executions/${executionId}/stream`,
+      `${API_URL}/api/workflows/${workflowId}/executions/${executionId}/stream${query}`,
       {
         method: "GET",
         credentials: "include",
@@ -904,6 +916,9 @@ export const workflowApi = {
       },
     )
       .then(async (response) => {
+        if (response.status === 423) {
+          throw new EncryptedRunLockedError();
+        }
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -1012,6 +1027,23 @@ export const workflowApi = {
   getHistoryEntry: async (entryId: string): Promise<AllExecutionHistoryEntry> => {
     const response = await api.get<AllExecutionHistoryEntry>(
       `/workflows/history/all/${entryId}`,
+    );
+    return response.data;
+  },
+  /** Decrypts an encrypted run on the server. Every call is written to the audit log. */
+  unlockHistoryEntry: async (entryId: string): Promise<AllExecutionHistoryEntry> => {
+    const response = await api.post<AllExecutionHistoryEntry>(
+      `/workflows/history/all/${entryId}/unlock`,
+    );
+    return response.data;
+  },
+  setRunHistoryEncryption: async (
+    id: string,
+    enabled: boolean,
+  ): Promise<{ encrypt_run_history: boolean }> => {
+    const response = await api.put<{ encrypt_run_history: boolean }>(
+      `/workflows/${id}/run-history-encryption`,
+      { enabled },
     );
     return response.data;
   },

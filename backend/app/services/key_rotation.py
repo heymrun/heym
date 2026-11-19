@@ -39,6 +39,7 @@ from app.db.models import (
     KeyRotationState,
     SsoSettings,
     User,
+    UserHistoryKey,
 )
 from app.db.session import async_session_maker
 from app.services.cluster import identity, registry
@@ -150,6 +151,11 @@ async def _stored_tokens(db: AsyncSession) -> AsyncIterator[tuple[str, uuid.UUID
     )
     for user_id, token in mfa_rows.all():
         yield "mfa", user_id, token
+    history_key_rows = await db.execute(
+        select(UserHistoryKey.user_id, UserHistoryKey.wrapped_key).order_by(UserHistoryKey.user_id)
+    )
+    for user_id, token in history_key_rows.all():
+        yield "history_key", user_id, token
     sso = await db.get(SsoSettings, SSO_SETTINGS_ID)
     if sso is not None and sso.encrypted_client_secret:
         yield "sso", None, sso.encrypted_client_secret
@@ -299,9 +305,33 @@ async def _rewrite_mfa_secrets(db: AsyncSession) -> int:
     return rewritten
 
 
+async def _rewrite_history_keys(db: AsyncSession) -> int:
+    """Run history keys: one per user who has owned an encrypting workflow."""
+    rows = (
+        await db.execute(
+            select(UserHistoryKey.user_id, UserHistoryKey.wrapped_key)
+            .order_by(UserHistoryKey.user_id)
+            .with_for_update()
+        )
+    ).all()
+    new_tokens = await asyncio.to_thread(_rotate_all, [token for _, token in rows])
+    rewritten = 0
+    for (user_id, _), new_token in zip(rows, new_tokens):
+        if new_token is None:
+            continue
+        await db.execute(
+            update(UserHistoryKey)
+            .where(UserHistoryKey.user_id == user_id)
+            .values(wrapped_key=new_token)
+        )
+        rewritten += 1
+    return rewritten
+
+
 async def _rewrite_singletons(db: AsyncSession) -> int:
-    """The SSO client secret, the key check's canary, and authenticator secrets."""
+    """The SSO client secret, the key check's canary, authenticator and run history keys."""
     rewritten = await _rewrite_mfa_secrets(db)
+    rewritten += await _rewrite_history_keys(db)
     sso = (
         await db.execute(
             select(SsoSettings).where(SsoSettings.id == SSO_SETTINGS_ID).with_for_update()

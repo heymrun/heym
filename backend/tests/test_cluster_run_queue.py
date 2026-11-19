@@ -345,6 +345,12 @@ class QueueTraceLoggingTests(unittest.IsolatedAsyncioTestCase):
                         run_queue, "choose_target", new=AsyncMock(return_value="worker-a")
                     ),
                     patch.object(run_queue, "async_session_maker", factory),
+                    # Run history encryption off: the queue row keeps the caller's inputs.
+                    patch.object(
+                        run_queue,
+                        "seal_queue_inputs",
+                        new=AsyncMock(side_effect=lambda _db, **values: values["inputs"]),
+                    ),
                     self.assertLogs("queue-test", level="ERROR") as logged,
                 ):
                     try:

@@ -36,7 +36,8 @@ async def queued_run_events(
     last_queue: dict[str, Any] | None = None
     started = False
     while True:
-        body = await workflow_concurrency.build_status_body(workflow_id, execution_id)
+        # The caller's own stream: it started the run, so an encrypted run's outputs reach it.
+        body = await workflow_concurrency.build_status_body(workflow_id, execution_id, trusted=True)
         if body is None:
             yield _frame(
                 {

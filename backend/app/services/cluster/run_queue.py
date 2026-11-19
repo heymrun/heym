@@ -23,6 +23,11 @@ from app.db.models import ActiveWorkflowExecution, ClusterDispatchState, Workflo
 from app.db.session import async_session_maker
 from app.services.cluster import registry
 from app.services.cluster.weights import level_counters, pick_instance, rescale_counters
+from app.services.run_history_encryption import (
+    open_queue_result,
+    seal_queue_inputs,
+    seal_queue_result,
+)
 
 logger = logging.getLogger("cluster")
 
@@ -134,6 +139,12 @@ async def enqueue(run: QueuedRun) -> str | None:
     )
     try:
         async with async_session_maker() as db:
+            values["inputs"] = await seal_queue_inputs(
+                db,
+                workflow_id=run.workflow_id,
+                execution_id=run.execution_id,
+                inputs=values["inputs"],
+            )
             await db.execute(WorkflowRunQueue.__table__.insert().values(**values))
             await db.commit()
     except StatementError as error:
@@ -170,6 +181,17 @@ async def claim_next(instance_id: str) -> WorkflowRunQueue | None:
 
 async def complete(execution_id: uuid.UUID, *, result: dict | None, error: str | None) -> None:
     async with async_session_maker() as db:
+        workflow_id = (
+            await db.execute(
+                select(WorkflowRunQueue.workflow_id).where(
+                    WorkflowRunQueue.execution_id == execution_id
+                )
+            )
+        ).scalar_one_or_none()
+        if workflow_id is not None:
+            result = await seal_queue_result(
+                db, workflow_id=workflow_id, execution_id=execution_id, result=result
+            )
         await db.execute(
             update(WorkflowRunQueue)
             .where(WorkflowRunQueue.execution_id == execution_id)
@@ -327,7 +349,11 @@ async def notify_queue(target_instance_id: str) -> None:
 
 
 async def read_terminal_result(execution_id: uuid.UUID) -> tuple[str, dict | None, str | None]:
-    """Status, result and error for one queued run, or ("missing", None, None)."""
+    """Status, result and error for one queued run, or ("missing", None, None).
+
+    The caller is the dispatcher that queued the run and waits to answer its request, so
+    a sealed result is opened for it.
+    """
     async with async_session_maker() as db:
         row = (
             await db.execute(
@@ -335,12 +361,16 @@ async def read_terminal_result(execution_id: uuid.UUID) -> tuple[str, dict | Non
                     WorkflowRunQueue.status,
                     WorkflowRunQueue.result,
                     WorkflowRunQueue.error,
+                    WorkflowRunQueue.workflow_id,
                 ).where(WorkflowRunQueue.execution_id == execution_id)
             )
         ).first()
-    if row is None:
-        return "missing", None, None
-    return row[0], row[1], row[2]
+        if row is None:
+            return "missing", None, None
+        result = await open_queue_result(
+            db, workflow_id=row[3], execution_id=execution_id, result=row[1]
+        )
+    return row[0], result, row[2]
 
 
 def is_terminal(status: str) -> bool:

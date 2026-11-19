@@ -23,7 +23,7 @@ from fastapi import (
     status,
 )
 from fastapi.responses import JSONResponse, StreamingResponse
-from sqlalchemy import String, cast, func, or_, select, text
+from sqlalchemy import String, cast, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
@@ -69,10 +69,13 @@ from app.models.schemas import (
     HighlightPayloadSchema,
     HistoryListResponse,
     InputFieldSchema,
+    NodeResultSchema,
     OutputNodeSchema,
     PendingReviewSeedRequest,
     PendingReviewSeedResponse,
     RevertVersionRequest,
+    RunHistoryEncryptionResponse,
+    RunHistoryEncryptionUpdate,
     WorkflowCreate,
     WorkflowExecuteResponse,
     WorkflowExecutionStatusResponse,
@@ -89,7 +92,7 @@ from app.models.schemas import (
 )
 from app.services import file_intake_service, workflow_concurrency
 from app.services.active_execution_overview import collect_active_executions_for_user
-from app.services.audit_log import OUTCOME_DENIED, audit
+from app.services.audit_log import OUTCOME_DENIED, OUTCOME_FAILURE, audit
 from app.services.auth import create_workflow_execution_token, decode_token
 from app.services.cache_rate_limit import rate_limiter, response_cache
 from app.services.cluster.dispatch import dispatch_workflow, resolve_placement
@@ -145,6 +148,18 @@ from app.services.node_analytics_rollup import pending_on_first_write
 from app.services.pending_execution import needs_local_pending_persist
 from app.services.pending_review_cancel import cancel_pending_review_execution
 from app.services.queued_run_stream import queued_run_events
+from app.services.run_history_encryption import (
+    RunHistoryUnavailableError,
+    ensure_user_key,
+    is_sealed_queue_value,
+    not_encrypted,
+    open_active_inputs,
+    open_active_node_results,
+    open_run_payload,
+    open_run_payload_or_placeholders,
+    stored_run_payload,
+    unseal_in_place,
+)
 from app.services.run_history_list import (
     apply_instance_filter,
     history_status_clause,
@@ -628,6 +643,7 @@ async def _finalize_allow_downstream_history(
                     history_entry_id,
                 )
                 return
+            await unseal_in_place(bg_db, history_entry)
 
             is_already_finalized = any(
                 isinstance(nr, dict) and nr.get("metadata", {}).get("_downstream_finalized")
@@ -1058,6 +1074,22 @@ def _output_summary_for_chat(outputs: dict) -> str:
     return " | ".join(parts) if parts else str(outputs)[:120]
 
 
+async def count_encrypted_recent_executions_for_user(
+    db: AsyncSession, user_id: uuid.UUID, since_hours: int | None = 24
+) -> int:
+    """Encrypted runs `get_recent_executions_for_user` leaves out, for the chat to mention."""
+    query = (
+        select(func.count())
+        .select_from(ExecutionHistory)
+        .join(Workflow, ExecutionHistory.workflow_id == Workflow.id)
+        .where(workflow_access_clause(user_id), ~not_encrypted())
+    )
+    if since_hours:
+        since = datetime.now(timezone.utc) - timedelta(hours=since_hours)
+        query = query.where(ExecutionHistory.started_at >= since)
+    return int((await db.execute(query)).scalar_one() or 0)
+
+
 async def get_recent_executions_for_user(
     db: AsyncSession,
     user_id: uuid.UUID,
@@ -1067,7 +1099,7 @@ async def get_recent_executions_for_user(
     """
     Return recent execution and run history for the user, for dashboard chat.
     Each item: workflow_name, run_type, started_at (iso), status, execution_time_ms,
-    trigger_source, output_summary.
+    trigger_source, output_summary. Encrypted runs are left out.
     """
     now = datetime.now(timezone.utc)
     since = (now - timedelta(hours=since_hours)) if since_hours else None
@@ -1075,7 +1107,7 @@ async def get_recent_executions_for_user(
     exec_query = (
         select(ExecutionHistory, Workflow)
         .join(Workflow, ExecutionHistory.workflow_id == Workflow.id)
-        .where(workflow_access_clause(user_id))
+        .where(workflow_access_clause(user_id), not_encrypted())
         .order_by(ExecutionHistory.started_at.desc())
         .limit(limit)
     )
@@ -1163,6 +1195,7 @@ async def get_execution_history_entry(
             started_at=history.started_at,
             trigger_source=history.trigger_source,
             recovered=history.recovered,
+            encrypted=history.encrypted,
             highlight=build_highlight_payload(
                 history.node_results or [], workflow.nodes or [], history.inputs or {}
             ),
@@ -1194,6 +1227,95 @@ async def get_execution_history_entry(
     raise HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
         detail="Execution history entry not found",
+    )
+
+
+@router.post(
+    "/history/all/{entry_id}/unlock",
+    response_model=ExecutionHistoryWithWorkflowResponse,
+)
+async def unlock_execution_history_entry(
+    entry_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ExecutionHistoryWithWorkflowResponse:
+    """Decrypt one encrypted run for a user who can at least read its workflow.
+
+    Owners, collaborators and instance administrators alike: every unlock is audited.
+    """
+    row = (
+        await db.execute(
+            select(ExecutionHistory, Workflow)
+            .join(Workflow, ExecutionHistory.workflow_id == Workflow.id)
+            .where(ExecutionHistory.id == entry_id)
+            .where(workflow_access_clause(current_user.id))
+        )
+    ).first()
+    if row is None:
+        audit(
+            action="workflow.history_unlock",
+            outcome=OUTCOME_DENIED,
+            actor=current_user,
+            target_type="execution",
+            target_id=entry_id,
+            reason="not_found_or_no_access",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Execution history entry not found",
+        )
+    history, workflow = row
+    if not history.encrypted:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This run is not encrypted",
+        )
+    permission = await get_workflow_permission(db, workflow, current_user.id)
+    try:
+        payload = await open_run_payload(db, history)
+    except RunHistoryUnavailableError:
+        audit(
+            action="workflow.history_unlock",
+            outcome=OUTCOME_FAILURE,
+            actor=current_user,
+            target_type="workflow",
+            target_id=workflow.id,
+            target_name=workflow.name,
+            execution_id=history.id,
+            reason="undecryptable",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This run can no longer be decrypted",
+        )
+    audit(
+        action="workflow.history_unlock",
+        actor=current_user,
+        target_type="workflow",
+        target_id=workflow.id,
+        target_name=workflow.name,
+        execution_id=history.id,
+        owned=workflow.owner_id == current_user.id,
+        permission=permission,
+        admin=is_instance_admin(current_user),
+    )
+    return ExecutionHistoryWithWorkflowResponse(
+        id=history.id,
+        workflow_id=history.workflow_id,
+        workflow_name=workflow.name,
+        run_type="workflow",
+        inputs=payload.inputs,
+        outputs=payload.outputs,
+        node_results=payload.node_results,
+        status=history.status,
+        execution_time_ms=history.execution_time_ms,
+        started_at=history.started_at,
+        trigger_source=history.trigger_source,
+        recovered=history.recovered,
+        encrypted=True,
+        highlight=build_highlight_payload(
+            payload.node_results, workflow.nodes or [], payload.inputs
+        ),
     )
 
 
@@ -1236,6 +1358,7 @@ async def list_all_execution_history(
             execution_time_ms=row.execution_time_ms,
             trigger_source=row.trigger_source,
             recovered=row.recovered,
+            encrypted=row.encrypted,
             executed_by_instance_id=row.executed_by_instance_id,
             executed_by_instance_name=row.executed_by_instance_name,
         )
@@ -1304,7 +1427,11 @@ async def get_workflow_execution_status(
             raise not_found
     else:
         await validate_workflow_auth(workflow, request, current_user, db)
-    body = await workflow_concurrency.build_status_body(workflow_id, execution_id)
+    body = await workflow_concurrency.build_status_body(
+        workflow_id,
+        execution_id,
+        run_token=request.headers.get(workflow_concurrency.RUN_TOKEN_HEADER),
+    )
     if body is None:
         raise not_found
     return WorkflowExecutionStatusResponse.model_validate(body)
@@ -1315,10 +1442,15 @@ async def stream_active_workflow_execution(
     workflow_id: uuid.UUID,
     execution_id: uuid.UUID,
     request: Request,
+    unlock: bool = Query(default=False),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> StreamingResponse:
-    """Stream a running execution into any authorized workflow canvas."""
+    """Stream a running execution into any authorized workflow canvas.
+
+    A run of a workflow with run history encryption answers 423 until the viewer confirms
+    the unlock (``unlock=true``); that request is audited before the stream starts.
+    """
     workflow = await get_workflow_for_user(db, workflow_id, current_user.id)
     if workflow is None:
         raise HTTPException(
@@ -1330,6 +1462,7 @@ async def stream_active_workflow_execution(
         execution_id,
         workflow_id=workflow_id,
     )
+    persisted_inputs = None
     if initial_inputs is None:
         async with async_session_maker() as stream_db:
             active_inputs_result = await stream_db.execute(
@@ -1340,7 +1473,34 @@ async def stream_active_workflow_execution(
                 )
             )
             persisted_inputs = active_inputs_result.scalar_one_or_none()
-        initial_inputs = dict(persisted_inputs or {})
+    run_encrypted = workflow.encrypt_run_history is True or is_sealed_queue_value(persisted_inputs)
+    if run_encrypted and not unlock:
+        raise HTTPException(
+            status_code=status.HTTP_423_LOCKED,
+            detail="This run is encrypted. Unlock it to watch it live.",
+        )
+    if run_encrypted:
+        audit(
+            action="workflow.live_run_unlock",
+            actor=current_user,
+            target_type="workflow",
+            target_id=workflow.id,
+            target_name=workflow.name,
+            execution_id=execution_id,
+            owned=workflow.owner_id == current_user.id,
+            permission=await get_workflow_permission(db, workflow, current_user.id),
+            admin=is_instance_admin(current_user),
+        )
+    if initial_inputs is None:
+        async with async_session_maker() as stream_db:
+            initial_inputs = dict(
+                await open_active_inputs(
+                    stream_db,
+                    workflow_id=workflow_id,
+                    execution_id=execution_id,
+                    inputs=persisted_inputs,
+                )
+            )
 
     async def event_generator():
         emitted_result_count = 0
@@ -1454,7 +1614,8 @@ async def stream_active_workflow_execution(
                     execution_id,
                     workflow_id=workflow_id,
                 )
-                if completed_result is not None:
+                # A queue worker leaves an empty payload: its run is read from history below.
+                if completed_result:
                     yield f"data: {json.dumps(completed_result)}\n\n"
                     break
                 async with async_session_maker() as stream_db:
@@ -1466,11 +1627,22 @@ async def stream_active_workflow_execution(
                         )
                     )
                     active = active_result.scalar_one_or_none()
+                    if active is not None:
+                        node_results = (
+                            await open_active_node_results(
+                                stream_db,
+                                workflow_id=workflow_id,
+                                execution_id=execution_id,
+                                node_results=active.node_results,
+                                sealed=active.encrypted_node_results,
+                            )
+                            if run_encrypted
+                            else list(active.node_results or [])
+                        )
                 if active is not None:
                     active_found = True
                     running_node_ids = list(active.running_node_ids or [])
                     running_node_started_at_ms = dict(active.running_node_started_at_ms or {})
-                    node_results = list(active.node_results or [])
 
             if active_found:
                 missing_ticks = 0
@@ -1502,21 +1674,30 @@ async def stream_active_workflow_execution(
                     )
                 )
                 history = history_result.scalar_one_or_none()
+                # The viewer unlocked this live view, so the finished run opens for them too.
+                final = None
+                if history is not None:
+                    final = (
+                        await open_run_payload_or_placeholders(stream_db, history)
+                        if run_encrypted
+                        else stored_run_payload(history)
+                    )
 
-            if history is not None:
-                final_node_results = list(history.node_results or [])
+            if history is not None and final is not None:
+                final_node_results = list(final.node_results)
                 final_event = {
                     "type": "execution_complete",
                     "workflow_id": str(workflow_id),
                     "status": history.status,
-                    "outputs": history.outputs or {},
+                    "outputs": final.outputs,
                     "execution_time_ms": history.execution_time_ms,
                     "node_results": final_node_results,
                     "execution_history_id": str(history.id),
+                    "encrypted": history.encrypted,
                     "highlight": build_highlight_payload(
                         final_node_results,
                         workflow.nodes or [],
-                        history.inputs or {},
+                        final.inputs,
                     ),
                 }
                 yield f"data: {json.dumps(final_event)}\n\n"
@@ -2020,6 +2201,60 @@ async def clear_workflow_response_cache(
     await require_workflow_write(db, workflow, current_user.id)
 
     await response_cache.clear_workflow(db, workflow_id)
+
+
+@router.put(
+    "/{workflow_id}/run-history-encryption",
+    response_model=RunHistoryEncryptionResponse,
+)
+async def set_run_history_encryption(
+    workflow_id: uuid.UUID,
+    body: RunHistoryEncryptionUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> RunHistoryEncryptionResponse:
+    """Turn run history encryption on or off for runs written from now on. Owner only."""
+    workflow = await get_workflow_for_user(db, workflow_id, current_user.id)
+    if workflow is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Workflow not found",
+        )
+    if workflow.owner_id != current_user.id:
+        audit(
+            action="workflow.run_history_encryption",
+            outcome=OUTCOME_DENIED,
+            actor=current_user,
+            target_type="workflow",
+            target_id=workflow.id,
+            target_name=workflow.name,
+            enabled=body.enabled,
+            reason="not_owner",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the workflow owner can change run history encryption",
+        )
+    previous = bool(workflow.encrypt_run_history)
+    if body.enabled:
+        await ensure_user_key(db, workflow.owner_id)
+    # updated_at stays: an open editor's next save would otherwise read as a conflict.
+    await db.execute(
+        update(Workflow)
+        .where(Workflow.id == workflow.id)
+        .values(encrypt_run_history=body.enabled, updated_at=Workflow.updated_at)
+    )
+    await db.commit()
+    audit(
+        action="workflow.run_history_encryption",
+        actor=current_user,
+        target_type="workflow",
+        target_id=workflow.id,
+        target_name=workflow.name,
+        enabled=body.enabled,
+        previous=previous,
+    )
+    return RunHistoryEncryptionResponse(encrypt_run_history=body.enabled)
 
 
 @router.delete("/{workflow_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -3526,7 +3761,10 @@ async def execute_workflow_endpoint(
             concurrency_limit=getattr(workflow, "concurrency_limit", None),
             concurrency_exempt=concurrency_exempt,
             on_queued="return",
-            mint_status_token=getattr(workflow, "auth_type", None) == WorkflowAuthType.anonymous,
+            # Anonymous callers read their run with it; for an encrypted workflow it is the
+            # only way back to the outputs without an audited unlock.
+            mint_status_token=getattr(workflow, "auth_type", None) == WorkflowAuthType.anonymous
+            or bool(getattr(workflow, "encrypt_run_history", False)),
         )
     except WorkflowCancelledError:
         audit_workflow_run(
@@ -3860,10 +4098,15 @@ async def stream_workflow_execution_history_entry(
     workflow_id: uuid.UUID,
     entry_id: uuid.UUID,
     request: Request,
+    unlock: bool = Query(default=False),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> StreamingResponse:
-    """Stream changes for a single workflow execution history entry."""
+    """Stream changes for a single workflow execution history entry.
+
+    An encrypted entry streams its placeholders, or, after the viewer confirmed the unlock
+    (``unlock=true``, audited here), its real values.
+    """
     workflow = await get_workflow_for_user(db, workflow_id, current_user.id)
     if workflow is None:
         raise HTTPException(
@@ -3883,6 +4126,19 @@ async def stream_workflow_execution_history_entry(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Execution history entry not found",
         )
+    open_encrypted = unlock and bool(initial_history.encrypted)
+    if open_encrypted:
+        audit(
+            action="workflow.live_run_unlock",
+            actor=current_user,
+            target_type="workflow",
+            target_id=workflow.id,
+            target_name=workflow.name,
+            execution_id=entry_id,
+            owned=workflow.owner_id == current_user.id,
+            permission=await get_workflow_permission(db, workflow, current_user.id),
+            admin=is_instance_admin(current_user),
+        )
 
     async def event_generator():
         last_payload = ""
@@ -3900,6 +4156,11 @@ async def stream_workflow_execution_history_entry(
                     )
                 )
                 history = result.scalar_one_or_none()
+                payload = (
+                    await open_run_payload_or_placeholders(stream_db, history)
+                    if history is not None and open_encrypted
+                    else None
+                )
 
             if history is None:
                 error_event = {
@@ -3910,9 +4171,23 @@ async def stream_workflow_execution_history_entry(
                 break
 
             entry_response = ExecutionHistoryResponse.model_validate(history)
+            if payload is not None:
+                entry_response = entry_response.model_copy(
+                    update={
+                        "inputs": payload.inputs,
+                        "outputs": payload.outputs,
+                        "node_results": [
+                            NodeResultSchema.model_validate(item)
+                            for item in payload.node_results
+                            if isinstance(item, dict)
+                        ],
+                    }
+                )
             entry_response.highlight = HighlightPayloadSchema.model_validate(
                 build_highlight_payload(
-                    history.node_results or [], workflow.nodes or [], history.inputs or {}
+                    payload.node_results if payload is not None else history.node_results or [],
+                    workflow.nodes or [],
+                    payload.inputs if payload is not None else history.inputs or {},
                 )
             )
             entry_payload = entry_response.model_dump(mode="json")
@@ -4029,6 +4304,7 @@ async def get_execution_history(
             execution_time_ms=h.execution_time_ms,
             trigger_source=h.trigger_source,
             recovered=h.recovered,
+            encrypted=h.encrypted,
             executed_by_instance_id=h.executed_by_instance_id,
             executed_by_instance_name=h.executed_by_instance_name,
         )

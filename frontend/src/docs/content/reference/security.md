@@ -80,6 +80,10 @@ A single container can skip step 1. Credentials no configured key can read, from
 
 Rotation protects backups taken afterwards. A leaked key together with a copy of the database still exposes every credential in that copy, so after a leak, also rotate the credentials at their providers. The full procedure, including the first start after upgrading, is in `ENVIRONMENT-VARIABLES.md` under "Rotating `ENCRYPTION_KEY`".
 
+## Run History Encryption
+
+A workflow owner can turn on **Encrypt run history** so the inputs, outputs and node results of new runs are stored with AES-256-GCM under a per-owner key. The key's secret is wrapped with `ENCRYPTION_KEY`, never leaves the server, and is re-encrypted by [key rotation](#rotating-the-key). Viewing an encrypted run takes an explicit, audited unlock. See [Run History Encryption](./run-history-encryption.md).
+
 ## MCP API Key
 
 The MCP API key is used to authenticate external MCP clients connecting to `/api/mcp`, `/api/mcp/servers/{id}/mcp`, and the legacy `/sse` routes. Clients send the MCP API key in the `X-MCP-Key` header, or an OAuth 2.0 access token as `Authorization: Bearer <token>`. On the legacy `/sse` routes, when the SSE connection is established, a short-lived (1-hour) session token is issued and embedded in the message endpoint URL instead of the real API key, preventing the key from appearing in server access logs. For Streamable HTTP, clients send the key or OAuth access token on each request, and the session is carried in the signed `Mcp-Session-Id` header. See [MCP Tab](../tabs/mcp-tab.md) for setup.
@@ -158,6 +162,7 @@ Sandbox limits are constants rather than environment variables — 512 MB of mem
 - [Code Node](../nodes/code-node.md) – Sandboxed Python execution with its own dependencies
 - [Agent Node](../nodes/agent-node.md) – Custom Python tools that run in the sandbox
 - [Execution Tokens](./execution-tokens.md) – Scoped JWTs for calling workflows from external systems
+- [Run History Encryption](./run-history-encryption.md): Encrypted run history with audited unlock
 - [Guardrails](./guardrails.md) – Block unsafe content in LLM and Agent nodes
 - [Settings](./user-settings.md) – Change your password
 - [Credentials Tab](../tabs/credentials-tab.md) – Manage API keys

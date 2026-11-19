@@ -16,12 +16,13 @@ T0 = datetime(2026, 9, 1, 8, 0, tzinfo=timezone.utc)
 T1 = datetime(2026, 9, 3, 9, 30, tzinfo=timezone.utc)
 
 
-def _result(*, all_rows=None, scalars=None, first=None, scalar_one=None) -> MagicMock:
+def _result(*, all_rows=None, scalars=None, first=None, scalar_one=None, count=0) -> MagicMock:
     result = MagicMock()
     result.all.return_value = all_rows or []
     result.scalars.return_value.all.return_value = scalars or []
     result.first.return_value = first
     result.scalar_one_or_none.return_value = scalar_one
+    result.scalar_one.return_value = count
     return result
 
 
@@ -36,14 +37,16 @@ def _run(status: str = "success", **overrides) -> SimpleNamespace:
         "inputs": {"q": "hi"},
         "outputs": {"answer": "ok"},
         "node_results": [],
+        "encrypted": False,
     }
     values.update(overrides)
     return SimpleNamespace(**values)
 
 
-def _db(*results: MagicMock) -> AsyncMock:
+def _db(*results: MagicMock, encrypted: int = 0) -> AsyncMock:
+    """The listing's statements in order, then the count of encrypted runs it leaves out."""
     db = AsyncMock()
-    db.execute = AsyncMock(side_effect=list(results))
+    db.execute = AsyncMock(side_effect=[*results, _result(count=encrypted)])
     return db
 
 
@@ -64,7 +67,7 @@ class TestRunHistoryMetadata(unittest.IsolatedAsyncioTestCase):
         db = _db(
             _result(all_rows=[("success", 8, T0, T1, 800.0), ("error", 2, T0, T1, 400.0)]),
             _result(scalars=[listed]),
-            _result(first=(listed.id, "error", T1)),
+            _result(first=(listed.id, "error", T1, False)),
         )
 
         out = await self._call(db)
@@ -85,7 +88,7 @@ class TestRunHistoryMetadata(unittest.IsolatedAsyncioTestCase):
 
         await self._call(db)
 
-        self.assertEqual(db.execute.await_count, 3)
+        self.assertEqual(db.execute.await_count, 4)
         for call in db.execute.await_args_list:
             params = call.args[0].compile().params.values()
             self.assertIn(self.workflow_id, params)
@@ -95,7 +98,7 @@ class TestRunHistoryMetadata(unittest.IsolatedAsyncioTestCase):
         db = _db(
             _result(all_rows=[("success", 8, T0, T1, 800.0), ("error", 2, T0, T1, 400.0)]),
             _result(scalars=[listed]),
-            _result(first=(listed.id, "error", T1)),
+            _result(first=(listed.id, "error", T1, False)),
         )
 
         out = await self._call(db, status="ERROR", limit=1)
@@ -106,6 +109,23 @@ class TestRunHistoryMetadata(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(out["has_more"])
         runs_stmt = db.execute.await_args_list[1].args[0].compile()
         self.assertIn("error", runs_stmt.params.values())
+
+    async def test_encrypted_runs_are_counted_but_left_out_of_the_list(self) -> None:
+        db = _db(
+            _result(all_rows=[("success", 3, T0, T1, 300.0)]),
+            _result(scalars=[]),
+            _result(first=(uuid.uuid4(), "success", T1, True)),
+            encrypted=3,
+        )
+
+        out = await self._call(db)
+
+        self.assertEqual(out["total_runs"], 3)
+        self.assertEqual(out["encrypted_runs_skipped"], 3)
+        self.assertEqual(out["matching_runs"], 0)
+        self.assertTrue(out["last_run"]["encrypted"])
+        runs_sql = str(db.execute.await_args_list[1].args[0].compile())
+        self.assertIn("execution_history.encrypted IS false", runs_sql)
 
     async def test_empty_history(self) -> None:
         out = await self._call(_db(_result(), _result(), _result()))

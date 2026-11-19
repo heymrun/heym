@@ -17,6 +17,29 @@ import type { ReleaseEntry } from "@/features/release-tour/releaseTour.types";
  */
 export const RELEASE_REGISTRY: ReleaseEntry[] = [
   {
+    releaseId: "2026.38",
+    publishedAt: new Date("2026-11-20T12:00:00Z"),
+    headline: "Encrypted run history",
+    releaseTour: {
+      label: "New in Heym", introTitle: "New in this release",
+      introDescription: "Keep a production workflow's runs encrypted, and open one only through an audited unlock.",
+      tourEnabled: true,
+      sectionOrder: ["run-history-encryption"],
+    },
+    sections: [{
+      id: "run-history-encryption", title: "Encrypted run history",
+      publishedAt: new Date("2026-11-20T12:00:00Z"),
+      blocks: [{ type: "prose", markdown: "Turn on **Encrypt run history** in a workflow's settings and every run from then on, editor test runs and sub-workflow runs included, stores its inputs, outputs and node results encrypted with AES-256-GCM under a key of the workflow owner's. History shows these runs with a lock. Anyone with access, the owner and instance administrators included, clicks **Unlock** and confirms to see a run; the server decrypts it for that request and writes the unlock to the audit log, as it does every change of the setting. Chat and MCP run history tools and the Heym node leave encrypted runs out and say how many they skipped, while counts, durations, analytics and alerts keep including them. Watching a still-running run on the canvas asks first and is audited too. Queued runs are sealed in the queue, and their status link returns outputs only with the run token the caller received. Heym Work shows and unlocks them the same way, and the Workflow Analysis report suggests the setting for workflows that handle personal data or are shared." }],
+      tour: {
+        description: "Store a workflow's runs encrypted and open one only through an unlock that is written to the audit log.",
+        useCases: ["Keep customer or patient data out of everyday run history", "Let admins inspect a production run only when there is a reason", "Prove who opened which run, and when, from the audit trail"],
+        tourVisual: "run-history-encryption",
+        docTarget: { categoryId: "reference", slug: "run-history-encryption", title: "Run History Encryption" },
+      },
+    }],
+  },
+
+  {
     releaseId: "2026.37",
     publishedAt: new Date("2026-11-19T12:00:00Z"),
     headline: "Gmail Send and Outlook Send",
@@ -106,30 +129,5 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
         docTarget: { categoryId: "nodes", slug: "gmail-trigger-node", title: "Gmail Trigger" },
       },
     }],
-  },
-
-  {
-    releaseId: "2026.33",
-    publishedAt: new Date("2026-11-15T00:00:00Z"),
-    headline: "Standardized /mcp server endpoints",
-    releaseTour: {
-      label: "New in Heym", introTitle: "New in this release",
-      introDescription: "Connect new MCP clients through /mcp, with existing /sse servers preserved.",
-      tourEnabled: true,
-      sectionOrder: ["mcp-endpoint"],
-    },
-    sections: [
-      {
-        id: "mcp-endpoint", title: "Standardized /mcp endpoint for new MCP servers",
-        publishedAt: new Date("2026-11-15T00:00:00Z"),
-        blocks: [{ type: "prose", markdown: "New MCP servers get an address ending in `/mcp`. Servers you already have keep their `/sse` address, so connected clients keep working. Copy JSON and Add to Cursor always use the right address." }],
-        tour: {
-          description: "New MCP servers get an address ending in /mcp. Servers you already have keep their /sse address, so connected clients keep working. Copy JSON and Add to Cursor always use the right address.",
-          useCases: ["Connect MCP clients to /api/mcp", "Create named servers with the new /mcp route", "Keep existing /sse clients and Cursor integrations working as before"],
-          tourVisual: "mcp-endpoint",
-          docTarget: { categoryId: "tabs", slug: "mcp-tab", title: "MCP / A2A" },
-        },
-      },
-    ],
   },
 ];

@@ -8,6 +8,8 @@ import {
   Clock,
   Database,
   Loader2,
+  Lock,
+  LockOpen,
   Trash2,
   CheckCircle2,
   XCircle,
@@ -28,6 +30,7 @@ import { activeExecutionStatus } from "@/components/Panels/activeExecutionStatus
 import ExecutionHistoryAskAiButton from "@/components/Panels/ExecutionHistoryAskAiButton.vue";
 import ExecutionHistoryTimeline from "@/components/Panels/ExecutionHistoryTimeline.vue";
 import ExecutionHistoryViewToggle from "@/components/Panels/ExecutionHistoryViewToggle.vue";
+import RunHistoryUnlockNotice from "@/components/Panels/RunHistoryUnlockNotice.vue";
 import Button from "@/components/ui/Button.vue";
 import Dialog from "@/components/ui/Dialog.vue";
 import ImageLightbox from "@/components/ui/ImageLightbox.vue";
@@ -49,11 +52,17 @@ import {
 } from "@/lib/executionLog";
 import { isOpenInNewTab } from "@/lib/paletteNavigate";
 import { cn } from "@/lib/utils";
+import { type UnlockedRunCandidate, withUnlockedMatches } from "@/lib/unlockedRunSearch";
 import { followedSignals, localFollowSignals } from "@/features/collab/followSignals";
 import { workflowApi } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
 import { useWorkflowStore } from "@/stores/workflow";
-import type { ActiveExecutionItem, ExecutionHistoryEntry, NodeResult } from "@/types/workflow";
+import type {
+  ActiveExecutionItem,
+  AllExecutionHistoryEntry,
+  ExecutionHistoryEntry,
+  NodeResult,
+} from "@/types/workflow";
 
 interface Props {
   open: boolean;
@@ -191,7 +200,42 @@ const instanceOptions = computed<Array<{ value: string | undefined; label: strin
   ];
 });
 
-const filteredExecutionHistoryList = computed(() => executionHistoryList.value);
+const unlockedCandidates = computed<UnlockedRunCandidate[]>(() =>
+  [...workflowStore.executionHistoryDetails.values()]
+    .filter((entry) => entry.unlocked)
+    .map((entry) => ({
+      item: {
+        id: entry.id,
+        workflow_id: entry.result?.workflow_id ?? workflowStore.currentWorkflow?.id ?? null,
+        workflow_name: workflowStore.currentWorkflow?.name ?? "Workflow",
+        run_type: "workflow" as const,
+        started_at: entry.started_at,
+        status: entry.status,
+        execution_time_ms: entry.result?.execution_time_ms ?? 0,
+        trigger_source: entry.trigger_source,
+        recovered: entry.recovered,
+        encrypted: true,
+        executed_by_instance_id: entry.executed_by_instance_id,
+        executed_by_instance_name: entry.executed_by_instance_name,
+      },
+      data: [entry.inputs, entry.result?.outputs, entry.result?.node_results],
+    })),
+);
+
+/** The server cannot search encrypted content; runs unlocked here are matched in the browser. */
+const filteredExecutionHistoryList = computed(() =>
+  withUnlockedMatches(executionHistoryList.value, searchQuery.value, unlockedCandidates.value, {
+    status: selectedStatus.value,
+    triggerSource: selectedTriggerSource.value,
+    instanceId: selectedInstanceId.value,
+  }),
+);
+const displayedHistoryTotal = computed(
+  () =>
+    executionHistoryTotal.value +
+    filteredExecutionHistoryList.value.length -
+    executionHistoryList.value.length,
+);
 const hasActiveFilters = computed<boolean>(
   () =>
     Boolean(searchQuery.value.trim()) ||
@@ -336,6 +380,15 @@ onUnmounted(() => {
 
 function formatTime(value: string): string {
   return new Date(value).toLocaleString();
+}
+
+/** An encrypted run the user has not unlocked: its data sections stay hidden. */
+const runLocked = computed(
+  () => Boolean(selectedEntry.value?.encrypted && !selectedEntry.value.unlocked),
+);
+
+function onRunUnlocked(entry: AllExecutionHistoryEntry): void {
+  workflowStore.applyUnlockedHistoryEntry(entry);
 }
 
 async function selectEntry(entryId: string): Promise<void> {
@@ -760,6 +813,8 @@ async function openEntryOnCanvas(entryId: string): Promise<void> {
 }
 
 function bringToCanvas(): void {
+  // A locked encrypted run has no data to bring; it stays selected with its Unlock notice.
+  if (runLocked.value) return;
   if (!selectedEntry.value || !workflowStore.currentWorkflow?.id) return;
   const nodeResultsFromHistory = selectedEntry.value.result?.node_results || [];
   const executionResultFromHistory = selectedEntry.value.result || undefined;
@@ -802,7 +857,7 @@ function bringToCanvas(): void {
           Loading...
         </template>
         <template v-else>
-          {{ executionHistoryTotal }} run(s)
+          {{ displayedHistoryTotal }} run(s)
         </template>
       </p>
       <div class="order-2 ml-auto flex items-center gap-0.5 sm:order-3 sm:col-start-3 sm:gap-1 shrink-0 flex-wrap justify-end">
@@ -1037,6 +1092,14 @@ function bringToCanvas(): void {
               >
                 <RotateCcw class="w-2.5 h-2.5" />
               </span>
+              <span
+                v-if="entry.encrypted"
+                class="px-1 py-0.5 rounded bg-primary/15 text-primary dark:text-violet-300 inline-flex items-center"
+                title="Encrypted run"
+                data-testid="run-history-encrypted-badge"
+              >
+                <Lock class="w-2.5 h-2.5" />
+              </span>
             </div>
           </button>
           <div
@@ -1083,70 +1146,85 @@ function bringToCanvas(): void {
               Recovered run, automatically re-run after a server restart.
             </span>
           </div>
-          <!-- Inputs -->
-          <div class="flex items-center justify-between gap-2">
-            <div class="text-sm font-semibold">
-              Inputs
+          <RunHistoryUnlockNotice
+            v-if="selectedEntry.encrypted && !selectedEntry.unlocked"
+            :key="selectedEntry.id"
+            :entry-id="selectedEntry.id"
+            @unlocked="onRunUnlocked"
+          />
+          <div
+            v-else-if="selectedEntry.encrypted"
+            class="flex items-center gap-2 px-3 py-2 rounded-md bg-primary/10 text-primary dark:text-violet-300 text-xs"
+          >
+            <LockOpen class="w-3.5 h-3.5 shrink-0" />
+            <span>Unlocked encrypted run. This view was written to the audit log.</span>
+          </div>
+          <template v-if="!runLocked">
+            <!-- Inputs -->
+            <div class="flex items-center justify-between gap-2">
+              <div class="text-sm font-semibold">
+                Inputs
+              </div>
+              <div class="flex items-center gap-0.5 sm:gap-1 flex-wrap justify-end">
+                <Button
+                  v-if="pendingHitlUrl"
+                  variant="ghost"
+                  size="sm"
+                  class="h-6 px-2 gap-1 text-amber-500 hover:text-amber-400"
+                  @click="openExternal(pendingHitlUrl)"
+                >
+                  <ExternalLink class="w-3 h-3" />
+                  <span class="text-xs">HITL Review</span>
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  class="h-6 px-2 gap-1"
+                  @click="bringToCanvas"
+                >
+                  <ArrowDownToLine class="w-3 h-3" />
+                  <span class="text-xs">Bring to Canvas</span>
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  class="h-6 px-2 gap-1"
+                  @click="copyToClipboard(selectedEntry?.inputs ?? {}, 'inputs')"
+                >
+                  <component
+                    :is="copiedField === 'inputs' ? Check : Copy"
+                    class="w-3 h-3"
+                  />
+                  <span class="text-xs">{{ copiedField === 'inputs' ? 'Copied' : 'Copy' }}</span>
+                </Button>
+              </div>
             </div>
-            <div class="flex items-center gap-0.5 sm:gap-1 flex-wrap justify-end">
-              <Button
-                v-if="pendingHitlUrl"
-                variant="ghost"
-                size="sm"
-                class="h-6 px-2 gap-1 text-amber-500 hover:text-amber-400"
-                @click="openExternal(pendingHitlUrl)"
-              >
-                <ExternalLink class="w-3 h-3" />
-                <span class="text-xs">HITL Review</span>
-              </Button>
+            <pre class="text-xs bg-muted/30 p-3 rounded-md max-h-40 overflow-auto whitespace-pre-wrap break-all">{{ JSON.stringify(selectedEntry?.inputs ?? {}, null, 2) }}</pre>
+
+            <!-- Outputs -->
+            <div class="flex items-center justify-between gap-2">
+              <div class="text-sm font-semibold">
+                Outputs
+              </div>
               <Button
                 variant="ghost"
                 size="sm"
                 class="h-6 px-2 gap-1"
-                @click="bringToCanvas"
-              >
-                <ArrowDownToLine class="w-3 h-3" />
-                <span class="text-xs">Bring to Canvas</span>
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                class="h-6 px-2 gap-1"
-                @click="copyToClipboard(selectedEntry?.inputs ?? {}, 'inputs')"
+                @click="copyToClipboard(selectedEntry?.result?.outputs ?? {}, 'outputs')"
               >
                 <component
-                  :is="copiedField === 'inputs' ? Check : Copy"
+                  :is="copiedField === 'outputs' ? Check : Copy"
                   class="w-3 h-3"
                 />
-                <span class="text-xs">{{ copiedField === 'inputs' ? 'Copied' : 'Copy' }}</span>
+                <span class="text-xs">{{ copiedField === 'outputs' ? 'Copied' : 'Copy' }}</span>
               </Button>
             </div>
-          </div>
-          <pre class="text-xs bg-muted/30 p-3 rounded-md max-h-40 overflow-auto whitespace-pre-wrap break-all">{{ JSON.stringify(selectedEntry?.inputs ?? {}, null, 2) }}</pre>
-
-          <!-- Outputs -->
-          <div class="flex items-center justify-between gap-2">
-            <div class="text-sm font-semibold">
-              Outputs
-            </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              class="h-6 px-2 gap-1"
-              @click="copyToClipboard(selectedEntry?.result?.outputs ?? {}, 'outputs')"
-            >
-              <component
-                :is="copiedField === 'outputs' ? Check : Copy"
-                class="w-3 h-3"
-              />
-              <span class="text-xs">{{ copiedField === 'outputs' ? 'Copied' : 'Copy' }}</span>
-            </Button>
-          </div>
-          <pre class="text-xs bg-muted/30 p-3 rounded-md max-h-40 overflow-auto whitespace-pre-wrap break-all">{{ JSON.stringify(selectedEntry?.result?.outputs ?? {}, null, 2) }}</pre>
+            <pre class="text-xs bg-muted/30 p-3 rounded-md max-h-40 overflow-auto whitespace-pre-wrap break-all">{{ JSON.stringify(selectedEntry?.result?.outputs ?? {}, null, 2) }}</pre>
+          </template>
 
           <!-- Screenshots -->
           <div
-            v-if="runScreenshots.length > 0"
+            v-if="runScreenshots.length > 0 && !runLocked"
             class="space-y-2"
           >
             <div class="text-sm font-semibold">
@@ -1166,7 +1244,7 @@ function bringToCanvas(): void {
 
           <!-- Steps -->
           <div
-            v-if="nodeResults.length > 0"
+            v-if="nodeResults.length > 0 && !runLocked"
             class="space-y-2"
           >
             <div class="flex items-center justify-between gap-2">

@@ -81,6 +81,7 @@ from app.api.workflows import (
     _persist_global_variables_from_execution,
     _spawn_detached_task,
     collect_referenced_workflows,
+    count_encrypted_recent_executions_for_user,
     extract_input_fields_from_workflow,
     extract_output_node_from_workflow,
     get_credentials_context,
@@ -332,12 +333,13 @@ WORKFLOW_ANALYZE_SYSTEM_PROMPT = """You analyze an automation workflow and produ
 Given the workflow's nodes and edges, write Markdown with these sections, in this exact order:
 
 ## Improvement areas
-A bulleted list of concrete, actionable suggestions (reliability, error handling, missing validation, cost, clarity). Whenever the workflow handles credentials, user input, external requests, data exposure, injection-prone steps, or anything else security-relevant, include a clear **security** angle here (risks and how to mitigate them). Always cover these five checks explicitly:
+A bulleted list of concrete, actionable suggestions (reliability, error handling, missing validation, cost, clarity). Whenever the workflow handles credentials, user input, external requests, data exposure, injection-prone steps, or anything else security-relevant, include a clear **security** angle here (risks and how to mitigate them). Always cover these six checks explicitly:
 1. **Error handling** — Inspect the provided `analysisContext`. ONLY when BOTH `hasErrorHandler` is false AND `errorWorkflowConfigured` is false (the workflow has no error handling at all), call this out and recommend adding an errorHandler node and/or configuring an error workflow ("on error, run workflow"). If at least one is present (`hasErrorHandler` true OR `errorWorkflowConfigured` true), the workflow already catches errors — do NOT mention error handling at all: no suggestion to add more, and no acknowledgement.
 2. **Time saved** — ONLY when `minutesSavedPerRun` is null or zero, recommend setting an estimated "time saved per run" so the analytics time saved metric can populate. If it is already set, do NOT mention time saved at all (no acknowledgement).
 3. **Network nodes** — For any node that performs network I/O (e.g. `httpRequest` and integration/API nodes such as slack, drive, notion, etc.), recommend node-specific error handling (enable retry and/or onError "continue on error") on those specific nodes by label.
 4. **Alerts** — Inspect the provided `analysisContext`. ONLY when `hasAlertConfigured` is false (no alerts watch this workflow), recommend setting up alerts before going to prod — for example an error, duration, or cost alert. If alerts are already configured, do NOT mention alerts at all.
 5. **Evals** — Inspect the provided `analysisContext`. When `agentNodes` is not empty and `hasAgentSuite` is false, recommend adding an **Agent Suite** in Evals for those agents (name them by label) to check which tools they must and must not call, and their latency, USD cost, tokens and tool calls against a baseline, or a **Prompt Suite** to test the agent's prompt across models. When `llmNodes` is not empty, recommend a **Prompt Suite** in Evals to test those LLM nodes' prompts (by label) across models. When both lists are empty, or the only agents already have an agent suite and there are no LLM nodes, do NOT mention evals.
+6. **Run history encryption** — Inspect the provided `analysisContext`. ONLY when `runHistoryEncrypted` is false AND (the workflow appears to process personal data, such as names, emails, phone numbers, addresses, customer, patient, employee or payment details, form or chat submissions, OR `isShared` is true), suggest that the owner consider turning on **Encrypt run history** in the workflow settings, so the inputs, outputs and node results of production runs are stored encrypted and can only be viewed through an audited unlock. If `runHistoryEncrypted` is true, or neither condition holds, do NOT mention it.
 
 If the workflow already looks solid, say so and suggest small refinements.
 
@@ -365,6 +367,8 @@ def _build_workflow_analysis_context(
     current_workflow: dict | None,
     has_alert_configured: bool,
     has_agent_suite: bool = False,
+    run_history_encrypted: bool = False,
+    is_shared: bool = False,
 ) -> dict[str, Any]:
     """Derive the ``analysisContext`` block the analyzer prompt reasons over."""
     workflow = current_workflow or {}
@@ -378,6 +382,8 @@ def _build_workflow_analysis_context(
         "agentNodes": _node_labels(nodes, "agent"),
         "llmNodes": _node_labels(nodes, "llm"),
         "hasAgentSuite": has_agent_suite,
+        "runHistoryEncrypted": run_history_encrypted,
+        "isShared": is_shared,
     }
 
 
@@ -410,6 +416,37 @@ async def _workflow_has_agent_suite(
         .where(AgentSuite.owner_id == user.id, AgentSuite.workflow_id == workflow_id)
     )
     return bool((result.scalar_one() or 0) > 0)
+
+
+async def _workflow_privacy_context(
+    db: AsyncSession, workflow_id: uuid.UUID | None
+) -> tuple[bool, bool]:
+    """Whether the workflow encrypts its run history, and whether anyone else can reach it."""
+    if workflow_id is None:
+        return False, False
+    from app.db.models import Workflow, WorkflowShare, WorkflowTeamShare
+
+    encrypted = (
+        await db.execute(select(Workflow.encrypt_run_history).where(Workflow.id == workflow_id))
+    ).scalar_one_or_none()
+    direct = (
+        await db.execute(
+            select(func.count())
+            .select_from(WorkflowShare)
+            .where(
+                WorkflowShare.workflow_id == workflow_id,
+                WorkflowShare.is_explicit_share.is_(True),
+            )
+        )
+    ).scalar_one()
+    team = (
+        await db.execute(
+            select(func.count())
+            .select_from(WorkflowTeamShare)
+            .where(WorkflowTeamShare.workflow_id == workflow_id)
+        )
+    ).scalar_one()
+    return bool(encrypted), bool((direct or 0) + (team or 0))
 
 
 MAX_DASHBOARD_CHAT_HISTORY = 25
@@ -930,7 +967,7 @@ DASHBOARD_CHAT_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_recent_executions",
-            "description": "List recent workflow runs and chat runs with details (workflow name, time, status, brief output). Use when the user asks what ran or what came in (e.g. 'what ran?', 'show details', 'list recent runs', 'what ran in the last 24 hours?').",
+            "description": "List recent workflow runs and chat runs with details (workflow name, time, status, brief output). Use when the user asks what ran or what came in (e.g. 'what ran?', 'show details', 'list recent runs', 'what ran in the last 24 hours?'). Encrypted runs are left out; encrypted_runs_skipped says how many.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -952,7 +989,7 @@ DASHBOARD_CHAT_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_workflow_run_history",
-            "description": "Run history of ONE specific workflow, filtered by workflow_id in the database. Use when the user asks about a particular workflow's runs (e.g. 'how many times did X run?', 'did X fail?', 'when did X last run?', 'what was the status of X's last run?', 'why did X fail?'). Get workflow_id from list_workflows first. Step 1: call with only workflow_id to get metadata: total_runs, status_counts, first_run_at, last_run_at, last_run, avg_execution_time_ms, and a page of runs (execution_id, status, started_at, execution_time_ms, trigger_source). Step 2, only when the user wants the content or the reason: call again with execution_id from runs to get that run's inputs, outputs, and per-node trace (with errors). Prefer this over get_recent_executions whenever a single workflow is named.",
+            "description": "Run history of ONE specific workflow, filtered by workflow_id in the database. Use when the user asks about a particular workflow's runs (e.g. 'how many times did X run?', 'did X fail?', 'when did X last run?', 'what was the status of X's last run?', 'why did X fail?'). Get workflow_id from list_workflows first. Step 1: call with only workflow_id to get metadata: total_runs, status_counts, first_run_at, last_run_at, last_run, avg_execution_time_ms, and a page of runs (execution_id, status, started_at, execution_time_ms, trigger_source). Step 2, only when the user wants the content or the reason: call again with execution_id from runs to get that run's inputs, outputs, and per-node trace (with errors). Prefer this over get_recent_executions whenever a single workflow is named. Runs of a workflow with run history encryption are counted but not listed (encrypted_runs_skipped) and their content cannot be read here; tell the user they can unlock such a run in the History dialog.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -4938,7 +4975,16 @@ async def stream_dashboard_chat(
                     executions = await get_recent_executions_for_user(
                         db, user_id, limit=limit, since_hours=since_hours
                     )
-                    result = json.dumps(executions, default=str)
+                    encrypted_skipped = await count_encrypted_recent_executions_for_user(
+                        db, user_id, since_hours=since_hours
+                    )
+                    result = json.dumps(
+                        {
+                            "executions": executions,
+                            "encrypted_runs_skipped": encrypted_skipped,
+                        },
+                        default=str,
+                    )
                     step_ms = round((time.time() - step_start) * 1000, 2)
                     run_steps.append(
                         {
@@ -5828,10 +5874,13 @@ async def analyze_workflow_stream(
         wf_summary = json.dumps(request.current_workflow, ensure_ascii=False)
         system_prompt += f"\n\nWorkflow:\n```json\n{wf_summary}\n```"
         has_alert_configured = await _workflow_has_alert(db, current_user, workflow_id)
+        run_history_encrypted, is_shared = await _workflow_privacy_context(db, workflow_id)
         analysis_context = _build_workflow_analysis_context(
             request.current_workflow,
             has_alert_configured,
             await _workflow_has_agent_suite(db, current_user, workflow_id),
+            run_history_encrypted=run_history_encrypted,
+            is_shared=is_shared,
         )
         system_prompt += (
             "\n\nanalysisContext:\n```json\n"

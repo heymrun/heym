@@ -8,6 +8,8 @@ import {
   Clock,
   Database,
   Loader2,
+  Lock,
+  LockOpen,
   Trash2,
   CheckCircle2,
   XCircle,
@@ -36,6 +38,7 @@ import { activeExecutionStatus } from "@/components/Panels/activeExecutionStatus
 import ExecutionHistoryAskAiButton from "@/components/Panels/ExecutionHistoryAskAiButton.vue";
 import ExecutionHistoryTimeline from "@/components/Panels/ExecutionHistoryTimeline.vue";
 import ExecutionHistoryViewToggle from "@/components/Panels/ExecutionHistoryViewToggle.vue";
+import RunHistoryUnlockNotice from "@/components/Panels/RunHistoryUnlockNotice.vue";
 import Button from "@/components/ui/Button.vue";
 import Dialog from "@/components/ui/Dialog.vue";
 import ImageLightbox from "@/components/ui/ImageLightbox.vue";
@@ -53,6 +56,7 @@ import { collectRunImageSrcs, getOutputImageSrcs } from "@/lib/executionImages";
 import { buildDisplayNodeResults, type DisplayNodeResult } from "@/lib/executionLog";
 import { isOpenInNewTab } from "@/lib/paletteNavigate";
 import { cn } from "@/lib/utils";
+import { type UnlockedRunCandidate, withUnlockedMatches } from "@/lib/unlockedRunSearch";
 import { workflowApi } from "@/services/api";
 import { useWorkflowStore } from "@/stores/workflow";
 
@@ -239,6 +243,36 @@ const instanceOptions = computed<Array<{ value: string | undefined; label: strin
 
 // Like the trigger-source filter beside it, this applies to the entries already
 // loaded rather than to the whole table.
+/** Unlocked runs stay unlocked while filters change; everything else is reloaded. */
+function unlockedOnly(
+  cache: Map<string, AllExecutionHistoryEntry>,
+): Map<string, AllExecutionHistoryEntry> {
+  return new Map([...cache].filter(([, entry]) => entry.unlocked));
+}
+
+const unlockedCandidates = computed<UnlockedRunCandidate[]>(() =>
+  [...entryDetailsCache.value.values()]
+    .filter((entry) => entry.unlocked)
+    .filter((entry) => !props.workflowId || entry.workflow_id === props.workflowId)
+    .map((entry) => ({
+      item: {
+        id: entry.id,
+        workflow_id: entry.workflow_id,
+        workflow_name: entry.workflow_name,
+        run_type: entry.run_type ?? "workflow",
+        started_at: entry.started_at,
+        status: entry.status,
+        execution_time_ms: entry.execution_time_ms,
+        trigger_source: entry.trigger_source,
+        recovered: entry.recovered,
+        encrypted: true,
+        executed_by_instance_id: entry.executed_by_instance_id,
+        executed_by_instance_name: entry.executed_by_instance_name,
+      },
+      data: [entry.inputs, entry.outputs, entry.node_results],
+    })),
+);
+
 const filteredExecutionHistory = computed<AllExecutionHistoryEntryLight[]>(() => {
   let entries = executionHistory.value;
 
@@ -246,8 +280,20 @@ const filteredExecutionHistory = computed<AllExecutionHistoryEntryLight[]>(() =>
     entries = entries.filter((entry) => entry.trigger_source === selectedTriggerSource.value);
   }
 
-  return entries;
+  return withUnlockedMatches(entries, searchQuery.value, unlockedCandidates.value, {
+    status: selectedStatus.value,
+    triggerSource: selectedTriggerSource.value,
+    instanceId: selectedInstanceId.value,
+  });
 });
+
+/** Unlocked runs the server could not match by their content, counted with its total. */
+const unlockedMatchCount = computed(
+  () =>
+    filteredExecutionHistory.value.filter(
+      (entry) => !executionHistory.value.some((listed) => listed.id === entry.id),
+    ).length,
+);
 
 const hasActiveFilters = computed<boolean>(
   () =>
@@ -272,6 +318,17 @@ async function ensureEntryLoaded(entryId: string): Promise<void> {
   }
 }
 
+/** An encrypted run the user has not unlocked: its data sections stay hidden. */
+const runLocked = computed(
+  () => Boolean(selectedEntry.value?.encrypted && !selectedEntry.value.unlocked),
+);
+
+function onRunUnlocked(entry: AllExecutionHistoryEntry): void {
+  const cache = new Map(entryDetailsCache.value);
+  cache.set(entry.id, entry);
+  entryDetailsCache.value = cache;
+}
+
 async function withPreferredRun(
   items: AllExecutionHistoryEntryLight[],
 ): Promise<AllExecutionHistoryEntryLight[]> {
@@ -293,6 +350,7 @@ async function withPreferredRun(
         execution_time_ms: entry.execution_time_ms,
         trigger_source: entry.trigger_source,
         recovered: entry.recovered,
+        encrypted: entry.encrypted,
         executed_by_instance_id: entry.executed_by_instance_id,
         executed_by_instance_name: entry.executed_by_instance_name,
       },
@@ -398,7 +456,7 @@ watch(
     loading.value = true;
     error.value = "";
     expandedNodes.value = new Set();
-    entryDetailsCache.value = new Map();
+    entryDetailsCache.value = unlockedOnly(entryDetailsCache.value);
     searchActive.value = false;
     searchQuery.value = "";
     selectedTriggerSource.value = undefined;
@@ -442,7 +500,7 @@ watch(selectedTriggerSource, async () => {
   if (!props.open) return;
 
   cancelScheduledSearchReload();
-  entryDetailsCache.value = new Map();
+  entryDetailsCache.value = unlockedOnly(entryDetailsCache.value);
   expandedNodes.value = new Set();
   await loadHistory();
 });
@@ -451,7 +509,7 @@ watch(selectedInstanceId, async () => {
   if (!props.open) return;
 
   cancelScheduledSearchReload();
-  entryDetailsCache.value = new Map();
+  entryDetailsCache.value = unlockedOnly(entryDetailsCache.value);
   expandedNodes.value = new Set();
   await loadHistory();
 });
@@ -464,7 +522,7 @@ watch(selectedStatus, async () => {
   if (!props.open) return;
 
   cancelScheduledSearchReload();
-  entryDetailsCache.value = new Map();
+  entryDetailsCache.value = unlockedOnly(entryDetailsCache.value);
   expandedNodes.value = new Set();
   await loadHistory();
 });
@@ -983,6 +1041,8 @@ async function openEntryOnCanvas(entryId: string): Promise<void> {
 }
 
 function bringToCanvas(): void {
+  // A locked encrypted run has no data to bring; it stays selected with its Unlock notice.
+  if (runLocked.value) return;
   if (!selectedEntry.value?.workflow_id) return;
   void router.push({
     name: "editor",
@@ -1021,7 +1081,7 @@ function bringToCanvas(): void {
     <div class="space-y-3 sm:space-y-4">
       <div class="flex flex-wrap items-center justify-between gap-x-2 gap-y-3 sm:grid sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:gap-3">
         <p class="order-1 self-center shrink-0 text-base leading-none text-muted-foreground">
-          {{ totalCount }} run(s)
+          {{ totalCount + unlockedMatchCount }} run(s)
         </p>
         <div class="order-2 ml-auto flex items-center gap-1 sm:gap-2 sm:order-3 sm:col-start-3 flex-wrap justify-end shrink-0">
           <AutoRefreshControl
@@ -1261,6 +1321,14 @@ function bringToCanvas(): void {
                 >
                   <RotateCcw class="w-3 h-3" />
                 </span>
+                <span
+                  v-if="entry.encrypted"
+                  class="px-1 py-0.5 rounded bg-primary/15 text-primary dark:text-violet-300 shrink-0 inline-flex items-center"
+                  title="Encrypted run"
+                  data-testid="run-history-encrypted-badge"
+                >
+                  <Lock class="w-3 h-3" />
+                </span>
               </div>
               <component
                 :is="getStatusIcon(entry.status)"
@@ -1315,73 +1383,88 @@ function bringToCanvas(): void {
                 Recovered run, automatically re-run after a server restart.
               </span>
             </div>
+            <RunHistoryUnlockNotice
+              v-if="selectedEntry.encrypted && !selectedEntry.unlocked"
+              :key="selectedEntry.id"
+              :entry-id="selectedEntry.id"
+              @unlocked="onRunUnlocked"
+            />
+            <div
+              v-else-if="selectedEntry.encrypted"
+              class="flex items-center gap-2 px-3 py-2 rounded-md bg-primary/10 text-primary dark:text-violet-300 text-xs"
+            >
+              <LockOpen class="w-3.5 h-3.5 shrink-0" />
+              <span>Unlocked encrypted run. This view was written to the audit log.</span>
+            </div>
             <div class="text-sm font-semibold">
               Workflow
             </div>
             <div class="text-sm text-muted-foreground">
               {{ selectedEntry?.workflow_name }}
             </div>
-            <div class="flex items-center justify-between gap-2">
-              <div class="text-sm font-semibold">
-                Inputs
+            <template v-if="!runLocked">
+              <div class="flex items-center justify-between gap-2">
+                <div class="text-sm font-semibold">
+                  Inputs
+                </div>
+                <div class="flex items-center gap-0.5 sm:gap-1 flex-wrap justify-end">
+                  <Button
+                    v-if="pendingHitlUrl"
+                    variant="ghost"
+                    size="sm"
+                    class="h-6 px-2 gap-1 text-amber-500 hover:text-amber-400"
+                    @click="openExternal(pendingHitlUrl)"
+                  >
+                    <ExternalLink class="w-3 h-3" />
+                    <span class="text-xs">HITL Review</span>
+                  </Button>
+                  <Button
+                    v-if="!isChatRun"
+                    variant="ghost"
+                    size="sm"
+                    class="h-6 px-2 gap-1"
+                    @click="bringToCanvas"
+                  >
+                    <ArrowDownToLine class="w-3 h-3" />
+                    <span class="text-xs">Bring to Canvas</span>
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    class="h-6 px-2 gap-1"
+                    @click="copyToClipboard(selectedEntry?.inputs ?? {}, 'inputs')"
+                  >
+                    <component
+                      :is="copiedField === 'inputs' ? Check : Copy"
+                      class="w-3 h-3"
+                    />
+                    <span class="text-xs">{{ copiedField === 'inputs' ? 'Copied' : 'Copy' }}</span>
+                  </Button>
+                </div>
               </div>
-              <div class="flex items-center gap-0.5 sm:gap-1 flex-wrap justify-end">
-                <Button
-                  v-if="pendingHitlUrl"
-                  variant="ghost"
-                  size="sm"
-                  class="h-6 px-2 gap-1 text-amber-500 hover:text-amber-400"
-                  @click="openExternal(pendingHitlUrl)"
-                >
-                  <ExternalLink class="w-3 h-3" />
-                  <span class="text-xs">HITL Review</span>
-                </Button>
-                <Button
-                  v-if="!isChatRun"
-                  variant="ghost"
-                  size="sm"
-                  class="h-6 px-2 gap-1"
-                  @click="bringToCanvas"
-                >
-                  <ArrowDownToLine class="w-3 h-3" />
-                  <span class="text-xs">Bring to Canvas</span>
-                </Button>
+              <pre class="text-xs bg-muted/30 p-3 rounded-md max-h-32 overflow-auto whitespace-pre-wrap break-all">{{ JSON.stringify(selectedEntry?.inputs ?? {}, null, 2) }}</pre>
+              <div class="flex items-center justify-between gap-2">
+                <div class="text-sm font-semibold">
+                  Outputs
+                </div>
                 <Button
                   variant="ghost"
                   size="sm"
                   class="h-6 px-2 gap-1"
-                  @click="copyToClipboard(selectedEntry?.inputs ?? {}, 'inputs')"
+                  @click="copyToClipboard(selectedEntry?.outputs ?? {}, 'outputs')"
                 >
                   <component
-                    :is="copiedField === 'inputs' ? Check : Copy"
+                    :is="copiedField === 'outputs' ? Check : Copy"
                     class="w-3 h-3"
                   />
-                  <span class="text-xs">{{ copiedField === 'inputs' ? 'Copied' : 'Copy' }}</span>
+                  <span class="text-xs">{{ copiedField === 'outputs' ? 'Copied' : 'Copy' }}</span>
                 </Button>
               </div>
-            </div>
-            <pre class="text-xs bg-muted/30 p-3 rounded-md max-h-32 overflow-auto whitespace-pre-wrap break-all">{{ JSON.stringify(selectedEntry?.inputs ?? {}, null, 2) }}</pre>
-            <div class="flex items-center justify-between gap-2">
-              <div class="text-sm font-semibold">
-                Outputs
-              </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                class="h-6 px-2 gap-1"
-                @click="copyToClipboard(selectedEntry?.outputs ?? {}, 'outputs')"
-              >
-                <component
-                  :is="copiedField === 'outputs' ? Check : Copy"
-                  class="w-3 h-3"
-                />
-                <span class="text-xs">{{ copiedField === 'outputs' ? 'Copied' : 'Copy' }}</span>
-              </Button>
-            </div>
-            <pre class="text-xs bg-muted/30 p-3 rounded-md max-h-32 overflow-auto whitespace-pre-wrap break-all">{{ JSON.stringify(selectedEntry?.outputs ?? {}, null, 2) }}</pre>
+              <pre class="text-xs bg-muted/30 p-3 rounded-md max-h-32 overflow-auto whitespace-pre-wrap break-all">{{ JSON.stringify(selectedEntry?.outputs ?? {}, null, 2) }}</pre>
+            </template>
 
             <div
-              v-if="runScreenshots.length > 0"
+              v-if="runScreenshots.length > 0 && !runLocked"
               class="space-y-2"
             >
               <div class="text-sm font-semibold">
@@ -1400,7 +1483,7 @@ function bringToCanvas(): void {
             </div>
 
             <div
-              v-if="stepsForDisplay.length > 0"
+              v-if="stepsForDisplay.length > 0 && !runLocked"
               class="space-y-2"
             >
               <div class="flex items-center justify-between gap-2">
