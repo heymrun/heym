@@ -11,10 +11,12 @@ from __future__ import annotations
 import re
 import uuid
 from dataclasses import dataclass
+from email import encoders
 from email.mime.application import MIMEApplication
+from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from email.utils import formatdate, getaddresses, make_msgid, parseaddr
+from email.utils import formataddr, formatdate, getaddresses, make_msgid, parseaddr
 from typing import Any
 
 from app.services.node_execution.base import NodeExecutionContext
@@ -23,7 +25,10 @@ _BLOCK_TAGS = (
     *("p", "div", "br", "li", "tr", "table", "ul", "ol", "blockquote", "hr"),
     *("h1", "h2", "h3", "h4", "h5", "h6", "section", "article", "header", "footer"),
 )
-_HTML_MARKERS = ("<body", "<div", "<table", "<p>", "<br>", "<br/>", "<br />")
+# The tags that make a body HTML, with or without attributes (<p style="...">, <br/>).
+# The attributes stop at the next "<" as well as ">", so a body full of unclosed "<p "
+# (a forwarded email, a webhook payload, model output) is scanned in linear time.
+_HTML_TAG = re.compile(r"<(?:body|div|table|p|br)\b[^<>]*>", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -93,13 +98,29 @@ def recipients(group: str) -> list[tuple[str, str]]:
     return [("", addr.strip()) for addr in group.split(",") if addr.strip()]
 
 
+def address_header(value: str) -> str:
+    """An address field as it goes in a From/To/Cc/Bcc header.
+
+    A header with a non-ASCII character is written as one encoded-word, addresses included,
+    and a reader then finds no address in it. Each display name is encoded on its own
+    instead, so "José García <jose@example.com>" keeps its address. An ASCII field, or one
+    the parser cannot read, is used as written.
+    """
+    if value.isascii():
+        return value
+    pairs = [(name, addr) for name, addr in getaddresses([value]) if addr]
+    if not pairs or not all(addr.isascii() for _name, addr in pairs):
+        return value
+    return ", ".join(formataddr(pair) for pair in pairs)
+
+
 def is_html_body(body: str) -> bool:
     """Whether the body reads as HTML; a plain-text body is sent as text/plain."""
     lowered = body.strip().lower()
     return (
         lowered.startswith("<!doctype html")
         or lowered.startswith("<html")
-        or any(marker in lowered for marker in _HTML_MARKERS)
+        or _HTML_TAG.search(lowered) is not None
     )
 
 
@@ -186,17 +207,17 @@ def build_mime_message(
     """
     msg = MIMEMultipart("mixed")
     if sender:
-        msg["From"] = sender
+        msg["From"] = address_header(sender)
     # RFC 5322 requires Date; Gmail refuses mail without a Message-ID. Relays that do not add
     # missing headers for remote clients (Postfix's default) pass the message on as built.
     msg["Date"] = formatdate(localtime=True)
     domain = parseaddr(sender or account)[1].rpartition("@")[2]
     msg["Message-ID"] = make_msgid(domain=domain or None)
-    msg["To"] = fields.to
+    msg["To"] = address_header(fields.to)
     if fields.cc:
-        msg["Cc"] = fields.cc
+        msg["Cc"] = address_header(fields.cc)
     if bcc_header and fields.bcc:
-        msg["Bcc"] = fields.bcc
+        msg["Bcc"] = address_header(fields.bcc)
     msg["Subject"] = fields.subject
 
     body_part = MIMEMultipart("alternative")
@@ -208,8 +229,15 @@ def build_mime_message(
     msg.attach(body_part)
 
     for attachment in attachments:
-        _, _, subtype = attachment.mime_type.partition("/")
-        part = MIMEApplication(attachment.content, _subtype=subtype or "octet-stream")
+        maintype, _, subtype = attachment.mime_type.partition("/")
+        if subtype and maintype not in ("multipart", "message"):
+            # The file's own type (image/png, text/calendar), base64 like any attachment.
+            part = MIMEBase(maintype, subtype)
+            part.set_payload(attachment.content)
+            encoders.encode_base64(part)
+        else:
+            # A multipart or message body must not be base64 encoded; send it as data.
+            part = MIMEApplication(attachment.content, _subtype=subtype or "octet-stream")
         part.add_header("Content-Disposition", "attachment", filename=attachment.filename)
         msg.attach(part)
     return msg

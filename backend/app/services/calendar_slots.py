@@ -17,6 +17,7 @@ from fastapi import HTTPException
 
 MAX_AVAILABILITY_DAYS = 60
 _EMAIL_PATTERN = re.compile(r"[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+")
+_DATE_ONLY = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 Interval = tuple[datetime, datetime]
 
@@ -49,6 +50,11 @@ def parse_datetime(value: str, zone: ZoneInfo, label: str) -> datetime:
         raise HTTPException(400, f"{label}: dates must use ISO 8601 format") from exc
     if result.tzinfo is not None:
         return result.astimezone(zone)
+    if _DATE_ONLY.fullmatch(value.strip()):
+        # A date is the whole day, from its first instant. Where daylight saving starts at
+        # midnight (Africa/Cairo, America/Santiago) there is no 00:00 and the day starts at
+        # 01:00; all-day events arrive as dates and must not fail the read there.
+        return result.replace(tzinfo=zone).astimezone(timezone.utc).astimezone(zone)
     result = result.replace(tzinfo=zone)
     if result.astimezone(timezone.utc).astimezone(zone).replace(tzinfo=None) != result.replace(
         tzinfo=None

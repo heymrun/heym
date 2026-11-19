@@ -121,6 +121,20 @@ class OutlookSendMessageTests(TestCase):
 
         self.assertEqual(send.call_args.args[0]["body"]["contentType"], "HTML")
 
+    def test_html_tags_with_attributes_make_an_html_body(self) -> None:
+        for body in ('<p style="margin:0">Shipped</p>', 'Shipped<br class="gap">Tracking: 42'):
+            with self.subTest(body=body):
+                _, send = _run({**BASE, "emailBody": body})
+
+                self.assertEqual(send.call_args.args[0]["body"]["contentType"], "HTML")
+
+    def test_text_that_only_mentions_angle_brackets_stays_text(self) -> None:
+        for body in ("1 < 2 and 3 > 2", "Wrap code in <pre> tags"):
+            with self.subTest(body=body):
+                _, send = _run({**BASE, "emailBody": body})
+
+                self.assertEqual(send.call_args.args[0]["body"]["contentType"], "Text")
+
     def test_a_from_address_is_sent_as_from(self) -> None:
         result, send = _run({**BASE, "fromAddress": "support@contoso.com"})
 

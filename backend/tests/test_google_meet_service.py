@@ -60,6 +60,18 @@ class TestAvailabilityWindow(unittest.TestCase):
             parse_datetime("2026-10-25T02:30:00+01:00", ZoneInfo("Europe/Berlin")).fold, 1
         )
 
+    def test_a_date_starts_at_the_first_instant_of_its_day(self) -> None:
+        # Africa/Cairo goes from 00:00 to 01:00 on 2026-04-24: that day starts at 01:00.
+        cairo = ZoneInfo("Africa/Cairo")
+        self.assertEqual(
+            parse_datetime("2026-04-24", cairo).isoformat(), "2026-04-24T01:00:00+03:00"
+        )
+        self.assertEqual(
+            parse_datetime("2026-04-23", cairo).isoformat(), "2026-04-23T00:00:00+02:00"
+        )
+        with self.assertRaises(HTTPException):
+            parse_datetime("2026-04-24T00:30:00", cairo)
+
 
 class TestAttendees(unittest.TestCase):
     def test_csv_json_and_arrays_deduplicate_addresses(self) -> None:

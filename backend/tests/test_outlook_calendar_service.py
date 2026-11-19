@@ -236,6 +236,35 @@ class AvailabilityTests(CalendarTestCase):
             [{"start": "2026-11-13T00:00:00+01:00", "end": "2026-11-14T00:00:00+01:00"}],
         )
 
+    def test_all_day_events_around_a_day_without_midnight_are_read(self) -> None:
+        # Africa/Cairo goes from 00:00 to 01:00 on 2026-04-24: that day starts at 01:00.
+        self.graph.on(
+            "GET",
+            "calendar/calendarView",
+            body={
+                "value": [
+                    item("2026-04-23T00:00:00", "2026-04-24T00:00:00", isAllDay=True, showAs="oof"),
+                    item("2026-04-24T00:00:00", "2026-04-25T00:00:00", isAllDay=True, showAs="oof"),
+                ]
+            },
+        )
+
+        result = self.service.read_availability(
+            "primary", "2026-04-22T00:00:00", "2026-04-26T00:00:00", "Africa/Cairo"
+        )
+
+        self.assertEqual(
+            result["busy_slots"],
+            [{"start": "2026-04-23T00:00:00+02:00", "end": "2026-04-25T00:00:00+03:00"}],
+        )
+        self.assertEqual(
+            result["available_slots"],
+            [
+                {"start": "2026-04-22T00:00:00+02:00", "end": "2026-04-23T00:00:00+02:00"},
+                {"start": "2026-04-25T00:00:00+03:00", "end": "2026-04-26T00:00:00+03:00"},
+            ],
+        )
+
     def test_every_page_is_read_and_a_next_link_off_graph_is_refused(self) -> None:
         next_link = f"{GRAPH_BASE}/calendar/calendarView?$skiptoken=2"
         self.graph.on(

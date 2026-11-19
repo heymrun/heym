@@ -2,7 +2,7 @@
 
 import unittest
 import uuid
-from email import message_from_string
+from email import message_from_string, policy
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -158,6 +158,14 @@ class SendEmailFromHeaderTests(unittest.TestCase):
         self.assertTrue(second["Message-ID"].endswith("@acme.test>"))
         self.assertNotEqual(first["Message-ID"], second["Message-ID"])
 
+    def test_a_from_name_with_accents_keeps_its_address(self) -> None:
+        server, _ = self._send({"smtp_from": "Café Zürich <team@test.com>"})
+
+        msg = message_from_string(server.sendmail.call_args.args[2], policy=policy.default)
+        (sender,) = msg["From"].addresses
+        self.assertEqual((sender.display_name, sender.addr_spec), ("Café Zürich", "team@test.com"))
+        self._assert_signs_in_as_username(server)
+
 
 class SendEmailRecipientListTests(unittest.TestCase):
     """To/Cc/Bcc are address lists: a quoted display name may hold a comma."""
@@ -185,6 +193,27 @@ class SendEmailRecipientListTests(unittest.TestCase):
         )
         self.assertEqual(envelope, ["john@x.com", "jane@x.com", "hans@y.de", "audit@x.com"])
         self.assertEqual(msg["To"], '"Doe, John" <john@x.com>, Jane Roe <jane@x.com>')
+
+    def test_names_with_accents_keep_their_addresses_in_the_headers(self) -> None:
+        nr, server = _run_send_email(
+            {
+                "label": "sendEmail",
+                "credentialId": str(uuid.uuid4()),
+                "to": "José García <jose@x.com>, b@x.com",
+                "cc": '"Müller, Hans" <hans@y.de>',
+                "subject": "Hi",
+            },
+            uuid.uuid4(),
+            _make_db_mock([]),
+        )
+        self.assertEqual(nr["status"], "success")
+        self.assertEqual(server.sendmail.call_args.args[1], ["jose@x.com", "b@x.com", "hans@y.de"])
+
+        msg = message_from_string(server.sendmail.call_args.args[2], policy=policy.default)
+        to = [(a.display_name, a.addr_spec) for a in msg["To"].addresses]
+        cc = [(a.display_name, a.addr_spec) for a in msg["Cc"].addresses]
+        self.assertEqual(to, [("José García", "jose@x.com"), ("", "b@x.com")])
+        self.assertEqual(cc, [("Müller, Hans", "hans@y.de")])
 
     def test_plain_comma_separated_addresses_are_unchanged(self) -> None:
         envelope, _ = self._envelope(to="a@x.com, b@x.com,c@x.com,", cc=" ")
@@ -305,6 +334,41 @@ class SendEmailAttachmentTests(unittest.TestCase):
         filenames = [p.get_filename() for p in msg.walk() if p.get_filename()]
         self.assertIn("report.pdf", filenames)
 
+    def test_an_attachment_keeps_its_drive_file_type(self) -> None:
+        for filename, mime_type, sent_type in (
+            ("chart.png", "image/png", "image/png"),
+            ("meeting.ics", "text/calendar", "text/calendar"),
+            ("report.pdf", "application/pdf", "application/pdf"),
+            ("blob", "", "application/octet-stream"),
+        ):
+            with self.subTest(mime_type=mime_type):
+                owner = uuid.uuid4()
+                file_id = uuid.uuid4()
+                file_row = SimpleNamespace(
+                    id=file_id,
+                    owner_id=owner,
+                    filename=filename,
+                    mime_type=mime_type,
+                    storage_path=f"{owner}/{file_id}/{filename}",
+                )
+                nr, server = _run_send_email(
+                    {
+                        "label": "sendEmail",
+                        "credentialId": str(uuid.uuid4()),
+                        "to": "a@x.com",
+                        "subject": "Hi",
+                        "attachments": str(file_id),
+                    },
+                    owner,
+                    _make_db_mock([file_row]),
+                )
+                self.assertEqual(nr["status"], "success")
+                _, msg = _sent_message(server)
+                (part,) = [p for p in msg.walk() if p.get_filename()]
+                self.assertEqual(part.get_content_type(), sent_type)
+                self.assertEqual(part["Content-Transfer-Encoding"], "base64")
+                self.assertEqual(part.get_payload(decode=True), b"PDFDATA")
+
     def test_team_shared_drive_file_attached(self) -> None:
         owner = uuid.uuid4()
         other_user = uuid.uuid4()
@@ -389,6 +453,37 @@ class SendEmailBodyRenderingTests(unittest.TestCase):
         content_types = {p.get_content_type() for p in msg.walk()}
         self.assertIn("text/html", content_types)
         self.assertIn("text/plain", content_types)
+
+    def test_html_tags_with_attributes_make_an_html_body(self) -> None:
+        for body in ('<p style="margin:0">Shipped</p>', 'Shipped<br class="gap">Tracking: 42'):
+            with self.subTest(body=body):
+                nr, server = _run_send_email(
+                    {
+                        "label": "sendEmail",
+                        "credentialId": str(uuid.uuid4()),
+                        "to": "a@x.com",
+                        "subject": "Hi",
+                        "emailBody": body,
+                    },
+                    uuid.uuid4(),
+                    _make_db_mock([]),
+                )
+                self.assertEqual(nr["status"], "success")
+                _, msg = _sent_message(server)
+                kinds = {part.get_content_type() for part in msg.walk()}
+                self.assertTrue({"text/html", "text/plain"} <= kinds, kinds)
+
+    def test_a_body_full_of_unclosed_tags_is_read_in_linear_time(self) -> None:
+        import time
+
+        from app.services.email_compose import is_html_body
+
+        # 240 KB of "<p " with no ">": about 7 s when the attributes may run past a "<".
+        body = "<p " * 80000
+        started = time.perf_counter()
+        self.assertFalse(is_html_body(body))
+        self.assertLess(time.perf_counter() - started, 1.0)
+        self.assertTrue(is_html_body(body + "<p>Shipped</p>"))
 
     def test_the_plain_part_of_an_html_body_reads_as_text(self) -> None:
         html = (

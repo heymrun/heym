@@ -3,7 +3,7 @@
 import base64
 import unittest
 import uuid
-from email import message_from_bytes
+from email import message_from_bytes, policy
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -106,6 +106,31 @@ class GmailSendMessageTests(unittest.TestCase):
         self.assertIsNotNone(msg["Date"])
         self.assertTrue(msg["Message-ID"].endswith("@example.com>"))
 
+    def test_names_with_accents_keep_the_addresses_gmail_delivers_to(self) -> None:
+        result, send, _ = _run(
+            {
+                **BASE,
+                "to": "José García <jose@x.com>, b@x.com",
+                "cc": '"Müller, Hans" <hans@y.de>',
+                "bcc": "東京チーム <tokyo@x.jp>",
+            }
+        )
+
+        self.assertEqual(result["status"], "success")
+        msg = message_from_bytes(send.call_args.args[0], policy=policy.default)
+        headers = {
+            name: [(a.display_name, a.addr_spec) for a in msg[name].addresses]
+            for name in ("To", "Cc", "Bcc")
+        }
+        self.assertEqual(
+            headers,
+            {
+                "To": [("José García", "jose@x.com"), ("", "b@x.com")],
+                "Cc": [("Müller, Hans", "hans@y.de")],
+                "Bcc": [("東京チーム", "tokyo@x.jp")],
+            },
+        )
+
     def test_a_blank_from_lets_gmail_use_the_account_address(self) -> None:
         result, send, list_send_as = _run(BASE)
 
@@ -151,6 +176,14 @@ class GmailSendMessageTests(unittest.TestCase):
         self.assertIn("text/html", parts)
         self.assertEqual(parts["text/plain"].get_payload(decode=True).decode(), "Hello there")
 
+    def test_html_tags_with_attributes_make_an_html_body(self) -> None:
+        for body in ('<p style="margin:0">Shipped</p>', 'Shipped<br class="gap">Tracking: 42'):
+            with self.subTest(body=body):
+                _, send, _ = _run({**BASE, "emailBody": body})
+
+                kinds = {part.get_content_type() for part in _sent(send).walk()}
+                self.assertTrue({"text/html", "text/plain"} <= kinds, kinds)
+
     def test_blank_fields_stay_blank_and_expressions_resolve(self) -> None:
         _, send, _ = _run({**BASE, "subject": "", "emailBody": "Got $in.text"})
 
@@ -179,6 +212,26 @@ class GmailSendMessageTests(unittest.TestCase):
         self.assertEqual(
             base64.b64decode(attached[0].get_payload()), b"PDFDATA"
         )  # base64 on the wire, as SMTP sends it
+
+    def test_an_attachment_keeps_its_drive_file_type(self) -> None:
+        for filename, mime_type in (("chart.png", "image/png"), ("meeting.ics", "text/calendar")):
+            with self.subTest(mime_type=mime_type):
+                owner = uuid.uuid4()
+                file_id = uuid.uuid4()
+                row = SimpleNamespace(
+                    id=file_id,
+                    owner_id=owner,
+                    filename=filename,
+                    mime_type=mime_type,
+                    storage_path=f"{owner}/{file_id}/{filename}",
+                )
+                _, send, _ = _run(
+                    {**BASE, "attachments": str(file_id)}, owner_id=owner, db=_db_mock([row])
+                )
+
+                (part,) = [p for p in _sent(send).walk() if p.get_filename()]
+                self.assertEqual(part.get_content_type(), mime_type)
+                self.assertEqual(part.get_payload(decode=True), b"PDFDATA")
 
     def test_an_inaccessible_drive_file_fails_before_sending(self) -> None:
         result, send, _ = _run({**BASE, "attachments": str(uuid.uuid4())}, db=_db_mock([None]))
