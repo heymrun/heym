@@ -1056,6 +1056,15 @@ export const workflowApi = {
     await api.delete("/workflows/history/all");
   },
 
+  deleteWorkflowHistoryEntry: async (workflowId: string, entryId: string): Promise<void> => {
+    await api.delete(`/workflows/${workflowId}/history/${entryId}`);
+  },
+
+  /** One run of any workflow the caller owns, or one of their own chat runs. */
+  deleteHistoryEntry: async (entryId: string): Promise<void> => {
+    await api.delete(`/workflows/history/all/${entryId}`);
+  },
+
   getVersions: async (id: string): Promise<WorkflowVersion[]> => {
     const response = await api.get<WorkflowVersion[]>(`/workflows/${id}/versions`);
     return response.data;

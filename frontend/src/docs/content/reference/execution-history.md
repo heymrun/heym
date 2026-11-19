@@ -15,6 +15,13 @@ Each execution stores:
 | **Node results** | Per-node outputs, status, and execution time |
 | **Status** | `success`, `error`, `pending`, `skipped`, or `failed` (see [Crash Recovery](#crash-recovery)) |
 | **trigger_source** | How the run was triggered (see [Triggers](./triggers.md)) |
+| **Started by** | The signed-in user who started the run, shown as an avatar and name in the run list (see [Who started a run](#who-started-a-run)) |
+
+## Who started a run
+
+Both history dialogs show the user's **avatar and name** (their Gravatar, or their initial) next to the trigger tag of a run that a signed-in user started: from the editor, through the API with a session, API key or [execution token](./execution-tokens.md), from [MCP](../tabs/mcp-tab.md) tools, from a [Board](../tabs/board-tab.md) card, or from Chat. Runs started by a trigger with no user (a schedule, a webhook without a session, Slack, Telegram and other messaging triggers) show only their tag. Chat and assistant runs in All History show your own name.
+
+Nothing is backfilled: runs recorded before this was added show no name. Deleting a user removes the name from their runs and keeps the runs.
 
 ## Accessing History
 
@@ -159,6 +166,16 @@ Use **Copy** next to Inputs or Outputs to copy the JSON to the clipboard.
 ## Encrypted runs
 
 When a workflow has **Encrypt run history** on, its runs show a lock icon and open as **Encrypted run** without inputs, outputs or node results. Click **Unlock** and confirm to decrypt the run on the server; the unlock is written to the audit log. A locked run cannot be brought to the canvas, and **Open live** on a running one asks for the same confirmation. See [Run History Encryption](./run-history-encryption.md).
+
+## Delete a run
+
+Hover a run in either list and click the trash icon that appears to delete that run only. A confirmation asks first, and deleting cannot be undone.
+
+- Only the workflow owner can delete a workflow run, as with **Clear history**. Runs of a workflow shared with you show no trash icon.
+- In All History you can also delete your own chat and assistant runs.
+- An [encrypted run](./run-history-encryption.md) can be deleted without unlocking it.
+- Sub-workflow runs of that run are entries in their own workflows' histories and stay.
+- Each deletion is written to the [audit log](./audit.md) as `workflow.history_delete`, and a refused attempt as `outcome=denied`.
 
 ## Clear History
 

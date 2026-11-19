@@ -31,7 +31,11 @@ from app.db.models import (
 from app.observability import tracing
 from app.services import workflow_concurrency
 from app.services.cluster import identity, run_queue
-from app.services.cluster.attribution import attribution_fields
+from app.services.cluster.attribution import (
+    attribution_fields,
+    started_by_user,
+    started_by_user_options,
+)
 from app.services.cluster.node_placement import Placement, workflow_placement
 from app.services.cluster.run_history import (
     OffloadedRun,
@@ -289,6 +293,7 @@ async def dispatch_workflow(
     workflow_cache: dict[str, dict] | None = None,
     trigger_source: str | None = None,
     actor_user_id: uuid.UUID | None = None,
+    started_by_user_id: uuid.UUID | None = None,
     credentials_owner_id: uuid.UUID | None = None,
     test_run: bool = False,
     timeout_seconds: float | None = None,
@@ -341,6 +346,7 @@ async def dispatch_workflow(
             **(run_options or {}),
             "run_error_workflow": run_error_workflow,
             **sealed_options,
+            **started_by_user_options(started_by_user_id),
         }
         admission = await workflow_concurrency.admit(
             workflow_concurrency.HeldRun(
@@ -484,6 +490,7 @@ async def dispatch_workflow(
         run_options={
             **({"holds_concurrency_slot": True} if holds_slot else {}),
             **sealed_options,
+            **started_by_user_options(started_by_user_id),
         }
         or None,
     )
@@ -641,6 +648,7 @@ class RunQueueWorker:
             trigger_source=row.trigger_source,
             result=result,
             redact=redact,
+            started_by_user_id=started_by_user(getattr(row, "run_options", None)),
         )
 
         # 2. Global variables transaction (separate from history)
@@ -969,6 +977,7 @@ class RunQueueWorker:
                     credentials_owner_id=row.credentials_owner_id,
                     result=result,
                     redact=redact,
+                    started_by_user_id=started_by_user(getattr(row, "run_options", None)),
                 )
             else:
                 await persist_run_history(
@@ -980,6 +989,7 @@ class RunQueueWorker:
                     trigger_source=row.trigger_source,
                     result=result,
                     redact=redact,
+                    started_by_user_id=started_by_user(getattr(row, "run_options", None)),
                 )
                 if row.credentials_owner_id is not None:
                     async with async_session_maker() as db:
@@ -1028,6 +1038,7 @@ class RunQueueWorker:
                         "execution_time_ms": 0.0,
                         "trigger_source": row.trigger_source,
                         "started_at": execution_started_at(row.execution_id, [], 0.0),
+                        "executed_by_user_id": started_by_user(getattr(row, "run_options", None)),
                         **attribution_fields(),
                     },
                 )

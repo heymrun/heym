@@ -1288,6 +1288,7 @@ async def call_mcp_tool(
             global_variables_context=global_variables_context,
             trace_user_id=mcp_user.id,
             actor_user_id=mcp_user.id,
+            started_by_user_id=mcp_user.id,
             cancel_event=cancel_event,
             timeout_seconds=getattr(target_workflow, "workflow_timeout_seconds", None),
             concurrency_limit=target_workflow.concurrency_limit,
@@ -1330,6 +1331,7 @@ async def call_mcp_tool(
                 public_base_url=build_default_public_base_url(),
                 history_entry_id=execution_id,
             )
+            history_entry.executed_by_user_id = mcp_user.id
             await upsert_workflow_analytics_snapshot(
                 db,
                 workflow_id=target_workflow.id,
@@ -1362,6 +1364,7 @@ async def call_mcp_tool(
                 status=execution_result.status,
                 execution_time_ms=execution_result.execution_time_ms,
                 trigger_source="MCP",
+                executed_by_user_id=mcp_user.id,
             )
             db.add(history_entry)
             await upsert_workflow_analytics_snapshot(
@@ -1565,6 +1568,7 @@ async def _dispatch_mcp_jsonrpc(
                 credentials_context=credentials_context,
                 trace_user_id=mcp_user.id,
                 actor_user_id=mcp_user.id,
+                started_by_user_id=mcp_user.id,
                 cancel_event=cancel_event,
                 timeout_seconds=getattr(target_workflow, "workflow_timeout_seconds", None),
                 concurrency_limit=target_workflow.concurrency_limit,
@@ -1607,6 +1611,7 @@ async def _dispatch_mcp_jsonrpc(
                     public_base_url=build_default_public_base_url(),
                     history_entry_id=execution_id,
                 )
+                history_entry.executed_by_user_id = mcp_user.id
                 await upsert_workflow_analytics_snapshot(
                     db,
                     workflow_id=target_workflow.id,
@@ -1639,6 +1644,7 @@ async def _dispatch_mcp_jsonrpc(
                     status=execution_result.status,
                     execution_time_ms=execution_result.execution_time_ms,
                     trigger_source="MCP",
+                    executed_by_user_id=mcp_user.id,
                 )
                 db.add(history_entry)
                 await upsert_workflow_analytics_snapshot(

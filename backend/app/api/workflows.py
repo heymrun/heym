@@ -95,6 +95,7 @@ from app.services.active_execution_overview import collect_active_executions_for
 from app.services.audit_log import OUTCOME_DENIED, OUTCOME_FAILURE, audit
 from app.services.auth import create_workflow_execution_token, decode_token
 from app.services.cache_rate_limit import rate_limiter, response_cache
+from app.services.cluster.attribution import started_by_user_options
 from app.services.cluster.dispatch import dispatch_workflow, resolve_placement
 from app.services.cluster.run_history import throw_error_http_status_code
 from app.services.codex_followup_service import (
@@ -166,6 +167,7 @@ from app.services.run_history_list import (
     run_history_rows,
 )
 from app.services.run_history_list import filters_to_workflow_runs as filters_to_workflow_runs
+from app.services.run_history_meta import workflow_run_meta
 from app.services.user_lookup import find_user_by_email
 from app.services.workflow_access import (
     PERMISSION_WRITE,
@@ -428,6 +430,7 @@ async def persist_stream_execution_result(
     final_result: dict,
     was_cancelled: bool,
     test_run: bool = False,
+    started_by_user_id: uuid.UUID | None = None,
 ) -> bool:
     """Record a streamed run's terminal state. Returns False when there is nothing to write.
 
@@ -470,6 +473,7 @@ async def persist_stream_execution_result(
                 status="cancelled",
                 execution_time_ms=float(parent_exec_time),
                 trigger_source=trigger_source,
+                executed_by_user_id=started_by_user_id,
             )
         )
         await upsert_workflow_analytics_snapshot(
@@ -548,6 +552,7 @@ async def persist_stream_execution_result(
             status=status_value,
             execution_time_ms=final_result.get("execution_time_ms", 0),
             trigger_source=trigger_source,
+            executed_by_user_id=started_by_user_id,
         )
     )
     await upsert_workflow_analytics_snapshot(
@@ -1347,24 +1352,109 @@ async def list_all_execution_history(
     items_result = await db.execute(
         select(combined).order_by(combined.c.started_at.desc()).limit(limit).offset(offset)
     )
-    items = [
-        ExecutionHistoryListResponse(
-            id=row.id,
-            workflow_id=row.workflow_id,
-            workflow_name=row.workflow_name,
-            run_type=row.run_type,
-            started_at=row.started_at,
-            status=row.status,
-            execution_time_ms=row.execution_time_ms,
-            trigger_source=row.trigger_source,
-            recovered=row.recovered,
-            encrypted=row.encrypted,
-            executed_by_instance_id=row.executed_by_instance_id,
-            executed_by_instance_name=row.executed_by_instance_name,
+    rows = items_result.all()
+    meta = await workflow_run_meta(
+        db, [row.id for row in rows if row.run_type == "workflow"], current_user.id
+    )
+    items = []
+    for row in rows:
+        if row.run_type == "workflow":
+            run_meta = meta.get(row.id)
+            starter_id = run_meta.user_id if run_meta else None
+            starter_name = run_meta.user_name if run_meta else None
+            can_delete = run_meta.can_delete if run_meta else False
+        else:
+            starter_id, starter_name, can_delete = current_user.id, current_user.name, True
+        items.append(
+            ExecutionHistoryListResponse(
+                id=row.id,
+                workflow_id=row.workflow_id,
+                workflow_name=row.workflow_name,
+                run_type=row.run_type,
+                started_at=row.started_at,
+                status=row.status,
+                execution_time_ms=row.execution_time_ms,
+                trigger_source=row.trigger_source,
+                recovered=row.recovered,
+                encrypted=row.encrypted,
+                executed_by_instance_id=row.executed_by_instance_id,
+                executed_by_instance_name=row.executed_by_instance_name,
+                executed_by_user_id=starter_id,
+                executed_by_user_name=starter_name,
+                can_delete=can_delete,
+            )
         )
-        for row in items_result.all()
-    ]
     return HistoryListResponse(total=total, items=items)
+
+
+@router.delete("/history/all/{entry_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_execution_history_entry(
+    entry_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Delete one run: a workflow run of a workflow the caller owns, or the caller's own chat run."""
+    row = (
+        await db.execute(
+            select(ExecutionHistory, Workflow)
+            .join(Workflow, ExecutionHistory.workflow_id == Workflow.id)
+            .where(ExecutionHistory.id == entry_id)
+            .where(workflow_access_clause(current_user.id))
+        )
+    ).first()
+    if row is not None:
+        history, workflow = row
+        await _delete_workflow_run(db, current_user, workflow, history)
+        return
+
+    run_deleted = await db.execute(
+        RunHistory.__table__.delete().where(
+            RunHistory.id == entry_id, RunHistory.user_id == current_user.id
+        )
+    )
+    if not run_deleted.rowcount:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Execution history entry not found",
+        )
+    audit(
+        action="workflow.history_delete",
+        actor=current_user,
+        target_type="execution",
+        target_id=entry_id,
+        run_type="chat",
+    )
+
+
+async def _delete_workflow_run(
+    db: AsyncSession, current_user: User, workflow: Workflow, history: ExecutionHistory
+) -> None:
+    """Delete one workflow run for its owner; anyone else with access is refused and audited."""
+    if workflow.owner_id != current_user.id:
+        audit(
+            action="workflow.history_delete",
+            outcome=OUTCOME_DENIED,
+            actor=current_user,
+            target_type="workflow",
+            target_id=workflow.id,
+            target_name=workflow.name,
+            execution_id=history.id,
+            reason="not_owner",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the owner can delete a run",
+        )
+    audit(
+        action="workflow.history_delete",
+        actor=current_user,
+        target_type="workflow",
+        target_id=workflow.id,
+        target_name=workflow.name,
+        execution_id=history.id,
+        encrypted=bool(history.encrypted),
+    )
+    await db.execute(ExecutionHistory.__table__.delete().where(ExecutionHistory.id == history.id))
 
 
 @router.delete("/history/all", status_code=status.HTTP_204_NO_CONTENT)
@@ -3582,6 +3672,7 @@ async def execute_workflow_endpoint(
 
     session_user = current_user
     current_user = await validate_workflow_auth(workflow, request, current_user, db)
+    started_by_user_id = current_user.id if current_user else None
     enforce_workflow_http_method(workflow, request, test_run)
 
     enriched_inputs = {
@@ -3615,6 +3706,7 @@ async def execute_workflow_endpoint(
                     status="rate_limited",
                     execution_time_ms=0,
                     trigger_source=trigger_source,
+                    executed_by_user_id=started_by_user_id,
                 )
                 db.add(history_entry)
                 await upsert_workflow_analytics_snapshot(
@@ -3651,6 +3743,7 @@ async def execute_workflow_endpoint(
                     status="cached",
                     execution_time_ms=0,
                     trigger_source=trigger_source,
+                    executed_by_user_id=started_by_user_id,
                 )
                 db.add(history_entry)
                 await upsert_workflow_analytics_snapshot(
@@ -3756,6 +3849,7 @@ async def execute_workflow_endpoint(
             global_variables_context=global_variables_context,
             trace_user_id=trace_user_id,
             actor_user_id=credentials_owner_id,
+            started_by_user_id=started_by_user_id,
             cancel_event=cancel_event,
             timeout_seconds=getattr(workflow, "workflow_timeout_seconds", None),
             concurrency_limit=getattr(workflow, "concurrency_limit", None),
@@ -3787,6 +3881,7 @@ async def execute_workflow_endpoint(
                 status="cancelled",
                 execution_time_ms=0,
                 trigger_source=trigger_source,
+                executed_by_user_id=started_by_user_id,
             )
             db.add(history_entry)
             await upsert_workflow_analytics_snapshot(
@@ -3869,6 +3964,7 @@ async def execute_workflow_endpoint(
                 public_base_url=build_public_base_url(request),
                 history_entry_id=execution_id,
             )
+        history_entry.executed_by_user_id = started_by_user_id
         await upsert_workflow_analytics_snapshot(
             db,
             workflow_id=workflow.id,
@@ -3923,6 +4019,7 @@ async def execute_workflow_endpoint(
             execution_time_ms=execution_result.execution_time_ms,
             trigger_source=trigger_source,
             node_analytics_pending=pending_on_first_write(execution_result),
+            executed_by_user_id=started_by_user_id,
         )
         db.add(history_entry)
         if not execution_result.allow_downstream_pending:
@@ -4293,6 +4390,7 @@ async def get_execution_history(
         history_query.order_by(ExecutionHistory.started_at.desc()).limit(limit).offset(offset)
     )
     history = history_result.scalars().all()
+    meta = await workflow_run_meta(db, [h.id for h in history], current_user.id)
     items = [
         ExecutionHistoryListResponse(
             id=h.id,
@@ -4307,6 +4405,9 @@ async def get_execution_history(
             encrypted=h.encrypted,
             executed_by_instance_id=h.executed_by_instance_id,
             executed_by_instance_name=h.executed_by_instance_name,
+            executed_by_user_id=meta[h.id].user_id if h.id in meta else None,
+            executed_by_user_name=meta[h.id].user_name if h.id in meta else None,
+            can_delete=meta[h.id].can_delete if h.id in meta else False,
         )
         for h in history
     ]
@@ -4365,6 +4466,36 @@ async def clear_execution_history(
     )
 
 
+@router.delete("/{workflow_id}/history/{entry_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_workflow_execution_history_entry(
+    workflow_id: uuid.UUID,
+    entry_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Delete one run of a workflow. Only the owner can, as with clearing the whole history."""
+    workflow = await get_workflow_for_user(db, workflow_id, current_user.id)
+    if workflow is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Workflow not found",
+        )
+    history = (
+        await db.execute(
+            select(ExecutionHistory).where(
+                ExecutionHistory.id == entry_id,
+                ExecutionHistory.workflow_id == workflow_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if history is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Execution history entry not found",
+        )
+    await _delete_workflow_run(db, current_user, workflow, history)
+
+
 @router.post("/{workflow_id}/execute/stream")
 @router.get("/{workflow_id}/execute/stream")
 @router.put("/{workflow_id}/execute/stream")
@@ -4402,6 +4533,7 @@ async def execute_workflow_stream(
 
     session_user = current_user
     current_user = await validate_workflow_auth(workflow, request, current_user, db)
+    started_by_user_id = current_user.id if current_user else None
     enforce_workflow_http_method(workflow, request, test_run)
 
     if not workflow.sse_enabled and trigger_source not in _INTERNAL_STREAM_TRIGGER_SOURCES:
@@ -4442,6 +4574,7 @@ async def execute_workflow_stream(
                     node_results=[],
                     status="rate_limited",
                     execution_time_ms=0,
+                    executed_by_user_id=started_by_user_id,
                 )
                 db.add(history_entry)
                 await upsert_workflow_analytics_snapshot(
@@ -4478,6 +4611,7 @@ async def execute_workflow_stream(
                     status="cached",
                     execution_time_ms=0,
                     trigger_source=trigger_source,
+                    executed_by_user_id=started_by_user_id,
                 )
                 db.add(history_entry)
                 await upsert_workflow_analytics_snapshot(
@@ -4596,7 +4730,10 @@ async def execute_workflow_stream(
                 actor_user_id=credentials_owner_id,
                 credentials_owner_id=credentials_owner_id,
                 timeout_seconds=getattr(workflow, "workflow_timeout_seconds", None),
-                run_options={"run_error_workflow": True},
+                run_options={
+                    "run_error_workflow": True,
+                    **started_by_user_options(started_by_user_id),
+                },
             )
         )
         if admission.kind == "queue_full":
@@ -4791,6 +4928,7 @@ async def execute_workflow_stream(
                 final_result=final_result,
                 was_cancelled=was_cancelled,
                 test_run=test_run,
+                started_by_user_id=started_by_user_id,
             )
             if written:
                 await session.commit()
@@ -4893,6 +5031,7 @@ async def execute_workflow_stream(
                                 public_base_url=public_base_url,
                                 history_entry_id=execution_id,
                             )
+                        history_entry.executed_by_user_id = started_by_user_id
                         await upsert_workflow_analytics_snapshot(
                             db,
                             workflow_id=workflow.id,
@@ -4970,6 +5109,7 @@ async def execute_workflow_stream(
                                         public_base_url=public_base_url,
                                         history_entry_id=execution_id,
                                     )
+                                history_entry.executed_by_user_id = started_by_user_id
                                 await upsert_workflow_analytics_snapshot(
                                     db,
                                     workflow_id=workflow.id,
