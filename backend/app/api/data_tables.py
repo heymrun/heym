@@ -274,19 +274,54 @@ def _column_names(columns: list[dict]) -> set[str]:
     }
 
 
+def _renamed_columns(old_columns: object, new_columns: list[dict]) -> dict[str, str]:
+    """Old name -> new name for each column whose id stays and whose name changes.
+
+    A new name that another column also has is left out: moving the values there would
+    overwrite that column's own values.
+    """
+    new_names = {str(col.get("id")): col.get("name") for col in new_columns}
+    renamed: dict[str, str] = {}
+    for col in old_columns if isinstance(old_columns, list) else []:
+        if not isinstance(col, dict) or not col.get("name"):
+            continue
+        column_id = str(col.get("id"))
+        new_name = new_names.get(column_id)
+        if not new_name or new_name == col["name"]:
+            continue
+        if any(name == new_name and cid != column_id for cid, name in new_names.items()):
+            continue
+        renamed[str(col["name"])] = str(new_name)
+    return renamed
+
+
 async def _prune_rows_to_columns(
     table_id: uuid.UUID,
     columns: list[dict],
     db: AsyncSession,
     updated_by: uuid.UUID,
+    renamed: dict[str, str] | None = None,
 ) -> None:
-    """Remove row JSON keys that no longer exist in the table schema."""
+    """Remove row JSON keys that no longer exist in the table schema.
+
+    A renamed column's values move to its new name instead of being removed.
+    """
     allowed_names = _column_names(columns)
+    renamed = renamed or {}
+    # A key that a renamed column moves into only takes the renamed column's value.
+    moved_keys = set(renamed) | set(renamed.values())
     result = await db.execute(select(DataTableRow).where(DataTableRow.table_id == table_id))
     rows = result.scalars().all()
     for row in rows:
         row_data = row.data if isinstance(row.data, dict) else {}
-        pruned_data = {key: value for key, value in row_data.items() if key in allowed_names}
+        pruned_data = {
+            key: value
+            for key, value in row_data.items()
+            if key in allowed_names and key not in moved_keys
+        }
+        for old_name, new_name in renamed.items():
+            if old_name in row_data:
+                pruned_data[new_name] = row_data[old_name]
         if pruned_data != row_data:
             row.data = pruned_data
             row.updated_by = updated_by
@@ -686,7 +721,8 @@ async def update_data_table(
         for i, col in enumerate(columns_json):
             col["id"] = str(col.get("id", uuid.uuid4()))
             col["order"] = col.get("order", i)
-        await _prune_rows_to_columns(table_id, columns_json, db, current_user.id)
+        renamed = _renamed_columns(table.columns, columns_json)
+        await _prune_rows_to_columns(table_id, columns_json, db, current_user.id, renamed)
         table.columns = columns_json
 
     await db.flush()
