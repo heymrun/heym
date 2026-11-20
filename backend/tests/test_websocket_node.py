@@ -89,6 +89,31 @@ class TestWebSocketExecutorBranches(unittest.TestCase):
         self.assertEqual(websocket_result["output"]["message_type"], "json")
         self.assertEqual(websocket_result["output"]["status"], "sent")
 
+    def test_a_quote_in_a_header_value_keeps_the_headers_json(self) -> None:
+        from app.services.websocket_utils import normalize_websocket_headers
+        from app.services.workflow_executor import WorkflowExecutor
+
+        nodes, edges, inputs = _make_websocket_send_workflow(
+            {
+                "websocketUrl": "wss://socket.example.com/publish",
+                "websocketHeaders": '{"X-Context": "$start.body.text"}',
+                "websocketMessage": "ping",
+            }
+        )
+        inputs["body"]["text"] = '{"tenant": "café", "path": "C:\\\\data"}'
+        send_mock = AsyncMock(return_value={"status": "sent"})
+
+        with patch("app.services.workflow_executor.send_websocket_message", send_mock):
+            result = WorkflowExecutor(nodes=nodes, edges=edges).execute(
+                workflow_id=uuid.uuid4(), initial_inputs=inputs
+            )
+
+        self.assertEqual(result.status, "success")
+        headers = send_mock.await_args.kwargs["headers"]
+        self.assertEqual(
+            normalize_websocket_headers(headers), {"X-Context": inputs["body"]["text"]}
+        )
+
     def test_websocket_trigger_exposes_event_payload_to_downstream_nodes(self) -> None:
         from app.services.workflow_executor import WorkflowExecutor
 

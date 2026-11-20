@@ -35,11 +35,9 @@ def execute(ctx: NodeExecutionContext) -> object:
             preserve_type=True,
         )
     elif headers_template:
-        resolved_headers = self.evaluate_message_template(
-            headers_template,
-            inputs,
-            node_id,
-        )
+        # Resolved per value like the message below, so a quote in a header value stays
+        # inside its string instead of breaking the JSON object.
+        resolved_headers = render_json_template(self, headers_template, inputs, node_id)
     else:
         resolved_headers = {}
 
