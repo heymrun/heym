@@ -1929,6 +1929,9 @@ def _reject_stale_update(workflow: Workflow, base_updated_at: datetime | None) -
 # The error workflow runs with the failed run's context, which is the owner's for
 # anonymous and triggered runs, so a collaborator pointing it at a workflow they own
 # would run their own nodes as the owner (GHSA-c3f4-2mrj-jfqr).
+# The run settings (timeout, concurrency, recovery, time saved) shape every production run
+# and the owner's analytics, so they are the owner's on every client, not only in the
+# editor's settings panel.
 OWNER_ONLY_EXECUTION_FIELDS = (
     "auth_type",
     "auth_header_key",
@@ -1940,6 +1943,24 @@ OWNER_ONLY_EXECUTION_FIELDS = (
     "sse_enabled",
     "sse_node_config",
     "error_workflow_id",
+    "auto_recover_runs",
+    "minutes_saved_per_run",
+    "workflow_timeout_seconds",
+    "concurrency_limit",
+    "concurrency_max_queue",
+    "concurrency_max_wait_seconds",
+)
+
+# Fields where zero (or less) clears the stored value.
+_POSITIVE_OR_CLEARED_FIELDS = (
+    "cache_ttl_seconds",
+    "rate_limit_requests",
+    "rate_limit_window_seconds",
+    "minutes_saved_per_run",
+    "workflow_timeout_seconds",
+    "concurrency_limit",
+    "concurrency_max_queue",
+    "concurrency_max_wait_seconds",
 )
 
 
@@ -1952,7 +1973,7 @@ def _normalized_execution_value(field: str, value: Any) -> Any:
     """
     if field == "http_method":
         return value.strip().upper()
-    if field in ("cache_ttl_seconds", "rate_limit_requests", "rate_limit_window_seconds"):
+    if field in _POSITIVE_OR_CLEARED_FIELDS:
         return value if value > 0 else None
     # An unset key/config reads back as "" or {} through the API, so a client echoing
     # what it was given must not look like a change against the stored NULL.

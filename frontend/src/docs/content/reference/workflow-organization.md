@@ -65,6 +65,8 @@ Authentication is the reason the block is owner-only: `Anonymous` lets unauthent
 
 **On error, run workflow** (`error_workflow_id`) in the workflow-level **Properties** panel is owner-only for the same reason: the [error workflow](./features.md#error-workflow) runs with the failed run's credentials and global variables, which are the owner's for triggered and anonymous runs. Collaborators see the setting read-only, and adding, replacing, or clearing it as a non-owner is rejected with `403`.
 
+The other run settings in that panel are owner-only too, because they shape every production run and the owner's analytics: **Time saved per run** (`minutes_saved_per_run`), **Workflow timeout** (`workflow_timeout_seconds`), **Concurrency limit** (`concurrency_limit`, `concurrency_max_queue`, `concurrency_max_wait_seconds`), **Encrypt run history** and **Auto-recover runs** (`auto_recover_runs`). Collaborators see them read-only, and the API rejects a non-owner's change with `403`, whichever client sends it. A request that repeats the stored values still saves.
+
 Editing the canvas, name, and description is unaffected.
 
 ### Execution tokens
