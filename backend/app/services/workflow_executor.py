@@ -1041,16 +1041,14 @@ class DotList(list):
         return DotList(result)
 
     def sort(self, expr: str = "item", order: str = "asc") -> "DotList":
-        def get_sort_key(item: object) -> object:
-            key = self._evaluate_item_expression(expr, item)
-            if key is None:
-                return (1, "")
-            return (0, key)
-
+        keyed = [(self._evaluate_item_expression(expr, item), item) for item in self]
+        # Items without a key stay last in both orders, in their original order.
+        present = [pair for pair in keyed if pair[0] is not None]
+        missing = [item for key, item in keyed if key is None]
         reverse = order.lower() == "desc"
         try:
-            sorted_list = sorted(self, key=get_sort_key, reverse=reverse)
-            return DotList(sorted_list)
+            sorted_list = sorted(present, key=lambda pair: pair[0], reverse=reverse)
+            return DotList([item for _key, item in sorted_list] + missing)
         except TypeError:
             return DotList(self)
 

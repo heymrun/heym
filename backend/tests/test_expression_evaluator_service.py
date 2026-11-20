@@ -2323,6 +2323,54 @@ class TestDotBoolComparisonsAndPreview(unittest.TestCase):
         self.assertIsNone(res_filter.error)
         self.assertEqual(res_filter.result, ["alice"])
 
+    def test_sort_keeps_items_without_a_key_last_in_both_orders(self) -> None:
+        players = [
+            {"name": "Ann", "score": 42},
+            {"name": "Bob", "score": None},
+            {"name": "Cy", "score": 97},
+            {"name": "Dee"},
+        ]
+        service = self._service()
+        context = {"node": {"players": players}}
+
+        desc = service.evaluate(
+            "$node.players.sort('item.score', 'desc').map('item.name')", context
+        )
+        asc = service.evaluate("$node.players.sort('item.score').map('item.name')", context)
+
+        self.assertEqual(desc.result, ["Cy", "Ann", "Bob", "Dee"])
+        self.assertEqual(asc.result, ["Ann", "Cy", "Bob", "Dee"])
+
+        result = execute_workflow(
+            workflow_id=uuid.uuid4(),
+            nodes=[
+                {
+                    "id": "start",
+                    "type": "textInput",
+                    "data": {"label": "start", "inputFields": [{"key": "players"}]},
+                },
+                {
+                    "id": "rank",
+                    "type": "set",
+                    "data": {
+                        "label": "rank",
+                        "mappings": [
+                            {
+                                "key": "top2",
+                                "value": "$start.players.sort('item.score', 'desc')"
+                                ".take(2).map('item.name')",
+                            }
+                        ],
+                    },
+                },
+            ],
+            edges=[{"id": "e1", "source": "start", "target": "rank"}],
+            inputs={"players": players},
+            test_run=True,
+        )
+        rank = next(row for row in result.node_results if row["node_label"] == "rank")
+        self.assertEqual(rank["output"], {"top2": ["Cy", "Ann"]})
+
     def test_maintainer_two_node_workflow_execution(self) -> None:
         nodes = [
             {

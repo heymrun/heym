@@ -9,6 +9,24 @@ from app.services.node_execution.base import NodeExecutionContext
 from app.services.node_execution.json_fields import resolve_json_field as _resolve_json_field
 
 
+def _json_field(
+    executor: object, template: object, inputs: dict, node_id: str, *, operation: str, field: str
+) -> object:
+    """The field's parsed value; a field that is not JSON once filled in fails the node.
+
+    A blank field stays an empty object, as before.
+    """
+    if isinstance(template, str) and not template.strip():
+        return {}
+    try:
+        return _resolve_json_field(executor, template, inputs, node_id)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"DataTable {operation}: the {field} is not valid JSON once its expressions "
+            f"are filled in ({exc.msg})"
+        ) from exc
+
+
 def _build_data_table_sort_clauses(sort_str: str, columns: list) -> list:
     """Build SQLAlchemy order_by clauses for a DataTable sort string.
 
@@ -161,10 +179,9 @@ def execute(ctx: NodeExecutionContext) -> object:
 
         if operation == "find":
             filter_template = node_data.get("dataTableFilter", "{}")
-            try:
-                filter_dict = _resolve_json_field(self, filter_template, inputs, node_id)
-            except json.JSONDecodeError:
-                filter_dict = {}
+            filter_dict = _json_field(
+                self, filter_template, inputs, node_id, operation="find", field="filter"
+            )
 
             query = db.query(DataTableRow).filter(DataTableRow.table_id == data_table_id)
             if filter_dict and isinstance(filter_dict, dict):
@@ -229,10 +246,9 @@ def execute(ctx: NodeExecutionContext) -> object:
 
         elif operation == "count":
             filter_template = node_data.get("dataTableFilter", "{}")
-            try:
-                filter_dict = _resolve_json_field(self, filter_template, inputs, node_id)
-            except json.JSONDecodeError:
-                filter_dict = {}
+            filter_dict = _json_field(
+                self, filter_template, inputs, node_id, operation="count", field="filter"
+            )
 
             query = db.query(DataTableRow).filter(DataTableRow.table_id == data_table_id)
             if isinstance(filter_dict, dict) and filter_dict:
@@ -274,10 +290,9 @@ def execute(ctx: NodeExecutionContext) -> object:
 
         elif operation == "insert":
             data_template = node_data.get("dataTableData", "{}")
-            try:
-                row_data = _resolve_json_field(self, data_template, inputs, node_id)
-            except json.JSONDecodeError:
-                row_data = {}
+            row_data = _json_field(
+                self, data_template, inputs, node_id, operation="insert", field="row data"
+            )
 
             coerced_data = row_data if isinstance(row_data, dict) else {}
             coerced_data, _ = _coerce_row_data(coerced_data, table.columns or [])
@@ -311,10 +326,9 @@ def execute(ctx: NodeExecutionContext) -> object:
                 raise ValueError("DataTable update requires a row ID")
 
             data_template = node_data.get("dataTableData", "{}")
-            try:
-                update_data = _resolve_json_field(self, data_template, inputs, node_id)
-            except json.JSONDecodeError:
-                update_data = {}
+            update_data = _json_field(
+                self, data_template, inputs, node_id, operation="update", field="row data"
+            )
 
             row = (
                 db.query(DataTableRow)
@@ -375,16 +389,14 @@ def execute(ctx: NodeExecutionContext) -> object:
 
         elif operation == "upsert":
             filter_template = node_data.get("dataTableFilter", "{}")
-            try:
-                filter_dict = _resolve_json_field(self, filter_template, inputs, node_id)
-            except json.JSONDecodeError:
-                filter_dict = {}
+            filter_dict = _json_field(
+                self, filter_template, inputs, node_id, operation="upsert", field="filter"
+            )
 
             data_template = node_data.get("dataTableData", "{}")
-            try:
-                upsert_data = _resolve_json_field(self, data_template, inputs, node_id)
-            except json.JSONDecodeError:
-                upsert_data = {}
+            upsert_data = _json_field(
+                self, data_template, inputs, node_id, operation="upsert", field="row data"
+            )
 
             # Try to find existing row by filter
             existing_row = None

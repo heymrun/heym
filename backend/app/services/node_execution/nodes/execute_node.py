@@ -122,7 +122,13 @@ def execute(ctx: NodeExecutionContext) -> object:
         else:
             execute_inputs = {"value": first_input}
 
-    if execute_workflow_id and execute_workflow_id in self.workflow_cache:
+    if execute_workflow_id and execute_workflow_id not in self.workflow_cache:
+        # The run's cache leaves out a target that was deleted or has no nodes.
+        raise ValueError(
+            f"The workflow to execute ({execute_workflow_id}) was not found or has no nodes"
+        )
+
+    if execute_workflow_id:
         target_workflow = self.workflow_cache[execute_workflow_id]
         self._refresh_vars_context_cache()
         merged_global = (
