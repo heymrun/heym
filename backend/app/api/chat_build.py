@@ -10,6 +10,7 @@ import asyncio
 import json
 import uuid
 from collections.abc import Sequence
+from dataclasses import replace
 from threading import Event
 from typing import Any
 
@@ -628,7 +629,10 @@ class ChatBuildSession:
                     if len(zips) == 1
                     else f"The zip {attachment.name} could not be read."
                 )
-            skills.extend(read_zip(raw).skills)
+            found = read_zip(raw).skills
+            if attachment.skill_drive_files:
+                found = tuple(replace(skill, drive_files=True) for skill in found)
+            skills.extend(found)
         if not skills:
             return None
         if len(skills) == 1:

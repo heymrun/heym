@@ -70,6 +70,7 @@ Heym's [Chat tab](../tabs/chat-tab.md#asking-about-heym-work), [`heym_chat` over
 - **Heym asks Heym Work.** For each chat turn, Heym asks Heym Work which tools the signed-in person may use, then relays each call. Heym Work decides what each role may see, as on its screens.
 - **Heym must reach Heym Work's address.** Heym calls the **Heym Work address** from Settings → Heym Work. When Heym cannot reach it, the chat says Heym Work is not answering and carries on without it.
 - **Each call carries a short-lived token.** Heym signs a token for the person, bound to the integration key, valid for five minutes (35 minutes for starting a Discover search), and sends it in a header. Heym does not store it, and it does not work without the integration key. Heym does not follow redirects with it.
+- **Heym Work's skills can read Drive.** A skill Heym Work sends with a Chat message, or puts on an agent with **Use in Workflow**, gets **Drive files** turned on, so its Python can read the person's Drive files, such as the ones attached in Heym Work's Chat. It reads only what that person can open.
 - **Every call is audited.** Heym writes a `work.assistant_call` line to its [audit log](./audit.md) for each call, and Heym Work records the call in its own log.
 
 ## Security Model

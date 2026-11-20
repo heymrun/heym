@@ -47,6 +47,8 @@ class SkillBundle:
     content: str
     files: tuple[ArchiveFile, ...]
     directory: str
+    # Set by the sender of the zip, never read from it: the skill may read Drive files.
+    drive_files: bool = False
 
 
 @dataclass(frozen=True)

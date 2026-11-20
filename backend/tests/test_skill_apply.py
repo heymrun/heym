@@ -1,6 +1,7 @@
 """Placing a skill on a workflow: match updates, a new name adds, ambiguity does not save."""
 
 import unittest
+from dataclasses import replace
 
 from app.services.skill_apply import FileEdit, new_skill_workflow, place_skill
 from app.services.skill_archive import ArchiveFile, SkillBundle
@@ -197,6 +198,48 @@ class PlaceSkillTests(unittest.TestCase):
         self.assertEqual(nodes[1]["data"]["credentialId"], "cred-1")
         self.assertEqual(nodes[1]["data"]["model"], "gpt-4o")
         self.assertEqual([edge["source"] for edge in edges], ["request", "agent"])
+
+
+class SkillDriveFilesTests(unittest.TestCase):
+    def _skill(self, nodes: list[dict]) -> dict:
+        return nodes[0]["data"]["skills"][0]
+
+    def test_a_bundle_that_reads_drive_turns_drive_files_on(self) -> None:
+        placed = place_skill([_agent("a1", "Clerk")], replace(BUNDLE, drive_files=True))
+        assert placed.nodes is not None
+        self.assertIs(self._skill(placed.nodes)["driveFilesEnabled"], True)
+
+    def test_it_turns_drive_files_on_for_a_skill_that_had_them_off(self) -> None:
+        old = {
+            "id": "s1",
+            "name": "invoice-helper",
+            "content": "old",
+            "files": [],
+            "driveFilesEnabled": False,
+        }
+        placed = place_skill([_agent("a1", "Clerk", [old])], replace(BUNDLE, drive_files=True))
+        assert placed.nodes is not None
+        self.assertIs(self._skill(placed.nodes)["driveFilesEnabled"], True)
+
+    def test_an_ordinary_bundle_keeps_what_the_agent_had(self) -> None:
+        placed = place_skill([_agent("a1", "Clerk")], BUNDLE)
+        assert placed.nodes is not None
+        self.assertNotIn("driveFilesEnabled", self._skill(placed.nodes))
+        on = {
+            "id": "s1",
+            "name": "invoice-helper",
+            "content": "old",
+            "files": [],
+            "driveFilesEnabled": True,
+        }
+        placed = place_skill([_agent("a1", "Clerk", [on])], BUNDLE)
+        assert placed.nodes is not None
+        self.assertIs(self._skill(placed.nodes)["driveFilesEnabled"], True)
+
+    def test_a_new_workflow_from_a_drive_bundle_has_drive_files_on(self) -> None:
+        _title, nodes, _edges = new_skill_workflow(replace(BUNDLE, drive_files=True), "cred-1", "m")
+        agent = next(node for node in nodes if node.get("type") == "agent")
+        self.assertIs(agent["data"]["skills"][0]["driveFilesEnabled"], True)
 
 
 if __name__ == "__main__":

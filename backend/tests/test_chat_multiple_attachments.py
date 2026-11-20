@@ -22,6 +22,7 @@ from app.services.chat_attachments import (
     stored_attachments,
 )
 from app.services.chat_message_edit import attachment_blocks
+from app.services.skill_archive import SkillBundle
 
 REPORT_ID = uuid.UUID("0b8c2a8e-7d55-4e8e-9f3c-2b1d6f3a9c10")
 NOTES_ID = uuid.UUID("5f0e7c1a-3b2d-4c6e-8a9f-1d2e3f4a5b6c")
@@ -319,6 +320,34 @@ class BuildSessionAttachmentTests(unittest.TestCase):
         self.assertEqual(result["status"], "needs_choice")
         self.assertEqual(result["skills"], ["alpha", "beta"])
         self.assertIn("The zips have several skills", result["message"])
+
+    def test_a_zip_marked_for_drive_gives_its_skills_drive_files(self) -> None:
+        bundle = SkillBundle(name="alpha", content="x", files=(), directory="")
+        session = self._session(
+            [FileAttachment(name="a.zip", kind="zip", content="a", skill_drive_files=True)]
+        )
+        with (
+            patch("app.api.chat_build.decode_zip_payload", side_effect=lambda value: value),
+            patch(
+                "app.api.chat_build.read_zip",
+                side_effect=lambda _raw: SimpleNamespace(skills=[bundle]),
+            ),
+        ):
+            picked = session._attached_bundle(None)
+        self.assertIsInstance(picked, SkillBundle)
+        self.assertTrue(picked.drive_files)
+
+    def test_the_drive_mark_survives_storage(self) -> None:
+        body = _body(
+            attachments=[
+                {"name": "a.zip", "kind": "zip", "content": "x", "skill_drive_files": True}
+            ]
+        )
+        stored = [item.model_dump(mode="json") for item in body.requested_attachments()]
+        turn = [FileAttachment.model_validate(item) for item in stored]
+        self.assertTrue(turn[0].skill_drive_files)
+        plain = FileAttachment(name="b.zip", kind="zip", content="x")
+        self.assertFalse(plain.skill_drive_files)
 
 
 if __name__ == "__main__":

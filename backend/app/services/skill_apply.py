@@ -117,7 +117,13 @@ def overlay(bundle: SkillBundle | None, edits: list[FileEdit], *, name: str) -> 
             content = edit.content
         elif _editable(path):
             files[path] = ArchiveFile(path, edit.content)
-    return SkillBundle(name=name, content=content, files=tuple(files.values()), directory="")
+    return SkillBundle(
+        name=name,
+        content=content,
+        files=tuple(files.values()),
+        directory="",
+        drive_files=bundle.drive_files if bundle is not None else False,
+    )
 
 
 def _record(existing: dict[str, Any] | None, bundle: SkillBundle) -> dict[str, Any]:
@@ -145,6 +151,8 @@ def _record(existing: dict[str, Any] | None, bundle: SkillBundle) -> dict[str, A
     for key in ("timeoutSeconds", "driveFilesEnabled"):
         if key in current:
             record[key] = current[key]
+    if bundle.drive_files:
+        record["driveFilesEnabled"] = True
     return record
 
 

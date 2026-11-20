@@ -292,6 +292,8 @@ class FileAttachment(BaseModel):
     file_id: uuid.UUID | None = None
     size: int | None = None
     mime: str | None = None
+    # kind "zip": the sender lets the zip's skills read the user's Drive files on an agent.
+    skill_drive_files: bool = False
 
     def injection_value(self) -> str:
         """What a workflow input receives for this attachment: the Drive id or the content."""
