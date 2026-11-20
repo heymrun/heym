@@ -582,6 +582,15 @@ class TestGenerateConversationTitle(unittest.IsolatedAsyncioTestCase):
             "Please explain dashboard automation history for account...",
         )
 
+    async def test_fallback_fits_the_title_column_after_a_long_word(self) -> None:
+        from app.api.chats import _fallback_title_from_content
+
+        link = "https://reports.example.com/summary.pdf?X-Amz-Signature=" + "a" * 300
+        title = _fallback_title_from_content(f"Please summarize the quarterly report {link} now")
+
+        self.assertEqual(title, "Please summarize the quarterly report https://repo...")
+        self.assertLessEqual(len(title), 255)
+
     async def test_fallback_ignores_attachment_metadata(self) -> None:
         from app.api.chats import _fallback_title_from_content
 

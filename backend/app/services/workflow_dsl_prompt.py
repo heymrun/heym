@@ -2558,26 +2558,29 @@ The last node in the iteration body MUST connect BACK to the loop node's `loop` 
 **Insert Operation**:
 ```json
 {
-  "status": "success",
-  "inserted_ids": ["uuid-1", "uuid-2"]
+  "success": true,
+  "operation": "insert",
+  "point_id": "uuid-1"
 }
 ```
 
 **Search Operation**:
 ```json
 {
-  "status": "success",
+  "success": true,
+  "operation": "search",
+  "query": "How long do refunds take?",
+  "reranked": false,
+  "hybrid": false,
   "results": [
     {
       "id": "uuid-1",
+      "text": "Document text...",
       "score": 0.95,
-      "payload": {
-        "content": "Document text...",
-        "filename": "document.pdf",
-        "page_number": 1
-      }
+      "metadata": {"source": "document.pdf", "page": 1}
     }
-  ]
+  ],
+  "count": 1
 }
 ```
 
@@ -2656,10 +2659,10 @@ The last node in the iteration body MUST connect BACK to the loop node's `loop` 
 ```
 
 **Accessing RAG Output**:
-- `$ragNodeLabel.status` - Operation status ("success")
-- `$ragNodeLabel.inserted_ids` - Array of inserted document IDs (for insert operation)
+- `$ragNodeLabel.success` - true when the operation ran
 - `$ragNodeLabel.results` - Array of search results (for search operation)
-- `$ragNodeLabel.results.first().payload.content` - Content of the top result
+- `$ragNodeLabel.results.first().text` - Content of the top result
+- `$ragNodeLabel.results.first().metadata` - Metadata of the top result
 - `$ragNodeLabel.results.first().score` - Similarity score of the top result (0-1); with `hybridSearch` the fused score (0-1)
 - `$ragNodeLabel.results.first().vector_score` / `.keyword_score` - Per-search scores with `hybridSearch` (null when that search did not return the document)
 - `$ragNodeLabel.hybrid` - Boolean, whether hybrid search ran
@@ -2674,7 +2677,7 @@ The last node in the iteration body MUST connect BACK to the loop node's `loop` 
   "nodes": [
     {"id": "input_1", "type": "textInput", "position": {"x": 100, "y": 100}, "data": {"label": "userQuestion", "inputFields": [{"key": "text"}]}},
     {"id": "rag_1", "type": "rag", "position": {"x": 350, "y": 100}, "data": {"label": "searchKnowledge", "operation": "search", "vectorStoreId": "vector-store-uuid", "queryText": "$userQuestion.body.text", "searchLimit": 3}},
-    {"id": "llm_1", "type": "llm", "position": {"x": 600, "y": 100}, "data": {"label": "generateAnswer", "credentialId": "llm-credential-uuid", "model": "gpt-4o", "systemInstruction": "Answer the user's question based on the following context:\\n$searchKnowledge.results.map(\"item.payload.content\").join(\"\\n\\n\")", "userMessage": "$userQuestion.body.text"}},
+    {"id": "llm_1", "type": "llm", "position": {"x": 600, "y": 100}, "data": {"label": "generateAnswer", "credentialId": "llm-credential-uuid", "model": "gpt-4o", "systemInstruction": "Answer the user's question based on the following context:\\n$searchKnowledge.results.map(\"item.text\").join(\"\\n\\n\")", "userMessage": "$userQuestion.body.text"}},
     {"id": "output_1", "type": "output", "position": {"x": 850, "y": 100}, "data": {"label": "answer", "message": "$generateAnswer.text"}}
   ],
   "edges": [

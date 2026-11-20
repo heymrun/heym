@@ -99,7 +99,7 @@ Heym includes a [RAG / Vector Store Node](../nodes/rag-node.md) and a managed [V
 - Choose your vector backend: **Qdrant** (external server) or **Postgres (pgvector)**, which stores vectors in Heym's own database with no extra service to run
 - Insert documents into a vector store directly from a workflow node
 - Perform semantic search and feed results into an LLM or Agent node
-- Reference results with expressions like `$ragNode.results.map("item.payload.content").join("\n\n")`
+- Reference results with expressions like `$ragNode.results.map("item.text").join("\n\n")`
 
 In Heym, RAG is two nodes with full control over embeddings and retrieval.
 

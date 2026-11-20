@@ -100,6 +100,7 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 DEFAULT_CONVERSATION_TITLE = "New Chat"
+_TITLE_COLUMN_CHARS = 255
 DEFAULT_QUICK_PROMPTS: list[str] = [
     "List my workflows",
     "Show recent runs",
@@ -1364,6 +1365,11 @@ def _fallback_title_from_content(content: str) -> str:
     title_source = cleaned.strip("\"'`“”‘’")
     if len(title_source) > 50:
         word_boundary = title_source.find(" ", 50)
+        # dashboard_conversations.title is VARCHAR(255), "..." included. A long unbroken word
+        # (a signed link, a token) can put the next space past that, so cut at 50 as when
+        # there is no space at all.
+        if word_boundary > _TITLE_COLUMN_CHARS - len("..."):
+            word_boundary = -1
         title_source = title_source[: word_boundary if word_boundary != -1 else 50]
     title = title_source.rstrip(".,:;!?")
     return f"{title}..." if title else DEFAULT_CONVERSATION_TITLE

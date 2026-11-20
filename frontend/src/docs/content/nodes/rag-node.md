@@ -55,7 +55,7 @@ Add documents to the vector store.
 | `documentContent` | yes | Text to embed and store |
 | `documentMetadata` | no | JSON object, e.g. `{"source": "user", "category": "general"}` |
 
-**Output:** `$nodeLabel.status`, `$nodeLabel.inserted_ids`
+**Output:** `$nodeLabel.success`, `$nodeLabel.point_id` (the stored point id)
 
 To store an image's text or a recording's transcript from a workflow, put a
 [Converter](./converter-node.md) node (`imageToText`, `pdfToText` or `audioToText`) before the
