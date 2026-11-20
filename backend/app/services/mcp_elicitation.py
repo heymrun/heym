@@ -1,17 +1,21 @@
-"""What an MCP client declared, and URL-mode elicitation (MCP 2025-11-25).
+"""What an MCP client declared, and elicitation (MCP 2025-11-25).
 
 Heym's MCP endpoints keep no session, so what a client declared in `initialize` comes back
 on every later request: in the signed `Mcp-Session-Id` header Heym hands out on Streamable
 HTTP, or on the SSE channel of the legacy transport. A tool call that needs a secret sends
 the client a URL-mode `elicitation/create`: the user opens a Heym page in the browser and
 types the secret there, so it never passes through the client or the model. Form mode is
-never used for secrets; the spec forbids it.
+never used for secrets; the spec forbids it. It asks for other input instead, such as the
+text to insert into an agent's memory, and its reply comes back to the waiting tool call
+through `form_elicitations`.
 """
 
+import asyncio
 import secrets
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from threading import Event
 from typing import TYPE_CHECKING, Any
 
 import jwt
@@ -35,7 +39,10 @@ MCP_SESSION_HEADER = "Mcp-Session-Id"
 _SESSION_TOKEN_TYPE = "mcp_client_session"
 # Heym's own JSON-RPC ids for elicitation requests, so a client's reply finds its request.
 _ELICITATION_ID_PREFIX = "heym-elicit-"
+_FORM_ID_PREFIX = "heym-form-"
 _REPLY_ACTIONS = frozenset({"accept", "decline", "cancel"})
+FORM_WAIT_SECONDS = 300.0
+_FORM_POLL_SECONDS = 1.0
 
 
 def negotiate_protocol_version(requested: object) -> str:
@@ -117,6 +124,10 @@ class MCPClientChannel:
     def supports_url_elicitation(self) -> bool:
         return URL_MODE in self.elicitation_modes
 
+    @property
+    def supports_form_elicitation(self) -> bool:
+        return FORM_MODE in self.elicitation_modes
+
 
 def url_elicitation_request(elicitation_id: uuid.UUID, url: str, message: str) -> dict[str, Any]:
     """The `elicitation/create` request that asks the client to open `url`."""
@@ -180,3 +191,123 @@ def parse_elicitation_reply(body: dict[str, Any]) -> ElicitationReply | None:
     if action not in _REPLY_ACTIONS:
         return None
     return ElicitationReply(elicitation_id, str(action))
+
+
+def form_elicitation_request(
+    elicitation_id: uuid.UUID, message: str, requested_schema: dict[str, Any]
+) -> dict[str, Any]:
+    """The form-mode `elicitation/create` request.
+
+    `mode` is left out: form is the default, and clients older than 2025-11-25 do not know it.
+    """
+    return {
+        "jsonrpc": "2.0",
+        "id": f"{_FORM_ID_PREFIX}{elicitation_id}",
+        "method": "elicitation/create",
+        "params": {"message": message, "requestedSchema": requested_schema},
+    }
+
+
+@dataclass(frozen=True)
+class FormElicitationReply:
+    """The client's answer to one form elicitation; `content` is set on accept only."""
+
+    elicitation_id: uuid.UUID
+    action: str
+    content: dict[str, Any] = field(default_factory=dict)
+
+
+def parse_form_elicitation_reply(body: dict[str, Any]) -> FormElicitationReply | None:
+    """Read a client reply to one of Heym's form elicitations, or None for any other."""
+    raw_id = body.get("id")
+    if not isinstance(raw_id, str) or not raw_id.startswith(_FORM_ID_PREFIX):
+        return None
+    try:
+        elicitation_id = uuid.UUID(raw_id[len(_FORM_ID_PREFIX) :])
+    except ValueError:
+        return None
+    if "error" in body:
+        return FormElicitationReply(elicitation_id, "error")
+    result = body.get("result")
+    if not isinstance(result, dict) or result.get("action") not in _REPLY_ACTIONS:
+        return None
+    content = result.get("content")
+    return FormElicitationReply(
+        elicitation_id,
+        str(result["action"]),
+        dict(content) if result["action"] == "accept" and isinstance(content, dict) else {},
+    )
+
+
+class FormElicitationWaiters:
+    """The form elicitations tool calls in this process are waiting for.
+
+    The reply arrives as a separate POST. One that lands on another process finds no waiter
+    and is dropped; the tool call then times out and asks in the chat instead.
+    """
+
+    def __init__(self) -> None:
+        self._waiting: dict[uuid.UUID, tuple[uuid.UUID, asyncio.Future[FormElicitationReply]]] = {}
+
+    def open(
+        self, elicitation_id: uuid.UUID, user_id: uuid.UUID
+    ) -> "asyncio.Future[FormElicitationReply]":
+        future: asyncio.Future[FormElicitationReply] = asyncio.get_running_loop().create_future()
+        self._waiting[elicitation_id] = (user_id, future)
+        return future
+
+    def close(self, elicitation_id: uuid.UUID) -> None:
+        self._waiting.pop(elicitation_id, None)
+
+    def resolve(self, user_id: uuid.UUID, reply: FormElicitationReply) -> bool:
+        """Hand a reply to its waiting call; a reply from another user is ignored."""
+        waiting = self._waiting.get(reply.elicitation_id)
+        if waiting is None or waiting[0] != user_id:
+            return False
+        future = waiting[1]
+
+        def _set() -> None:
+            if not future.done():
+                future.set_result(reply)
+
+        future.get_loop().call_soon_threadsafe(_set)
+        return True
+
+
+form_elicitations = FormElicitationWaiters()
+
+
+async def ask_form(
+    client: MCPClientChannel,
+    *,
+    user_id: uuid.UUID,
+    message: str,
+    requested_schema: dict[str, Any],
+    cancel_event: Event | None = None,
+    timeout: float = FORM_WAIT_SECONDS,
+    waiters: FormElicitationWaiters = form_elicitations,
+) -> FormElicitationReply | None:
+    """Ask the client a form question and wait for the answer.
+
+    None when the client could not be reached, the turn was stopped or no answer came in time.
+    """
+    elicitation_id = uuid.uuid4()
+    future = waiters.open(elicitation_id, user_id)
+    try:
+        try:
+            await client.send(form_elicitation_request(elicitation_id, message, requested_schema))
+        except Exception:  # noqa: BLE001 - a client that went away gets asked in the chat
+            return None
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        while loop.time() < deadline:
+            if cancel_event is not None and cancel_event.is_set():
+                return None
+            wait = min(_FORM_POLL_SECONDS, max(0.0, deadline - loop.time()))
+            try:
+                return await asyncio.wait_for(asyncio.shield(future), timeout=wait)
+            except TimeoutError:
+                continue
+        return None
+    finally:
+        waiters.close(elicitation_id)

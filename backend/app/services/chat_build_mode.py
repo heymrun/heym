@@ -17,6 +17,7 @@ MAX_BUILD_TEST_RUNS = 5
 SAVE_WORKFLOW_TOOL = "save_workflow"
 RUN_WORKFLOW_TEST_TOOL = "run_workflow_test"
 FINISH_TOOL = "finish"
+INSERT_AGENT_MEMORY_TOOL = "insert_agent_memory"
 BUILD_TOOL_NAMES = frozenset({SAVE_WORKFLOW_TOOL, RUN_WORKFLOW_TEST_TOOL, FINISH_TOOL})
 
 # The AI Builder tools build with a second model call; build mode builds with the DSL itself.
@@ -203,6 +204,14 @@ def build_mode_instructions(target_name: str | None, target_id: uuid.UUID | None
         "would change.",
         "- A skill zip or a change to an existing skill goes through apply_skill. That tool "
         "keeps the skill files. Do not paste them into save_workflow.",
+        f"- Agent memory: when the user wants to add knowledge to an agent's memory or to turn "
+        f"its memory on, call {INSERT_AGENT_MEMORY_TOOL} right away (read the workflow first "
+        "only if you need to find the agent). It turns persistent memory on by itself, so never "
+        "use save_workflow or edit_workflow for that. When the user's messages contain the "
+        "knowledge, pass it as text exactly as given, at most 24,000 characters per call. When "
+        "they do not, call it without text and do not ask for the text yourself: Heym asks the "
+        "user. Only when the result is needs_text, ask its question with a heym-clarify block "
+        "holding one question of type text and stop, then call it again with the answer as text.",
     ]
     if target_id is not None:
         lines += [

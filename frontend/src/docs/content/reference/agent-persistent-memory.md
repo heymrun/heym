@@ -28,6 +28,18 @@ Two buttons sit in the dialog's top-right corner, next to **Reload**:
 
 AI insert is disabled until the agent node has both a **credential** and a **model** selected; hover the button to see why. Clear all is disabled while the graph is empty. Neither action goes on the dialog's Ctrl+Z history, and both clear it, because earlier steps may no longer apply. Both need write access to the workflow.
 
+### From Chat and MCP
+
+[Chat](../tabs/chat-tab.md) and the MCP `heym_chat` tool can run the same AI insert. Ask, for example, “Add these product facts to the support agent's memory: …”. The assistant finds the agent (it asks which one when the workflow has several) and inserts the text from your message. When you ask without giving the text, for example “Turn on the support agent's memory so I can fill it”, it asks what to insert:
+
+| Where | How you give the text |
+|-------|-----------------------|
+| Chat tab, Heym Work Chat | A free-text question card in the conversation |
+| MCP client with form elicitation | The client's own free-text field; the call waits up to five minutes |
+| Other MCP clients | A question in the result; reply with the text and the same `conversation_id` |
+
+The agent's credential and model extract the text (up to 24,000 characters per insert) into this graph. When `persistentMemoryEnabled` is off, the same step turns it on, saved like an editor save, with the previous version kept in Edit History. A failed insert changes nothing. Inserting needs write access to the workflow.
+
 ## Sharing with other agents
 
 In the memory graph dialog, **Share memory with other agents** lets you attach **peers** that may consume this graph at runtime:

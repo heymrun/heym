@@ -14,7 +14,9 @@ AGENT_CAPABILITIES = (
     "list, inspect and run workflows; build a new workflow or change one it built earlier in "
     "the conversation, test-run it with sample inputs (at most 5 test runs per message) and "
     "fix it until a run passes; create, edit and run prompt and agent eval suites, including "
-    "an agent's baseline; report analytics, where workflows fail and why they are slow (by "
+    "an agent's baseline; insert knowledge into an agent's persistent memory graph, turning "
+    "the memory on when it is off and asking for the text when the request has none; report "
+    "analytics, where workflows fail and why they are slow (by "
     "workflow and by node type), recent executions, the run history of one "
     "workflow (how many times it ran, statuses, when, and the details of a single run), and "
     "which executions are running right now (with elapsed time, current node, and a link to "
@@ -93,6 +95,14 @@ AGENT_SKILLS: tuple[AgentSkillInfo, ...] = (
         "Create, edit and run prompt and agent eval suites, including an agent's baseline.",
         ("evals", "testing"),
         ("Create an eval suite for the support triage prompt.",),
+    ),
+    AgentSkillInfo(
+        "agent-memory",
+        "Agent memory",
+        "Insert knowledge into an agent's persistent memory graph, turning the memory on when "
+        "it is off and asking for the text when the request has none.",
+        ("memory", "knowledge-graph", "agents"),
+        ("Add these product facts to the support agent's memory.",),
     ),
     AgentSkillInfo(
         "observability",

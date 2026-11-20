@@ -29,6 +29,7 @@ from app.api.ai_assistant import (
     get_workflows_for_user_with_inputs,
     run_execute_workflow_tool,
 )
+from app.api.chat_agent_memory import INSERT_AGENT_MEMORY_TOOL_SCHEMA, ChatAgentMemoryTool
 from app.api.chat_evals import ChatEvalTools
 from app.api.workflows import extract_input_fields_from_workflow, get_workflow_for_user
 from app.db.models import Credential, User, Workflow
@@ -40,6 +41,7 @@ from app.services.chat_build_mode import (
     BUDGET_SPENT_MESSAGE,
     BUILD_TOOL_NAMES,
     FINISH_TOOL,
+    INSERT_AGENT_MEMORY_TOOL,
     MAX_BUILD_TEST_RUNS,
     RUN_WORKFLOW_TEST_TOOL,
     SAVE_WORKFLOW_TOOL,
@@ -294,6 +296,17 @@ class ChatBuildSession:
                 user=user, public_base_url=public_base_url, cancel_event=cancel_event
             )
         )
+        self.memory = (
+            None
+            if request.skill_only
+            else ChatAgentMemoryTool(
+                db=db,
+                user=user,
+                llm_session_id=self.llm_session_id,
+                client=credential_form.client if credential_form is not None else None,
+                cancel_event=cancel_event,
+            )
+        )
 
     @property
     def builder_mode(self) -> CredentialPromptMode:
@@ -370,6 +383,8 @@ class ChatBuildSession:
             return tools + [APPLY_SKILL_TOOL_SCHEMA]
         if self.evals is not None:
             tools += self.evals.schemas()
+        if self.memory is not None:
+            tools.append(INSERT_AGENT_MEMORY_TOOL_SCHEMA)
         if not self.progress.budget_spent:
             return tools + [
                 APPLY_SKILL_TOOL_SCHEMA,
@@ -388,12 +403,16 @@ class ChatBuildSession:
             return name == APPLY_SKILL_TOOL
         if self.evals is not None and self.evals.handles(name):
             return True
+        if name == INSERT_AGENT_MEMORY_TOOL:
+            return self.memory is not None
         return name in BUILD_TOOL_NAMES or name == APPLY_SKILL_TOOL
 
     def display_args(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
         """Arguments for the step row, the stored message and the trace, without the whole DSL."""
         if self.evals is not None and self.evals.handles(name):
             return self.evals.display_args(name, args)
+        if name == INSERT_AGENT_MEMORY_TOOL:
+            return ChatAgentMemoryTool.display_args(args)
         if name == APPLY_SKILL_TOOL:
             edits = args.get("file_edits") if isinstance(args.get("file_edits"), list) else []
             paths = [item.get("path") for item in edits if isinstance(item, dict)]
@@ -419,6 +438,8 @@ class ChatBuildSession:
             return self.evals.step_label(name)
         if name == REQUEST_CREDENTIAL_FORM_TOOL:
             return "Opening the credential form..."
+        if name == INSERT_AGENT_MEMORY_TOOL:
+            return "Inserting into agent memory..."
         if name == APPLY_SKILL_TOOL:
             return "Saving the skill..."
         if name == SAVE_WORKFLOW_TOOL:
@@ -441,6 +462,8 @@ class ChatBuildSession:
             return tool_error("This chat writes skills. It does not build other workflows.")
         if self.evals is not None and self.evals.handles(name):
             return await self.evals.call(name, args)
+        if name == INSERT_AGENT_MEMORY_TOOL:
+            return await self._insert_agent_memory(args)
         if name == SAVE_WORKFLOW_TOOL:
             return await self._save(args)
         if name == RUN_WORKFLOW_TEST_TOOL:
@@ -791,6 +814,26 @@ class ChatBuildSession:
         if target is not None and requested != target:
             return tool_error(f"This turn changes workflow {target}; pass that id or none.")
         return requested
+
+    async def _insert_agent_memory(self, args: dict[str, Any]) -> BuildToolOutcome:
+        if self.memory is None:
+            return tool_error("This chat cannot change agent memory.")
+        requested = self._requested_workflow_id(args.get("workflow_id"))
+        if isinstance(requested, BuildToolOutcome):
+            return requested
+        workflow_id = requested or self.progress.workflow_id
+        if workflow_id is None:
+            return tool_error("Pass workflow_id: the workflow with the agent.")
+        workflow = await get_workflow_for_user(self.db, workflow_id, self.user.id)
+        if workflow is None:
+            return tool_error("Workflow not found or no access")
+        if not await user_can_write_workflow(self.db, workflow, self.user.id):
+            return tool_error("You have read-only access to this workflow")
+        inserted = await self.memory.call(workflow, args)
+        # Memory turned on changes what the last test run ran: finish needs a new passing run.
+        if inserted.saved and self.progress.workflow_id == workflow.id:
+            self.progress.record_save(workflow.id)
+        return inserted.outcome
 
     async def _run_test(
         self, args: dict[str, Any], progress: ToolProgress | None = None

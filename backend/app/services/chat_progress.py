@@ -28,6 +28,7 @@ _DRAFTING_MESSAGES = {
     "save_prompt_suite": "Writing the eval suite",
     "save_agent_suite": "Writing the eval suite",
     "finish": "Wrapping up",
+    "insert_agent_memory": "Preparing the memory insert",
 }
 
 

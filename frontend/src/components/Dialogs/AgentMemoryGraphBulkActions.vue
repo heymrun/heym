@@ -35,7 +35,7 @@ const clearDisabled = computed<boolean>(
   <!-- Each button sits in a span: a disabled button gets no pointer events, so the span is what
        the tooltip listens on, and the reason it is disabled still shows on hover. -->
   <Tooltip :label="aiInsertTooltip(model)">
-    <span class="inline-flex">
+    <span class="mr-1 inline-flex">
       <button
         type="button"
         class="agent-memory-ai-insert flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-medium text-primary transition-all duration-200 dark:text-brand-primary-soft disabled:pointer-events-none disabled:opacity-40 disabled:shadow-none"
