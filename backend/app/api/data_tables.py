@@ -4,6 +4,7 @@ import json
 import math
 import re
 import uuid
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
@@ -294,6 +295,17 @@ def _normalize_unique_value(value: Any, col_type: str = "string") -> str:
     """Normalize unique column value for comparison with PostgreSQL JSONB text."""
     if isinstance(value, bool) or col_type == "boolean":
         return "true" if (value is True or str(value).lower() in ("true", "1", "yes")) else "false"
+    if col_type == "number":
+        # 1, 1.0 and "1.00" are one number; JSONB keeps them as written.
+        try:
+            number = Decimal(str(value))
+        except InvalidOperation:
+            return str(value)
+        # A value past float range (1e200000) is left as written, as before.
+        if number.is_finite() and math.isfinite(float(number)):
+            if number == number.to_integral_value():
+                return str(int(number))
+            return format(number.normalize(), "f")
     return str(value)
 
 
@@ -331,6 +343,9 @@ def _prepare_unique_checks(
     return unique_checks, col_type_map
 
 
+_JSON_NUMBER = re.compile(r"-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?")
+
+
 def _unique_lock_statement(table_id: str | uuid.UUID) -> tuple[str, dict]:
     """Build the statement that serialises unique-constraint checks for one table.
 
@@ -350,16 +365,32 @@ def _unique_lock_statement(table_id: str | uuid.UUID) -> tuple[str, dict]:
     )
 
 
+def _compares_as_number(col_value: str, col_type: object) -> bool:
+    """Whether a number column's value is also compared as a jsonb number.
+
+    String columns compare text only, and a value too large for a float (1e200000)
+    would overflow PostgreSQL's numeric cast.
+    """
+    if str(col_type).lower() != "number" or not _JSON_NUMBER.fullmatch(col_value):
+        return False
+    return math.isfinite(float(col_value))
+
+
 def _build_unique_query(
     table_id: str | uuid.UUID,
     unique_checks: list[tuple[str, str]],
     exclude_row_id: str | uuid.UUID | None = None,
+    col_type_map: dict[str, str] | None = None,
 ) -> tuple[str, dict]:
     """Build the SQL query and parameter dict for checking unique constraints."""
     conditions = []
     params: dict = {"table_id": str(table_id)}
     for i, (col_name, col_value) in enumerate(unique_checks):
-        conditions.append(f"data ->> :cn{i} = :cv{i}")
+        condition = f"data ->> :cn{i} = :cv{i}"
+        if _compares_as_number(col_value, (col_type_map or {}).get(col_name)):
+            # A number stored as 1.0 reads back as the text "1.0"; jsonb compares it as 1.
+            condition = f"({condition} OR CAST(data -> :cn{i} AS jsonb) = CAST(:cv{i} AS jsonb))"
+        conditions.append(condition)
         params[f"cn{i}"] = col_name
         params[f"cv{i}"] = col_value
 
@@ -410,7 +441,7 @@ async def _check_unique_constraints(
     lock_sql, lock_params = _unique_lock_statement(table_id)
     await db.execute(text(lock_sql), lock_params)
 
-    sql, params = _build_unique_query(table_id, unique_checks, exclude_row_id)
+    sql, params = _build_unique_query(table_id, unique_checks, exclude_row_id, col_type_map)
     result = await db.execute(text(sql), params)
     existing_rows = result.fetchall()
 
@@ -435,7 +466,7 @@ def _check_unique_constraints_sync(
     lock_sql, lock_params = _unique_lock_statement(table_id)
     db.execute(text(lock_sql), lock_params)
 
-    sql, params = _build_unique_query(table_id, unique_checks, exclude_row_id)
+    sql, params = _build_unique_query(table_id, unique_checks, exclude_row_id, col_type_map)
     result = db.execute(text(sql), params)
     existing_rows = result.fetchall()
 
