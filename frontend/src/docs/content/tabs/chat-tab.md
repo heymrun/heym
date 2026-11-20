@@ -109,6 +109,28 @@ If your workspace has several boards and you do not identify one, Chat pauses wi
 single-choice board picker. Select a board to finish creating the card. No slash command
 or special message format is required.
 
+## Asking About Heym Work
+
+When [Heym Work](../reference/heym-work.md) is connected, Chat can answer from it as you. Ask in
+ordinary language, for example “How many flows do I have, and how did they last run?”,
+“What is in my world's Orders corner?”, “How many skills do I have, and which are shared with
+me?”, “What did my last Discover search find?” or “Start a Discover search for a skill that
+reads invoices”.
+
+| You ask about | Chat answers with |
+|---------------|-------------------|
+| **World** | The corners of your industry world, with the data table or workflows behind each. For the rows in a corner's table, Chat reads that [data table](./datatable-tab.md) in Heym, so Heym checks your access to it again. |
+| **Flows** | How many flows you have (all of them count as active, since each one's trigger is live), each flow's trigger, steps and last run. For a flow running right now, Chat asks [what is running](#asking-what-is-running). |
+| **Skills** | How many skills you have, how many are yours and how many are shared with you, the count per folder, and one skill's details: its `SKILL.md`, its files and what Discover said about it. |
+| **Discover** | Your recent searches and what each found, and a new search from a link or a description. A search runs in the background in Heym Work; ask about it again to read its results, and import a result on Heym Work's Discover screen. |
+| **Documentation** | Heym Work's own articles, with links into Heym Work. |
+
+Heym Work applies your Heym Work role, the same as on its screens: a Viewer can ask about the
+world and the documentation, and Flows, Skills and Discover need an Editor or an Owner. Someone
+who is not a Heym Work member, or an install whose license is not active, can only search Heym
+Work's documentation. A deactivated Heym account gets nothing. If Heym Work does not answer,
+Chat says so instead of guessing.
+
 ## Asking What Is Running
 
 Ask in ordinary language — "what is running?", "how many workflows are active right now?",

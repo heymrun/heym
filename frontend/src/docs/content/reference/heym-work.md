@@ -63,6 +63,15 @@ Home opens, ready for the team.
 
 Switch off **Enable Heym Work** to stop the connection. Heym Work then asks for Heym's key again. Heym keeps running every workflow, schedule and webhook either way.
 
+## Chat and MCP
+
+Heym's [Chat tab](../tabs/chat-tab.md#asking-about-heym-work), [`heym_chat` over MCP](../tabs/mcp-tab.md#heym-agent) and the [A2A agent](./a2a.md) can answer questions about Heym Work: the world, flows, skills, Discover and Heym Work's documentation. Heym Work's own Chat runs its turns in Heym and gets the same answers.
+
+- **Heym asks Heym Work.** For each chat turn, Heym asks Heym Work which tools the signed-in person may use, then relays each call. Heym Work decides what each role may see, as on its screens.
+- **Heym must reach Heym Work's address.** Heym calls the **Heym Work address** from Settings → Heym Work. When Heym cannot reach it, the chat says Heym Work is not answering and carries on without it.
+- **Each call carries a short-lived token.** Heym signs a token for the person, bound to the integration key, valid for five minutes (35 minutes for starting a Discover search), and sends it in a header. Heym does not store it, and it does not work without the integration key. Heym does not follow redirects with it.
+- **Every call is audited.** Heym writes a `work.assistant_call` line to its [audit log](./audit.md) for each call, and Heym Work records the call in its own log.
+
 ## Security Model
 
 - **Every change goes through Heym.** Heym Work reads what it shows from Heym's database, and sends every action to Heym over the key-protected channel, where Heym applies its own access rules. Heym Work keeps its own data in a separate `heym_work` schema.
