@@ -48,6 +48,8 @@ class TokenClaims:
 SIGN_IN_PASSWORD = "pwd"
 SIGN_IN_MFA = "mfa"
 SIGN_IN_SSO = "sso"
+# A token Heym's chat mints for one call it makes to Heym Work (work_integration).
+SIGN_IN_ASSISTANT = "assistant"
 
 
 def _add_client_claims(
@@ -69,10 +71,10 @@ def create_access_token(
     client: str | None = None,
     key_version: str | None = None,
     method: str | None = None,
+    expires_in: timedelta | None = None,
 ) -> str:
-    expire = datetime.now(timezone.utc) + timedelta(
-        minutes=settings.jwt_access_token_expire_minutes
-    )
+    lifetime = expires_in or timedelta(minutes=settings.jwt_access_token_expire_minutes)
+    expire = datetime.now(timezone.utc) + lifetime
     to_encode: dict[str, object] = {
         "sub": str(user_id),
         "exp": expire,

@@ -199,6 +199,8 @@ Untrusted Agent Python **skills** run in a hardened, throwaway sibling container
 | `HEYM_SKILL_DOCKER_WORKSPACE_VOLUME` | Docker volume shared with each skill runner. Falls back to `HEYM_CODEX_DOCKER_WORKSPACE_VOLUME` (`heym-codex-workspaces` in Compose), else the backend's own mount is inspected. | — |
 | `HEYM_SKILL_HOST_WORKSPACE_DIR` | Absolute host path for the workspace mount when using a bind mount instead of a Docker volume. | — |
 
+The workspace variables apply to a backend in a container. A native `run.sh` backend needs none of them: like the Code node, it creates each skill run under the system temp directory and bind-mounts that directory into the sandbox, and the sandbox image's own `python` runs the skill (set `HEYM_SKILL_PYTHON` to use another interpreter).
+
 ## Code node sandbox
 
 **The Code node adds no variables of its own, and deliberately has no `subprocess` escape hatch.** It runs arbitrary user Python with arbitrary dependencies, so it always requires a reachable [sandbox backend](#sandbox-backend) (Docker or Kubernetes) and fails closed without one — `HEYM_PYTHON_TOOL_SANDBOX` does not apply to it. Its limits (512m memory, 1 CPU, 256 PIDs, 120s install timeout, 60s execution timeout) are constants in `app/services/code_python_executor.py`, not configuration.

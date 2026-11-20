@@ -87,7 +87,9 @@ This is best for requests where you want the work done as a reusable automation,
 
 Drop files on the composer, paste them (a screenshot, or files copied from your file manager), or pick several with the paperclip. One message carries up to 10 files, and each one shows as a chip while it uploads; remove one with its **×**.
 
-Documents (PDF, XLSX, XLS, CSV, TSV, DOCX, JSON, TXT, MD), images (PNG, JPG, GIF, WebP) and plain text files of any name go to your Drive with the source **Chat**, and the message carries only each file's name and id. A plain text file is anything that reads as UTF-8 text, such as `notes`, `Makefile` or `todo.list`. Code files (PY, TS, JS, HTML, XML, YAML, LOG) are read into the message. Chat reads an image's text with OCR in the sandbox. Skill zips are attached as before: a zip with a `SKILL.md` becomes a skill on an agent with every file in its folder, including Python, templates and images. A file that cannot be attached is listed by name, and the other files still go with the message.
+Documents (PDF, XLSX, XLS, CSV, TSV, DOCX, JSON, TXT, MD), images (PNG, JPG, GIF, WebP) and plain text files of any name go to your Drive with the source **Chat**, and the message carries only each file's name and id. A plain text file is anything that reads as UTF-8 text, such as `notes`, `Makefile` or `todo.list`. Code files (PY, TS, JS, HTML, XML, YAML, LOG) are read into the message. Chat reads an image's text with OCR in the sandbox. Skill zips are attached as before: a zip with a `SKILL.md` becomes a skill on an agent with every file in its folder, including Python, templates and images.
+
+When a message carries a skill and asks to use it, Chat runs that skill for the request: it puts the skill on a Request → Agent → Result workflow, runs it with your request and answers with what the skill produced, file links included. It does not build another workflow around the skill or instead of it, and it cannot add or remove steps in that turn; it may only change the skill workflow's settings. When you name something to read first, such as a website, Chat gets it with one of your workflows that loads web pages before the skill runs. A workflow made for another job, such as Skill Discover, does not count even if it reads pages. When you have no such workflow, Chat says so and asks you to paste the page text, attach it, or let it build a page loader; it does not stand in for the page with the documentation. A page loader only reads pages: Text Input, HTTP, Playwright steps (no custom code or AI step), Crawler, Set, Variable, Loop, Merge, Condition and Output nodes. These rules hold for the rest of that chat, not only the message that carried the skill: Chat builds no other workflow there and does not run its own Python (`run_python`), so the skill makes the files. To build something else, start a new chat. When the skill cannot run in Heym as written (it expects a shell, Node.js, npm or LibreOffice, or a library the sandbox lacks), Chat converts the skill itself and runs it again: it adds a Python `main.py` that writes nothing for an empty request, and rewrites `SKILL.md` without the steps Heym's sandbox cannot run. If it still fails, Chat says what failed. A file that cannot be attached is listed by name, and the other files still go with the message.
 
 Chat answers file questions with [File Analysis](../reference/file-analysis.md): it calls `inspect_file` for the type, structure and a short sample, then `run_python` for the specific operation, such as "take the Total field on the Summary sheet and add the value from the last page". Results come back as tables or short extracts, and files Chat creates (xlsx, csv, json) are saved to Drive with a link.
 
@@ -108,6 +110,28 @@ never approves a review by moving a card.
 If your workspace has several boards and you do not identify one, Chat pauses with a
 single-choice board picker. Select a board to finish creating the card. No slash command
 or special message format is required.
+
+## Asking About Heym Work
+
+When [Heym Work](../reference/heym-work.md) is connected, Chat can answer from it as you. Ask in
+ordinary language, for example “How many flows do I have, and how did they last run?”,
+“What is in my world's Orders corner?”, “How many skills do I have, and which are shared with
+me?”, “What did my last Discover search find?” or “Start a Discover search for a skill that
+reads invoices”.
+
+| You ask about | Chat answers with |
+|---------------|-------------------|
+| **World** | The corners of your industry world, with the data table or workflows behind each. For the rows in a corner's table, Chat reads that [data table](./datatable-tab.md) in Heym, so Heym checks your access to it again. |
+| **Flows** | How many flows you have (all of them count as active, since each one's trigger is live), each flow's trigger, steps and last run. For a flow running right now, Chat asks [what is running](#asking-what-is-running). |
+| **Skills** | How many skills you have, how many are yours and how many are shared with you, the count per folder, and one skill's details: its `SKILL.md`, its files and what Discover said about it. |
+| **Discover** | Your recent searches and what each found, and a new search from a link or a description. A search runs in the background in Heym Work; ask about it again to read its results, and import a result on Heym Work's Discover screen. |
+| **Documentation** | Heym Work's own articles, with links into Heym Work. |
+
+Heym Work applies your Heym Work role, the same as on its screens: a Viewer can ask about the
+world and the documentation, and Flows, Skills and Discover need an Editor or an Owner. Someone
+who is not a Heym Work member, or an install whose license is not active, can only search Heym
+Work's documentation. A deactivated Heym account gets nothing. If Heym Work does not answer,
+Chat says so instead of guessing.
 
 ## Asking What Is Running
 

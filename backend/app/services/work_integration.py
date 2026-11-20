@@ -15,8 +15,13 @@ from fastapi import Request
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import WORK_INTEGRATION_ID, WorkIntegration, WorkSsoCode
-from app.services.auth import create_access_token, create_refresh_token, store_refresh_token
+from app.db.models import WORK_INTEGRATION_ID, User, WorkIntegration, WorkSsoCode
+from app.services.auth import (
+    SIGN_IN_ASSISTANT,
+    create_access_token,
+    create_refresh_token,
+    store_refresh_token,
+)
 from app.services.secret_tokens import hash_secret
 
 WORK_CLIENT = "work"
@@ -26,6 +31,9 @@ WORK_KEY_PREFIX = "hwi_"
 KEY_VERSION_LENGTH = 12
 KEY_CACHE_SECONDS = 5.0
 SSO_CODE_TTL = timedelta(seconds=60)
+ASSISTANT_TOKEN_TTL = timedelta(minutes=5)
+# Discover's searches are failed as stale after 30 minutes; the token outlives that window.
+ASSISTANT_LONG_TOKEN_TTL = timedelta(minutes=35)
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 _WORK_STATE = re.compile(r"[A-Za-z0-9_-]{16,128}")
 
@@ -180,6 +188,23 @@ async def issue_work_tokens(
     refresh = create_refresh_token(user_id, client=WORK_CLIENT, key_version=version, method=method)
     await store_refresh_token(db, refresh, user_id)
     return WorkTokens(access_token=access, refresh_token=refresh)
+
+
+def mint_assistant_token(user: User, key_hash: str, *, long_running: bool = False) -> str | None:
+    """A Work-bound access token for one call Heym's chat makes to Work.
+
+    None for an inactive user or an integration without a key. The token is never stored:
+    it goes to Work in a header, and Heym accepts it back only with the Work key.
+    """
+    if not key_hash or not user.is_active:
+        return None
+    return create_access_token(
+        user.id,
+        client=WORK_CLIENT,
+        key_version=key_version(key_hash),
+        method=SIGN_IN_ASSISTANT,
+        expires_in=ASSISTANT_LONG_TOKEN_TTL if long_running else ASSISTANT_TOKEN_TTL,
+    )
 
 
 async def create_sso_code(db: AsyncSession, user_id: uuid.UUID) -> str:

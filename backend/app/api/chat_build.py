@@ -10,6 +10,7 @@ import asyncio
 import json
 import uuid
 from collections.abc import Sequence
+from dataclasses import replace
 from threading import Event
 from typing import Any
 
@@ -55,6 +56,11 @@ from app.services.chat_build_mode import (
 from app.services.chat_eval_mode import eval_instructions
 from app.services.chat_image_input import image_input
 from app.services.chat_progress import ToolProgress
+from app.services.chat_skill_turn import (
+    page_loader_problem,
+    skill_save_problem,
+    skill_use_instructions,
+)
 from app.services.collab.saves import queue_collab_saved
 from app.services.credential_access import load_accessible_credential_ids
 from app.services.credential_catalog import (
@@ -93,6 +99,7 @@ from app.services.skill_apply import (
     new_skill_workflow,
     place_skill,
     skill_write_instructions,
+    unchanged_edits,
 )
 from app.services.skill_archive import SkillBundle, decode_zip_payload, read_zip
 from app.services.workflow_access import user_can_write_workflow
@@ -272,6 +279,7 @@ class ChatBuildSession:
         attachments: Sequence[FileAttachment] = (),
         credential_form: CredentialFormTool | None = None,
         conversation_id: uuid.UUID | None = None,
+        earlier_skill_names: Sequence[str] = (),
     ) -> None:
         self.db = db
         self.user = user
@@ -288,6 +296,10 @@ class ChatBuildSession:
         # MCP turns: credentials are created on a Heym page, never in the chat.
         self.credential_form = credential_form
         self.progress = BuildProgress(workflow_id=request.target_workflow_id)
+        # The skills this chat carries: this message's zips (read once, on first use) and the
+        # ones earlier messages attached, so the skill rules hold for every later message.
+        self.earlier_skill_names = list(earlier_skill_names)
+        self._skill_names: list[str] | None = None
         # Eval suites are part of every build turn; a skill-only turn writes skills only.
         self.evals = (
             None
@@ -307,6 +319,27 @@ class ChatBuildSession:
                 cancel_event=cancel_event,
             )
         )
+
+    def skill_names(self) -> list[str]:
+        """The skills this chat carries. A chat with one runs it instead of building."""
+        if self._skill_names is None:
+            names: list[str] = []
+            for attachment in self.attachments:
+                if attachment.kind != "zip":
+                    continue
+                raw = decode_zip_payload(attachment.content)
+                if raw is not None:
+                    names.extend(skill.name for skill in read_zip(raw).skills)
+            for name in self.earlier_skill_names:
+                if name not in names:
+                    names.append(name)
+            self._skill_names = names
+        return self._skill_names
+
+    @property
+    def python_allowed(self) -> bool:
+        """run_python is off in a chat that uses a skill: the skill makes the files."""
+        return self.request.skill_only or not self.skill_names()
 
     @property
     def builder_mode(self) -> CredentialPromptMode:
@@ -372,7 +405,9 @@ class ChatBuildSession:
             target.name if target is not None else None,
             target.id if target is not None else None,
         )
-        return f"{instructions}\n{eval_instructions()}\n{skill_block}{user_context}"
+        skills = self.skill_names()
+        use_block = skill_use_instructions(skills) if skills else ""
+        return f"{instructions}\n{eval_instructions()}\n{skill_block}{use_block}{user_context}"
 
     def tools(self, base_tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """The chat's own tools without the AI Builder, plus what build mode allows now."""
@@ -495,6 +530,23 @@ class ChatBuildSession:
                 return tool_error("Workflow not found or no access")
             if not await user_can_write_workflow(self.db, existing, self.user.id):
                 return tool_error("You have read-only access to this workflow")
+
+        if self.skill_names():
+            if (
+                existing is not None
+                and requested is None
+                and self.request.target_workflow_id is None
+                and page_loader_problem(list(existing.nodes or [])) is not None
+                and page_loader_problem(list(config["nodes"])) is None
+            ):
+                # A page loader saved after apply_skill is a new workflow beside the skill's.
+                existing = None
+            problem = skill_save_problem(
+                list(existing.nodes or []) if existing is not None else None,
+                list(config["nodes"]),
+            )
+            if problem is not None:
+                return tool_error(problem)
 
         catalog = await load_credential_catalog(self.db, self.user.id)
         table_catalog = await load_data_table_catalog(self.db, self.user.id)
@@ -628,7 +680,10 @@ class ChatBuildSession:
                     if len(zips) == 1
                     else f"The zip {attachment.name} could not be read."
                 )
-            skills.extend(read_zip(raw).skills)
+            found = read_zip(raw).skills
+            if attachment.skill_drive_files:
+                found = tuple(replace(skill, drive_files=True) for skill in found)
+            skills.extend(found)
         if not skills:
             return None
         if len(skills) == 1:
@@ -699,11 +754,17 @@ class ChatBuildSession:
                 nodes = placed.nodes
             return await self._persist_skill(None, title, nodes, edges)
 
+        target_skill = bundle.name if bundle is not None else skill_name
+        unchanged = (
+            unchanged_edits(list(existing.nodes or []), target_skill, edits)
+            if edits and target_skill
+            else []
+        )
         placed = place_skill(
             list(existing.nodes or []),
             bundle,
             agent_id=agent_id,
-            skill_name=bundle.name if bundle is not None else skill_name,
+            skill_name=target_skill,
             edits=edits,
         )
         if placed.status == "needs_choice":
@@ -721,7 +782,7 @@ class ChatBuildSession:
         if placed.status != "saved" or placed.nodes is None:
             return tool_error(placed.message)
         return await self._persist_skill(
-            existing, existing.name, placed.nodes, list(existing.edges or [])
+            existing, existing.name, placed.nodes, list(existing.edges or []), unchanged=unchanged
         )
 
     async def _persist_skill(
@@ -730,6 +791,8 @@ class ChatBuildSession:
         name: str,
         nodes: list[dict[str, Any]],
         edges: list[dict[str, Any]],
+        *,
+        unchanged: list[str] | None = None,
     ) -> BuildToolOutcome:
         """Store a skill change through the same versioned save as the editor."""
         if existing is not None and getattr(existing, "kind", "workflow") == "dashboard_widget":
@@ -777,6 +840,12 @@ class ChatBuildSession:
             extra["version"] = 1
         elif version_number is not None:
             extra["version"] = version_number + 1
+        if unchanged:
+            extra["unchanged_files"] = unchanged
+            extra["note"] = (
+                f"These file_edits changed nothing, their text is the same as before: "
+                f"{', '.join(unchanged)}. Send the new text to change them."
+            )
         result = _build_saved_workflow_payload(
             workflow,
             nodes,

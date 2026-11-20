@@ -234,13 +234,22 @@ def _site_cases(docker: FakeDocker) -> dict[str, list[str]]:
         "HEYM_SKILL_WORKSPACE_DIR": str(skill_root / "_skill-workspaces"),
     }
     skill_files = [{"path": "main.py", "content": "print(1)"}]
-    with patch.dict(
-        os.environ, {**skill_env, "HEYM_SKILL_DOCKER_WORKSPACE_VOLUME": "heym-codex-workspaces"}
+    # Both recorded skill cases are a backend in a container, on the shared volume.
+    in_container = patch.object(skill_python_executor, "_shared_workspace", return_value=True)
+    with (
+        in_container,
+        patch.dict(
+            os.environ,
+            {**skill_env, "HEYM_SKILL_DOCKER_WORKSPACE_VOLUME": "heym-codex-workspaces"},
+        ),
     ):
         (out["skill_volume"],) = docker.capture(
             lambda: skill_python_executor.execute_skill_python(skill_files, {"input": "x"}, 10)
         )
-    with patch.dict(os.environ, {**skill_env, "HEYM_SKILL_HOST_WORKSPACE_DIR": "/srv/heym"}):
+    with (
+        patch.object(skill_python_executor, "_shared_workspace", return_value=True),
+        patch.dict(os.environ, {**skill_env, "HEYM_SKILL_HOST_WORKSPACE_DIR": "/srv/heym"}),
+    ):
         (out["skill_bind"],) = docker.capture(
             lambda: skill_python_executor.execute_skill_python(skill_files, {"input": "x"}, 10)
         )

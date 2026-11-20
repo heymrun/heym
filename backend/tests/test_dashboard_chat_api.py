@@ -21,6 +21,7 @@ from app.api.ai_assistant import (
     edit_and_run_generated_workflow_tool,
     stream_dashboard_chat,
 )
+from app.api.chat_work import ChatWorkTools
 from app.db.models import CredentialType, WebhookBodyMode, WorkflowAuthType, WorkflowVersion
 from app.services.credential_catalog import CatalogCredential, CredentialPromptMode
 from app.services.data_table_catalog import CatalogColumn, CatalogDataTable
@@ -95,6 +96,9 @@ def _stub_credential_catalog(test: unittest.TestCase) -> tuple[AsyncMock, AsyncM
 class DashboardChatApiTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.credentials_prompt, self.credential_catalog = _stub_credential_catalog(self)
+        work_patcher = patch.object(ChatWorkTools, "load", AsyncMock(return_value=None))
+        work_patcher.start()
+        self.addCleanup(work_patcher.stop)
 
     def test_append_date_to_user_messages_only_changes_llm_copy(self) -> None:
         messages = [
@@ -193,6 +197,7 @@ class DashboardChatApiTests(unittest.IsolatedAsyncioTestCase):
             _cancel_event: object,
             _attachment: object = None,
             _selected_credential: object = None,
+            **_kwargs: object,
         ):
             captured["system_prompt"] = system_prompt
             captured["messages"] = messages
@@ -229,7 +234,6 @@ class DashboardChatApiTests(unittest.IsolatedAsyncioTestCase):
                 "app.api.ai_assistant.get_workflows_for_user_with_inputs",
                 AsyncMock(return_value=[]),
             ),
-            patch("app.api.ai_assistant._load_agents_md_content", return_value="AGENTS context"),
             patch("app.api.ai_assistant.build_public_base_url", return_value="http://localhost"),
             patch(
                 "app.api.ai_assistant.stream_dashboard_chat",
@@ -245,7 +249,8 @@ class DashboardChatApiTests(unittest.IsolatedAsyncioTestCase):
             chunks = _normalize_chunks([chunk async for chunk in response.body_iterator])
 
         self.assertEqual(chunks, ['data: {"type":"done"}\n\n'])
-        self.assertIn("AGENTS context", captured["system_prompt"])
+        self.assertTrue(captured["system_prompt"].startswith("You are the Heym Agent"))
+        self.assertNotIn("Heym Platform Context", captured["system_prompt"])
         self.assertIn(
             "User preferences / custom instructions (follow these when relevant):",
             captured["system_prompt"],
@@ -299,6 +304,7 @@ class DashboardChatApiTests(unittest.IsolatedAsyncioTestCase):
             _cancel_event: object,
             _attachment: object = None,
             _selected_credential: object = None,
+            **_kwargs: object,
         ):
             captured["trace_context"] = _trace_context
             yield 'data: {"type":"done"}\n\n'
@@ -323,7 +329,6 @@ class DashboardChatApiTests(unittest.IsolatedAsyncioTestCase):
                 "app.api.ai_assistant.get_workflows_for_user_with_inputs",
                 AsyncMock(return_value=[]),
             ),
-            patch("app.api.ai_assistant._load_agents_md_content", return_value=""),
             patch("app.api.ai_assistant.build_public_base_url", return_value="http://localhost"),
             patch(
                 "app.api.ai_assistant.stream_dashboard_chat",
@@ -409,6 +414,7 @@ class DashboardChatApiTests(unittest.IsolatedAsyncioTestCase):
             _cancel_event: object,
             _attachment: object = None,
             _selected_credential: object = None,
+            **_kwargs: object,
         ):
             captured["messages"] = messages
             yield 'data: {"type":"done"}\n\n'
@@ -438,7 +444,6 @@ class DashboardChatApiTests(unittest.IsolatedAsyncioTestCase):
                 "app.api.ai_assistant.get_workflows_for_user_with_inputs",
                 AsyncMock(return_value=[]),
             ),
-            patch("app.api.ai_assistant._load_agents_md_content", return_value=""),
             patch("app.api.ai_assistant.build_public_base_url", return_value="http://localhost"),
             patch(
                 "app.api.ai_assistant.stream_dashboard_chat",
@@ -483,6 +488,7 @@ class DashboardChatApiTests(unittest.IsolatedAsyncioTestCase):
             _cancel_event: object,
             _attachment: object = None,
             _selected_credential: object = None,
+            **_kwargs: object,
         ):
             yield 'data: {"type":"step","label":"Searching documentation..."}\n\n'
             yield 'data: {"type":"done"}\n\n'
@@ -507,7 +513,6 @@ class DashboardChatApiTests(unittest.IsolatedAsyncioTestCase):
                 "app.api.ai_assistant.get_workflows_for_user_with_inputs",
                 AsyncMock(return_value=[]),
             ),
-            patch("app.api.ai_assistant._load_agents_md_content", return_value=""),
             patch("app.api.ai_assistant.build_public_base_url", return_value="http://localhost"),
             patch(
                 "app.api.ai_assistant.stream_dashboard_chat",
@@ -554,6 +559,7 @@ class DashboardChatApiTests(unittest.IsolatedAsyncioTestCase):
             _cancel_event: object,
             _attachment: object = None,
             _selected_credential: object = None,
+            **_kwargs: object,
         ):
             await release_stream.wait()
             yield 'data: {"type":"done"}\n\n'
@@ -575,7 +581,6 @@ class DashboardChatApiTests(unittest.IsolatedAsyncioTestCase):
                 "app.api.ai_assistant.get_workflows_for_user_with_inputs",
                 AsyncMock(return_value=[]),
             ),
-            patch("app.api.ai_assistant._load_agents_md_content", return_value=""),
             patch("app.api.ai_assistant.build_public_base_url", return_value="http://localhost"),
             patch(
                 "app.api.ai_assistant.stream_dashboard_chat", side_effect=fake_stream_dashboard_chat
@@ -634,7 +639,6 @@ class DashboardChatApiTests(unittest.IsolatedAsyncioTestCase):
                 "app.api.ai_assistant.get_workflows_for_user_with_inputs",
                 AsyncMock(return_value=[]),
             ),
-            patch("app.api.ai_assistant._load_agents_md_content", return_value=""),
             patch("app.api.ai_assistant.build_public_base_url", return_value="http://localhost"),
             patch(
                 "app.api.ai_assistant.stream_dashboard_chat",
@@ -693,7 +697,6 @@ class DashboardChatApiTests(unittest.IsolatedAsyncioTestCase):
                 "app.api.ai_assistant.get_workflows_for_user_with_inputs",
                 AsyncMock(return_value=workflows),
             ),
-            patch("app.api.ai_assistant._load_agents_md_content", return_value=""),
             patch("app.api.ai_assistant.build_public_base_url", return_value="http://localhost"),
             patch(
                 "app.api.ai_assistant.stream_dashboard_chat",
@@ -1156,6 +1159,9 @@ class BuildUserMessageTests(unittest.TestCase):
 class DashboardChatAttachmentIntegrationTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.credentials_prompt, self.credential_catalog = _stub_credential_catalog(self)
+        work_patcher = patch.object(ChatWorkTools, "load", AsyncMock(return_value=None))
+        work_patcher.start()
+        self.addCleanup(work_patcher.stop)
 
     async def test_dashboard_chat_injects_routing_instructions_when_attachment_present(
         self,
@@ -1186,6 +1192,7 @@ class DashboardChatAttachmentIntegrationTests(unittest.IsolatedAsyncioTestCase):
             _cancel_event: object,
             _attachment: object = None,
             _selected_credential: object = None,
+            **_kwargs: object,
         ):
             captured["system_prompt"] = system_prompt
             captured["messages"] = messages
@@ -1209,7 +1216,6 @@ class DashboardChatAttachmentIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 new_callable=AsyncMock,
                 return_value=[],
             ),
-            patch("app.api.ai_assistant._load_agents_md_content", return_value=None),
             patch("app.api.ai_assistant.build_public_base_url", return_value="http://localhost"),
             patch("app.api.ai_assistant.stream_dashboard_chat", side_effect=fake_stream),
         ):
@@ -1236,7 +1242,6 @@ class DashboardChatBreakdownTests(unittest.IsolatedAsyncioTestCase):
         history = [{"role": "user", "content": "hello"}]
         breakdown = _context_breakdown(
             base_system_prompt="sys",
-            agents_md="agents",
             workflows_block="wf",
             user_rules="rules",
             history=history,
@@ -1244,7 +1249,7 @@ class DashboardChatBreakdownTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertIn("system", breakdown)
-        self.assertIn("agents_md", breakdown)
+        self.assertNotIn("agents_md", breakdown)
         self.assertIn("workflows", breakdown)
         self.assertIn("user_rules", breakdown)
         self.assertIn("history", breakdown)
@@ -1257,14 +1262,12 @@ class DashboardChatBreakdownTests(unittest.IsolatedAsyncioTestCase):
 
         breakdown = _context_breakdown(
             base_system_prompt="",
-            agents_md="",
             workflows_block="",
             user_rules="",
             history=[],
             attachment_content=None,
         )
         self.assertEqual(breakdown["system"], 0)
-        self.assertEqual(breakdown["agents_md"], 0)
         self.assertEqual(breakdown["workflows"], 0)
         self.assertEqual(breakdown["user_rules"], 0)
         self.assertEqual(breakdown["history"], 0)
@@ -1513,7 +1516,6 @@ class ContextSummaryEndpointTests(unittest.IsolatedAsyncioTestCase):
         fake_parts = SystemPromptParts(
             full_system_prompt="sys",
             base_system_prompt="sys",
-            agents_md="",
             workflows_block="",
             user_rules="",
         )
@@ -1538,7 +1540,6 @@ class ContextSummaryEndpointTests(unittest.IsolatedAsyncioTestCase):
                 "app.api.ai_assistant._context_breakdown",
                 return_value={
                     "system": 1,
-                    "agents_md": 0,
                     "workflows": 0,
                     "user_rules": 0,
                     "history": 0,

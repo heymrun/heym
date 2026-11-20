@@ -27,6 +27,7 @@ _MODULES = (
     "app.services.run_history_list",
     "app.services.run_history_meta",
     "app.services.url_redaction",
+    "app.services.doc_index",
 )
 _PROBE = (
     "import importlib, sys\n"

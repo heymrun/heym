@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 
 from app.api import ai_assistant
+from app.api.chat_work import ChatWorkTools
 from app.db.models import CredentialType
 from app.services import llm_chat_bridge
 from app.services.assistant_yolo import YoloToolOutcome, stream_yolo_assistant_turn
@@ -708,7 +709,7 @@ class TestChatEntryPoints(unittest.IsolatedAsyncioTestCase):
                 "app.api.ai_assistant.get_workflows_for_user_with_inputs",
                 AsyncMock(return_value=[]),
             ),
-            patch("app.api.ai_assistant._load_agents_md_content", return_value="AGENTS context"),
+            patch.object(ChatWorkTools, "load", AsyncMock(return_value=None)),
             patch("app.api.ai_assistant.build_public_base_url", return_value="http://localhost"),
             patch("app.api.ai_assistant.build_credentials_prompt", AsyncMock(return_value="")),
             patch("app.api.ai_assistant.knowledge_bases_prompt_block", AsyncMock(return_value="")),

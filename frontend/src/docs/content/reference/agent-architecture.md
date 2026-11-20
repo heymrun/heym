@@ -102,7 +102,7 @@ Skills extend the agent's system context and can add Python tools.
 - **Shape**: `AgentSkill` = `{ id, name, content, files?, timeoutSeconds? }`
 - **Content**: Prepended to the system instruction (joined with `---`)
 - **Python tools**: For each skill with `.py` files, a `skill_{skill_name}` tool is added
-- **Execution**: `skill_python_executor.py` runs scripts with `uv run python` in a temp dir; args as JSON on stdin, result as JSON on stdout
+- **Execution**: `skill_python_executor.py` runs the skill in the sandbox. The tool takes `script` (one of the skill's own `.py` files; default `main.py`, `run.py` or the first one), `args` (argv, never through a shell; `{output_dir}` is the folder whose files reach Drive) and `input` (stdin). A call with only `input` keeps the old shape: the input, or the arguments as JSON, on stdin. The result is the script's stdout, read as JSON when it is JSON
 
 Skills can be added by dropping a `.zip` or `.md` file onto the Skills area in the [Agent Node](../nodes/agent-node.md) config.
 

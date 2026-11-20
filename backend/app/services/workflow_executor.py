@@ -76,6 +76,7 @@ from app.services.node_execution import NodeExecutionContext, execute_node_handl
 from app.services.node_execution.extra_body import resolve_extra_body
 from app.services.node_execution.llm_batch_input import normalize_batch_user_messages
 from app.services.page_params import PAGE_CONTEXT_NAME, page_params_from_inputs
+from app.services.skill_python_executor import SkillWorkspaces, skill_tool_schema
 from app.services.timezone_utils import get_configured_timezone, normalize_datetime_to_timezone
 from app.services.trigger_inputs import receives_initial_inputs
 from app.services.websocket_utils import (
@@ -4937,14 +4938,26 @@ class WorkflowExecutor(WorkflowBranchRoutingMixin):
             source_label=str(node_data.get("label") or "Agent"),
             workflow_id=self.workflow_id,
         )
-        if toolbox is None:
-            return self._run_agent_node(node_id, inputs, node_data, guardrails_config)
+        # A skill keeps one workspace for this execution, so a later call sees earlier files.
+        skill_workspaces = SkillWorkspaces()
         try:
-            return self._run_agent_node(
-                node_id, inputs, node_data, guardrails_config, file_toolbox=toolbox
-            )
+            if toolbox is None:
+                return self._run_agent_node(
+                    node_id, inputs, node_data, guardrails_config, skill_workspaces=skill_workspaces
+                )
+            try:
+                return self._run_agent_node(
+                    node_id,
+                    inputs,
+                    node_data,
+                    guardrails_config,
+                    file_toolbox=toolbox,
+                    skill_workspaces=skill_workspaces,
+                )
+            finally:
+                toolbox.workspace.delete()
         finally:
-            toolbox.workspace.delete()
+            skill_workspaces.close()
 
     def _run_agent_node(
         self,
@@ -4953,6 +4966,7 @@ class WorkflowExecutor(WorkflowBranchRoutingMixin):
         node_data: dict,
         guardrails_config: dict | None = None,
         file_toolbox: FileToolbox | None = None,
+        skill_workspaces: SkillWorkspaces | None = None,
     ) -> dict:
         combined_input = ""
         for data in self._visible_inputs(inputs).values():
@@ -5374,29 +5388,21 @@ class WorkflowExecutor(WorkflowBranchRoutingMixin):
             skill_name = (skill.get("name") or "skill").replace(" ", "_").lower()
             skill_timeout = float(skill.get("timeoutSeconds") or tool_timeout_seconds)
             drive_files_enabled = bool(skill.get("driveFilesEnabled"))
-            skill_description = (
-                f"Run {skill.get('name', 'skill')} Python script. Pass arguments as JSON."
+            skill_description, skill_parameters = skill_tool_schema(
+                str(skill.get("name") or "skill"),
+                skill_files,
+                drive_files_enabled=drive_files_enabled,
             )
-            if drive_files_enabled:
-                skill_description += (
-                    " This skill can import heym_drive to read accessible Drive files by "
-                    "file_id or filename."
-                )
             merged_tools.append(
                 {
                     "name": f"skill_{skill_name}",
                     "description": skill_description,
-                    "parameters": json.dumps(
-                        {
-                            "type": "object",
-                            "properties": {
-                                "input": {"type": "string", "description": "Input for the script"}
-                            },
-                            "required": [],
-                        }
-                    ),
+                    "parameters": json.dumps(skill_parameters),
                     "_source": "skill",
                     "_skill_files": skill_files,
+                    "_skill_workspace": skill_workspaces.for_skill(skill_name)
+                    if skill_workspaces is not None
+                    else None,
                     "_skill_timeout": skill_timeout,
                     "_drive_files_enabled": drive_files_enabled,
                     "_actor_user_id": str(self.actor_user_id) if self.actor_user_id else None,

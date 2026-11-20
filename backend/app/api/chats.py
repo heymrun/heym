@@ -25,7 +25,6 @@ from app.api.ai_assistant import (
     FileAttachment,
     _build_user_message,
     _format_workflows_for_prompt,
-    _load_agents_md_content,
     get_workflows_for_user_with_inputs,
     resolve_model_binding,
     stream_dashboard_chat,
@@ -33,6 +32,7 @@ from app.api.ai_assistant import (
 from app.api.chat_build import ChatBuildSession
 from app.api.chat_files import ChatFileTools
 from app.api.chat_knowledge_bases import knowledge_bases_prompt_block
+from app.api.chat_work import ChatWorkTools
 from app.api.deps import get_current_user, get_current_user_id, get_db
 from app.api.workflows import get_workflow_for_user
 from app.db.models import (
@@ -71,6 +71,7 @@ from app.services.chat_message_edit import (
     carried_attachments,
     messages_from_edit,
 )
+from app.services.chat_skill_turn import conversation_skill_names
 from app.services.credential_access import get_accessible_credential
 from app.services.credential_catalog import CredentialPromptMode, build_credentials_prompt
 from app.services.credential_setup import CredentialFormTool
@@ -275,7 +276,6 @@ async def _clear_queue_items(
 class SystemPromptParts:
     full_system_prompt: str
     base_system_prompt: str
-    agents_md: str
     workflows_block: str
     user_rules: str
     credentials_block: str = ""
@@ -298,7 +298,6 @@ async def _assemble_system_prompt_parts(
     workflows = await get_workflows_for_user_with_inputs(db, user.id)
     workflows_block = _format_workflows_for_prompt(workflows)
     knowledge_bases_block = await knowledge_bases_prompt_block(db, user.id)
-    agents_md = _load_agents_md_content() or ""
     user_rules = (user.user_rules or "").strip()
     credentials_block = (
         ""
@@ -307,14 +306,6 @@ async def _assemble_system_prompt_parts(
     )
 
     system_prompt = DASHBOARD_CHAT_SYSTEM_PROMPT
-    if agents_md:
-        system_prompt = (
-            "## Heym Platform Context\n\n"
-            "Use the following Heym platform documentation to answer questions about the platform, structure, commands, code style, and conventions:\n\n"
-            + agents_md
-            + "\n\n---\n\n"
-            + system_prompt
-        )
     system_prompt += build_reference + file_rules
     if workflows_block:
         system_prompt = (
@@ -336,7 +327,6 @@ async def _assemble_system_prompt_parts(
     return SystemPromptParts(
         full_system_prompt=system_prompt,
         base_system_prompt=DASHBOARD_CHAT_SYSTEM_PROMPT,
-        agents_md=agents_md,
         workflows_block=workflows_block,
         user_rules=user_rules,
         credentials_block=credentials_block,
@@ -485,8 +475,15 @@ async def _run_chat_turn(
                     attachments=attachments,
                     credential_form=turn.credential_form,
                     conversation_id=conv_uuid,
+                    earlier_skill_names=conversation_skill_names(
+                        message.content for message in all_messages if message.role == "user"
+                    ),
                 )
-            files = ChatFileTools(user=user, conversation_id=conv_uuid)
+            files = ChatFileTools(
+                user=user,
+                conversation_id=conv_uuid,
+                allow_python=build is None or build.python_allowed,
+            )
             parts = await _assemble_system_prompt_parts(
                 user,
                 db,
@@ -509,6 +506,11 @@ async def _run_chat_turn(
             if workspace_block:
                 parts = replace(
                     parts, full_system_prompt=parts.full_system_prompt + workspace_block
+                )
+            work = await ChatWorkTools.load(db, user)
+            if work is not None:
+                parts = replace(
+                    parts, full_system_prompt=parts.full_system_prompt + work.prompt_block()
                 )
 
             if turn.interrupted:
@@ -546,6 +548,7 @@ async def _run_chat_turn(
                 credential_mode=turn.credential_mode,
                 build=build,
                 files=files,
+                work=work,
             ):
                 if chunk.startswith("data: "):
                     try:
@@ -1919,7 +1922,6 @@ async def get_context_summary(
         base_system_prompt=parts.base_system_prompt
         + parts.credentials_block
         + parts.knowledge_bases_block,
-        agents_md=parts.agents_md,
         workflows_block=parts.workflows_block,
         user_rules=parts.user_rules,
         history=history,

@@ -117,7 +117,13 @@ def overlay(bundle: SkillBundle | None, edits: list[FileEdit], *, name: str) -> 
             content = edit.content
         elif _editable(path):
             files[path] = ArchiveFile(path, edit.content)
-    return SkillBundle(name=name, content=content, files=tuple(files.values()), directory="")
+    return SkillBundle(
+        name=name,
+        content=content,
+        files=tuple(files.values()),
+        directory="",
+        drive_files=bundle.drive_files if bundle is not None else False,
+    )
 
 
 def _record(existing: dict[str, Any] | None, bundle: SkillBundle) -> dict[str, Any]:
@@ -145,6 +151,8 @@ def _record(existing: dict[str, Any] | None, bundle: SkillBundle) -> dict[str, A
     for key in ("timeoutSeconds", "driveFilesEnabled"):
         if key in current:
             record[key] = current[key]
+    if bundle.drive_files:
+        record["driveFilesEnabled"] = True
     return record
 
 
@@ -164,6 +172,28 @@ def _matches(
             if isinstance(skill, dict) and _same(_skill_name(skill), name):
                 found.append((node, index))
     return found
+
+
+def unchanged_edits(
+    nodes: list[dict[str, Any]], skill_name: str, edits: list[FileEdit]
+) -> list[str]:
+    """The edited paths whose new text equals what the skill already holds."""
+    current: dict[str, str] | None = None
+    for node in nodes:
+        if not _is_agent(node):
+            continue
+        for skill in (node.get("data") or {}).get("skills") or []:
+            if isinstance(skill, dict) and _same(_skill_name(skill), skill_name):
+                current = {"SKILL.md": str(skill.get("content") or "")}
+                for item in skill.get("files") or []:
+                    if isinstance(item, dict) and isinstance(item.get("path"), str):
+                        current[item["path"]] = str(item.get("content") or "")
+                break
+        if current is not None:
+            break
+    if current is None:
+        return []
+    return [edit.path for edit in edits if current.get(edit.path) == edit.content]
 
 
 def place_skill(

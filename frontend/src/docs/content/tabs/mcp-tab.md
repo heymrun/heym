@@ -86,6 +86,7 @@ When it is on, `heym_chat` appears in `tools/list` alongside your workflow tools
 - Create, edit and run prompt and agent [eval suites](./evals-tab.md#from-chat-and-mcp), including an agent's baseline: reported, built from runs, or stated as numbers. The result lists the Evals link of every suite saved in the call.
 - Create or update your credentials on Heym's own page (see [Credentials](#credentials))
 - Read teams and global variables, and search the documentation
+- When [Heym Work](../reference/heym-work.md) is connected, answer from it as you: the world's corners and their data tables, how many flows you have and how they last ran, your skills with counts and details, Discover searches and their results, start a new Discover search, and search Heym Work's documentation (see [Chat › Asking About Heym Work](./chat-tab.md#asking-about-heym-work))
 - Approve, edit, or refuse pending human-in-the-loop reviews
 
 Capabilities added to the Chat tab later become available through `heym_chat` automatically — there is no per-capability toggle to keep in sync.

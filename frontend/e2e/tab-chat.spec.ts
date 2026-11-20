@@ -113,7 +113,6 @@ async function mockIdleChatContextSummary(page: import("@playwright/test").Page)
         limit: 16_385,
         breakdown: {
           system: 0,
-          agents_md: 0,
           workflows: 0,
           user_rules: 0,
           history: 0,
@@ -273,7 +272,6 @@ test("filters chat credentials and models with searchable selectors", async ({ p
         limit: 1000,
         breakdown: {
           system: 0,
-          agents_md: 0,
           workflows: 0,
           user_rules: 0,
           history: 0,
@@ -380,7 +378,6 @@ test("queues, edits, and deletes a message while streaming", async ({ page }) =>
         limit: 1000,
         breakdown: {
           system: 10,
-          agents_md: 10,
           workflows: 10,
           user_rules: 10,
           history: 10,

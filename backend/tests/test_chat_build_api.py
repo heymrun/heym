@@ -11,9 +11,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi import HTTPException
 
 from app.api import chats
-from app.db.models import DashboardChatQueueItem
+from app.api.chat_work import ChatWorkTools
+from app.db.models import DashboardChatQueueItem, DashboardMessage
 from app.models.chat_schemas import MessageCreate
 from app.services.chat_build_mode import BuildRequest
+from app.services.skill_archive import SkillBundle, ZipRead, prompt_for_zip
 
 
 def _body(**fields: Any) -> MessageCreate:
@@ -194,6 +196,11 @@ class QueuedBuildTurnTests(unittest.IsolatedAsyncioTestCase):
 
 
 class RunChatTurnBuildTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        work_patcher = patch.object(ChatWorkTools, "load", AsyncMock(return_value=None))
+        work_patcher.start()
+        self.addCleanup(work_patcher.stop)
+
     async def test_a_build_turn_adds_the_session_and_its_prompt(self) -> None:
         conv_id = str(uuid.uuid4())
         user = SimpleNamespace(id=uuid.uuid4(), user_rules=None)
@@ -202,14 +209,26 @@ class RunChatTurnBuildTests(unittest.IsolatedAsyncioTestCase):
         db.add = MagicMock()
         user_result = MagicMock()
         user_result.scalar_one_or_none.return_value = user
+        # An earlier message attached the docx skill; this one carries no zip.
+        skill = SkillBundle(name="docx", content="# docx", files=(), directory="docx")
+        zip_block = prompt_for_zip("docx.zip", ZipRead(skills=(skill,), text_files=(), notes=()))
+        earlier = DashboardMessage(
+            id=uuid.uuid4(),
+            conversation_id=uuid.UUID(conv_id),
+            role="user",
+            content=f"use this skill\n\n{zip_block}",
+            created_at=datetime.now(timezone.utc),
+        )
         msgs_result = MagicMock()
-        msgs_result.scalars.return_value.all.return_value = []
+        msgs_result.scalars.return_value.all.return_value = [earlier]
         conv_result = MagicMock()
         conv_result.scalar_one_or_none.return_value = None
         db.execute.side_effect = [user_result, msgs_result, conv_result]
         sessions: list[dict[str, Any]] = []
 
         class FakeSession:
+            python_allowed = False
+
             def __init__(self, **kwargs: Any) -> None:
                 sessions.append(kwargs)
 
@@ -229,7 +248,6 @@ class RunChatTurnBuildTests(unittest.IsolatedAsyncioTestCase):
         parts = chats.SystemPromptParts(
             full_system_prompt="base",
             base_system_prompt="base",
-            agents_md="",
             workflows_block="",
             user_rules="",
         )
@@ -269,6 +287,9 @@ class RunChatTurnBuildTests(unittest.IsolatedAsyncioTestCase):
             assemble.await_args.kwargs["build_reference"], "\n## Workflow DSL reference\n"
         )
         self.assertEqual(sessions[0]["workflows"], [])
+        self.assertEqual(list(sessions[0]["earlier_skill_names"]), ["docx"])
+        # The session says run_python is off, and the turn's file tools follow it.
+        self.assertFalse(stream_kwargs["files"].allow_python)
 
     async def test_saved_eval_suites_are_collected_like_saved_workflows(self) -> None:
         conv_id = str(uuid.uuid4())
@@ -299,7 +320,6 @@ class RunChatTurnBuildTests(unittest.IsolatedAsyncioTestCase):
         parts = chats.SystemPromptParts(
             full_system_prompt="base",
             base_system_prompt="base",
-            agents_md="",
             workflows_block="",
             user_rules="",
         )
