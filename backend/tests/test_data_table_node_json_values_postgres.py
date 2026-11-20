@@ -75,6 +75,13 @@ class DataTableNodeJsonValuesPostgresTests(unittest.TestCase):
     def _run(
         self, operation: str, inputs: dict[str, Any], upstream: str = "start", **fields: str
     ) -> dict[str, Any]:
+        node = self._node(operation, inputs, upstream, **fields)
+        self.assertEqual(node["status"], "success", node)
+        return node["output"]
+
+    def _node(
+        self, operation: str, inputs: dict[str, Any], upstream: str = "start", **fields: str
+    ) -> dict[str, Any]:
         nodes = [
             {"id": "start", "type": "textInput", "data": {"label": upstream}},
             {
@@ -95,9 +102,7 @@ class DataTableNodeJsonValuesPostgresTests(unittest.TestCase):
             inputs=inputs,
             actor_user_id=self.user_id,
         )
-        node = next(r for r in result.node_results if r.get("node_id") == "dt")
-        self.assertEqual(node["status"], "success", node)
-        return node["output"]
+        return next(r for r in result.node_results if r.get("node_id") == "dt")
 
     def _stored(self) -> list[dict]:
         with SessionLocal() as db:
@@ -157,6 +162,38 @@ class DataTableNodeJsonValuesPostgresTests(unittest.TestCase):
         )
 
         self.assertEqual([row["data"]["name"] for row in found["rows"]], ["Ben"])
+
+    def test_row_data_that_is_not_json_once_filled_in_fails_the_insert(self) -> None:
+        # The unquoted form with a value the request left out stays as text: not JSON.
+        node = self._node(
+            "insert",
+            {"text": "Eve"},
+            dataTableData='{"name": "$start.text", "age": $start.age}',
+        )
+
+        self.assertEqual(node["status"], "error")
+        self.assertIn("DataTable insert: the row data is not valid JSON", node["error"])
+        self.assertNotIn({}, self._stored())
+        self.assertEqual(len(self._stored()), 3)
+
+    def test_a_filter_that_is_not_json_fails_instead_of_matching_every_row(self) -> None:
+        for operation in ("find", "count", "upsert"):
+            with self.subTest(operation=operation):
+                node = self._node(
+                    operation,
+                    {"text": "Eve"},
+                    dataTableFilter='{"age": $start.age}',
+                    dataTableData='{"name": "Eve"}',
+                )
+
+                self.assertEqual(node["status"], "error")
+                self.assertIn(f"DataTable {operation}: the filter is not valid JSON", node["error"])
+        self.assertEqual(len(self._stored()), 3)
+
+    def test_a_blank_filter_still_finds_every_row(self) -> None:
+        found = self._run("find", {"text": "x"}, dataTableFilter="")
+
+        self.assertEqual(len(found["rows"]), 3)
 
 
 if __name__ == "__main__":
