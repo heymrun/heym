@@ -4,6 +4,7 @@ import json
 import math
 import re
 import uuid
+from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -289,6 +290,16 @@ async def _prune_rows_to_columns(
         if pruned_data != row_data:
             row.data = pruned_data
             row.updated_by = updated_by
+
+
+def _row_timestamps(index: int) -> dict:
+    """Timestamps for the index-th row one request writes, so the rows keep their order.
+
+    `now()` is the transaction's start time: every row of one import or clone got the
+    same created_at, and listing them fell back to the random row id.
+    """
+    stamp = func.now() + timedelta(microseconds=index)
+    return {"created_at": stamp, "updated_at": stamp}
 
 
 def _normalize_unique_value(value: Any, col_type: str = "string") -> str:
@@ -758,7 +769,11 @@ async def clone_data_table(
     db.add(new_table)
     await db.flush()
 
-    source_rows = await db.execute(select(DataTableRow).where(DataTableRow.table_id == source.id))
+    source_rows = await db.execute(
+        select(DataTableRow)
+        .where(DataTableRow.table_id == source.id)
+        .order_by(DataTableRow.created_at.asc(), DataTableRow.id.asc())
+    )
     row_count = 0
     for src_row in source_rows.scalars():
         db.add(
@@ -767,6 +782,7 @@ async def clone_data_table(
                 data=src_row.data,
                 created_by=current_user.id,
                 updated_by=current_user.id,
+                **_row_timestamps(row_count),
             )
         )
         row_count += 1
@@ -1001,7 +1017,11 @@ async def bulk_create_rows(
             errors.append({"row": i + 1, "errors": unique_errors})
             continue
         row = DataTableRow(
-            table_id=table_id, data=data, created_by=current_user.id, updated_by=current_user.id
+            table_id=table_id,
+            data=data,
+            created_by=current_user.id,
+            updated_by=current_user.id,
+            **_row_timestamps(imported),
         )
         db.add(row)
         await db.flush()
@@ -1062,7 +1082,11 @@ async def import_csv(
             errors.append({"row": i + 1, "errors": unique_errors})
             continue
         row = DataTableRow(
-            table_id=table_id, data=data, created_by=current_user.id, updated_by=current_user.id
+            table_id=table_id,
+            data=data,
+            created_by=current_user.id,
+            updated_by=current_user.id,
+            **_row_timestamps(imported),
         )
         db.add(row)
         await db.flush()
