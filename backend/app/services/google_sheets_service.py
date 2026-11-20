@@ -79,6 +79,13 @@ class GoogleSheetsService:
 
     def _refresh_token(self) -> None:
         """Exchange the refresh token for a new access token and persist to DB."""
+        # A credential saved but never connected has no refresh token yet, as Gmail checks.
+        if not all(
+            self._config.get(key) for key in ("refresh_token", "client_id", "client_secret")
+        ):
+            raise ValueError(
+                "Google Sheets node: credential is not connected — reconnect it in Dashboard → Credentials"
+            )
         resp = httpx.post(
             _TOKEN_URL,
             data={
