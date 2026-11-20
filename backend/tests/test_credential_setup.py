@@ -557,6 +557,7 @@ class BuildSessionCredentialFormTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self._session(None).handles(REQUEST_CREDENTIAL_FORM_TOOL))
 
         form = MagicMock(spec=CredentialFormTool)
+        form.client = None
         form.call = AsyncMock(
             return_value=credential_setup.CredentialFormOutcome(
                 result='{"status": "created"}',

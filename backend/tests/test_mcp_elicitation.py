@@ -4,6 +4,7 @@ import asyncio
 import json
 import unittest
 import uuid
+from threading import Event
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -16,14 +17,20 @@ from app.services.mcp_elicitation import (
     FALLBACK_PROTOCOL_VERSION,
     LATEST_PROTOCOL_VERSION,
     MCP_SESSION_HEADER,
+    FormElicitationReply,
+    FormElicitationWaiters,
     MCPClientChannel,
+    ask_form,
     decode_client_session,
     elicitation_complete_notification,
     elicitation_modes,
     encode_client_session,
+    form_elicitation_request,
+    form_elicitations,
     is_client_response,
     negotiate_protocol_version,
     parse_elicitation_reply,
+    parse_form_elicitation_reply,
     url_elicitation_request,
 )
 from app.services.mcp_session import MCPSSEChannelStore, mcp_session_store, mcp_sse_channels
@@ -359,6 +366,126 @@ class LegacySSETransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(seen["client"].supports_url_elicitation)
         self.assertEqual(notification["method"], "notifications/elicitation/complete")
         self.assertEqual(final["id"], "call-1")
+
+
+class FormElicitationTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        self.user_id = uuid.uuid4()
+
+    def test_request_has_no_mode_or_url_and_its_reply_carries_content(self) -> None:
+        elicitation_id = uuid.uuid4()
+        request = form_elicitation_request(elicitation_id, "Insert?", {"type": "object"})
+
+        self.assertEqual(request["method"], "elicitation/create")
+        self.assertEqual(
+            request["params"], {"message": "Insert?", "requestedSchema": {"type": "object"}}
+        )
+        accept = parse_form_elicitation_reply(
+            {
+                "jsonrpc": "2.0",
+                "id": request["id"],
+                "result": {"action": "accept", "content": {"confirm": True}},
+            }
+        )
+        self.assertEqual(
+            (accept.elicitation_id, accept.action, accept.content),
+            (elicitation_id, "accept", {"confirm": True}),
+        )
+        decline = parse_form_elicitation_reply(
+            {
+                "jsonrpc": "2.0",
+                "id": request["id"],
+                "result": {"action": "decline", "content": {"x": 1}},
+            }
+        )
+        self.assertEqual((decline.action, decline.content), ("decline", {}))
+        error = parse_form_elicitation_reply({"jsonrpc": "2.0", "id": request["id"], "error": {}})
+        self.assertEqual(error.action, "error")
+
+    def test_form_and_url_replies_do_not_cross(self) -> None:
+        url_id = f"heym-elicit-{uuid.uuid4()}"
+        form_id = f"heym-form-{uuid.uuid4()}"
+        result = {"action": "accept"}
+        self.assertIsNone(parse_form_elicitation_reply({"id": url_id, "result": result}))
+        self.assertIsNone(parse_elicitation_reply({"id": form_id, "result": result}))
+        self.assertIsNone(parse_form_elicitation_reply({"id": "heym-form-x", "result": result}))
+        self.assertIsNone(parse_form_elicitation_reply({"id": form_id, "result": {"action": "x"}}))
+
+    def test_form_mode_is_declared_by_an_empty_elicitation_object(self) -> None:
+        channel = MCPClientChannel(elicitation_modes({"elicitation": {}}), AsyncMock())
+        self.assertTrue(channel.supports_form_elicitation)
+        self.assertFalse(channel.supports_url_elicitation)
+
+    async def test_ask_form_returns_the_reply_of_the_same_user_only(self) -> None:
+        waiters = FormElicitationWaiters()
+        sent: list[dict[str, Any]] = []
+
+        async def send(payload: dict[str, Any]) -> None:
+            sent.append(payload)
+            reply_id = uuid.UUID(payload["id"].removeprefix("heym-form-"))
+            self.assertFalse(
+                waiters.resolve(uuid.uuid4(), FormElicitationReply(reply_id, "accept"))
+            )
+            self.assertTrue(
+                waiters.resolve(
+                    self.user_id, FormElicitationReply(reply_id, "accept", {"confirm": True})
+                )
+            )
+
+        reply = await ask_form(
+            MCPClientChannel(frozenset({"form"}), send),
+            user_id=self.user_id,
+            message="Insert?",
+            requested_schema={"type": "object"},
+            waiters=waiters,
+        )
+
+        self.assertEqual((reply.action, reply.content), ("accept", {"confirm": True}))
+        self.assertEqual(waiters._waiting, {})
+
+    async def test_ask_form_gives_up_on_silence_a_stopped_turn_or_a_gone_client(self) -> None:
+        waiters = FormElicitationWaiters()
+        silent = MCPClientChannel(frozenset({"form"}), AsyncMock())
+        gone = MCPClientChannel(frozenset({"form"}), AsyncMock(side_effect=ConnectionError()))
+        stopped = Event()
+        stopped.set()
+        for client, kwargs in (
+            (silent, {"timeout": 0.05}),
+            (silent, {"cancel_event": stopped}),
+            (gone, {}),
+        ):
+            reply = await ask_form(
+                client,
+                user_id=self.user_id,
+                message="Insert?",
+                requested_schema={"type": "object"},
+                waiters=waiters,
+                **kwargs,
+            )
+            self.assertIsNone(reply)
+        self.assertEqual(waiters._waiting, {})
+
+    async def test_a_posted_form_reply_reaches_the_waiting_call(self) -> None:
+        elicitation_id = uuid.uuid4()
+        future = form_elicitations.open(elicitation_id, self.user_id)
+        try:
+            response = await mcp_sse_post_endpoint(
+                request=_request(
+                    "/api/mcp/sse",
+                    {
+                        "jsonrpc": "2.0",
+                        "id": f"heym-form-{elicitation_id}",
+                        "result": {"action": "accept", "content": {"confirm": True}},
+                    },
+                ),
+                mcp_user=SimpleNamespace(id=self.user_id),
+            )
+            reply = await asyncio.wait_for(future, timeout=0.5)
+        finally:
+            form_elicitations.close(elicitation_id)
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(reply.content, {"confirm": True})
 
 
 if __name__ == "__main__":

@@ -407,7 +407,35 @@ async def ai_insert_memory(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found")
     await require_workflow_write(db, wf, current_user.id)
 
-    credential = await get_accessible_credential(db, body.credential_id, current_user.id)
+    return await insert_memory_text(
+        db,
+        user_id=current_user.id,
+        workflow_id=workflow_id,
+        node_id=node_id,
+        text=body.text,
+        credential_id=body.credential_id,
+        model=body.model,
+        # One insert is one conversation: a fresh, nonempty OpenCode session per request.
+        session_id=str(uuid.uuid4()),
+    )
+
+
+async def insert_memory_text(
+    db: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    workflow_id: uuid.UUID,
+    node_id: str,
+    text: str,
+    credential_id: uuid.UUID,
+    model: str,
+    session_id: str,
+) -> MemoryAiInsertResponse:
+    """AI insert into one agent's graph, for a caller that already checked write access.
+
+    The route and chat build mode share it. Flushes without committing; raises HTTPException.
+    """
+    credential = await get_accessible_credential(db, credential_id, user_id)
     if credential is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -437,22 +465,21 @@ async def ai_insert_memory(
     nodes, edges = await _load_graph_rows(db, workflow_id, canvas_key)
     nodes_summary, edges_summary = graph_summaries_for_extraction(nodes, edges)
     trace_context = LLMTraceContext(
-        user_id=current_user.id,
+        user_id=user_id,
         credential_id=credential.id,
         workflow_id=workflow_id,
         node_id=canvas_key,
         node_label="Agent memory insert",
         source="agent_memory",
-        # One insert is one conversation: a fresh, nonempty OpenCode session per request.
-        session_id=str(uuid.uuid4()),
+        session_id=session_id or str(uuid.uuid4()),
     )
     try:
         llm_out = await run_memory_extraction_llm(
             credential_type=credential.type.value,
             api_key=api_key,
             base_url=base_url,
-            model=body.model.strip(),
-            user_payload=build_memory_insert_payload(body.text, nodes_summary, edges_summary),
+            model=model.strip(),
+            user_payload=build_memory_insert_payload(text, nodes_summary, edges_summary),
             trace_context=trace_context,
             router=model_router,
             system_instruction=MEMORY_INSERT_SYSTEM,

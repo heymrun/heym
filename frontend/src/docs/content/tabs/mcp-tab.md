@@ -122,6 +122,19 @@ How the page reaches you depends on the client:
 
 The page only opens for the Heym account that started the request, so a forwarded link is useless to anyone else. A form stays open for 24 hours, and you can decline it from the page. Once you save or decline it, the step in the Chat tab conversation shows the result.
 
+### Agent memory
+
+Ask `heym_chat` to add knowledge to an agent, for example: “Add these product facts to the support agent's memory: …”. It inserts the text into that agent's [persistent memory graph](../reference/agent-persistent-memory.md) with the agent's own credential and model, the same way **AI insert** does in the graph editor, at most 24,000 characters per insert. When the agent's persistent memory is off, the same step turns it on as a normal save, kept in the workflow's Edit History.
+
+When your message already contains the knowledge, it is inserted right away. When it does not, for example “Turn on the support agent's memory, I want to add some facts”, Heym asks what to insert:
+
+| Client | What happens |
+|--------|--------------|
+| Supports MCP form elicitation | The client shows a free-text field naming the workflow, the agent, and whether memory turns on. The call waits up to five minutes; whatever you type is inserted. Declining or leaving it empty changes nothing. |
+| Anything else | The result carries the question. Reply with the text and the same `conversation_id`, and the assistant inserts it. |
+
+Inserting needs write access to the workflow, and the agent needs a credential and a model.
+
 ### Credential and model
 
 `heym_chat` runs the engine on your Heym account, so it needs an LLM credential of its own:

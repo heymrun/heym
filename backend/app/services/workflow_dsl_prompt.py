@@ -897,6 +897,7 @@ The response includes `$llmNodeLabel.image` (base64 data URL) which can be used 
   - `maxToolIterations`: Max tool-call loop iterations (default: 30)
   - `temperature`: Creativity (0.0-2.0, default 0.7)
   - `maxTokens`: Maximum response tokens (optional)
+  - `persistentMemoryEnabled`: Boolean to give the agent a persistent knowledge graph (default: false). When true, every run reads the graph in its system prompt and merges new facts after a successful run. Knowledge is added to the graph from its memory editor or from Chat, not through this field.
   - `imageInputEnabled`: Boolean to include an image alongside the user message (default: false)
   - `imageInput`: Image input expression (base64 data URL or image URL)
   - `isOrchestrator`: Boolean - when true, this agent can call other agent nodes as sub-agents (default: false)

@@ -89,9 +89,11 @@ from app.services.mcp_elicitation import (
     decode_client_session,
     elicitation_modes,
     encode_client_session,
+    form_elicitations,
     is_client_response,
     negotiate_protocol_version,
     parse_elicitation_reply,
+    parse_form_elicitation_reply,
 )
 from app.services.mcp_progress import (
     AGENT_PROGRESS_MESSAGE,
@@ -509,6 +511,10 @@ async def _accept_client_response(body: object, user_id: uuid.UUID) -> Response 
     """Store a client's reply to a request Heym sent it, such as an elicitation answer."""
     if not is_client_response(body):
         return None
+    form_reply = parse_form_elicitation_reply(body)
+    if form_reply is not None:
+        form_elicitations.resolve(user_id, form_reply)
+        return Response(status_code=status.HTTP_202_ACCEPTED)
     reply = parse_elicitation_reply(body)
     if reply is not None:
         async with async_session_maker() as db:
