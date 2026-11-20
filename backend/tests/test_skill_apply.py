@@ -3,7 +3,7 @@
 import unittest
 from dataclasses import replace
 
-from app.services.skill_apply import FileEdit, new_skill_workflow, place_skill
+from app.services.skill_apply import FileEdit, new_skill_workflow, place_skill, unchanged_edits
 from app.services.skill_archive import ArchiveFile, SkillBundle
 
 BUNDLE = SkillBundle(
@@ -240,6 +240,24 @@ class SkillDriveFilesTests(unittest.TestCase):
         _title, nodes, _edges = new_skill_workflow(replace(BUNDLE, drive_files=True), "cred-1", "m")
         agent = next(node for node in nodes if node.get("type") == "agent")
         self.assertIs(agent["data"]["skills"][0]["driveFilesEnabled"], True)
+
+
+class UnchangedEditTests(unittest.TestCase):
+    def test_an_edit_that_repeats_the_text_is_named(self) -> None:
+        skill = {
+            "id": "s1",
+            "name": "docx",
+            "content": "# Docx\nUse npm.",
+            "files": [{"path": "main.py", "content": "print(1)", "encoding": "text"}],
+        }
+        nodes = [_agent("a1", "Clerk", [skill])]
+        edits = [
+            FileEdit("SKILL.md", "# Docx\nUse npm."),
+            FileEdit("main.py", "print(2)"),
+            FileEdit("new.py", "print(3)"),
+        ]
+        self.assertEqual(unchanged_edits(nodes, "docx", edits), ["SKILL.md"])
+        self.assertEqual(unchanged_edits(nodes, "other", edits), [])
 
 
 if __name__ == "__main__":

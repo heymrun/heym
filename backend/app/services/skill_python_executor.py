@@ -36,6 +36,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -229,6 +230,9 @@ class SkillExecutionResult:
     output: object = None
     generated_files: list[dict[str, Any]] = field(default_factory=list)
     hitl_request: dict[str, Any] | None = None
+    # The script's exit code; None when no process reported one.
+    exit_code: int | None = None
+    stderr: str = ""
 
 
 def _env_is_allowed(key: str) -> bool:
@@ -330,10 +334,13 @@ def _find_entry_point(files: list[dict[str, Any]]) -> str | None:
     return py_files[0]
 
 
-def _collect_output_files(output_dir: Path) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+def _collect_output_files(
+    output_dir: Path, seen: dict[str, tuple[int, int]] | None = None
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
     """Scan _output_files/ for generated files and optional HITL sentinel.
 
-    Returns (generated_files, hitl_request).
+    Returns (generated_files, hitl_request). With ``seen`` (a workspace kept across calls),
+    a file whose size and modification time match an earlier call is not returned again.
     """
     if not output_dir.exists():
         return [], None
@@ -354,6 +361,8 @@ def _collect_output_files(output_dir: Path) -> tuple[list[dict[str, Any]], dict[
             hitl_request = json.loads(sentinel_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             logger.warning("Failed to parse HITL sentinel file")
+        # Read once: a later call in the same workspace must not pause again for it.
+        sentinel_path.unlink(missing_ok=True)
     elif sentinel_path.is_symlink():
         logger.warning("Skipping symlinked HITL sentinel in skill output")
 
@@ -375,6 +384,12 @@ def _collect_output_files(output_dir: Path) -> tuple[list[dict[str, Any]], dict[
         if file_path.resolve().parent != output_dir_resolved:
             logger.warning("Skipping skill output file outside output dir: %s", file_path.name)
             continue
+        if seen is not None:
+            info = file_path.lstat()
+            signature = (info.st_size, info.st_mtime_ns)
+            if seen.get(file_path.name) == signature:
+                continue
+            seen[file_path.name] = signature
         mime_type = mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"
         generated_files.append(
             {
@@ -608,7 +623,10 @@ def skill_tool_schema(
         "says to run `python <script> <arguments>`, call this tool with that script and "
         "args instead. input is the script's standard input. Write files the user should "
         f"receive to {OUTPUT_DIR_PLACEHOLDER} (use it in args) or to the folder named by the "
-        "_OUTPUT_DIR environment variable; Heym saves them to the user's Drive."
+        "_OUTPUT_DIR environment variable; Heym saves them to the user's Drive. Calls in this "
+        f"run share that folder, so a later call can read a file an earlier call wrote (pass "
+        f"{OUTPUT_DIR_PLACEHOLDER}/<name>). A script that exits with a non-zero code is an "
+        "error."
     )
     if drive_files_enabled:
         description += (
@@ -662,7 +680,88 @@ def _populate_workspace(
     return output_dir
 
 
-def _build_result(stdout: str, stderr: str, output_dir: Path) -> SkillExecutionResult:
+def _prepare_sandbox_dir(run_dir: Path) -> None:
+    """The sandbox runs non-root against a root-owned volume, so the run dir (and the dirs
+    the sandbox user must write) are made writable."""
+    _chmod_best_effort(run_dir, 0o777)
+    (run_dir / ".home").mkdir(parents=True, exist_ok=True)
+    _chmod_best_effort(run_dir / ".home", 0o777)
+
+
+class SkillWorkspace:
+    """One skill's workspace for one agent run.
+
+    The first call writes the skill's files (and its Drive copies); later calls of the same
+    skill in the same run see what earlier calls wrote, so a skill can make a document and
+    then check or convert it. Only files that are new or changed since the last call are
+    returned. Calls are serialized. The agent node closes the workspace when it ends.
+    """
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.seen: dict[str, tuple[int, int]] = {}
+        self.run_dir: Path | None = None
+        self._removable: Path | None = None
+        self._closed = False
+
+    def open(
+        self,
+        skill_files: list[dict[str, Any]],
+        drive_files: list[dict[str, Any]] | None,
+        *,
+        sandbox: bool,
+        shared: bool,
+    ) -> tuple[Path, Path]:
+        """The run dir and its output dir, made on the first call."""
+        if self._closed:
+            raise RuntimeError("This skill workspace is closed")
+        if self.run_dir is None:
+            run_dir, removable = _make_run_dir(shared if sandbox else False)
+            self._removable = removable
+            if sandbox:
+                _prepare_sandbox_dir(run_dir)
+            _populate_workspace(run_dir, skill_files, drive_files)
+            self.run_dir = run_dir
+        output_dir = self.run_dir / _OUTPUT_FILES_DIR
+        output_dir.mkdir(parents=True, exist_ok=True)
+        if sandbox:
+            _chmod_best_effort(output_dir, 0o777)
+        return self.run_dir, output_dir
+
+    @property
+    def closed(self) -> bool:
+        return self._closed
+
+    def close(self) -> None:
+        """Remove the workspace; links the skill left in it are not followed."""
+        self._closed = True
+        if self._removable is not None:
+            shutil.rmtree(self._removable, ignore_errors=True)
+            self._removable = None
+
+
+class SkillWorkspaces:
+    """The skill workspaces of one agent run, one per skill."""
+
+    def __init__(self) -> None:
+        self._by_name: dict[str, SkillWorkspace] = {}
+
+    def for_skill(self, name: str) -> SkillWorkspace:
+        return self._by_name.setdefault(name, SkillWorkspace())
+
+    def close(self) -> None:
+        for workspace in self._by_name.values():
+            workspace.close()
+
+
+def _build_result(
+    stdout: str,
+    stderr: str,
+    output_dir: Path,
+    *,
+    seen: dict[str, tuple[int, int]] | None = None,
+    exit_code: int | None = None,
+) -> SkillExecutionResult:
     """Parse a skill's stdout/stderr and collect any generated files."""
     stdout = (stdout or "").strip()
     if not stdout:
@@ -672,11 +771,13 @@ def _build_result(stdout: str, stderr: str, output_dir: Path) -> SkillExecutionR
             output = json.loads(stdout)
         except json.JSONDecodeError:
             output = {"output": stdout, "stderr": stderr or ""}
-    generated_files, hitl_request = _collect_output_files(output_dir)
+    generated_files, hitl_request = _collect_output_files(output_dir, seen)
     return SkillExecutionResult(
         output=output,
         generated_files=generated_files,
         hitl_request=hitl_request,
+        exit_code=exit_code,
+        stderr=stderr or "",
     )
 
 
@@ -689,46 +790,64 @@ def _execute_skill_subprocess(
     *,
     argv: tuple[str, ...] = (),
     stdin: str | None = None,
+    workspace: SkillWorkspace | None = None,
 ) -> SkillExecutionResult:
     """Run the skill in a local subprocess (NOT a security boundary; trusted/dev only)."""
+    args_json = _serialize_skill_stdin(arguments) if stdin is None else stdin
+    if workspace is not None:
+        with workspace.lock:
+            root, output_dir = workspace.open(skill_files, drive_files, sandbox=False, shared=False)
+            return _run_skill_locally(
+                root, output_dir, entry_point, argv, args_json, timeout_seconds, workspace.seen
+            )
     with tempfile.TemporaryDirectory() as tmpdir:
         root = Path(tmpdir)
         output_dir = _populate_workspace(root, skill_files, drive_files)
-        args_json = _serialize_skill_stdin(arguments) if stdin is None else stdin
+        return _run_skill_locally(root, output_dir, entry_point, argv, args_json, timeout_seconds)
 
-        env = _safe_env()
-        env["_OUTPUT_DIR"] = str(output_dir)
 
-        def _apply_resource_limits() -> None:
-            """Apply OS-level resource limits inside the child process."""
-            try:
-                import resource  # noqa: PLC0415 (Unix-only)
+def _run_skill_locally(
+    root: Path,
+    output_dir: Path,
+    entry_point: str,
+    argv: tuple[str, ...],
+    args_json: str,
+    timeout_seconds: float,
+    seen: dict[str, tuple[int, int]] | None = None,
+) -> SkillExecutionResult:
+    env = _safe_env()
+    env["_OUTPUT_DIR"] = str(output_dir)
 
-                resource.setrlimit(resource.RLIMIT_AS, (_MEMORY_LIMIT_BYTES, _MEMORY_LIMIT_BYTES))
-            except Exception:
-                pass  # Non-fatal: best-effort on platforms that support it
-
+    def _apply_resource_limits() -> None:
+        """Apply OS-level resource limits inside the child process."""
         try:
-            result = subprocess.run(
-                # Run with the backend's own interpreter so backend packages
-                # (python-docx, pypdf, ...) are available to the skill.
-                [_skill_interpreter(), entry_point, *_resolve_argv(argv, output_dir)],
-                cwd=str(root),
-                input=args_json,
-                capture_output=True,
-                text=True,
-                timeout=timeout_seconds,
-                env=env,
-                preexec_fn=_apply_resource_limits,
-            )
-        except subprocess.TimeoutExpired:
-            raise TimeoutError(
-                f"Skill execution timed out after {timeout_seconds} seconds"
-            ) from None
+            import resource  # noqa: PLC0415 (Unix-only)
 
-        if result.stderr:
-            logger.warning("Skill stderr: %s", result.stderr)
-        return _build_result(result.stdout, result.stderr, output_dir)
+            resource.setrlimit(resource.RLIMIT_AS, (_MEMORY_LIMIT_BYTES, _MEMORY_LIMIT_BYTES))
+        except Exception:
+            pass  # Non-fatal: best-effort on platforms that support it
+
+    try:
+        result = subprocess.run(
+            # Run with the backend's own interpreter so backend packages
+            # (python-docx, pypdf, ...) are available to the skill.
+            [_skill_interpreter(), entry_point, *_resolve_argv(argv, output_dir)],
+            cwd=str(root),
+            input=args_json,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            env=env,
+            preexec_fn=_apply_resource_limits,
+        )
+    except subprocess.TimeoutExpired:
+        raise TimeoutError(f"Skill execution timed out after {timeout_seconds} seconds") from None
+
+    if result.stderr:
+        logger.warning("Skill stderr: %s", result.stderr)
+    return _build_result(
+        result.stdout, result.stderr, output_dir, seen=seen, exit_code=result.returncode
+    )
 
 
 def _docker_available() -> bool:
@@ -827,53 +946,91 @@ def _execute_skill_docker(
     *,
     argv: tuple[str, ...] = (),
     stdin: str | None = None,
+    workspace: SkillWorkspace | None = None,
 ) -> SkillExecutionResult:
     """Run the skill inside a hardened, throwaway sandbox (no Docker socket, no SA token)."""
     mount_point = _skill_volume_mount_point()
     shared = _shared_workspace()
+    args_json = _serialize_skill_stdin(arguments) if stdin is None else stdin
+    if workspace is not None:
+        with workspace.lock:
+            run_dir, output_dir = workspace.open(
+                skill_files, drive_files, sandbox=True, shared=shared
+            )
+            return _run_skill_sandbox(
+                image,
+                mount_point,
+                run_dir,
+                output_dir,
+                entry_point,
+                argv,
+                args_json,
+                timeout_seconds,
+                shared=shared,
+                seen=workspace.seen,
+            )
     run_dir, removable = _make_run_dir(shared)
     try:
-        # The sandbox runs non-root against a root-owned volume, so the throwaway
-        # run dir (and the dirs the sandbox user must write) are made writable.
-        _chmod_best_effort(run_dir, 0o777)
-        (run_dir / ".home").mkdir(parents=True, exist_ok=True)
-        _chmod_best_effort(run_dir / ".home", 0o777)
-
+        _prepare_sandbox_dir(run_dir)
         output_dir = _populate_workspace(run_dir, skill_files, drive_files)
         _chmod_best_effort(output_dir, 0o777)
-
-        args_json = _serialize_skill_stdin(arguments) if stdin is None else stdin
-        name = f"heym-skill-{uuid.uuid4().hex}"
-        # The run dir sits at the same path inside the sandbox, so the output dir does too.
-        spec = _skill_spec(
+        return _run_skill_sandbox(
             image,
-            name,
             mount_point,
             run_dir,
+            output_dir,
             entry_point,
-            native_bind=not shared,
-            argv=_resolve_argv(argv, output_dir),
+            argv,
+            args_json,
+            timeout_seconds,
+            shared=shared,
         )
-        try:
-            result = get_sandbox_manager().run(spec, args_json, timeout_seconds)
-        except SandboxTimeoutError:
-            raise TimeoutError(
-                f"Skill execution timed out after {timeout_seconds} seconds"
-            ) from None
-
-        if result.stderr:
-            logger.warning("Skill docker stderr: %s", result.stderr)
-        # A sandbox that never started fails closed; any other exit code is the
-        # skill's own process and stays a soft result like the subprocess path.
-        if result.start_failed:
-            raise RuntimeError(
-                "Skill Docker sandbox failed to start "
-                f"(docker exit {result.returncode}): {(result.stderr or '').strip()[:500]}"
-            )
-        return _build_result(result.stdout, result.stderr, output_dir)
     finally:
         # rmtree does not follow links the skill may have left in its workspace.
         shutil.rmtree(removable, ignore_errors=True)
+
+
+def _run_skill_sandbox(
+    image: str,
+    mount_point: Path,
+    run_dir: Path,
+    output_dir: Path,
+    entry_point: str,
+    argv: tuple[str, ...],
+    args_json: str,
+    timeout_seconds: float,
+    *,
+    shared: bool,
+    seen: dict[str, tuple[int, int]] | None = None,
+) -> SkillExecutionResult:
+    name = f"heym-skill-{uuid.uuid4().hex}"
+    # The run dir sits at the same path inside the sandbox, so the output dir does too.
+    spec = _skill_spec(
+        image,
+        name,
+        mount_point,
+        run_dir,
+        entry_point,
+        native_bind=not shared,
+        argv=_resolve_argv(argv, output_dir),
+    )
+    try:
+        result = get_sandbox_manager().run(spec, args_json, timeout_seconds)
+    except SandboxTimeoutError:
+        raise TimeoutError(f"Skill execution timed out after {timeout_seconds} seconds") from None
+
+    if result.stderr:
+        logger.warning("Skill docker stderr: %s", result.stderr)
+    # A sandbox that never started fails closed; any other exit code is the
+    # skill's own process and stays a soft result like the subprocess path.
+    if result.start_failed:
+        raise RuntimeError(
+            "Skill Docker sandbox failed to start "
+            f"(docker exit {result.returncode}): {(result.stderr or '').strip()[:500]}"
+        )
+    return _build_result(
+        result.stdout, result.stderr, output_dir, seen=seen, exit_code=result.returncode
+    )
 
 
 def _chmod_best_effort(path: Path, mode: int) -> None:
@@ -888,6 +1045,7 @@ def execute_skill_python(
     arguments: dict[str, Any],
     timeout_seconds: float = 30.0,
     drive_files: list[dict[str, Any]] | None = None,
+    workspace: SkillWorkspace | None = None,
 ) -> SkillExecutionResult:
     """
     Execute a skill's Python script in the configured sandbox.
@@ -927,6 +1085,7 @@ def execute_skill_python(
             plan.script,
             argv=plan.argv,
             stdin=plan.stdin,
+            workspace=workspace,
         )
 
     # mode == "auto" or "docker": require a real Docker sandbox and fail closed
@@ -952,4 +1111,5 @@ def execute_skill_python(
         image,
         argv=plan.argv,
         stdin=plan.stdin,
+        workspace=workspace,
     )

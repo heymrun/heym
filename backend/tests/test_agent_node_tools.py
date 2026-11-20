@@ -584,6 +584,11 @@ class TestAgentNodeToolIntegration(unittest.TestCase):
         self.assertEqual(set(parameters["properties"]), {"input", "script", "args"})
         self.assertIn("main.py", parameters["properties"]["script"]["enum"])
         self.assertIn("no shell", drive_tool["description"])
+        # Each skill keeps one workspace for the run, closed when the agent node ends.
+        workspace = drive_tool["_skill_workspace"]
+        self.assertIsNotNone(workspace)
+        self.assertIsNot(workspace, plain_tool["_skill_workspace"])
+        self.assertTrue(workspace.closed)
 
 
 class TestHitlSingleReviewPolicy(unittest.TestCase):

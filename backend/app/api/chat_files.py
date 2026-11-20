@@ -30,14 +30,22 @@ from app.services.file_sandbox.tools import (
 from app.services.file_sandbox.workspace import FileWorkspace
 
 _MAX_DISPLAY_CODE_CHARS = 4000
+PYTHON_OFF_MESSAGE = (
+    "run_python is off in a chat that uses a skill. Run the skill workflow; the skill "
+    "makes the files."
+)
 
 
 class ChatFileTools:
     """``list_files``, ``inspect_file``, ``run_python`` and ``clear_workspace`` for a turn."""
 
-    def __init__(self, *, user: User, conversation_id: uuid.UUID) -> None:
+    def __init__(
+        self, *, user: User, conversation_id: uuid.UUID, allow_python: bool = True
+    ) -> None:
         self.user = user
         self.conversation_id = conversation_id
+        # Off in a chat that uses a skill, so the model cannot write the files itself.
+        self.allow_python = allow_python
         self.workspace = FileWorkspace.for_chat(user.id, conversation_id)
         self.toolbox = FileToolbox(
             self.workspace,
@@ -69,9 +77,11 @@ class ChatFileTools:
             lines.append(f"- scratch: {entry['path']} ({entry['size']} bytes)")
         return "\n".join(lines)
 
-    @staticmethod
-    def schemas() -> list[dict[str, Any]]:
-        return tool_schemas(include_clear=True)
+    def schemas(self) -> list[dict[str, Any]]:
+        schemas = tool_schemas(include_clear=True)
+        if self.allow_python:
+            return schemas
+        return [s for s in schemas if s["function"]["name"] != RUN_PYTHON_TOOL]
 
     @staticmethod
     def handles(name: str) -> bool:
@@ -119,6 +129,12 @@ class ChatFileTools:
         self, name: str, args: dict[str, Any], *, progress: ToolProgress | None = None
     ) -> BuildToolOutcome:
         """Run one file tool off the event loop."""
+        if name == RUN_PYTHON_TOOL and not self.allow_python:
+            return BuildToolOutcome(
+                result=json.dumps({"ok": False, "error": PYTHON_OFF_MESSAGE}),
+                summary=f"Error: {PYTHON_OFF_MESSAGE}",
+                status="error",
+            )
         result = await asyncio.to_thread(self.toolbox.call, name, args)
         return BuildToolOutcome(
             result=json.dumps(result, default=str),

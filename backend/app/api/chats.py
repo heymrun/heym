@@ -71,6 +71,7 @@ from app.services.chat_message_edit import (
     carried_attachments,
     messages_from_edit,
 )
+from app.services.chat_skill_turn import conversation_skill_names
 from app.services.credential_access import get_accessible_credential
 from app.services.credential_catalog import CredentialPromptMode, build_credentials_prompt
 from app.services.credential_setup import CredentialFormTool
@@ -474,8 +475,15 @@ async def _run_chat_turn(
                     attachments=attachments,
                     credential_form=turn.credential_form,
                     conversation_id=conv_uuid,
+                    earlier_skill_names=conversation_skill_names(
+                        message.content for message in all_messages if message.role == "user"
+                    ),
                 )
-            files = ChatFileTools(user=user, conversation_id=conv_uuid)
+            files = ChatFileTools(
+                user=user,
+                conversation_id=conv_uuid,
+                allow_python=build is None or build.python_allowed,
+            )
             parts = await _assemble_system_prompt_parts(
                 user,
                 db,

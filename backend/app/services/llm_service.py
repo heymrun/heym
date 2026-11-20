@@ -3278,6 +3278,27 @@ def _load_skill_drive_files(actor_user_id: str | None) -> list[dict[str, Any]]:
     ]
 
 
+_SKILL_STDERR_TAIL = 2000
+
+
+def _skill_tool_output(result: Any, output: Any = None) -> Any:
+    """What the agent gets for a skill call: the script's output, or an error when the
+    script exited with a non-zero code (its stderr tail included), so a failed step is not
+    reported as a success."""
+    value = result.output if output is None else output
+    exit_code = getattr(result, "exit_code", None)
+    if not exit_code:
+        return value
+    failed = dict(value) if isinstance(value, dict) else {"output": value}
+    failed["status"] = "error"
+    failed["error"] = f"The script exited with code {exit_code}."
+    failed["exit_code"] = exit_code
+    stderr = str(getattr(result, "stderr", "") or "")
+    if stderr and not failed.get("stderr"):
+        failed["stderr"] = stderr[-_SKILL_STDERR_TAIL:]
+    return failed
+
+
 def _unified_tool_executor(
     tool_def: dict[str, Any],
     name: str,
@@ -3311,7 +3332,13 @@ def _unified_tool_executor(
             if tool_def.get("_drive_files_enabled")
             else None
         )
-        result = execute_skill_python(skill_files, args, effective_timeout, drive_files=drive_files)
+        result = execute_skill_python(
+            skill_files,
+            args,
+            effective_timeout,
+            drive_files=drive_files,
+            workspace=tool_def.get("_skill_workspace"),
+        )
 
         if isinstance(result, SkillExecutionResult):
             if result.hitl_request:
@@ -3341,9 +3368,9 @@ def _unified_tool_executor(
                 if file_links:
                     output = _normalize_skill_file_references(output, file_links)
                     output["_generated_files"] = file_links
-                return output
+                return _skill_tool_output(result, output)
 
-            return result.output
+            return _skill_tool_output(result)
 
         return result
     from app.services.python_tool_executor import execute_tool
