@@ -121,6 +121,35 @@ class PlaceSkillTests(unittest.TestCase):
         self.assertEqual(skill["content"], "Read it carefully.")
         self.assertEqual(skill["files"][0]["content"], "def run():\n    return 1\n")
 
+    def test_a_file_edit_keeps_markdown_stored_as_base64(self) -> None:
+        # A notes.md saved in Windows-1252 is not UTF-8, so the zip reader stored it as base64.
+        notes = {"path": "notes.md", "content": "Qm9uam91ciBjYWbp", "encoding": "base64"}
+        nodes = [
+            _agent(
+                "a1",
+                "Clerk",
+                [
+                    {
+                        "id": "s1",
+                        "name": "invoice-helper",
+                        "content": "old",
+                        "files": [
+                            {"path": "main.py", "content": "print(1)\n", "encoding": "text"},
+                            dict(notes),
+                        ],
+                    }
+                ],
+            )
+        ]
+
+        placed = place_skill(
+            nodes, None, skill_name="invoice-helper", edits=[FileEdit("main.py", "print(2)\n")]
+        )
+
+        files = placed.nodes[0]["data"]["skills"][0]["files"]
+        self.assertIn(notes, files)
+        self.assertIn({"path": "main.py", "content": "print(2)\n", "encoding": "text"}, files)
+
     def test_a_binary_asset_is_written_as_base64(self) -> None:
         bundle = SkillBundle(
             name="invoice-helper",

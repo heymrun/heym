@@ -41,6 +41,9 @@ class _FakeExecutor:
     def evaluate_message_template(self, template, inputs, node_id):  # noqa: ANN001
         return template
 
+    def evaluate_nonempty_message_template(self, template, inputs, node_id):  # noqa: ANN001
+        return template
+
     def _get_accessible_credential(self, db, credential_id):  # noqa: ANN001
         return types.SimpleNamespace(encrypted_config=b"ciphertext")
 

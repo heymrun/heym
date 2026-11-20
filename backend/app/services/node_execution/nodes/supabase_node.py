@@ -52,7 +52,7 @@ def execute(ctx: NodeExecutionContext) -> object:
         else ""
     )
     schema = raw_schema or str(supabase_config.get("supabase_schema", "public")).strip() or "public"
-    table = self.evaluate_message_template(
+    table = self.evaluate_nonempty_message_template(
         str(node_data.get("supabaseTable", "") or ""),
         inputs,
         node_id,

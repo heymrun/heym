@@ -24,7 +24,10 @@ def execute(ctx: NodeExecutionContext) -> object:
     value_template = node_data.get("redisValue", "")
     ttl = node_data.get("redisTtl")
 
-    redis_key = self.evaluate_message_template(key_template, inputs, node_id)
+    # Blank stays blank: evaluate_message_template would name the key after the inputs.
+    redis_key = self.evaluate_nonempty_message_template(key_template, inputs, node_id)
+    if not redis_key:
+        raise ValueError("Redis node requires a key")
 
     from app.db.session import SessionLocal
     from app.services.encryption import decrypt_config
@@ -51,7 +54,7 @@ def execute(ctx: NodeExecutionContext) -> object:
     )
 
     if operation == "set":
-        redis_value = self.evaluate_message_template(value_template, inputs, node_id)
+        redis_value = self.evaluate_nonempty_message_template(value_template, inputs, node_id)
         if ttl and int(ttl) > 0:
             r.setex(redis_key, int(ttl), redis_value)
             output = {"success": True, "key": redis_key, "ttl": int(ttl)}

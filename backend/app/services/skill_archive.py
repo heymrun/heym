@@ -12,6 +12,7 @@ import base64
 import binascii
 import io
 import zipfile
+import zlib
 from dataclasses import dataclass
 from typing import Literal
 
@@ -25,6 +26,8 @@ PROMPT_TOTAL_CHARS = 24_000
 _IGNORED_DIRS = {"__MACOSX"}
 _IGNORED_NAMES = {".DS_Store"}
 _SKILL_MARKDOWN = "skill.md"
+# General purpose bit 0: the member is encrypted, and reading it needs a password.
+_ENCRYPTED_FLAG = 0x1
 
 
 @dataclass(frozen=True)
@@ -114,6 +117,7 @@ def read_zip(raw: bytes) -> ZipRead:
 
     texts: list[ArchiveFile] = []
     binaries: list[ArchiveFile] = []
+    skipped: set[str] = set()
     notes: list[str] = []
     total = 0
     with archive:
@@ -131,14 +135,41 @@ def read_zip(raw: bytes) -> ZipRead:
             if total > MAX_UNCOMPRESSED_BYTES:
                 notes.append("Stopped reading: the zip expands past 8 MB.")
                 break
-            data = archive.read(info)
+            if info.flag_bits & _ENCRYPTED_FLAG:
+                notes.append(f"Skipped {path}: the file is password-protected.")
+                skipped.add(path)
+                continue
+            try:
+                data = archive.read(info)
+            except (zipfile.BadZipFile, zlib.error, NotImplementedError, EOFError):
+                notes.append(f"Skipped {path}: the file is damaged or could not be unpacked.")
+                skipped.add(path)
+                continue
             text = _read_text(data)
             if text is None:
                 binaries.append(ArchiveFile(path, base64.b64encode(data).decode(), "base64"))
                 continue
             texts.append(ArchiveFile(path, text))
 
-    skills, rest = _skills_from(texts + binaries)
+    # A skipped member takes part in grouping as an empty placeholder, so the skill that owns
+    # it is known.
+    placeholders = [ArchiveFile(path, "", "base64") for path in sorted(skipped)]
+    bundles, rest = _skills_from(texts + binaries + placeholders)
+    # A skill missing a member it owns is left out: saving it would replace the stored skill
+    # and drop the stored copy of that member. Its readable files stay as context.
+    skills = []
+    for bundle in bundles:
+        prefix = f"{bundle.directory}/" if bundle.directory else ""
+        missing = [prefix + item.path for item in bundle.files if prefix + item.path in skipped]
+        if not missing:
+            skills.append(bundle)
+            continue
+        notes.append(f"Did not read skill {bundle.name}: {', '.join(missing)} could not be read.")
+        rest.append(ArchiveFile(f"{prefix}SKILL.md", bundle.content))
+        rest.extend(
+            ArchiveFile(prefix + item.path, item.content, item.encoding) for item in bundle.files
+        )
+    rest = [item for item in rest if item.path not in skipped]
     kept_text = [item for item in rest if item.encoding == "text"]
     notes.extend(f"Skipped binary file {item.path}." for item in rest if item.encoding == "base64")
     return ZipRead(tuple(skills), tuple(kept_text), tuple(notes))

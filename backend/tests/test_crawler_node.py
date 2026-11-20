@@ -16,6 +16,9 @@ class _FakeExecutor:
     def evaluate_message_template(self, template: str, inputs: dict, node_id: str) -> str:  # noqa: ARG002
         return template
 
+    def evaluate_nonempty_message_template(self, template: str, inputs: dict, node_id: str) -> str:  # noqa: ARG002
+        return template
+
     def _get_accessible_credential(self, db: object, credential_id: str) -> object | None:  # noqa: ARG002
         if credential_id == "valid-cred":
             return types.SimpleNamespace(encrypted_config=b"ciphertext")
