@@ -7,6 +7,7 @@ Heym issued a token to Work for it.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +26,8 @@ from app.services.work_assistant import (
     load_work_link,
     manifest_for,
 )
+
+logger = logging.getLogger(__name__)
 
 _CONNECTED = (
     "\n\n## Heym Work (connected)\n"
@@ -55,13 +58,21 @@ class ChatWorkTools:
 
     @classmethod
     async def load(cls, db: AsyncSession, user: User) -> ChatWorkTools | None:
-        """The turn's Work tools; None when Work is not linked or offers this user nothing."""
+        """The turn's Work tools; None when Work is not linked or offers this user nothing.
+
+        An optional integration never breaks a chat turn: a failure here leaves the turn
+        without Work tools.
+        """
         if not user.is_active:
             return None
-        link = await load_work_link(db)
-        if link is None:
+        try:
+            link = await load_work_link(db)
+            if link is None:
+                return None
+            state = await manifest_for(link, user)
+        except Exception:
+            logger.warning("Could not load Heym Work's tools for a chat turn", exc_info=True)
             return None
-        state = await manifest_for(link, user)
         if state.manifest is None and not state.unreachable:
             return None
         return cls(user=user, link=link, manifest=state.manifest)

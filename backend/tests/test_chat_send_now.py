@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi import HTTPException
 
 from app.api import chats
+from app.api.chat_work import ChatWorkTools
 from app.db.models import DashboardChatQueueItem
 
 
@@ -94,6 +95,11 @@ class SendQueuedMessageNowTests(unittest.IsolatedAsyncioTestCase):
 
 
 class SupersededTurnCancellationTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        work_patcher = patch.object(ChatWorkTools, "load", AsyncMock(return_value=None))
+        work_patcher.start()
+        self.addCleanup(work_patcher.stop)
+
     async def test_cancel_during_model_routing_still_records_a_cancelled_turn(self) -> None:
         await self._check_cancellation(superseded=True, during_routing=True)
 

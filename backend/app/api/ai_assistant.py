@@ -73,6 +73,7 @@ from app.api.chat_memory import (
     summarize_user_memory_tool,
     user_memory_tool_label,
 )
+from app.api.chat_work import ChatWorkTools
 from app.api.data_tables import create_data_table as create_data_table_route
 from app.api.deps import get_current_user
 from app.api.schedules import fetch_schedule_events_for_user
@@ -3688,11 +3689,13 @@ async def stream_dashboard_chat(
     credential_mode: CredentialPromptMode = CredentialPromptMode.ASK_AND_CREATE,
     build: "ChatBuildSession | None" = None,
     files: "ChatFileTools | None" = None,
+    work: "ChatWorkTools | None" = None,
 ) -> AsyncGenerator[str, None]:
     """Run dashboard chat with tool use: loop non-streaming calls with tools until no tool_calls, then yield final content.
 
     With `build`, the turn may save, test-run and finish workflows (chat build mode).
     With `files`, it may open Drive files in the file sandbox.
+    With `work`, it may ask the linked Heym Work.
     """
     user_id = user.id
     is_reasoning = is_reasoning_model(model)
@@ -3793,6 +3796,8 @@ async def stream_dashboard_chat(
         tools = build.tools(DASHBOARD_CHAT_TOOLS) if build is not None else DASHBOARD_CHAT_TOOLS
         if files is not None:
             tools = [*tools, *files.schemas()]
+        if work is not None:
+            tools = [*tools, *work.schemas()]
         return {
             **base_kwargs,
             "tools": tools,
@@ -4098,6 +4103,8 @@ async def stream_dashboard_chat(
                     if build is not None and build.handles(name)
                     else files
                     if files is not None and files.handles(name)
+                    else work
+                    if work is not None and work.handles(name)
                     else None
                 )
                 if args_error is not None:
@@ -6237,6 +6244,9 @@ async def dashboard_chat_stream(
     system_prompt += await build_credentials_prompt(
         db, current_user.id, CredentialPromptMode.ASK_AND_CREATE
     )
+    work = await ChatWorkTools.load(db, current_user)
+    if work is not None:
+        system_prompt += work.prompt_block()
     if request.user_rules and request.user_rules.strip():
         system_prompt = (
             system_prompt
@@ -6295,6 +6305,7 @@ async def dashboard_chat_stream(
                     cancel_event,
                     attachments,
                     credential,
+                    work=work,
                 ):
                     if cancel_event.is_set():
                         break

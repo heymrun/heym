@@ -21,6 +21,7 @@ from app.api.ai_assistant import (
     edit_and_run_generated_workflow_tool,
     stream_dashboard_chat,
 )
+from app.api.chat_work import ChatWorkTools
 from app.db.models import CredentialType, WebhookBodyMode, WorkflowAuthType, WorkflowVersion
 from app.services.credential_catalog import CatalogCredential, CredentialPromptMode
 from app.services.data_table_catalog import CatalogColumn, CatalogDataTable
@@ -95,6 +96,9 @@ def _stub_credential_catalog(test: unittest.TestCase) -> tuple[AsyncMock, AsyncM
 class DashboardChatApiTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.credentials_prompt, self.credential_catalog = _stub_credential_catalog(self)
+        work_patcher = patch.object(ChatWorkTools, "load", AsyncMock(return_value=None))
+        work_patcher.start()
+        self.addCleanup(work_patcher.stop)
 
     def test_append_date_to_user_messages_only_changes_llm_copy(self) -> None:
         messages = [
@@ -193,6 +197,7 @@ class DashboardChatApiTests(unittest.IsolatedAsyncioTestCase):
             _cancel_event: object,
             _attachment: object = None,
             _selected_credential: object = None,
+            **_kwargs: object,
         ):
             captured["system_prompt"] = system_prompt
             captured["messages"] = messages
@@ -299,6 +304,7 @@ class DashboardChatApiTests(unittest.IsolatedAsyncioTestCase):
             _cancel_event: object,
             _attachment: object = None,
             _selected_credential: object = None,
+            **_kwargs: object,
         ):
             captured["trace_context"] = _trace_context
             yield 'data: {"type":"done"}\n\n'
@@ -409,6 +415,7 @@ class DashboardChatApiTests(unittest.IsolatedAsyncioTestCase):
             _cancel_event: object,
             _attachment: object = None,
             _selected_credential: object = None,
+            **_kwargs: object,
         ):
             captured["messages"] = messages
             yield 'data: {"type":"done"}\n\n'
@@ -483,6 +490,7 @@ class DashboardChatApiTests(unittest.IsolatedAsyncioTestCase):
             _cancel_event: object,
             _attachment: object = None,
             _selected_credential: object = None,
+            **_kwargs: object,
         ):
             yield 'data: {"type":"step","label":"Searching documentation..."}\n\n'
             yield 'data: {"type":"done"}\n\n'
@@ -554,6 +562,7 @@ class DashboardChatApiTests(unittest.IsolatedAsyncioTestCase):
             _cancel_event: object,
             _attachment: object = None,
             _selected_credential: object = None,
+            **_kwargs: object,
         ):
             await release_stream.wait()
             yield 'data: {"type":"done"}\n\n'
@@ -1156,6 +1165,9 @@ class BuildUserMessageTests(unittest.TestCase):
 class DashboardChatAttachmentIntegrationTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.credentials_prompt, self.credential_catalog = _stub_credential_catalog(self)
+        work_patcher = patch.object(ChatWorkTools, "load", AsyncMock(return_value=None))
+        work_patcher.start()
+        self.addCleanup(work_patcher.stop)
 
     async def test_dashboard_chat_injects_routing_instructions_when_attachment_present(
         self,
@@ -1186,6 +1198,7 @@ class DashboardChatAttachmentIntegrationTests(unittest.IsolatedAsyncioTestCase):
             _cancel_event: object,
             _attachment: object = None,
             _selected_credential: object = None,
+            **_kwargs: object,
         ):
             captured["system_prompt"] = system_prompt
             captured["messages"] = messages

@@ -33,6 +33,7 @@ from app.api.ai_assistant import (
 from app.api.chat_build import ChatBuildSession
 from app.api.chat_files import ChatFileTools
 from app.api.chat_knowledge_bases import knowledge_bases_prompt_block
+from app.api.chat_work import ChatWorkTools
 from app.api.deps import get_current_user, get_current_user_id, get_db
 from app.api.workflows import get_workflow_for_user
 from app.db.models import (
@@ -510,6 +511,11 @@ async def _run_chat_turn(
                 parts = replace(
                     parts, full_system_prompt=parts.full_system_prompt + workspace_block
                 )
+            work = await ChatWorkTools.load(db, user)
+            if work is not None:
+                parts = replace(
+                    parts, full_system_prompt=parts.full_system_prompt + work.prompt_block()
+                )
 
             if turn.interrupted:
                 parts = replace(
@@ -546,6 +552,7 @@ async def _run_chat_turn(
                 credential_mode=turn.credential_mode,
                 build=build,
                 files=files,
+                work=work,
             ):
                 if chunk.startswith("data: "):
                     try:

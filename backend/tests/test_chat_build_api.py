@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi import HTTPException
 
 from app.api import chats
+from app.api.chat_work import ChatWorkTools
 from app.db.models import DashboardChatQueueItem
 from app.models.chat_schemas import MessageCreate
 from app.services.chat_build_mode import BuildRequest
@@ -194,6 +195,11 @@ class QueuedBuildTurnTests(unittest.IsolatedAsyncioTestCase):
 
 
 class RunChatTurnBuildTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        work_patcher = patch.object(ChatWorkTools, "load", AsyncMock(return_value=None))
+        work_patcher.start()
+        self.addCleanup(work_patcher.stop)
+
     async def test_a_build_turn_adds_the_session_and_its_prompt(self) -> None:
         conv_id = str(uuid.uuid4())
         user = SimpleNamespace(id=uuid.uuid4(), user_rules=None)

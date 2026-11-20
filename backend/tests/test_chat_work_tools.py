@@ -5,8 +5,9 @@ import unittest
 import uuid
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
+from app.api import ai_assistant
 from app.api.chat_work import ChatWorkTools
 from app.services.work_assistant import ManifestState, WorkLink, WorkManifest, WorkTool
 
@@ -47,6 +48,14 @@ class LoadTests(unittest.IsolatedAsyncioTestCase):
                 "app.api.chat_work.manifest_for",
                 AsyncMock(return_value=ManifestState(None, unreachable=False)),
             ),
+        ):
+            self.assertIsNone(await ChatWorkTools.load(AsyncMock(), _user()))
+
+    async def test_a_failing_lookup_leaves_the_turn_without_work(self) -> None:
+        failing = AsyncMock(side_effect=RuntimeError("database went away"))
+        with (
+            patch("app.api.chat_work.load_work_link", failing),
+            self.assertLogs("app.api.chat_work", level="WARNING"),
         ):
             self.assertIsNone(await ChatWorkTools.load(AsyncMock(), _user()))
 
@@ -127,6 +136,82 @@ class CallTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Needs an Editor.", outcome.summary)
         self.assertEqual(audit.call_args.kwargs["outcome"], "failure")
         self.assertEqual(audit.call_args.kwargs["status"], 403)
+
+
+class StreamTests(unittest.IsolatedAsyncioTestCase):
+    async def test_stream_offers_and_dispatches_work_tools(self) -> None:
+        user = _user()
+        tool_message = MagicMock(content=None)
+        tool_call = MagicMock()
+        tool_call.id = "call"
+        tool_call.function.name = "work_get_world"
+        tool_call.function.arguments = "{}"
+        tool_message.tool_calls = [tool_call]
+        final_message = MagicMock(content="Three corners.", tool_calls=None)
+        usage = MagicMock(prompt_tokens=1, completion_tokens=1, total_tokens=2)
+        client = MagicMock()
+        client.chat.completions.create.side_effect = [
+            MagicMock(choices=[MagicMock(message=tool_message)], usage=usage),
+            MagicMock(choices=[MagicMock(message=final_message)], usage=usage),
+        ]
+        work = ChatWorkTools(user=user, link=_LINK, manifest=_MANIFEST)
+        with (
+            patch.object(ai_assistant, "record_run_history"),
+            patch(
+                "app.api.chat_work.call_tool",
+                AsyncMock(return_value={"corners": [{"key": "orders"}]}),
+            ) as call,
+            patch("app.api.chat_work.audit"),
+        ):
+            chunks = [
+                chunk
+                async for chunk in ai_assistant.stream_dashboard_chat(
+                    client,
+                    "gpt-4o-mini",
+                    "system",
+                    [{"role": "user", "content": "What is in my world?"}],
+                    AsyncMock(),
+                    user,
+                    "OpenAI",
+                    "http://localhost",
+                    work=work,
+                )
+            ]
+
+        call.assert_awaited_once()
+        first = client.chat.completions.create.call_args_list[0].kwargs
+        offered = [tool["function"]["name"] for tool in first["tools"]]
+        self.assertIn("work_get_world", offered)
+        self.assertIn("list_workflows", offered)
+        second = client.chat.completions.create.call_args_list[1].kwargs
+        tool_results = [m for m in second["messages"] if m.get("role") == "tool"]
+        self.assertIn("orders", tool_results[-1]["content"])
+        self.assertIn("Asking Heym Work...", "".join(chunks))
+
+    async def test_stream_without_work_offers_no_work_tools(self) -> None:
+        final_message = MagicMock(content="Hello.", tool_calls=None)
+        usage = MagicMock(prompt_tokens=1, completion_tokens=1, total_tokens=2)
+        client = MagicMock()
+        client.chat.completions.create.side_effect = [
+            MagicMock(choices=[MagicMock(message=final_message)], usage=usage),
+        ]
+        with patch.object(ai_assistant, "record_run_history"):
+            async for _chunk in ai_assistant.stream_dashboard_chat(
+                client,
+                "gpt-4o-mini",
+                "system",
+                [{"role": "user", "content": "hi"}],
+                AsyncMock(),
+                _user(),
+                "OpenAI",
+                "http://localhost",
+            ):
+                pass
+        offered = [
+            tool["function"]["name"]
+            for tool in client.chat.completions.create.call_args_list[0].kwargs["tools"]
+        ]
+        self.assertFalse([name for name in offered if name.startswith("work_")])
 
 
 if __name__ == "__main__":
