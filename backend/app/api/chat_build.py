@@ -56,6 +56,7 @@ from app.services.chat_build_mode import (
 from app.services.chat_eval_mode import eval_instructions
 from app.services.chat_image_input import image_input
 from app.services.chat_progress import ToolProgress
+from app.services.chat_skill_turn import skill_save_problem, skill_use_instructions
 from app.services.collab.saves import queue_collab_saved
 from app.services.credential_access import load_accessible_credential_ids
 from app.services.credential_catalog import (
@@ -289,6 +290,8 @@ class ChatBuildSession:
         # MCP turns: credentials are created on a Heym page, never in the chat.
         self.credential_form = credential_form
         self.progress = BuildProgress(workflow_id=request.target_workflow_id)
+        # The skills this message carries; read once, on first use.
+        self._skill_names: list[str] | None = None
         # Eval suites are part of every build turn; a skill-only turn writes skills only.
         self.evals = (
             None
@@ -308,6 +311,19 @@ class ChatBuildSession:
                 cancel_event=cancel_event,
             )
         )
+
+    def turn_skill_names(self) -> list[str]:
+        """The skills in this turn's zips. A turn with one runs it instead of building."""
+        if self._skill_names is None:
+            names: list[str] = []
+            for attachment in self.attachments:
+                if attachment.kind != "zip":
+                    continue
+                raw = decode_zip_payload(attachment.content)
+                if raw is not None:
+                    names.extend(skill.name for skill in read_zip(raw).skills)
+            self._skill_names = names
+        return self._skill_names
 
     @property
     def builder_mode(self) -> CredentialPromptMode:
@@ -373,7 +389,9 @@ class ChatBuildSession:
             target.name if target is not None else None,
             target.id if target is not None else None,
         )
-        return f"{instructions}\n{eval_instructions()}\n{skill_block}{user_context}"
+        skills = self.turn_skill_names()
+        use_block = skill_use_instructions(skills) if skills else ""
+        return f"{instructions}\n{eval_instructions()}\n{skill_block}{use_block}{user_context}"
 
     def tools(self, base_tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """The chat's own tools without the AI Builder, plus what build mode allows now."""
@@ -496,6 +514,14 @@ class ChatBuildSession:
                 return tool_error("Workflow not found or no access")
             if not await user_can_write_workflow(self.db, existing, self.user.id):
                 return tool_error("You have read-only access to this workflow")
+
+        if self.turn_skill_names():
+            problem = skill_save_problem(
+                list(existing.nodes or []) if existing is not None else None,
+                list(config["nodes"]),
+            )
+            if problem is not None:
+                return tool_error(problem)
 
         catalog = await load_credential_catalog(self.db, self.user.id)
         table_catalog = await load_data_table_catalog(self.db, self.user.id)
