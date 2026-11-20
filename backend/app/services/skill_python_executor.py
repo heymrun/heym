@@ -252,16 +252,21 @@ def _sandbox_mode() -> str:
     return raw
 
 
-def _skill_interpreter() -> str:
+def _skill_interpreter(*, native: bool = False) -> str:
     """Python interpreter used to run skills.
 
     Skills rely on the backend's installed packages (python-docx, pypdf, etc.),
     so they run with the backend's own venv interpreter rather than an isolated
     uv environment. In the Docker sandbox the sibling uses the backend image, so
     ``sys.executable`` (e.g. ``/app/backend/.venv/bin/python``) is a valid path
-    there too. Override with ``HEYM_SKILL_PYTHON`` for a custom skill image.
+    there too. A native backend's ``sys.executable`` is a host path no image has,
+    so there the sandbox image's own ``python`` runs the skill, as it runs Python
+    tools. Override with ``HEYM_SKILL_PYTHON`` for a custom skill image.
     """
-    return os.environ.get("HEYM_SKILL_PYTHON", "").strip() or sys.executable
+    override = os.environ.get("HEYM_SKILL_PYTHON", "").strip()
+    if override:
+        return override
+    return "python" if native else sys.executable
 
 
 def _skill_volume_mount_point() -> Path:
@@ -279,6 +284,35 @@ def _skill_workspace_root() -> Path:
     if override:
         return Path(override)
     return _skill_volume_mount_point() / _SKILL_WORKSPACE_SUBDIR
+
+
+def _shared_workspace() -> bool:
+    """True when skill run dirs must live on the volume shared with the sandbox.
+
+    A backend in a container (or a pod) shares a volume with its sandboxes. A native
+    backend (``run.sh``) has no such volume and binds a host directory instead, like the
+    Code node: the default mount point (``/app/data/...``) does not exist on the host.
+    """
+    return get_sandbox_manager().uses_shared_workspace()
+
+
+def _make_run_dir(shared: bool) -> tuple[Path, Path]:
+    """This run's directory and the directory removed when the run ends.
+
+    On the shared volume the run dir is a fresh uuid under the workspace root. On a
+    native backend it sits in a private parent that ``mkdtemp`` creates atomically
+    (mode 0700, unpredictable name), so no other local user can reach it, and a name
+    planted in a shared /tmp cannot redirect it. The sandbox reaches the run dir
+    through its own bind mount, which the parent's mode does not affect.
+    """
+    if shared:
+        run_dir = _skill_workspace_root() / "_skills" / uuid.uuid4().hex
+        run_dir.mkdir(parents=True, exist_ok=True)
+        return run_dir, run_dir
+    parent = Path(tempfile.mkdtemp(prefix="heym-skill-"))
+    run_dir = parent / "run"
+    run_dir.mkdir()
+    return run_dir, parent
 
 
 ENTRY_POINT_PRIORITY = ("main.py", "run.py")
@@ -475,6 +509,144 @@ def _serialize_skill_stdin(arguments: dict[str, Any]) -> str:
     return json.dumps(arguments, default=str)
 
 
+# A skill tool argument naming the folder whose files the user receives.
+OUTPUT_DIR_PLACEHOLDER = "{output_dir}"
+MAX_SCRIPT_ARGS = 64
+MAX_SCRIPT_ARG_CHARS = 4000
+
+
+@dataclass(frozen=True)
+class SkillInvocation:
+    """Which of the skill's scripts runs, its arguments and its standard input."""
+
+    script: str
+    argv: tuple[str, ...]
+    stdin: str
+
+
+def _skill_scripts(skill_files: list[dict[str, Any]]) -> list[str]:
+    return [
+        str(item.get("path"))
+        for item in skill_files
+        if isinstance(item.get("path"), str) and str(item["path"]).endswith(".py")
+    ]
+
+
+def _script_arguments(raw: object) -> tuple[str, ...]:
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise ValueError("args must be a list of strings")
+    if len(raw) > MAX_SCRIPT_ARGS:
+        raise ValueError(f"A script takes at most {MAX_SCRIPT_ARGS} arguments")
+    argv: list[str] = []
+    for item in raw:
+        if isinstance(item, bool) or not isinstance(item, str | int | float):
+            raise ValueError("Each argument must be a string")
+        value = str(item)
+        if "\x00" in value:
+            raise ValueError("An argument must not contain NUL bytes")
+        if len(value) > MAX_SCRIPT_ARG_CHARS:
+            raise ValueError(f"An argument is longer than {MAX_SCRIPT_ARG_CHARS} characters")
+        argv.append(value)
+    return tuple(argv)
+
+
+def plan_invocation(
+    skill_files: list[dict[str, Any]], arguments: dict[str, Any]
+) -> SkillInvocation:
+    """The run a skill tool call asks for. Raises ValueError for anything else.
+
+    Without ``script`` the skill's entry point runs and stdin keeps its old shape. With
+    ``script`` it must be one of the skill's own .py files; ``args`` go to it as argv,
+    never through a shell, and ``input`` is its stdin.
+    """
+    requested = arguments.get("script")
+    if requested is None or (isinstance(requested, str) and not requested.strip()):
+        entry = _find_entry_point(skill_files)
+        if not entry:
+            raise ValueError("No Python file found in skill")
+        if "args" not in arguments:
+            return SkillInvocation(entry, (), _serialize_skill_stdin(arguments))
+        script = entry
+    else:
+        if not isinstance(requested, str):
+            raise ValueError("script must be the path of one of the skill's Python files")
+        script = requested.strip().removeprefix("./")
+        scripts = _skill_scripts(skill_files)
+        if script not in scripts:
+            listed = ", ".join(scripts[:20]) or "none"
+            raise ValueError(f"No script {requested!r} in this skill. Its scripts: {listed}")
+        # The check that guards writing the file guards the path it runs from.
+        _safe_skill_path(Path("/workspace"), script)
+    raw_input = arguments.get("input")
+    if raw_input is None:
+        stdin = ""
+    elif isinstance(raw_input, str):
+        stdin = raw_input
+    else:
+        stdin = json.dumps(raw_input, default=str)
+    return SkillInvocation(script, _script_arguments(arguments.get("args")), stdin)
+
+
+MAX_LISTED_SCRIPTS = 100
+
+
+def skill_tool_schema(
+    skill_name: str, skill_files: list[dict[str, Any]], *, drive_files_enabled: bool
+) -> tuple[str, dict[str, Any]]:
+    """The agent's tool for one skill: its description and JSON parameters.
+
+    The model runs any of the skill's Python scripts by path, with arguments, the way a
+    skill written for a shell says to run them, since the sandbox has no shell.
+    """
+    scripts = _skill_scripts(skill_files)
+    entry = _find_entry_point(skill_files) or (scripts[0] if scripts else "")
+    description = (
+        f"Run a Python script of the {skill_name} skill in Heym's sandbox. Without script "
+        f"it runs {entry}. There is no shell, Node.js, npm or LibreOffice: where the skill "
+        "says to run `python <script> <arguments>`, call this tool with that script and "
+        "args instead. input is the script's standard input. Write files the user should "
+        f"receive to {OUTPUT_DIR_PLACEHOLDER} (use it in args) or to the folder named by the "
+        "_OUTPUT_DIR environment variable; Heym saves them to the user's Drive."
+    )
+    if drive_files_enabled:
+        description += (
+            " This skill can import heym_drive to read accessible Drive files by file_id or "
+            "filename."
+        )
+    script_property: dict[str, Any] = {
+        "type": "string",
+        "description": f"The skill's Python file to run. Omit it to run {entry}.",
+    }
+    if len(scripts) <= MAX_LISTED_SCRIPTS:
+        script_property["enum"] = scripts
+    else:
+        description += " Scripts include: " + ", ".join(scripts[:40]) + "."
+    parameters = {
+        "type": "object",
+        "properties": {
+            "input": {"type": "string", "description": "Standard input for the script."},
+            "script": script_property,
+            "args": {
+                "type": "array",
+                "items": {"type": "string"},
+                "maxItems": MAX_SCRIPT_ARGS,
+                "description": (
+                    "Command-line arguments, as separate strings; never a shell command. "
+                    f"{OUTPUT_DIR_PLACEHOLDER} is the folder whose files the user receives."
+                ),
+            },
+        },
+        "required": [],
+    }
+    return description, parameters
+
+
+def _resolve_argv(argv: tuple[str, ...], output_dir: Path) -> tuple[str, ...]:
+    return tuple(item.replace(OUTPUT_DIR_PLACEHOLDER, str(output_dir)) for item in argv)
+
+
 def _populate_workspace(
     root: Path,
     skill_files: list[dict[str, Any]],
@@ -514,12 +686,15 @@ def _execute_skill_subprocess(
     timeout_seconds: float,
     drive_files: list[dict[str, Any]] | None,
     entry_point: str,
+    *,
+    argv: tuple[str, ...] = (),
+    stdin: str | None = None,
 ) -> SkillExecutionResult:
     """Run the skill in a local subprocess (NOT a security boundary; trusted/dev only)."""
     with tempfile.TemporaryDirectory() as tmpdir:
         root = Path(tmpdir)
         output_dir = _populate_workspace(root, skill_files, drive_files)
-        args_json = _serialize_skill_stdin(arguments)
+        args_json = _serialize_skill_stdin(arguments) if stdin is None else stdin
 
         env = _safe_env()
         env["_OUTPUT_DIR"] = str(output_dir)
@@ -537,7 +712,7 @@ def _execute_skill_subprocess(
             result = subprocess.run(
                 # Run with the backend's own interpreter so backend packages
                 # (python-docx, pypdf, ...) are available to the skill.
-                [_skill_interpreter(), entry_point],
+                [_skill_interpreter(), entry_point, *_resolve_argv(argv, output_dir)],
                 cwd=str(root),
                 input=args_json,
                 capture_output=True,
@@ -568,7 +743,9 @@ def _resolve_image() -> str | None:
     )
 
 
-def _skill_workspace_mount(mount_point: Path, run_dir: Path) -> WorkspaceMount:
+def _skill_workspace_mount(
+    mount_point: Path, run_dir: Path, *, native_bind: bool = False
+) -> WorkspaceMount:
     """Only this run's subtree, at the same path as on the backend."""
     return WorkspaceMount(
         host_path=run_dir,
@@ -585,12 +762,20 @@ def _skill_workspace_mount(mount_point: Path, run_dir: Path) -> WorkspaceMount:
                 "the named volume mounted at the workspace volume mount point, or run with "
                 "HEYM_PYTHON_TOOL_SANDBOX=subprocess for trusted/dev use only."
             ),
+            native_bind=native_bind,
         ),
     )
 
 
 def _skill_spec(
-    image: str, name: str, mount_point: Path, run_dir: Path, entry_point: str
+    image: str,
+    name: str,
+    mount_point: Path,
+    run_dir: Path,
+    entry_point: str,
+    *,
+    native_bind: bool = False,
+    argv: tuple[str, ...] = (),
 ) -> SandboxSpec:
     """Hardened sandbox for a skill: network egress and a per-run writable workspace."""
     memory = os.environ.get("HEYM_SKILL_MEMORY", "512m")
@@ -598,8 +783,8 @@ def _skill_spec(
         site="skill",
         name=name,
         image=image,
-        entrypoint=_skill_interpreter(),
-        args=(entry_point,),
+        entrypoint=_skill_interpreter(native=native_bind),
+        args=(entry_point, *argv),
         network=os.environ.get("HEYM_SKILL_NETWORK", "bridge"),
         user=os.environ.get("HEYM_SKILL_USER", "65534:65534"),
         tmpfs=(Tmpfs("/tmp", "rw,nosuid", "64m"),),
@@ -613,7 +798,7 @@ def _skill_spec(
             f"_OUTPUT_DIR={run_dir / _OUTPUT_FILES_DIR}",
             *forwarded_env(SKILL_FORWARD_PREFIXES),
         ),
-        workspace_mounts=(_skill_workspace_mount(mount_point, run_dir),),
+        workspace_mounts=(_skill_workspace_mount(mount_point, run_dir, native_bind=native_bind),),
     )
 
 
@@ -623,9 +808,13 @@ def _build_skill_docker_command(
     mount_point: Path,
     run_dir: Path,
     entry_point: str,
+    *,
+    native_bind: bool = False,
 ) -> list[str]:
     """The skill sandbox as ``docker run`` argv."""
-    return render_docker_argv(_skill_spec(image, name, mount_point, run_dir, entry_point))
+    return render_docker_argv(
+        _skill_spec(image, name, mount_point, run_dir, entry_point, native_bind=native_bind)
+    )
 
 
 def _execute_skill_docker(
@@ -635,11 +824,14 @@ def _execute_skill_docker(
     drive_files: list[dict[str, Any]] | None,
     entry_point: str,
     image: str,
+    *,
+    argv: tuple[str, ...] = (),
+    stdin: str | None = None,
 ) -> SkillExecutionResult:
     """Run the skill inside a hardened, throwaway sandbox (no Docker socket, no SA token)."""
     mount_point = _skill_volume_mount_point()
-    run_dir = _skill_workspace_root() / "_skills" / uuid.uuid4().hex
-    run_dir.mkdir(parents=True, exist_ok=True)
+    shared = _shared_workspace()
+    run_dir, removable = _make_run_dir(shared)
     try:
         # The sandbox runs non-root against a root-owned volume, so the throwaway
         # run dir (and the dirs the sandbox user must write) are made writable.
@@ -650,9 +842,18 @@ def _execute_skill_docker(
         output_dir = _populate_workspace(run_dir, skill_files, drive_files)
         _chmod_best_effort(output_dir, 0o777)
 
-        args_json = _serialize_skill_stdin(arguments)
+        args_json = _serialize_skill_stdin(arguments) if stdin is None else stdin
         name = f"heym-skill-{uuid.uuid4().hex}"
-        spec = _skill_spec(image, name, mount_point, run_dir, entry_point)
+        # The run dir sits at the same path inside the sandbox, so the output dir does too.
+        spec = _skill_spec(
+            image,
+            name,
+            mount_point,
+            run_dir,
+            entry_point,
+            native_bind=not shared,
+            argv=_resolve_argv(argv, output_dir),
+        )
         try:
             result = get_sandbox_manager().run(spec, args_json, timeout_seconds)
         except SandboxTimeoutError:
@@ -671,7 +872,8 @@ def _execute_skill_docker(
             )
         return _build_result(result.stdout, result.stderr, output_dir)
     finally:
-        shutil.rmtree(run_dir, ignore_errors=True)
+        # rmtree does not follow links the skill may have left in its workspace.
+        shutil.rmtree(removable, ignore_errors=True)
 
 
 def _chmod_best_effort(path: Path, mode: int) -> None:
@@ -708,9 +910,7 @@ def execute_skill_python(
     Raises:
         RuntimeError: If the configured Docker sandbox backend is unavailable.
     """
-    entry_point = _find_entry_point(skill_files)
-    if not entry_point:
-        raise ValueError("No Python file found in skill")
+    plan = plan_invocation(skill_files, arguments)
 
     mode = _sandbox_mode()
     if mode == "subprocess":
@@ -720,7 +920,13 @@ def execute_skill_python(
             "development."
         )
         return _execute_skill_subprocess(
-            skill_files, arguments, timeout_seconds, drive_files, entry_point
+            skill_files,
+            arguments,
+            timeout_seconds,
+            drive_files,
+            plan.script,
+            argv=plan.argv,
+            stdin=plan.stdin,
         )
 
     # mode == "auto" or "docker": require a real Docker sandbox and fail closed
@@ -738,5 +944,12 @@ def execute_skill_python(
             "Set HEYM_SKILL_IMAGE (or HEYM_PYTHON_TOOL_IMAGE) to the backend image."
         )
     return _execute_skill_docker(
-        skill_files, arguments, timeout_seconds, drive_files, entry_point, image
+        skill_files,
+        arguments,
+        timeout_seconds,
+        drive_files,
+        plan.script,
+        image,
+        argv=plan.argv,
+        stdin=plan.stdin,
     )

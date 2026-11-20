@@ -280,6 +280,8 @@ Skills can be added by dropping a `.zip` or `.md` file onto the Skills area.
 After expanding a skill card, drop any file onto that skill to attach or replace a bundled file, including binary assets such as PDFs and images.
 Use the download button on a skill card to export that skill as a `.zip` archive for backup or reuse in another workflow.
 
+A skill with Python files gives the agent one tool, `skill_<name>`. The agent calls it with `script` (any `.py` file of the skill, by its path), `args` (command-line arguments, as separate strings) and `input` (the script's standard input). Without `script` the tool runs `main.py` or `run.py`, else the first Python file. The sandbox has no shell, Node.js, npm or LibreOffice, so a skill written for a shell (`python scripts/fill.py form.pdf out/`) runs through the tool instead: the agent passes that script and those arguments. Files the script writes to the folder named by the `_OUTPUT_DIR` environment variable, or to `{output_dir}` used in `args`, are saved to Drive, as in [File Generation](../reference/file-generation.md).
+
 Enable **Drive files** on a skill only when its Python code needs to read files from Heym Drive. Enabled skills receive a generated `heym_drive.py` helper at runtime and can call `list_drive_files`, `get_drive_file`, `get_drive_file_path`, `read_drive_file`, `read_drive_text`, or `read_drive_base64` with a Drive file id or exact filename. Filename lookup uses the newest accessible match. Disabled skills do not receive the helper.
 
 Each skill card has four actions on the row below the title:

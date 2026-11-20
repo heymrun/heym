@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import unittest
 from unittest.mock import MagicMock
 
@@ -578,6 +579,11 @@ class TestAgentNodeToolIntegration(unittest.TestCase):
         self.assertEqual(drive_tool["_actor_user_id"], str(actor_user_id))
         self.assertIs(plain_tool["_drive_files_enabled"], False)
         self.assertIn("Drive files are enabled for this skill", captured_system_instructions[0])
+        # The agent may run any of the skill's scripts, by path, with arguments.
+        parameters = json.loads(drive_tool["parameters"])
+        self.assertEqual(set(parameters["properties"]), {"input", "script", "args"})
+        self.assertIn("main.py", parameters["properties"]["script"]["enum"])
+        self.assertIn("no shell", drive_tool["description"])
 
 
 class TestHitlSingleReviewPolicy(unittest.TestCase):
