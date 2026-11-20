@@ -3,6 +3,7 @@ import { computed, type ComputedRef } from "vue";
 import type { WorkflowConcurrencyPatch } from "@/types/workflow";
 import { toConcurrencyUpdatePayload } from "@/components/Panels/propertiesPanel/concurrencySettings";
 import { workflowApi } from "@/services/api";
+import { useAuthStore } from "@/stores/auth";
 import { useWorkflowStore } from "@/stores/workflow";
 
 export interface WorkflowConcurrencySettingsState {
@@ -13,20 +14,26 @@ export interface WorkflowConcurrencySettingsState {
   save: (patch: WorkflowConcurrencyPatch) => Promise<void>;
 }
 
-/** Editors (owner and write shares) change the limit; read-only viewers see it. */
+/** The owner changes the limit; collaborators see it, and the server refuses their change. */
 export function useWorkflowConcurrencySettings(): WorkflowConcurrencySettingsState {
   const workflowStore = useWorkflowStore();
+  const authStore = useAuthStore();
 
   const limit = computed(() => workflowStore.currentWorkflow?.concurrency_limit ?? null);
   const maxQueue = computed(() => workflowStore.currentWorkflow?.concurrency_max_queue ?? null);
   const maxWaitSeconds = computed(
     () => workflowStore.currentWorkflow?.concurrency_max_wait_seconds ?? null,
   );
-  const readOnly = computed(() => workflowStore.isReadOnly);
+  const readOnly = computed(
+    () =>
+      workflowStore.isReadOnly ||
+      !authStore.user ||
+      workflowStore.currentWorkflow?.owner_id !== authStore.user.id,
+  );
 
   async function save(patch: WorkflowConcurrencyPatch): Promise<void> {
     const wf = workflowStore.currentWorkflow;
-    if (!wf || workflowStore.isReadOnly) return;
+    if (!wf || readOnly.value) return;
     const previous: WorkflowConcurrencyPatch = {
       concurrency_limit: wf.concurrency_limit ?? null,
       concurrency_max_queue: wf.concurrency_max_queue ?? null,

@@ -112,7 +112,7 @@ Configure per workflow: `rate_limit_requests` and `rate_limit_window_seconds`.
 
 ## Concurrency Limit and Queued Runs
 
-A workflow can cap how many production runs execute at once. Turn on **Concurrency limit** in the workflow-level **Properties** panel and set **Max concurrent runs**. Owners and collaborators with edit access can change it. The limit is off by default.
+A workflow can cap how many production runs execute at once. Turn on **Concurrency limit** in the workflow-level **Properties** panel and set **Max concurrent runs**. Only the workflow owner can change it; collaborators see it read-only. The limit is off by default.
 
 While the limit is reached, new runs wait in a first-in, first-out queue. This covers every production entry point: this endpoint, the [streaming endpoint](./sse-streaming.md), the [Portal](./portal.md), the [Quick Drawer](./quick-drawer.md), [MCP](../tabs/mcp-tab.md) and every [trigger](./triggers.md). The editor's own test runs always start right away and do not take a slot. Sending `test_run=true` without a signed-in session that can open the workflow does not skip the queue.
 

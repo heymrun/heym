@@ -1,4 +1,4 @@
-"""Editors set the limit through PUT; 0 clears it and negatives are rejected."""
+"""The owner sets the limit through PUT; 0 clears it and negatives are rejected."""
 
 import unittest
 import uuid
@@ -65,7 +65,7 @@ class ConcurrencySettingsUpdateTests(unittest.IsolatedAsyncioTestCase):
             await update_workflow(
                 workflow_id=workflow.id,
                 workflow_data=data,
-                current_user=SimpleNamespace(id=uuid.uuid4()),
+                current_user=SimpleNamespace(id=workflow.owner_id),
                 db=AsyncMock(),
             )
         return promote
