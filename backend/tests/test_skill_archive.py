@@ -17,6 +17,16 @@ def _zip(files: dict[str, str | bytes]) -> bytes:
     return buffer.getvalue()
 
 
+def _damaged(raw: bytes, member: str) -> bytes:
+    """`raw` with one byte of `member`'s stored data flipped, so its CRC no longer matches."""
+    with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+        info = archive.getinfo(member)
+    name_len, extra_len = struct.unpack_from("<HH", raw, info.header_offset + 26)
+    out = bytearray(raw)
+    out[info.header_offset + 30 + name_len + extra_len + 2] ^= 0xFF
+    return bytes(out)
+
+
 class SkillArchiveTests(unittest.TestCase):
     def test_a_skill_zip_keeps_every_file_and_skips_macos_metadata(self) -> None:
         raw = _zip(
@@ -108,20 +118,75 @@ class SkillArchiveTests(unittest.TestCase):
         self.assertIn("password-protected", prompt_for_zip("greeter.zip", reading))
 
     def test_a_damaged_member_becomes_a_note_and_the_rest_is_read(self) -> None:
-        raw = bytearray(
-            _zip({"broken.txt": "Bonjour from Zürich", "SKILL.md": "---\nname: tidy\n---\n"})
+        raw = _damaged(
+            _zip({"broken.txt": "Bonjour from Zürich", "tidy/SKILL.md": "---\nname: tidy\n---\n"}),
+            "broken.txt",
         )
-        # _zip stores members uncompressed; flip a byte of the first member's data (after its
-        # 30-byte local header and name) so it no longer matches its CRC.
-        data_start = 30 + len("broken.txt")
-        raw[data_start + 2] ^= 0xFF
 
-        reading = read_zip(bytes(raw))
+        reading = read_zip(raw)
 
         self.assertIn(
             "Skipped broken.txt: the file is damaged or could not be unpacked.", reading.notes
         )
         self.assertEqual([skill.name for skill in reading.skills], ["tidy"])
+
+    def test_a_skill_with_a_damaged_member_is_left_out_and_read_as_context(self) -> None:
+        # Saving the skill without main.py would replace the stored skill and drop its main.py.
+        raw = _damaged(
+            _zip(
+                {
+                    "greeter/main.py": "def run():\n    return 'Bonjour'\n",
+                    "greeter/SKILL.md": "---\nname: greeter\n---\nSay Bonjour.",
+                    "greeter/notes.md": "Greet in French.",
+                    "tidy/SKILL.md": "---\nname: tidy\n---\nTidy the text.",
+                }
+            ),
+            "greeter/main.py",
+        )
+
+        reading = read_zip(raw)
+
+        self.assertEqual([skill.name for skill in reading.skills], ["tidy"])
+        self.assertIn(
+            "Skipped greeter/main.py: the file is damaged or could not be unpacked.",
+            reading.notes,
+        )
+        self.assertIn(
+            "Did not read skill greeter: greeter/main.py could not be read.", reading.notes
+        )
+        self.assertEqual(
+            sorted(item.path for item in reading.text_files),
+            ["greeter/SKILL.md", "greeter/notes.md"],
+        )
+        prompt = prompt_for_zip("skills.zip", reading)
+        self.assertIn("Skill tidy.", prompt)
+        self.assertNotIn("Skill greeter.", prompt)
+        self.assertIn("Say Bonjour.", prompt)
+
+    def test_a_skill_with_a_password_protected_member_is_left_out(self) -> None:
+        raw = bytearray(
+            _zip({"greeter/SKILL.md": "---\nname: greeter\n---\n", "greeter/main.py": "x = 1\n"})
+        )
+        with zipfile.ZipFile(io.BytesIO(bytes(raw))) as archive:
+            info = archive.getinfo("greeter/main.py")
+        # Set general purpose bit 0 (encrypted) on main.py's local and central headers only.
+        local_flags = struct.unpack_from("<H", raw, info.header_offset + 6)[0]
+        struct.pack_into("<H", raw, info.header_offset + 6, local_flags | 0x1)
+        central = raw.find(b"PK\x01\x02")
+        while central >= 0:
+            name_len = struct.unpack_from("<H", raw, central + 28)[0]
+            if raw[central + 46 : central + 46 + name_len] == b"greeter/main.py":
+                flags = struct.unpack_from("<H", raw, central + 8)[0]
+                struct.pack_into("<H", raw, central + 8, flags | 0x1)
+            central = raw.find(b"PK\x01\x02", central + 4)
+
+        reading = read_zip(bytes(raw))
+
+        self.assertEqual(reading.skills, ())
+        self.assertIn("Skipped greeter/main.py: the file is password-protected.", reading.notes)
+        self.assertIn(
+            "Did not read skill greeter: greeter/main.py could not be read.", reading.notes
+        )
 
 
 if __name__ == "__main__":
