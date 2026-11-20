@@ -7,6 +7,7 @@ import json
 import logging
 import time
 import uuid
+from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Literal
 from xml.etree import ElementTree
 from zipfile import BadZipFile, ZipFile
@@ -17,6 +18,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.ai_assistant import (
+    _stream_sse_with_keepalive,
     get_credential_for_user,
     resolve_model_binding,
 )
@@ -81,16 +83,21 @@ SET_SKILL_FILES_TOOL: dict[str, Any] = {
     "function": {
         "name": "set_skill_files",
         "description": (
-            "Set the complete current editable skill file contents. "
-            "Call this whenever you create or update any Markdown or Python file. "
-            "Always include ALL editable .md and .py files in a single call."
+            "Create Markdown or Python files, or replace a file's whole content. "
+            "Send only the files you create or rewrite: files you leave out stay exactly as "
+            "they are. To change part of an existing file, use `edit_skill_file` instead. "
+            "List paths in `delete_paths` to remove files, for example the old path after a "
+            "rename."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "files": {
                     "type": "array",
-                    "description": "All editable .md and .py files that currently make up the skill.",
+                    "description": (
+                        "The .md and .py files to create or replace, each with its complete "
+                        "new content. Leave out every file that does not change."
+                    ),
                     "items": {
                         "type": "object",
                         "properties": {
@@ -99,12 +106,66 @@ SET_SKILL_FILES_TOOL: dict[str, Any] = {
                         },
                         "required": ["path", "content"],
                     },
-                }
+                },
+                "delete_paths": {
+                    "type": "array",
+                    "description": "Paths of editable files to remove. SKILL.md cannot be removed.",
+                    "items": {"type": "string"},
+                },
             },
             "required": ["files"],
         },
     },
 }
+
+EDIT_SKILL_FILE_TOOL: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "edit_skill_file",
+        "description": (
+            "Change part of an existing .md or .py file without resending it. Each edit "
+            "replaces `old_string` with `new_string`. `old_string` must match the current "
+            "file exactly, including whitespace and indentation, and must occur once unless "
+            "`replace_all` is true. Edits apply in order, and either all of them apply or "
+            "none do. Use this for any change that touches part of a file, especially a "
+            "large one."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Path of the file to change, as listed in the current files.",
+                },
+                "edits": {
+                    "type": "array",
+                    "description": "Replacements to apply to the file, in order.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "old_string": {
+                                "type": "string",
+                                "description": "Exact text to replace.",
+                            },
+                            "new_string": {
+                                "type": "string",
+                                "description": "Text to put in its place.",
+                            },
+                            "replace_all": {
+                                "type": "boolean",
+                                "description": "Replace every occurrence instead of exactly one.",
+                            },
+                        },
+                        "required": ["old_string", "new_string"],
+                    },
+                },
+            },
+            "required": ["path", "edits"],
+        },
+    },
+}
+
+SKILL_BUILDER_TOOLS: list[dict[str, Any]] = [SET_SKILL_FILES_TOOL, EDIT_SKILL_FILE_TOOL]
 
 _SKILL_DSL = """
 ## Heym Skill DSL
@@ -288,7 +349,7 @@ def execute(params: dict, files: dict) -> dict:
 2. Every `main.py` MUST import `json` and `sys` and include the `if __name__ == "__main__":` block shown above. Without it the script produces no output and the skill silently fails.
 3. NEVER embed fonts as Python strings or base64. Use reportlab built-in fonts: `Helvetica`, `Times-Roman`, `Courier`, and their bold/italic variants.
 4. NEVER embed image bytes as Python constants or base64. Ask the user to pass images as input files.
-5. Always call `set_skill_files` with the COMPLETE editable `.md`/`.py` file set every time you create or modify files.
+5. Change only what the request needs. Use `edit_skill_file` to change part of an existing file and `set_skill_files` to create a file or rewrite one completely. Files you do not send stay as they are, so never resend a file you did not change.
 6. Keep `SKILL.md` accurate because the LLM reads it to decide when to call the skill.
 7. `execute()` must remain a top-level function in `main.py`.
 8. Only generate or update `.md` and `.py` files.
@@ -298,6 +359,7 @@ def execute(params: dict, files: dict) -> dict:
 """
 
 MAX_SKILL_BUILDER_ROUNDS = 6
+SKILL_BUILDER_SSE_KEEPALIVE_SECONDS = 10.0
 ALLOWED_SKILL_BUILDER_EXTENSIONS = (".md", ".py")
 MACOS_METADATA_DIR = "__MACOSX"
 MACOS_METADATA_FILENAMES = {".DS_Store"}
@@ -604,14 +666,17 @@ def build_skill_builder_prompt(
                 base += "\n\n".join(attachment_contexts)
                 base += "\n\n"
         base += (
-            "When you update files, always call `set_skill_files` with ALL editable "
-            "`.md`/`.py` files, including unchanged editable files.\n"
+            "To change files, call `edit_skill_file` for targeted replacements and "
+            "`set_skill_files` for new or completely rewritten files. Send only what "
+            "changes: files you leave out stay exactly as they are, so a large file never "
+            "needs to be resent.\n"
         )
     else:
         base += (
             "\n\nThe user wants to create a NEW skill. "
             "If the request is specific enough, generate the skill immediately and call "
-            "`set_skill_files`. If the request is vague, ask a concise clarifying question first."
+            "`set_skill_files` with every file the skill needs. If the request is vague, ask "
+            "a concise clarifying question first."
         )
 
     uploaded_attachments = [
@@ -682,6 +747,185 @@ def _normalize_skill_files(raw_files: list[Any]) -> tuple[list[dict[str, str]], 
     return files, rejected_paths
 
 
+@dataclass
+class SkillFileToolOutcome:
+    """What one file tool call did to the turn's editable files, and what the model reads."""
+
+    result: str
+    changed_paths: list[str] = field(default_factory=list)
+    deleted_paths: list[str] = field(default_factory=list)
+
+
+ENGLISH_ONLY_REMINDER = (
+    "Keep all natural language content in English and only use `.md` and `.py` files."
+)
+
+
+def _initial_skill_files(existing_skill: SkillBuilderSkill | None) -> dict[str, str]:
+    """Return the editable files a turn starts from, keyed by normalized path."""
+
+    files: dict[str, str] = {}
+    if existing_skill is None:
+        return files
+    for file in existing_skill.files:
+        path = _normalize_skill_builder_path(file.path)
+        if _is_allowed_skill_builder_file(path):
+            files[path] = file.content
+    return files
+
+
+def _apply_set_skill_files(
+    skill_files: dict[str, str], args: dict[str, Any]
+) -> SkillFileToolOutcome:
+    """Write whole files and remove listed ones; files the call leaves out stay as they are."""
+
+    raw_files = args.get("files")
+    files, rejected_paths = _normalize_skill_files(raw_files if isinstance(raw_files, list) else [])
+    raw_deletes = args.get("delete_paths")
+    notes: list[str] = []
+    changed: list[str] = []
+    deleted: list[str] = []
+
+    for raw_path in raw_deletes if isinstance(raw_deletes, list) else []:
+        if not isinstance(raw_path, str):
+            continue
+        path = _normalize_skill_builder_path(raw_path)
+        if path.lower() == "skill.md":
+            notes.append("`SKILL.md` cannot be deleted, so it was kept.")
+        elif path in skill_files:
+            del skill_files[path]
+            deleted.append(path)
+        else:
+            notes.append(f"`{raw_path}` was not deleted because no editable file has that path.")
+
+    for file in files:
+        path = file["path"]
+        if path in deleted:
+            deleted.remove(path)
+        if skill_files.get(path) != file["content"]:
+            skill_files[path] = file["content"]
+            changed.append(path)
+
+    if rejected_paths:
+        rejected_list = ", ".join(rejected_paths)
+        notes.insert(
+            0,
+            "Some files were ignored because Skill Builder only accepts `.md` and `.py` "
+            f"files: {rejected_list}.",
+        )
+    if changed or deleted:
+        summary = []
+        if changed:
+            summary.append("wrote " + ", ".join(f"`{path}`" for path in changed))
+        if deleted:
+            summary.append("deleted " + ", ".join(f"`{path}`" for path in deleted))
+        notes.insert(0, f"Skill files updated: {'; '.join(summary)}. Other files are unchanged.")
+    elif files:
+        notes.insert(0, "The files you sent already had that content, so nothing changed.")
+    elif not notes:
+        notes.append("No valid files were accepted.")
+    notes.append(ENGLISH_ONLY_REMINDER)
+    return SkillFileToolOutcome(" ".join(notes), changed, deleted)
+
+
+def _edit_refused(reason: str) -> SkillFileToolOutcome:
+    return SkillFileToolOutcome(f"Nothing was changed: {reason}")
+
+
+def _apply_edit_skill_file(
+    skill_files: dict[str, str], args: dict[str, Any]
+) -> SkillFileToolOutcome:
+    """Apply exact string replacements to one file, all of them or none."""
+
+    raw_path = args.get("path")
+    if not isinstance(raw_path, str) or not _normalize_skill_builder_path(raw_path):
+        return _edit_refused("`path` is required.")
+    path = _normalize_skill_builder_path(raw_path)
+    if not _is_allowed_skill_builder_file(path):
+        return _edit_refused(f"Skill Builder only edits `.md` and `.py` files, not `{raw_path}`.")
+    if path not in skill_files:
+        return _edit_refused(f"`{path}` does not exist. Use `set_skill_files` to create it.")
+
+    edits = args.get("edits")
+    if not isinstance(edits, list) or not edits:
+        if isinstance(args.get("old_string"), str):
+            edits = [args]
+        else:
+            return _edit_refused("`edits` must list at least one replacement.")
+
+    original = skill_files[path]
+    content = original
+    for index, edit in enumerate(edits, start=1):
+        old_string = edit.get("old_string") if isinstance(edit, dict) else None
+        new_string = edit.get("new_string") if isinstance(edit, dict) else None
+        if not isinstance(old_string, str) or not isinstance(new_string, str):
+            return _edit_refused(f"edit {index} needs `old_string` and `new_string`.")
+        if not old_string:
+            return _edit_refused(
+                f"edit {index} has an empty `old_string`. Use `set_skill_files` to replace "
+                "a whole file."
+            )
+        replace_all = edit.get("replace_all") in (True, "true")
+        count = content.count(old_string)
+        if count == 0:
+            return _edit_refused(
+                f"edit {index}: `old_string` was not found in `{path}`. Copy it exactly from "
+                "the current file, including whitespace and indentation, and account for "
+                "earlier edits."
+            )
+        if count > 1 and not replace_all:
+            return _edit_refused(
+                f"edit {index}: `old_string` occurs {count} times in `{path}`. Include more "
+                "surrounding text so it matches once, or set `replace_all` to true."
+            )
+        content = content.replace(old_string, new_string, -1 if replace_all else 1)
+
+    if content == original:
+        return SkillFileToolOutcome(f"`{path}` already had that content, so nothing changed.")
+    skill_files[path] = content
+    return SkillFileToolOutcome(
+        f"Edited `{path}` with {len(edits)} replacement(s). The rest of the file and every "
+        f"other file are unchanged. {ENGLISH_ONLY_REMINDER}",
+        changed_paths=[path],
+    )
+
+
+def apply_skill_file_tool(
+    skill_files: dict[str, str], name: str, raw_arguments: str | None
+) -> SkillFileToolOutcome:
+    """Run one Skill Builder file tool against the turn's editable files."""
+
+    try:
+        args = json.loads(raw_arguments or "{}")
+    except json.JSONDecodeError:
+        args = None
+    if not isinstance(args, dict):
+        return SkillFileToolOutcome(
+            "Nothing was changed: the tool arguments were not a valid JSON object."
+        )
+    if name == "set_skill_files":
+        return _apply_set_skill_files(skill_files, args)
+    if name == "edit_skill_file":
+        return _apply_edit_skill_file(skill_files, args)
+    return SkillFileToolOutcome(f"Unsupported tool: {name}")
+
+
+def _skill_files_update_event(skill_files: dict[str, str], outcome: SkillFileToolOutcome) -> str:
+    """The SSE event for a file change: every editable file, plus what this call changed.
+
+    `files` is the whole editable set so a client that replaces its list stays correct;
+    `changed_paths` and `deleted_paths` let a client that merges touch only those.
+    """
+
+    payload = {
+        "type": "skill_files_update",
+        "files": [{"path": path, "content": content} for path, content in skill_files.items()],
+        "changed_paths": outcome.changed_paths,
+        "deleted_paths": outcome.deleted_paths,
+    }
+    return f"data: {json.dumps(payload)}\n\n"
+
+
 async def run_skill_builder(
     client: Any,
     request: SkillBuilderRequest,
@@ -691,6 +935,7 @@ async def run_skill_builder(
     """Run a non-streaming tool loop and emit SSE events for chat and files."""
 
     system_prompt = build_skill_builder_prompt(request.existing_skill, request.attachments)
+    skill_files = _initial_skill_files(request.existing_skill)
     history = [message.model_dump() for message in request.conversation_history]
     all_messages: list[dict[str, Any]] = [
         {"role": "system", "content": system_prompt},
@@ -709,7 +954,7 @@ async def run_skill_builder(
             response = client.chat.completions.create(
                 model=request.model,
                 messages=all_messages,
-                tools=[SET_SKILL_FILES_TOOL],
+                tools=SKILL_BUILDER_TOOLS,
                 temperature=0.3,
                 stream=False,
             )
@@ -756,39 +1001,17 @@ async def run_skill_builder(
             )
 
             for tool_call in message.tool_calls:
-                if tool_call.function.name == "set_skill_files":
-                    try:
-                        args = json.loads(tool_call.function.arguments or "{}")
-                    except json.JSONDecodeError:
-                        args = {}
-                    files, rejected_paths = _normalize_skill_files(args.get("files", []))
-                    if files:
-                        yield f"data: {json.dumps({'type': 'skill_files_update', 'files': files})}\n\n"
-                    if rejected_paths:
-                        rejected_list = ", ".join(rejected_paths)
-                        tool_result = (
-                            "Some files were ignored because Skill Builder only accepts `.md` "
-                            f"and `.py` files: {rejected_list}. Keep all natural language "
-                            "content in English only."
-                        )
-                    elif files:
-                        tool_result = (
-                            "Skill files updated successfully. Keep all natural language "
-                            "content in English and only use `.md` and `.py` files."
-                        )
-                    else:
-                        tool_result = (
-                            "No valid files were accepted. Skill Builder only accepts `.md` "
-                            "and `.py` files, and all natural language content must stay in English."
-                        )
-                else:
-                    tool_result = f"Unsupported tool: {tool_call.function.name}"
+                outcome = apply_skill_file_tool(
+                    skill_files, tool_call.function.name, tool_call.function.arguments
+                )
+                if outcome.changed_paths or outcome.deleted_paths:
+                    yield _skill_files_update_event(skill_files, outcome)
 
                 all_messages.append(
                     {
                         "role": "tool",
                         "tool_call_id": tool_call.id,
-                        "content": tool_result,
+                        "content": outcome.result,
                     }
                 )
 
@@ -868,8 +1091,14 @@ async def skill_builder_stream(
         message=request.message,
     )
 
+    # The model call blocks for as long as the answer takes, and a long file rewrite can
+    # run for minutes. Run it off the event loop and send keepalives meanwhile, or a proxy
+    # such as Cloudflare drops the silent connection (about 100 s) and the client sees 502.
     return StreamingResponse(
-        run_skill_builder(client, request, trace_context, provider),
+        _stream_sse_with_keepalive(
+            run_skill_builder(client, request, trace_context, provider),
+            keepalive_seconds=SKILL_BUILDER_SSE_KEEPALIVE_SECONDS,
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

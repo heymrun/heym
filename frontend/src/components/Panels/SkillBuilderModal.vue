@@ -336,6 +336,31 @@ const existingSkillForApi = computed<SkillBuilderExistingSkill | undefined>(() =
   buildExistingSkillForApi(),
 );
 
+// The assistant edits files in place, so after its first change it must read the files as
+// that change left them, not as the dialog opened (or nothing, for a new skill).
+function buildSkillForPrompt(
+  excludedAttachmentPaths: Set<string>,
+): SkillBuilderExistingSkill | undefined {
+  const opened = buildExistingSkillForApi(excludedAttachmentPaths);
+  if (!hasFilesUpdate.value) {
+    return opened;
+  }
+  return {
+    name: opened?.name ?? modalTitle.value,
+    files: currentFiles.value.map((file) => ({ path: file.path, content: file.content })),
+    attachments:
+      opened?.attachments ??
+      preservedSkillFiles.value
+        .filter((file) => !excludedAttachmentPaths.has(file.path))
+        .map((file) =>
+          toSkillBuilderAttachment(
+            file,
+            isAttachmentIncluded(file.path) && canIncludeAttachmentContent(file),
+          ),
+        ),
+  };
+}
+
 const existingPreservedSkillFiles = computed<AgentSkillFile[]>(() =>
   existingSkillFiles.value.filter((file) => !canSendFileToSkillBuilder(file)),
 );
@@ -575,7 +600,7 @@ function submit(): void {
     prompt,
     props.credentialId,
     props.model,
-    buildExistingSkillForApi(promptAttachmentPaths),
+    buildSkillForPrompt(promptAttachmentPaths),
     promptAttachments,
   );
 }
