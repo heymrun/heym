@@ -120,6 +120,7 @@ class CallTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(audit.call_args.kwargs["action"], "work.assistant_call")
         self.assertEqual(audit.call_args.kwargs["tool"], "start_discover_search")
         self.assertEqual(audit.call_args.kwargs["outcome"], "success")
+        self.assertIsNone(audit.call_args.kwargs["http_status"])
 
     async def test_error_result(self) -> None:
         tools = self._tools()
@@ -135,7 +136,7 @@ class CallTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(outcome.status, "error")
         self.assertIn("Needs an Editor.", outcome.summary)
         self.assertEqual(audit.call_args.kwargs["outcome"], "failure")
-        self.assertEqual(audit.call_args.kwargs["status"], 403)
+        self.assertEqual(audit.call_args.kwargs["http_status"], 403)
 
 
 class StreamTests(unittest.IsolatedAsyncioTestCase):

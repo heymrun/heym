@@ -119,7 +119,8 @@ class ChatWorkTools:
             actor=self.user,
             outcome=OUTCOME_FAILURE if error else OUTCOME_SUCCESS,
             tool=tool.name,
-            status=result.get("status"),
+            # Only a refusal carries Work's HTTP status; a result may have a status of its own.
+            http_status=result.get("status") if error else None,
         )
         return BuildToolOutcome(
             result=cap_result(result),
