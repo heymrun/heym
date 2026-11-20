@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.db.models import OAuthAccessToken, RefreshToken, User
-from app.services.auth import SIGN_IN_MFA, SIGN_IN_SSO, TokenClaims
+from app.services.auth import SIGN_IN_ASSISTANT, SIGN_IN_MFA, SIGN_IN_SSO, TokenClaims
 
 DEACTIVATED_DETAIL = "This account has been deactivated. Contact your administrator."
 
@@ -42,6 +42,10 @@ def meets_mfa_policy(method: str | None, *, has_password: bool, has_sso_identity
     if not settings.require_mfa:
         return True
     if method in (SIGN_IN_MFA, SIGN_IN_SSO):
+        return True
+    if method == SIGN_IN_ASSISTANT:
+        # Minted only by Heym's own server inside a chat turn whose credential already passed
+        # this policy, and usable only together with the Heym Work key.
         return True
     if method is None:
         # Minted before sessions recorded their method. An account with an SSO identity may
