@@ -25,7 +25,6 @@ from app.api.ai_assistant import (
     FileAttachment,
     _build_user_message,
     _format_workflows_for_prompt,
-    _load_agents_md_content,
     get_workflows_for_user_with_inputs,
     resolve_model_binding,
     stream_dashboard_chat,
@@ -276,7 +275,6 @@ async def _clear_queue_items(
 class SystemPromptParts:
     full_system_prompt: str
     base_system_prompt: str
-    agents_md: str
     workflows_block: str
     user_rules: str
     credentials_block: str = ""
@@ -299,7 +297,6 @@ async def _assemble_system_prompt_parts(
     workflows = await get_workflows_for_user_with_inputs(db, user.id)
     workflows_block = _format_workflows_for_prompt(workflows)
     knowledge_bases_block = await knowledge_bases_prompt_block(db, user.id)
-    agents_md = _load_agents_md_content() or ""
     user_rules = (user.user_rules or "").strip()
     credentials_block = (
         ""
@@ -308,14 +305,6 @@ async def _assemble_system_prompt_parts(
     )
 
     system_prompt = DASHBOARD_CHAT_SYSTEM_PROMPT
-    if agents_md:
-        system_prompt = (
-            "## Heym Platform Context\n\n"
-            "Use the following Heym platform documentation to answer questions about the platform, structure, commands, code style, and conventions:\n\n"
-            + agents_md
-            + "\n\n---\n\n"
-            + system_prompt
-        )
     system_prompt += build_reference + file_rules
     if workflows_block:
         system_prompt = (
@@ -337,7 +326,6 @@ async def _assemble_system_prompt_parts(
     return SystemPromptParts(
         full_system_prompt=system_prompt,
         base_system_prompt=DASHBOARD_CHAT_SYSTEM_PROMPT,
-        agents_md=agents_md,
         workflows_block=workflows_block,
         user_rules=user_rules,
         credentials_block=credentials_block,
@@ -1926,7 +1914,6 @@ async def get_context_summary(
         base_system_prompt=parts.base_system_prompt
         + parts.credentials_block
         + parts.knowledge_bases_block,
-        agents_md=parts.agents_md,
         workflows_block=parts.workflows_block,
         user_rules=parts.user_rules,
         history=history,

@@ -141,8 +141,6 @@ COPY backend/ .
 COPY docker/heym-codex-docker /usr/local/bin/heym-codex-docker
 COPY docker/heym-opencode-docker /usr/local/bin/heym-opencode-docker
 
-# AGENTS.md for dashboard chat system prompt (Heym platform context)
-COPY AGENTS.md /app/AGENTS.md
 COPY VERSION /app/VERSION
 
 # Documentation for chat search (used by search_documentation tool)

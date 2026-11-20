@@ -68,9 +68,6 @@ function formatK(n: number): string {
         <span>System prompt</span><span class="tabular-nums">{{ formatK(contextUsage.breakdown.system) }}</span>
       </div>
       <div class="flex justify-between">
-        <span>AGENTS.md</span><span class="tabular-nums">{{ formatK(contextUsage.breakdown.agents_md) }}</span>
-      </div>
-      <div class="flex justify-between">
         <span>Workflows</span><span class="tabular-nums">{{ formatK(contextUsage.breakdown.workflows) }}</span>
       </div>
       <div class="flex justify-between">

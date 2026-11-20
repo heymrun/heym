@@ -570,7 +570,6 @@ class SystemPromptBlockTests(unittest.IsolatedAsyncioTestCase):
             patch.object(
                 chats, "get_workflows_for_user_with_inputs", AsyncMock(return_value=workflows)
             ),
-            patch.object(chats, "_load_agents_md_content", return_value=""),
             patch.object(
                 chats, "build_credentials_prompt", AsyncMock(return_value="\n\n## Credentials")
             ),

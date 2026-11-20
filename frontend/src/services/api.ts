@@ -4299,7 +4299,7 @@ export const chatApi = {
               used: typeof parsed.used === "number" ? parsed.used : 0,
               limit: typeof parsed.limit === "number" ? parsed.limit : 0,
               breakdown: parsed.breakdown ?? {
-                system: 0, agents_md: 0, workflows: 0,
+                system: 0, workflows: 0,
                 user_rules: 0, history: 0, attachment: 0,
               },
             });

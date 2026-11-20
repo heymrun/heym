@@ -235,7 +235,6 @@ class RunChatTurnBuildTests(unittest.IsolatedAsyncioTestCase):
         parts = chats.SystemPromptParts(
             full_system_prompt="base",
             base_system_prompt="base",
-            agents_md="",
             workflows_block="",
             user_rules="",
         )
@@ -305,7 +304,6 @@ class RunChatTurnBuildTests(unittest.IsolatedAsyncioTestCase):
         parts = chats.SystemPromptParts(
             full_system_prompt="base",
             base_system_prompt="base",
-            agents_md="",
             workflows_block="",
             user_rules="",
         )

@@ -9,7 +9,6 @@ import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
-from pathlib import Path
 from threading import Event, Thread
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Iterator, Literal
 from urllib.parse import urlparse
@@ -644,22 +643,9 @@ def _append_date_to_user_messages(
     return dated_messages
 
 
-def _load_agents_md_content() -> str:
-    """Load AGENTS.md content for Heym platform context in dashboard chat."""
-    paths = [
-        Path("/app/AGENTS.md"),  # Docker
-        Path(__file__).resolve().parent.parent.parent.parent / "AGENTS.md",  # Local dev
-    ]
-    for p in paths:
-        if p.exists():
-            try:
-                return p.read_text(encoding="utf-8")
-            except OSError:
-                pass
-    return ""
+DASHBOARD_CHAT_SYSTEM_PROMPT = """You are the Heym Agent, the assistant built into Heym. Heym is a self-hosted AI agent platform: infrastructure for running and governing AI agents in production. In Heym a workflow defines how agents, deterministic steps, tools and data work together; the runtime executes it, records every run, and pauses for human review where it is asked to. People build and inspect workflows on the canvas and run them from APIs, schedules, triggers, MCP clients and portal chats; they reach you in the Chat tab, through MCP and through A2A. Heym Work is a separate, licensed interface for business teams that runs on Heym. When the user asks what Heym is, how to install, deploy or use it, or how a feature works, use search_documentation.
 
-
-DASHBOARD_CHAT_SYSTEM_PROMPT = """You are an assistant that helps the user with their workflows. You can:
+You help the user with their workflows and their Heym account. You can:
 1. List available workflows (how many, their names, descriptions, and input fields) when the user asks (e.g. "how many workflows?", "list workflows", "available tools").
 2. Answer questions about what is inside a workflow (e.g. "what is in the backlog?", "what do the sticky notes say?", "what tasks are in workflow X?") without running it: use list_workflows to find the workflow by name, then get_workflow_definition(workflow_id) to get its content (nodes, sticky notes, labels), and answer from that. Do not execute in these cases.
 3. Execute a workflow by ID with given inputs only when the user clearly wants to run one or when the answer cannot be given from workflow metadata or content alone (e.g. "send WhatsApp message to X saying Y", "run the birthday workflow", "when is the next birthday?").
@@ -3648,7 +3634,6 @@ def _round_event(event: RoundDraft | RoundProgress, round_number: int) -> str:
 
 def _context_breakdown(
     base_system_prompt: str,
-    agents_md: str,
     workflows_block: str,
     user_rules: str,
     history: list[dict],
@@ -3663,7 +3648,6 @@ def _context_breakdown(
 
     return {
         "system": _tok(base_system_prompt),
-        "agents_md": _tok(agents_md),
         "workflows": _tok(workflows_block),
         "user_rules": _tok(user_rules),
         "history": _estimate_tokens(history),
@@ -3741,7 +3725,6 @@ async def stream_dashboard_chat(
         if system_prompt_parts is None:
             breakdown = {
                 "system": _estimate_tokens([{"role": "system", "content": system_prompt}]),
-                "agents_md": 0,
                 "workflows": 0,
                 "user_rules": 0,
                 "history": _estimate_tokens(messages_to_use),
@@ -3754,7 +3737,6 @@ async def stream_dashboard_chat(
                 + getattr(system_prompt_parts, "credentials_block", "")
                 + getattr(system_prompt_parts, "build_block", "")
                 + getattr(system_prompt_parts, "knowledge_bases_block", ""),
-                agents_md=system_prompt_parts.agents_md,
                 workflows_block=system_prompt_parts.workflows_block,
                 user_rules=system_prompt_parts.user_rules,
                 history=messages_to_use,
@@ -6224,16 +6206,7 @@ async def dashboard_chat_stream(
     workflows = await get_workflows_for_user_with_inputs(db, current_user.id)
     workflows_block = _format_workflows_for_prompt(workflows)
 
-    agents_md = _load_agents_md_content()
     system_prompt = DASHBOARD_CHAT_SYSTEM_PROMPT
-    if agents_md:
-        system_prompt = (
-            "## Heym Platform Context\n\n"
-            "Use the following Heym platform documentation to answer questions about the platform, structure, commands, code style, and conventions:\n\n"
-            + agents_md
-            + "\n\n---\n\n"
-            + system_prompt
-        )
     if workflows_block:
         system_prompt = (
             system_prompt

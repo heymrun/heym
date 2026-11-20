@@ -185,7 +185,6 @@ class QuickPromptsUpdate(BaseModel):
 
 class ContextBreakdown(BaseModel):
     system: int
-    agents_md: int
     workflows: int
     user_rules: int
     history: int
