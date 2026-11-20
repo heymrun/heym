@@ -33,6 +33,10 @@ The **Execute** node calls another workflow (sub-workflow) and passes input to i
 }
 ```
 
+## Error Handling
+
+When the executed sub-workflow fails, the Execute node fails with the sub-workflow's error message, marking the calling run as failed (`status: "error"`). To handle sub-workflow failures without failing the parent workflow, enable **On Error** (`onErrorEnabled`) in the node's settings to route execution down the error branch.
+
 ## Do Not Wait
 
 When `executeDoNotWait: true`, the node dispatches the sub-workflow to a background thread and immediately returns:

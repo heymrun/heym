@@ -72,6 +72,7 @@ def execute(ctx: NodeExecutionContext) -> object:
     SubWorkflowExecution = _workflow_executor.SubWorkflowExecution  # noqa: N806
     WorkflowExecutor = _workflow_executor.WorkflowExecutor  # noqa: N806
     SUB_WORKFLOW_HITL_UNSUPPORTED = _workflow_executor.SUB_WORKFLOW_HITL_UNSUPPORTED  # noqa: N806
+    WorkflowCancelledError = _workflow_executor.WorkflowCancelledError  # noqa: N806
     _BACKGROUND_WORKFLOW_EXECUTOR = _workflow_executor._BACKGROUND_WORKFLOW_EXECUTOR  # noqa: N806
     _BACKGROUND_NODE_EXECUTOR = _workflow_executor._BACKGROUND_NODE_EXECUTOR  # noqa: N806
     _register_sub_execution = _workflow_executor._register_sub_execution
@@ -297,6 +298,29 @@ def execute(ctx: NodeExecutionContext) -> object:
                             )
                 if is_unsupported_pending:
                     raise ValueError(SUB_WORKFLOW_HITL_UNSUPPORTED)
+
+                if sub_result is not None and sub_result.status == "error":
+                    error_msg = None
+                    if isinstance(sub_result.outputs, dict) and sub_result.outputs.get("error"):
+                        error_msg = sub_result.outputs["error"]
+                    elif sub_result.node_results:
+                        for nr in reversed(sub_result.node_results):
+                            if isinstance(nr, dict) and nr.get("error"):
+                                error_msg = nr["error"]
+                                break
+                            elif hasattr(nr, "error") and getattr(nr, "error"):
+                                error_msg = getattr(nr, "error")
+                                break
+                    if not error_msg:
+                        wf_name = target_workflow.get("name") or execute_workflow_id
+                        error_msg = f"The executed workflow ({wf_name}) failed"
+                    raise ValueError(str(error_msg))
+
+                if sub_result is not None and sub_result.status == "cancelled":
+                    cancelled_msg = "Workflow execution cancelled"
+                    if isinstance(sub_result.outputs, dict) and sub_result.outputs.get("error"):
+                        cancelled_msg = str(sub_result.outputs["error"])
+                    raise WorkflowCancelledError(cancelled_msg)
 
                 output = {
                     "workflow_id": execute_workflow_id,
