@@ -247,7 +247,8 @@ def _validate_row_data(data: dict, columns: list[dict]) -> list[str]:
     for col in columns:
         name = col["name"]
         required = col.get("required", False)
-        if required and name not in data and col.get("defaultValue") is None:
+        # null and "" are missing too; 0 and false are values.
+        if required and _is_blank(data.get(name)) and col.get("defaultValue") is None:
             errors.append(f"Missing required field: {name}")
     for key in data:
         if key not in col_map:
@@ -256,13 +257,45 @@ def _validate_row_data(data: dict, columns: list[dict]) -> list[str]:
 
 
 def _apply_defaults(data: dict, columns: list[dict]) -> dict:
-    """Fill in default values for missing columns."""
+    """Fill in default values for missing columns, and for a required column left blank."""
     result = dict(data)
     for col in columns:
         name = col["name"]
-        if name not in result and col.get("defaultValue") is not None:
+        if col.get("defaultValue") is None:
+            continue
+        if name not in result or (col.get("required") and _is_blank(result[name])):
             result[name] = col["defaultValue"]
     return result
+
+
+def _is_blank(value: object) -> bool:
+    """null and "" leave a column empty; 0 and false do not."""
+    return value is None or value == ""
+
+
+def _validate_row_changes(changes: dict, columns: list[dict]) -> list[str]:
+    """Validate the values a row update changes: known columns, and no required one emptied."""
+    col_map = {col["name"]: col for col in columns}
+    errors: list[str] = []
+    for key, value in changes.items():
+        col = col_map.get(key)
+        if col is None:
+            errors.append(f"Unknown column: {key}")
+        elif col.get("required") and _is_blank(value):
+            errors.append(f"Missing required field: {key}")
+    return errors
+
+
+def _changed_values(stored: object, sent: dict) -> dict:
+    """The values a row update changes, compared with what the row stores.
+
+    Heym Work sends the whole row on every edit, so a row that already breaks a rule
+    has to stay editable: only the values that change are checked.
+    """
+    current = stored if isinstance(stored, dict) else {}
+    return {
+        key: value for key, value in sent.items() if key not in current or current[key] != value
+    }
 
 
 def _column_names(columns: list[dict]) -> set[str]:
@@ -301,8 +334,8 @@ async def _prune_rows_to_columns(
     db: AsyncSession,
     updated_by: uuid.UUID,
     renamed: dict[str, str] | None = None,
-) -> None:
-    """Remove row JSON keys that no longer exist in the table schema.
+) -> list[dict]:
+    """Remove row JSON keys that no longer exist in the table schema, returning the rows' data.
 
     A renamed column's values move to its new name instead of being removed.
     """
@@ -312,6 +345,7 @@ async def _prune_rows_to_columns(
     moved_keys = set(renamed) | set(renamed.values())
     result = await db.execute(select(DataTableRow).where(DataTableRow.table_id == table_id))
     rows = result.scalars().all()
+    kept: list[dict] = []
     for row in rows:
         row_data = row.data if isinstance(row.data, dict) else {}
         pruned_data = {
@@ -325,6 +359,49 @@ async def _prune_rows_to_columns(
         if pruned_data != row_data:
             row.data = pruned_data
             row.updated_by = updated_by
+        kept.append(pruned_data)
+    return kept
+
+
+def _new_unique_duplicate(
+    old_columns: object, new_columns: list[dict], rows: list[dict]
+) -> str | None:
+    """A message naming a value two rows share in a column that becomes unique, if any.
+
+    Checked when a column turns unique or a unique column changes type, with the row
+    checks' comparison: 1 and 1.0 are one number, empty values and boolean columns skip.
+    """
+    old = (
+        [col for col in old_columns if isinstance(col, dict)]
+        if isinstance(old_columns, list)
+        else []
+    )
+    old_by_id = {str(col.get("id")): col for col in old}
+    old_by_name = {col.get("name"): col for col in old}
+    for col in new_columns:
+        col_type = str(col.get("type", "string")).lower()
+        if not col.get("unique") or col_type == "boolean":
+            continue
+        before = old_by_id.get(str(col.get("id"))) or old_by_name.get(col.get("name"))
+        if (
+            before is not None
+            and before.get("unique")
+            and str(before.get("type", "string")).lower() == col_type
+        ):
+            continue
+        seen: set[str] = set()
+        for data in rows:
+            value = data.get(col["name"])
+            if _is_blank(value):
+                continue
+            normalized = _normalize_unique_value(value, col_type)
+            if normalized in seen:
+                return (
+                    f"Cannot make '{col['name']}' unique: more than one row has the value "
+                    f"{normalized}"
+                )
+            seen.add(normalized)
+    return None
 
 
 def _row_timestamps(index: int) -> dict:
@@ -722,7 +799,10 @@ async def update_data_table(
             col["id"] = str(col.get("id", uuid.uuid4()))
             col["order"] = col.get("order", i)
         renamed = _renamed_columns(table.columns, columns_json)
-        await _prune_rows_to_columns(table_id, columns_json, db, current_user.id, renamed)
+        rows = await _prune_rows_to_columns(table_id, columns_json, db, current_user.id, renamed)
+        duplicate = _new_unique_duplicate(table.columns, columns_json, rows)
+        if duplicate:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=duplicate)
         table.columns = columns_json
 
     await db.flush()
@@ -949,19 +1029,19 @@ async def update_row(
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Row not found")
 
-    merged = {**row.data, **row_data.data}
-    merged, coerce_errors = _coerce_row_data(merged, table.columns or [])
-    errors = coerce_errors + _validate_row_data(merged, table.columns or [])
+    changes = _changed_values(row.data, row_data.data)
+    changes, coerce_errors = _coerce_row_data(changes, table.columns or [])
+    errors = coerce_errors + _validate_row_changes(changes, table.columns or [])
     if errors:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="; ".join(errors))
 
     unique_errors = await _check_unique_constraints(
-        table_id, merged, table.columns or [], db, exclude_row_id=row_id
+        table_id, changes, table.columns or [], db, exclude_row_id=row_id
     )
     if unique_errors:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="; ".join(unique_errors))
 
-    row.data = merged
+    row.data = {**(row.data or {}), **changes}
     row.updated_by = current_user.id
     await db.flush()
     await db.refresh(row)

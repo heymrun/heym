@@ -113,7 +113,7 @@ def _check_unique_sync(
 
 def execute(ctx: NodeExecutionContext) -> object:
     """Execute the dataTable node."""
-    from app.api.data_tables import _parse_number_text
+    from app.api.data_tables import _apply_defaults, _changed_values, _parse_number_text
 
     _workflow_executor = import_module("app.services.workflow_executor")
     _coerce_row_data = _workflow_executor._coerce_row_data
@@ -294,7 +294,9 @@ def execute(ctx: NodeExecutionContext) -> object:
                 self, data_template, inputs, node_id, operation="insert", field="row data"
             )
 
-            coerced_data = row_data if isinstance(row_data, dict) else {}
+            # Column defaults are filled as in the DataTable tab; the column rules are not
+            # enforced here, so existing workflows keep running.
+            coerced_data = _apply_defaults(row_data if isinstance(row_data, dict) else {}, columns)
             coerced_data, _ = _coerce_row_data(coerced_data, table.columns or [])
             _check_unique_sync(coerced_data)
 
@@ -341,13 +343,13 @@ def execute(ctx: NodeExecutionContext) -> object:
             if not row:
                 raise ValueError(f"Row not found: {row_id}")
 
-            merged = {
-                **(row.data or {}),
-                **(update_data if isinstance(update_data, dict) else {}),
-            }
-            merged, _ = _coerce_row_data(merged, table.columns or [])
-            _check_unique_sync(merged, exclude_row_id=str(row.id))
-            row.data = merged
+            # Only the values that change are checked, as in the DataTable tab.
+            changes = _changed_values(
+                row.data, update_data if isinstance(update_data, dict) else {}
+            )
+            changes, _ = _coerce_row_data(changes, table.columns or [])
+            _check_unique_sync(changes, exclude_row_id=str(row.id))
+            row.data = {**(row.data or {}), **changes}
             row.updated_by = owner_id
             db.commit()
             db.refresh(row)
@@ -423,13 +425,12 @@ def execute(ctx: NodeExecutionContext) -> object:
                     existing_row = query.first()
 
             if existing_row:
-                merged = {
-                    **(existing_row.data or {}),
-                    **(upsert_data if isinstance(upsert_data, dict) else {}),
-                }
-                merged, _ = _coerce_row_data(merged, table.columns or [])
-                _check_unique_sync(merged, exclude_row_id=str(existing_row.id))
-                existing_row.data = merged
+                changes = _changed_values(
+                    existing_row.data, upsert_data if isinstance(upsert_data, dict) else {}
+                )
+                changes, _ = _coerce_row_data(changes, table.columns or [])
+                _check_unique_sync(changes, exclude_row_id=str(existing_row.id))
+                existing_row.data = {**(existing_row.data or {}), **changes}
                 existing_row.updated_by = owner_id
                 db.commit()
                 db.refresh(existing_row)
@@ -444,7 +445,9 @@ def execute(ctx: NodeExecutionContext) -> object:
                     "id": str(existing_row.id),
                 }
             else:
-                upsert_coerced = upsert_data if isinstance(upsert_data, dict) else {}
+                upsert_coerced = _apply_defaults(
+                    upsert_data if isinstance(upsert_data, dict) else {}, columns
+                )
                 upsert_coerced, _ = _coerce_row_data(upsert_coerced, table.columns or [])
                 _check_unique_sync(upsert_coerced)
                 new_row = DataTableRow(

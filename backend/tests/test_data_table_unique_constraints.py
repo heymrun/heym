@@ -286,7 +286,7 @@ class TestUpdateRowUniqueConstraints(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(resp.data["is_primary"], True)
 
-    async def test_update_row_omitted_unique_column_colliding_with_another_row_triggers_409(
+    async def test_update_row_keeps_a_row_that_already_shares_its_unique_value_editable(
         self,
     ) -> None:
         user = _make_user()
@@ -323,21 +323,19 @@ class TestUpdateRowUniqueConstraints(unittest.IsolatedAsyncioTestCase):
 
         db.execute = AsyncMock(side_effect=fake_execute)
 
-        # Update payload leaves out the unique 'email' column, only updating 'name'.
-        # Merged row preserves email: "alice@example.com" and detects conflict with other row.
-        with self.assertRaises(HTTPException) as ctx:
-            await dt_api.update_row(
-                table_id=table.id,
-                row_id=target_row.id,
-                row_data=DataTableRowUpdate(data={"name": "New Target Name"}),
-                current_user=user,
-                db=db,
-            )
-
-        self.assertEqual(ctx.exception.status_code, 409)
-        self.assertIn(
-            "Duplicate value for unique column 'email': alice@example.com", ctx.exception.detail
+        # Another row already holds the same email (the rule was turned on later). An
+        # update that does not change email only checks what it changes, so it saves.
+        resp = await dt_api.update_row(
+            table_id=table.id,
+            row_id=target_row.id,
+            row_data=DataTableRowUpdate(
+                data={"email": "alice@example.com", "name": "New Target Name"}
+            ),
+            current_user=user,
+            db=db,
         )
+
+        self.assertEqual(resp.data, {"email": "alice@example.com", "name": "New Target Name"})
 
     async def test_update_row_unrelated_field_preserves_unique_value_without_conflict(self) -> None:
         user = _make_user()
