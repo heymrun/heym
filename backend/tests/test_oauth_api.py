@@ -12,6 +12,7 @@ from fastapi import HTTPException, Request
 from app.api.mcp import get_mcp_user
 from app.api.mcp_servers import _get_named_server_context
 from app.api.oauth import (
+    _authenticate_client,
     _generate_csrf_token,
     _issue_tokens,
     _validate_pkce_request,
@@ -21,7 +22,7 @@ from app.api.oauth import (
     register_client,
     token_endpoint,
 )
-from app.db.models import OAuthAccessToken, OAuthAuthorizationCode
+from app.db.models import OAuthAccessToken, OAuthAuthorizationCode, OAuthClient
 from app.services.oauth_tokens import hash_oauth_token
 
 
@@ -225,6 +226,30 @@ class OAuthEndpointFlowTests(unittest.IsolatedAsyncioTestCase):
         token_record = next(obj for obj in added if isinstance(obj, OAuthAccessToken))
         self.assertEqual(token_record.access_token, hash_oauth_token(token_body["access_token"]))
         self.assertEqual(token_record.refresh_token, hash_oauth_token(token_body["refresh_token"]))
+
+    async def test_authenticate_client_confidential_with_null_secret_hash_fails_cleanly(
+        self,
+    ) -> None:
+        client = OAuthClient(
+            client_id="confidential-client-null-secret",
+            client_name="Confidential Client",
+            redirect_uris=["https://client.example/callback"],
+            client_secret_hash=None,
+            is_confidential=True,
+        )
+        db = AsyncMock()
+        db.execute = AsyncMock(return_value=_query_result(client))
+        form = {
+            "client_id": "confidential-client-null-secret",
+            "client_secret": "test-secret-value",
+        }
+        request = _request(method="POST", path="/token", data=form)
+
+        with self.assertRaises(HTTPException) as ctx:
+            await _authenticate_client(form, request, db)
+
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertEqual(ctx.exception.detail, {"error": "invalid_client"})
 
 
 class OAuthTokenStorageTests(unittest.IsolatedAsyncioTestCase):

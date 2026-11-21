@@ -300,7 +300,7 @@ async def _authenticate_client(form: dict, request: Request, db: AsyncSession) -
 
     # Confidential clients must provide a valid secret
     if client.is_confidential:
-        if not client_secret:
+        if not client_secret or not client.client_secret_hash:
             raise HTTPException(400, detail={"error": "invalid_client"})
         if not bcrypt.checkpw(client_secret.encode(), client.client_secret_hash.encode()):
             raise HTTPException(400, detail={"error": "invalid_client"})
