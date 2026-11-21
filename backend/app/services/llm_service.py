@@ -2760,24 +2760,16 @@ class LLMService:
 
         data = getattr(response, "data", None)
         if not data:
-            result = {
-                "image": "",
-                "text": prompt,
-                "model": model,
-                "revised_prompt": None,
-                "error": "No image returned by provider",
-                "elapsed_ms": round(elapsed_ms, 2),
-            }
             self._record_trace(
                 request_type="images.edit",
                 provider=provider,
                 model=model,
                 request=trace_request,
-                response=_sanitize_image_response(result),
-                error=result["error"],
+                response=None,
+                error="No image returned by provider",
                 elapsed_ms=round(elapsed_ms, 2),
             )
-            return result
+            raise ValueError("No image returned by provider")
 
         image_data = data[0]
         b64_image = image_data.b64_json if hasattr(image_data, "b64_json") else ""
@@ -3023,14 +3015,7 @@ class LLMService:
 
         data = getattr(response, "data", None)
         if not data:
-            return {
-                "image": "",
-                "text": prompt,
-                "model": model,
-                "revised_prompt": None,
-                "error": "No image returned by provider",
-                "elapsed_ms": round(elapsed_ms, 2),
-            }
+            raise ValueError("No image returned by provider")
 
         image_data = data[0]
         b64_image = image_data.b64_json if hasattr(image_data, "b64_json") else ""
