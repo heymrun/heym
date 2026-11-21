@@ -60,6 +60,13 @@ curl https://api.stripe.com/v1/customers -u "$credentials.Stripe:"
 curl https://api.example.com/users --json '{"name": "$input.body.name"}'
 ```
 
+Repeated `-d` options are joined with `&`, as curl does, so `-d name=$input.body.name -d email=$input.body.email` sends both fields. `--data-urlencode "name=value"` percent-encodes the part after the first `=` once its expressions are filled in, so a `+`, `&` or `#` in a value stays in that value. `-G` sends the data as the URL's query string of a GET instead of a body, the way Stripe documents its list endpoints; an explicit `-X` still sets the method. `-A`, `-b 'name=value'` and `-e` set `User-Agent`, `Cookie` and `Referer`, and the same header given with `-H` wins:
+
+```
+curl -G https://api.stripe.com/v1/customers -u "$credentials.Stripe:" -d limit=3
+curl -G "https://quickbooks.api.intuit.com/v3/company/$input.body.realm/query" --data-urlencode "query=SELECT * FROM Customer WHERE PrimaryEmailAddr = '$input.body.email'"
+```
+
 Quotes and spaces inside an expression belong to the expression, not to the cURL command, so methods that take string arguments work inline:
 
 ```

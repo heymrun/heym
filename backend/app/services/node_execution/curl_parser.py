@@ -5,6 +5,28 @@ from __future__ import annotations
 import base64
 from collections.abc import Callable
 from typing import Any
+from urllib.parse import quote
+
+# Options that set one header. A header the command also sets with -H wins, as in curl.
+_HEADER_OPTIONS = {
+    "-A": "User-Agent",
+    "--user-agent": "User-Agent",
+    "-b": "Cookie",
+    "--cookie": "Cookie",
+    "-e": "Referer",
+    "--referer": "Referer",
+}
+
+
+def _url_encoded(value: str) -> str:
+    """A --data-urlencode piece as curl sends it: the content after the first "=" encoded.
+
+    `name=content` keeps the name, `=content` and `content` send the content alone.
+    """
+    if "=" not in value:
+        return quote(value, safe="")
+    name, content = value.split("=", 1)
+    return (f"{name}=" if name else "") + quote(content, safe="")
 
 
 def parse_curl(
@@ -43,18 +65,32 @@ def parse_curl(
     follow_redirects = False
     basic_user: str | None = None
     json_option = False
+    data_indexes: set[int] = set()
+    explicit_method = False
+    get_option = False
+    option_headers: dict[str, str] = {}
     i = 0
     while i < len(tokens):
         token = tokens[i]
         if token in ("-X", "--request") and i + 1 < len(tokens):
             i += 1
             method = rendered(tokens[i]).upper()
+            explicit_method = True
+        elif token in ("-G", "--get"):
+            get_option = True
         elif token in ("-H", "--header") and i + 1 < len(tokens):
             i += 1
             header = rendered(tokens[i])
             if ":" in header:
                 key, value = header.split(":", 1)
                 headers[key.strip()] = value.strip()
+        elif token in _HEADER_OPTIONS and i + 1 < len(tokens):
+            # Consumed here so the value (a Referer is a URL) is never taken as the URL.
+            i += 1
+            value = rendered(tokens[i])
+            # `-b name` without "=" names a cookie file, which a workflow cannot read.
+            if token not in ("-b", "--cookie") or "=" in value:
+                option_headers[_HEADER_OPTIONS[token]] = value
         elif token in ("-L", "--location"):
             follow_redirects = True
         elif token in ("-u", "--user") and i + 1 < len(tokens):
@@ -71,7 +107,17 @@ def parse_curl(
         ) and i + 1 < len(tokens):
             json_option = json_option or token == "--json"
             i += 1
-            data = tokens[i]
+            data_indexes.add(i)
+            piece = tokens[i]
+            if token == "--data-urlencode":
+                # Encoded after its expressions are filled in, so a value's "&", "+" or "#"
+                # stays inside that value.
+                piece = _url_encoded(rendered(piece))
+            if data is None:
+                data = piece
+            else:
+                # As curl does: repeated -d values are joined with "&", --json pieces as-is.
+                data += ("" if token == "--json" else "&") + piece
             if method == "GET":
                 method = "POST"
         elif token == "--url" and i + 1 < len(tokens):
@@ -84,13 +130,27 @@ def parse_curl(
         i += 1
 
     if not url:
-        for token in reversed(tokens):
-            if token is data:
+        for index in range(len(tokens) - 1, -1, -1):
+            token = tokens[index]
+            if index in data_indexes:
                 continue
             candidate = rendered(token)
             if candidate.startswith(("http://", "https://")):
                 url = candidate
                 break
+
+    for name, value in option_headers.items():
+        if not any(k.lower() == name.lower() for k in headers):
+            headers[name] = value
+
+    if get_option:
+        # curl -G: the data goes into the URL's query string and the request is a GET.
+        # Stripe documents its list endpoints as `curl -G URL -d limit=3`.
+        if not explicit_method:
+            method = "GET"
+        if data is not None:
+            url += ("&" if "?" in url else "?") + rendered(data)
+            data = None
 
     if json_option:
         # curl 7.82+ `--json <data>`: a JSON body, and JSON headers unless the command sets them.

@@ -10,6 +10,7 @@ import base64
 import json
 import unittest
 from unittest.mock import patch
+from urllib.parse import parse_qs
 
 import httpx
 
@@ -193,6 +194,134 @@ class HttpNodeCurlJsonOptionTests(unittest.TestCase):
         self.assertEqual(request.method, "PUT")
         self.assertEqual(request.headers["accept"], "application/vnd.api+json")
         self.assertEqual(request.headers["content-type"], "application/json")
+
+
+class HttpNodeCurlRepeatedDataTests(unittest.TestCase):
+    """curl joins repeated -d values with "&"; only the last one used to be sent."""
+
+    def test_every_data_option_is_sent(self) -> None:
+        request = _run_curl(
+            "curl https://api.stripe.com/v1/customers -u sk_test_1: "
+            "-d name=$source.name -d email=jenny@example.com -d 'metadata[plan]=pro'",
+            inputs={"source": {"name": "Jenny"}},
+        )
+
+        self.assertEqual(request.method, "POST")
+        self.assertEqual(request.content, b"name=Jenny&email=jenny@example.com&metadata[plan]=pro")
+
+    def test_the_url_after_the_data_is_still_found(self) -> None:
+        request = _run_curl("curl -d a=1 --data b=2 https://api.example.com/form")
+
+        self.assertEqual(str(request.url), "https://api.example.com/form")
+        self.assertEqual(request.content, b"a=1&b=2")
+
+    def test_one_data_option_is_sent_as_written(self) -> None:
+        request = _run_curl("curl https://api.example.com/form -d 'a=1&b=2'")
+
+        self.assertEqual(request.content, b"a=1&b=2")
+
+
+class HttpNodeCurlGetOptionTests(unittest.TestCase):
+    """curl -G sends the -d data as the query string of a GET (Stripe's list endpoints)."""
+
+    def test_get_option_moves_the_data_into_the_query(self) -> None:
+        request = _run_curl(
+            "curl -G https://api.stripe.com/v1/customers -u sk_test_1: "
+            "-d limit=$source.limit -d email=jenny@example.com",
+            inputs={"source": {"limit": 3}},
+        )
+
+        self.assertEqual(request.method, "GET")
+        self.assertEqual(
+            str(request.url),
+            "https://api.stripe.com/v1/customers?limit=3&email=jenny@example.com",
+        )
+        self.assertEqual(request.content, b"")
+
+    def test_an_existing_query_string_is_extended(self) -> None:
+        request = _run_curl("curl --get 'https://api.example.com/search?q=heym' -d page=2")
+
+        self.assertEqual(str(request.url), "https://api.example.com/search?q=heym&page=2")
+
+    def test_an_explicit_method_is_kept(self) -> None:
+        request = _run_curl("curl -X DELETE -G https://api.example.com/items -d id=7")
+
+        self.assertEqual(request.method, "DELETE")
+        self.assertEqual(str(request.url), "https://api.example.com/items?id=7")
+
+
+class HttpNodeCurlHeaderOptionTests(unittest.TestCase):
+    """-A, -b and -e set User-Agent, Cookie and Referer; they used to be dropped."""
+
+    def test_header_options_are_sent(self) -> None:
+        request = _run_curl(
+            "curl https://api.example.com/me -A 'heym-bot/1.0' -b 'session=$source.sid' "
+            "-e 'https://app.example.com/'",
+            inputs={"source": {"sid": "abc123"}},
+        )
+
+        self.assertEqual(request.headers["user-agent"], "heym-bot/1.0")
+        self.assertEqual(request.headers["cookie"], "session=abc123")
+        self.assertEqual(request.headers["referer"], "https://app.example.com/")
+
+    def test_a_referer_url_is_not_taken_as_the_request_url(self) -> None:
+        request = _run_curl("curl https://api.example.com/me --referer https://app.example.com/")
+
+        self.assertEqual(str(request.url), "https://api.example.com/me")
+
+    def test_a_header_set_with_h_wins(self) -> None:
+        request = _run_curl(
+            "curl https://api.example.com/me -A 'heym-bot/1.0' -H 'User-Agent: custom/2.0'"
+        )
+
+        self.assertEqual(request.headers["user-agent"], "custom/2.0")
+
+    def test_a_cookie_file_name_sets_no_cookie(self) -> None:
+        request = _run_curl("curl -b cookies.txt https://api.example.com/me")
+
+        self.assertNotIn("cookie", request.headers)
+        self.assertEqual(str(request.url), "https://api.example.com/me")
+
+
+class HttpNodeCurlDataUrlencodeTests(unittest.TestCase):
+    """--data-urlencode encodes the content after the first "=", as curl does."""
+
+    QUERY = (
+        "curl -G https://quickbooks.api.intuit.com/v3/company/1/query "
+        '--data-urlencode "query=SELECT * FROM Customer WHERE PrimaryEmailAddr = '
+        '\'$userInput.email\'" --data-urlencode "minorversion=65"'
+    )
+
+    def _query(self, email: str) -> dict[str, list[str]]:
+        request = _run_curl(self.QUERY, inputs={"userInput": {"email": email}})
+        self.assertEqual(request.method, "GET")
+        return parse_qs(request.url.query.decode())
+
+    def test_plus_ampersand_and_hash_stay_in_the_value(self) -> None:
+        for email in ("jenny+qb@example.com", "R&D #1"):
+            with self.subTest(email=email):
+                self.assertEqual(
+                    self._query(email),
+                    {
+                        "query": [f"SELECT * FROM Customer WHERE PrimaryEmailAddr = '{email}'"],
+                        "minorversion": ["65"],
+                    },
+                )
+
+    def test_a_body_is_encoded_too(self) -> None:
+        request = _run_curl(
+            "curl https://api.example.com/search --data-urlencode 'q=fish & chips' -d page=2"
+        )
+
+        self.assertEqual(request.method, "POST")
+        self.assertEqual(request.content, b"q=fish%20%26%20chips&page=2")
+
+    def test_content_without_a_name_is_sent_alone(self) -> None:
+        request = _run_curl(
+            "curl https://api.example.com/x --data-urlencode '=a b' --data-urlencode 'c+d'"
+        )
+
+        self.assertEqual(request.content, b"a%20b&c%2Bd")
 
 
 if __name__ == "__main__":

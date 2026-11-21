@@ -9,6 +9,8 @@ import unittest
 import uuid
 from unittest.mock import AsyncMock, MagicMock
 
+from fastapi import HTTPException
+
 from app.api import data_tables as dt_api
 from app.db.models import DataTable, DataTableRow
 from app.models.schemas import DataTableColumnDef, DataTableUpdate
@@ -97,13 +99,18 @@ class DataTableColumnRenameTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(data, {"qty": 4})
 
     async def test_a_rename_to_a_name_another_column_has_keeps_that_column(self) -> None:
-        # The column editor does not block duplicate names; qty keeps its own values.
-        data = await _update(
-            {"sku": "A-1", "qty": 4, "note": "fragile"},
-            [_col(SKU, "qty"), _col(QTY, "qty"), _col(NOTE, "note")],
-        )
+        # Two columns named qty are refused, so the rows and qty's values stay as they are.
+        with self.assertRaises(HTTPException) as caught:
+            await _update(
+                {"sku": "A-1", "qty": 4, "note": "fragile"},
+                [_col(SKU, "qty"), _col(QTY, "qty"), _col(NOTE, "note")],
+            )
 
-        self.assertEqual(data, {"qty": 4, "note": "fragile"})
+        self.assertEqual(caught.exception.status_code, 400)
+        # Should such a list get through, the rename still moves nothing onto qty.
+        old = [{"id": str(SKU), "name": "sku"}, {"id": str(QTY), "name": "qty"}]
+        new = [{"id": str(SKU), "name": "qty"}, {"id": str(QTY), "name": "qty"}]
+        self.assertEqual(dt_api._renamed_columns(old, new), {})
 
     async def test_a_removed_column_still_loses_its_values(self) -> None:
         data = await _update(
