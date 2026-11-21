@@ -58,7 +58,6 @@ export interface AssistantToolEndEvent {
 
 export interface ContextBreakdown {
   system: number
-  agents_md: number
   workflows: number
   user_rules: number
   history: number

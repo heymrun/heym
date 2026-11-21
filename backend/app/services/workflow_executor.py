@@ -76,6 +76,7 @@ from app.services.node_execution import NodeExecutionContext, execute_node_handl
 from app.services.node_execution.extra_body import resolve_extra_body
 from app.services.node_execution.llm_batch_input import normalize_batch_user_messages
 from app.services.page_params import PAGE_CONTEXT_NAME, page_params_from_inputs
+from app.services.skill_python_executor import SkillWorkspaces, skill_tool_schema
 from app.services.timezone_utils import get_configured_timezone, normalize_datetime_to_timezone
 from app.services.trigger_inputs import receives_initial_inputs
 from app.services.websocket_utils import (
@@ -1132,6 +1133,12 @@ class DotStr(str):
     def or_empty(self) -> "DotStr":
         return self.orEmpty()
 
+    def toString(self) -> "DotStr":  # noqa: N802
+        return self
+
+    def to_string(self) -> "DotStr":
+        return self
+
     def upper(self) -> "DotStr":
         return DotStr(str.upper(self))
 
@@ -1773,6 +1780,13 @@ TERMINAL_MAPPER_NODE_TYPES: frozenset[str] = frozenset({"jsonOutputMapper", "htm
 OUTPUT_TERMINAL_NODE_TYPES: frozenset[str] = frozenset({"output", *TERMINAL_MAPPER_NODE_TYPES})
 
 
+def error_flow_terminal_output(result: "NodeResult", output: object) -> dict[str, Any]:
+    """An error flow's final output: a jsonOutputMapper's object is the body, as on success."""
+    if result.node_type == "jsonOutputMapper" and isinstance(output, dict):
+        return output
+    return {result.node_label: output}
+
+
 def unwrap_single_json_output_terminal_outputs(
     wf_executor: "WorkflowExecutor",
     final_outputs: dict[str, Any],
@@ -1995,6 +2009,7 @@ class WorkflowExecutor(WorkflowBranchRoutingMixin):
         node_pool: ThreadPoolExecutor | None = None,
         llm_session_id: str | None = None,
         file_scope: RunFileScope | None = None,
+        http_cookies: httpx.Cookies | None = None,
     ) -> None:
         self.nodes = {node["id"]: node for node in nodes}
         self._node_pool = node_pool or _SHARED_EXECUTOR
@@ -2019,6 +2034,8 @@ class WorkflowExecutor(WorkflowBranchRoutingMixin):
         self.global_variables_context = global_variables_context or {}
         self.workflow_id = workflow_id
         self.file_scope = (file_scope or RunFileScope()).including_workflow(workflow_id)
+        # The HTTP node's cookies for this run; a sub-workflow keeps its parent's.
+        self.http_cookies = http_cookies if http_cookies is not None else httpx.Cookies()
         self.workflow_name = workflow_name
         self.workflow_description = workflow_description
         self.execution_id = execution_id
@@ -4031,6 +4048,7 @@ class WorkflowExecutor(WorkflowBranchRoutingMixin):
                 llm_session_id=self.llm_session_id,
                 node_pool=self._node_pool,
                 file_scope=self.file_scope,
+                http_cookies=self.http_cookies,
             )
             enriched_inputs = {
                 "headers": {},
@@ -4937,14 +4955,26 @@ class WorkflowExecutor(WorkflowBranchRoutingMixin):
             source_label=str(node_data.get("label") or "Agent"),
             workflow_id=self.workflow_id,
         )
-        if toolbox is None:
-            return self._run_agent_node(node_id, inputs, node_data, guardrails_config)
+        # A skill keeps one workspace for this execution, so a later call sees earlier files.
+        skill_workspaces = SkillWorkspaces()
         try:
-            return self._run_agent_node(
-                node_id, inputs, node_data, guardrails_config, file_toolbox=toolbox
-            )
+            if toolbox is None:
+                return self._run_agent_node(
+                    node_id, inputs, node_data, guardrails_config, skill_workspaces=skill_workspaces
+                )
+            try:
+                return self._run_agent_node(
+                    node_id,
+                    inputs,
+                    node_data,
+                    guardrails_config,
+                    file_toolbox=toolbox,
+                    skill_workspaces=skill_workspaces,
+                )
+            finally:
+                toolbox.workspace.delete()
         finally:
-            toolbox.workspace.delete()
+            skill_workspaces.close()
 
     def _run_agent_node(
         self,
@@ -4953,6 +4983,7 @@ class WorkflowExecutor(WorkflowBranchRoutingMixin):
         node_data: dict,
         guardrails_config: dict | None = None,
         file_toolbox: FileToolbox | None = None,
+        skill_workspaces: SkillWorkspaces | None = None,
     ) -> dict:
         combined_input = ""
         for data in self._visible_inputs(inputs).values():
@@ -5374,29 +5405,21 @@ class WorkflowExecutor(WorkflowBranchRoutingMixin):
             skill_name = (skill.get("name") or "skill").replace(" ", "_").lower()
             skill_timeout = float(skill.get("timeoutSeconds") or tool_timeout_seconds)
             drive_files_enabled = bool(skill.get("driveFilesEnabled"))
-            skill_description = (
-                f"Run {skill.get('name', 'skill')} Python script. Pass arguments as JSON."
+            skill_description, skill_parameters = skill_tool_schema(
+                str(skill.get("name") or "skill"),
+                skill_files,
+                drive_files_enabled=drive_files_enabled,
             )
-            if drive_files_enabled:
-                skill_description += (
-                    " This skill can import heym_drive to read accessible Drive files by "
-                    "file_id or filename."
-                )
             merged_tools.append(
                 {
                     "name": f"skill_{skill_name}",
                     "description": skill_description,
-                    "parameters": json.dumps(
-                        {
-                            "type": "object",
-                            "properties": {
-                                "input": {"type": "string", "description": "Input for the script"}
-                            },
-                            "required": [],
-                        }
-                    ),
+                    "parameters": json.dumps(skill_parameters),
                     "_source": "skill",
                     "_skill_files": skill_files,
+                    "_skill_workspace": skill_workspaces.for_skill(skill_name)
+                    if skill_workspaces is not None
+                    else None,
                     "_skill_timeout": skill_timeout,
                     "_drive_files_enabled": drive_files_enabled,
                     "_actor_user_id": str(self.actor_user_id) if self.actor_user_id else None,
@@ -7458,8 +7481,9 @@ class WorkflowExecutor(WorkflowBranchRoutingMixin):
             results.append(result)
             completed.add(node_id)
 
-            if node_type == "output" and result.status == "success":
-                error_flow_output = {result.node_label: result.output}
+            # An htmlOutputMapper here still ends with the error message, as before.
+            if node_type in ("output", "jsonOutputMapper") and result.status == "success":
+                error_flow_output = error_flow_terminal_output(result, result.output)
                 if node_id in output_nodes_with_downstream:
                     remaining_queue = list(queue)
                     remaining_pending = dict(pending_count)
@@ -9371,7 +9395,7 @@ def _execute_error_flow_streaming(
         completed.add(node_id)
 
         if node_type in OUTPUT_TERMINAL_NODE_TYPES and result.status == "success":
-            error_flow_output = {result.node_label: output}
+            error_flow_output = error_flow_terminal_output(result, output)
             if not final_output_emitted:
                 final_output_emitted = True
                 yield {

@@ -95,7 +95,7 @@ async function mockChatSend(page: Page, sentBodies: string[]): Promise<void> {
       json: {
         used: 0,
         limit: 128000,
-        breakdown: { system: 0, agents_md: 0, workflows: 0, user_rules: 0, history: 0, attachment: 0 },
+        breakdown: { system: 0, workflows: 0, user_rules: 0, history: 0, attachment: 0 },
       },
     });
   });

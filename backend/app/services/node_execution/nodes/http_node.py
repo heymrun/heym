@@ -4,6 +4,7 @@ import json
 from importlib import import_module
 from typing import Any
 
+from app.services.http_run_cookies import run_cookies
 from app.services.node_execution.base import NodeExecutionContext
 
 
@@ -137,13 +138,14 @@ def execute(ctx: NodeExecutionContext) -> object:
         else:
             body = self.evaluate_message_template(body, inputs, node_id)
     http_client = ssrf_guard.get_guarded_http_client()
-    response = http_client.request(
-        method,
-        url,
-        headers=headers,
-        content=body,
-        follow_redirects=follow_redirects,
-    )
+    with run_cookies(self.http_cookies):
+        response = http_client.request(
+            method,
+            url,
+            headers=headers,
+            content=body,
+            follow_redirects=follow_redirects,
+        )
     try:
         response_body = response.json()
     except ValueError:

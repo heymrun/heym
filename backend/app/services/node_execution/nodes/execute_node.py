@@ -163,6 +163,7 @@ def execute(ctx: NodeExecutionContext) -> object:
                 llm_session_id=self.llm_session_id,
                 node_pool=(_BACKGROUND_NODE_EXECUTOR if execute_do_not_wait else self._node_pool),
                 file_scope=self.file_scope,
+                http_cookies=self.http_cookies,
             )
             enriched_execute_inputs = {
                 "headers": {},

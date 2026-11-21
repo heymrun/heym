@@ -63,7 +63,6 @@ COPY backend/pyproject.toml backend/uv.lock* ./
 RUN uv sync --frozen --no-dev
 
 COPY backend/ .
-COPY AGENTS.md /app/AGENTS.md
 COPY VERSION /app/VERSION
 COPY frontend/src/docs/content /app/docs
 
@@ -219,7 +218,6 @@ LABEL org.opencontainers.image.title="Heym" \
     org.label-schema.schema-version="1.0"
 
 COPY --from=backend-builder /app /app/backend
-COPY --from=backend-builder /app/AGENTS.md /app/AGENTS.md
 COPY --from=backend-builder /app/docs /app/docs
 COPY --from=frontend-builder /app/dist /app/frontend/dist
 COPY --from=frontend-builder /app/package.json /app/frontend/package.json

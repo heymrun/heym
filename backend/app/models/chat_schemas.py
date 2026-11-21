@@ -115,6 +115,10 @@ class ChatFileAttachment(BaseModel):
     file_id: uuid.UUID | None = None
     size: int | None = None
     mime: str | None = None
+    skill_drive_files: bool = Field(
+        default=False,
+        description="kind zip: the skills in this zip may read the user's Drive files once Chat puts them on an agent (driveFilesEnabled).",
+    )
 
 
 class MessageCreate(BaseModel):
@@ -185,7 +189,6 @@ class QuickPromptsUpdate(BaseModel):
 
 class ContextBreakdown(BaseModel):
     system: int
-    agents_md: int
     workflows: int
     user_rules: int
     history: int

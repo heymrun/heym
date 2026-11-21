@@ -1,6 +1,6 @@
 [project]
 name = "heym-backend"
-version = "0.0.164"
+version = "0.0.165"
 description = "Heym backend: infrastructure for running and governing AI agents in production"
 license = { text = "MIT with Commons Clause condition" }
 requires-python = ">=3.11.5"
@@ -29,6 +29,7 @@ dependencies = [
     "pypdf>=6.15.0",
     "reportlab>=4.0.0",
     "python-docx>=1.0.0",
+    "defusedxml>=0.7.1",
     "pypandoc_binary>=1.13",
     "Pillow>=12.3.0",
     "aio-pika>=9.6.2",

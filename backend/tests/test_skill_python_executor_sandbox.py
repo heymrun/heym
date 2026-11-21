@@ -394,6 +394,82 @@ class SkillDockerFailClosedTest(unittest.TestCase):
         self.assertEqual(result.output, {"partial": True})
 
 
+class SkillWorkspaceLocationTest(unittest.TestCase):
+    """Where a skill's run dir lives: on the shared volume in a container, else on the host.
+
+    A backend started with run.sh is not in a container, so the default volume mount
+    (/app/data/codex-workspaces) does not exist there; on macOS / is read-only and every
+    skill call failed with "[Errno 30] Read-only file system: '/app'". The Code node
+    already binds a host temp dir in that case; skills do the same.
+    """
+
+    def _run(self, shared: bool, env: dict[str, str]) -> mock.Mock:
+        manager = mock.Mock()
+        manager.run.return_value = mock.Mock(
+            stdout='{"ok": true}', stderr="", start_failed=False, returncode=0
+        )
+        with (
+            mock.patch.dict(os.environ, env, clear=False),
+            mock.patch.object(executor, "_shared_workspace", return_value=shared),
+            mock.patch.object(executor, "get_sandbox_manager", return_value=manager),
+        ):
+            result = executor._execute_skill_docker(
+                _skill("print('{}')"), {}, 30.0, None, "main.py", "img"
+            )
+        self.assertEqual(result.output, {"ok": True})
+        return manager.run.call_args.args[0]
+
+    def test_a_native_backend_binds_a_host_temp_dir_and_never_touches_app(self) -> None:
+        env = {"HEYM_SKILL_WORKSPACE_MOUNT": "", "HEYM_CODEX_WORKSPACE_DIR": ""}
+        with mock.patch.object(
+            executor.Path, "mkdir", autospec=True, side_effect=Path.mkdir
+        ) as mkdir:
+            spec = self._run(shared=False, env=env)
+        made = [str(call.args[0]) for call in mkdir.call_args_list]
+        self.assertFalse([path for path in made if path.startswith("/app")], made)
+        run_dir = Path(spec.workdir)
+        self.assertTrue(run_dir.is_relative_to(Path(tempfile.gettempdir())), run_dir)
+        self.assertTrue(run_dir.parent.name.startswith("heym-skill-"), run_dir)
+        self.assertFalse(run_dir.parent.exists(), "the private parent is removed too")
+        mount = spec.workspace_mounts[0]
+        self.assertTrue(mount.docker.native_bind)
+        self.assertEqual(mount.host_path, run_dir)
+        self.assertFalse(run_dir.exists(), "the run dir is removed after the run")
+        # The host's own interpreter path does not exist in any sandbox image.
+        self.assertEqual(spec.entrypoint, "python")
+
+    def test_a_container_backend_keeps_the_shared_volume(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {
+                "HEYM_SKILL_WORKSPACE_MOUNT": tmp,
+                "HEYM_SKILL_WORKSPACE_DIR": str(Path(tmp) / "_skill-workspaces"),
+            }
+            spec = self._run(shared=True, env=env)
+            run_dir = Path(spec.workdir)
+            self.assertTrue(run_dir.is_relative_to(Path(tmp) / "_skill-workspaces" / "_skills"))
+            self.assertFalse(spec.workspace_mounts[0].docker.native_bind)
+            # In a container the sandbox runs the backend image, venv path included.
+            self.assertEqual(spec.entrypoint, executor.sys.executable)
+
+    def test_an_explicit_skill_interpreter_wins_on_a_native_backend(self) -> None:
+        env = {"HEYM_SKILL_PYTHON": "/opt/venv/bin/python"}
+        spec = self._run(shared=False, env=env)
+        self.assertEqual(spec.entrypoint, "/opt/venv/bin/python")
+
+    def test_native_bind_mounts_the_run_dir_itself(self) -> None:
+        run_dir = Path(tempfile.gettempdir()) / "heym-skill-runs" / "abc"
+        cmd = executor._build_skill_docker_command(
+            "img",
+            "heym-skill-test",
+            Path("/app/data/codex-workspaces"),
+            run_dir,
+            "main.py",
+            native_bind=True,
+        )
+        mount_spec = cmd[cmd.index("--mount") + 1]
+        self.assertEqual(mount_spec, f"type=bind,src={run_dir},dst={run_dir}")
+
+
 class SkillImageResolutionTest(unittest.TestCase):
     """The sandbox image must resolve without relying on `docker inspect`."""
 

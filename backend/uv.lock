@@ -886,7 +886,7 @@ wheels = [
 
 [[package]]
 name = "heym-backend"
-version = "0.0.164"
+version = "0.0.165"
 source = { editable = "." }
 dependencies = [
     { name = "aio-pika" },
@@ -898,6 +898,7 @@ dependencies = [
     { name = "clickhouse-connect" },
     { name = "croniter" },
     { name = "cryptography" },
+    { name = "defusedxml" },
     { name = "docker" },
     { name = "exchangelib" },
     { name = "fastapi" },
@@ -958,6 +959,7 @@ requires-dist = [
     { name = "clickhouse-connect", specifier = ">=0.8.0" },
     { name = "croniter", specifier = ">=6.2.2" },
     { name = "cryptography", specifier = ">=50.0.0" },
+    { name = "defusedxml", specifier = ">=0.7.1" },
     { name = "docker", specifier = ">=7.0.0" },
     { name = "exchangelib", specifier = ">=5.5" },
     { name = "fastapi", specifier = ">=0.136.1" },

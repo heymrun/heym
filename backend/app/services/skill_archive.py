@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import binascii
 import io
+import re
 import zipfile
 import zlib
 from dataclasses import dataclass
@@ -47,6 +48,8 @@ class SkillBundle:
     content: str
     files: tuple[ArchiveFile, ...]
     directory: str
+    # Set by the sender of the zip, never read from it: the skill may read Drive files.
+    drive_files: bool = False
 
 
 @dataclass(frozen=True)
@@ -229,16 +232,29 @@ def _clip(text: str, limit: int) -> str:
     return text[:limit] + "\n...[truncated]"
 
 
+ZIP_BLOCK_HEADER = "[ATTACHED ZIP: "
+SKILL_ZIP_NOTE = (
+    "This zip contains a skill. Call apply_skill to put it on an agent. "
+    "Do not paste these files into save_workflow or into your reply; the server "
+    "keeps the original files, including Python the summary cuts short."
+)
+_SKILL_LINE = re.compile(r"^Skill (.+?)\. Other files: ", re.MULTILINE)
+
+
+def skill_names_in_zip_block(block: str) -> list[str]:
+    """The skills a stored ``prompt_for_zip`` block names, so a later turn knows them too."""
+    head, _, _rest = block.partition("\nSKILL.md:\n")
+    if SKILL_ZIP_NOTE not in head:
+        return []
+    return [match.group(1) for match in _SKILL_LINE.finditer(block)]
+
+
 def prompt_for_zip(name: str, reading: ZipRead) -> str:
     """The user-message block for a zip. File bytes the tool will write are not required here."""
-    lines = [f"[ATTACHED ZIP: {name}]"]
+    lines = [f"{ZIP_BLOCK_HEADER}{name}]"]
     lines.extend(reading.notes)
     if reading.skills:
-        lines.append(
-            "This zip contains a skill. Call apply_skill to put it on an agent. "
-            "Do not paste these files into save_workflow or into your reply; the server "
-            "keeps the original files, including Python the summary cuts short."
-        )
+        lines.append(SKILL_ZIP_NOTE)
         for skill in reading.skills:
             paths = ", ".join(item.path for item in skill.files) or "none"
             lines.append(f"Skill {skill.name}. Other files: {paths}.")

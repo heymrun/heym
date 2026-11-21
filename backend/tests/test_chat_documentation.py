@@ -10,12 +10,18 @@ from typing import Any, Literal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.api import ai_assistant
+from app.api.chat_work import ChatWorkTools
 from app.db.models import CredentialType
 from app.services.doc_index import DocIndexService
 from app.services.llm_trace import LLMTraceContext
 
 
 class ChatDocumentationTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        work_patcher = patch.object(ChatWorkTools, "load", AsyncMock(return_value=None))
+        work_patcher.start()
+        self.addCleanup(work_patcher.stop)
+
     async def test_large_search_results_reach_the_next_model_request_as_markdown(self) -> None:
         await self._assert_documentation_evidence("dashboard")
 
@@ -89,7 +95,6 @@ class ChatDocumentationTests(unittest.IsolatedAsyncioTestCase):
                 patch.object(
                     ai_assistant, "get_workflows_for_user_with_inputs", AsyncMock(return_value=[])
                 ),
-                patch.object(ai_assistant, "_load_agents_md_content", return_value=""),
                 patch.object(ai_assistant, "build_credentials_prompt", AsyncMock(return_value="")),
                 patch.object(
                     ai_assistant, "knowledge_bases_prompt_block", AsyncMock(return_value="")
