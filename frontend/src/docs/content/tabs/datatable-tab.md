@@ -24,11 +24,13 @@ Each column has:
 |----------|-------------|
 | Name | Column display name |
 | Type | `string`, `number`, `boolean`, `date`, or `json` |
-| Required | Whether new rows must include this column |
+| Required | Whether new rows must have a value in this column. `null` and an empty text count as missing; `0` and `false` are values |
 | Unique | Whether values must be unique across rows |
-| Default Value | Auto-filled when a row omits this column |
+| Default Value | Auto-filled when a row omits this column, or leaves a required column empty |
 
 Add, edit, or remove columns from the table detail view header.
+
+The rules apply when rows are added, imported from CSV, or created in bulk. Editing a row checks only the values the edit changes, so a row that already breaks a rule (for example one written before the rule was turned on) stays editable. Turning **Unique** on for a column, or changing the type of a unique column, is refused while two rows share a value in it, and the message names one such value. The comparison is the one rows use: `1` and `1.0` are one number, and empty values and boolean columns are skipped.
 
 ## Generate Columns with AI
 
