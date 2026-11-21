@@ -255,6 +255,18 @@ def _validate_row_data(data: dict, columns: list[dict]) -> list[str]:
     return errors
 
 
+def _reject_duplicate_column_names(columns: list) -> None:
+    """Two columns with one name would read and write the same row key."""
+    seen: set[str] = set()
+    for column in columns:
+        if column.name in seen:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Duplicate column name: {column.name}",
+            )
+        seen.add(column.name)
+
+
 def _apply_defaults(data: dict, columns: list[dict]) -> dict:
     """Fill in default values for missing columns."""
     result = dict(data)
@@ -626,6 +638,7 @@ async def create_data_table(
             detail="Data table with this name already exists",
         )
 
+    _reject_duplicate_column_names(data.columns)
     columns_json = [col.model_dump(mode="json") for col in data.columns]
     for i, col in enumerate(columns_json):
         col["id"] = str(col.get("id", uuid.uuid4()))
@@ -717,6 +730,7 @@ async def update_data_table(
         table.description = data.description
 
     if data.columns is not None:
+        _reject_duplicate_column_names(data.columns)
         columns_json = [col.model_dump(mode="json") for col in data.columns]
         for i, col in enumerate(columns_json):
             col["id"] = str(col.get("id", uuid.uuid4()))
