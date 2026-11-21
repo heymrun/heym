@@ -10,6 +10,7 @@ import base64
 import json
 import unittest
 from unittest.mock import patch
+from urllib.parse import parse_qs
 
 import httpx
 
@@ -280,6 +281,47 @@ class HttpNodeCurlHeaderOptionTests(unittest.TestCase):
 
         self.assertNotIn("cookie", request.headers)
         self.assertEqual(str(request.url), "https://api.example.com/me")
+
+
+class HttpNodeCurlDataUrlencodeTests(unittest.TestCase):
+    """--data-urlencode encodes the content after the first "=", as curl does."""
+
+    QUERY = (
+        "curl -G https://quickbooks.api.intuit.com/v3/company/1/query "
+        '--data-urlencode "query=SELECT * FROM Customer WHERE PrimaryEmailAddr = '
+        '\'$userInput.email\'" --data-urlencode "minorversion=65"'
+    )
+
+    def _query(self, email: str) -> dict[str, list[str]]:
+        request = _run_curl(self.QUERY, inputs={"userInput": {"email": email}})
+        self.assertEqual(request.method, "GET")
+        return parse_qs(request.url.query.decode())
+
+    def test_plus_ampersand_and_hash_stay_in_the_value(self) -> None:
+        for email in ("jenny+qb@example.com", "R&D #1"):
+            with self.subTest(email=email):
+                self.assertEqual(
+                    self._query(email),
+                    {
+                        "query": [f"SELECT * FROM Customer WHERE PrimaryEmailAddr = '{email}'"],
+                        "minorversion": ["65"],
+                    },
+                )
+
+    def test_a_body_is_encoded_too(self) -> None:
+        request = _run_curl(
+            "curl https://api.example.com/search --data-urlencode 'q=fish & chips' -d page=2"
+        )
+
+        self.assertEqual(request.method, "POST")
+        self.assertEqual(request.content, b"q=fish%20%26%20chips&page=2")
+
+    def test_content_without_a_name_is_sent_alone(self) -> None:
+        request = _run_curl(
+            "curl https://api.example.com/x --data-urlencode '=a b' --data-urlencode 'c+d'"
+        )
+
+        self.assertEqual(request.content, b"a%20b&c%2Bd")
 
 
 if __name__ == "__main__":

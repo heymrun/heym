@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 from collections.abc import Callable
 from typing import Any
+from urllib.parse import quote
 
 # Options that set one header. A header the command also sets with -H wins, as in curl.
 _HEADER_OPTIONS = {
@@ -15,6 +16,17 @@ _HEADER_OPTIONS = {
     "-e": "Referer",
     "--referer": "Referer",
 }
+
+
+def _url_encoded(value: str) -> str:
+    """A --data-urlencode piece as curl sends it: the content after the first "=" encoded.
+
+    `name=content` keeps the name, `=content` and `content` send the content alone.
+    """
+    if "=" not in value:
+        return quote(value, safe="")
+    name, content = value.split("=", 1)
+    return (f"{name}=" if name else "") + quote(content, safe="")
 
 
 def parse_curl(
@@ -96,11 +108,16 @@ def parse_curl(
             json_option = json_option or token == "--json"
             i += 1
             data_indexes.add(i)
+            piece = tokens[i]
+            if token == "--data-urlencode":
+                # Encoded after its expressions are filled in, so a value's "&", "+" or "#"
+                # stays inside that value.
+                piece = _url_encoded(rendered(piece))
             if data is None:
-                data = tokens[i]
+                data = piece
             else:
                 # As curl does: repeated -d values are joined with "&", --json pieces as-is.
-                data += ("" if token == "--json" else "&") + tokens[i]
+                data += ("" if token == "--json" else "&") + piece
             if method == "GET":
                 method = "POST"
         elif token == "--url" and i + 1 < len(tokens):
