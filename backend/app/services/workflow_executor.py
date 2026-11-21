@@ -3611,31 +3611,30 @@ class WorkflowExecutor(WorkflowBranchRoutingMixin):
                                 trace_context=trace_context,
                             )
                         )
-                        out = dict(result)
-                        self._attach_latest_trace_id(out, trace_context)
-                        last_trace_id = self._latest_trace_id(trace_context) or last_trace_id
-                        if attempt_idx > 0:
-                            out["fallbackUsed"] = True
-                            out["model"] = mod
-                        return out
+                    else:
+                        from app.services.llm_service import execute_image_generation
 
-                    from app.services.llm_service import execute_image_generation
-
-                    result = run_async(
-                        execute_image_generation(
-                            credential_type=credential_type.value,
-                            api_key=api_key,
-                            base_url=base_url,
-                            model=mod,
-                            prompt=user_message,
-                            size=image_size,
-                            quality=image_quality,
-                            trace_context=trace_context,
+                        result = run_async(
+                            execute_image_generation(
+                                credential_type=credential_type.value,
+                                api_key=api_key,
+                                base_url=base_url,
+                                model=mod,
+                                prompt=user_message,
+                                size=image_size,
+                                quality=image_quality,
+                                trace_context=trace_context,
+                            )
                         )
-                    )
                     out = dict(result)
                     self._attach_latest_trace_id(out, trace_context)
                     last_trace_id = self._latest_trace_id(trace_context) or last_trace_id
+                    if out.get("error") and attempt_idx < len(attempts) - 1:
+                        # Google image calls report a failed attempt in the result
+                        # instead of raising; the fallback gets its turn either way.
+                        last_error = ValueError(str(out["error"]))
+                        last_model = mod
+                        continue
                     if attempt_idx > 0:
                         out["fallbackUsed"] = True
                         out["model"] = mod

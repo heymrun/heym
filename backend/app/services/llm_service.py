@@ -474,6 +474,28 @@ def _sanitize_image_response(response: dict[str, Any]) -> dict[str, Any]:
     return sanitized
 
 
+def _first_image(response: Any) -> tuple[str, str | None]:
+    """Return the first image of an images response and its revised prompt.
+
+    The image is a base64 data URL, or the provider's own URL when it sent a URL
+    instead of base64 data: Heym passes that URL on and does not fetch it. Raises
+    ValueError when no image came back, so the LLM node reports the failure and can
+    move on to its fallback.
+    """
+    data = getattr(response, "data", None)
+    if not data:
+        raise ValueError("No image returned by provider")
+    image_data = data[0]
+    revised_prompt = getattr(image_data, "revised_prompt", None)
+    b64_image = getattr(image_data, "b64_json", None)
+    if b64_image:
+        return f"data:image/png;base64,{b64_image}", revised_prompt
+    image_url = getattr(image_data, "url", None)
+    if image_url:
+        return str(image_url), revised_prompt
+    raise ValueError("No image returned by provider")
+
+
 def _get_provider_label(credential_type: CredentialType) -> str:
     if credential_type == CredentialType.google:
         return "Google"
@@ -2758,27 +2780,22 @@ class LLMService:
 
         _log_response(f"{provider} Image Edit", response, elapsed_ms)
 
-        data = getattr(response, "data", None)
-        if not data:
+        try:
+            image, revised_prompt = _first_image(response)
+        except ValueError as exc:
             self._record_trace(
                 request_type="images.edit",
                 provider=provider,
                 model=model,
                 request=trace_request,
                 response=None,
-                error="No image returned by provider",
+                error=str(exc),
                 elapsed_ms=round(elapsed_ms, 2),
             )
-            raise ValueError("No image returned by provider")
-
-        image_data = data[0]
-        b64_image = image_data.b64_json if hasattr(image_data, "b64_json") else ""
-        revised_prompt = (
-            image_data.revised_prompt if hasattr(image_data, "revised_prompt") else None
-        )
+            raise
 
         result = {
-            "image": f"data:image/png;base64,{b64_image}" if b64_image else "",
+            "image": image,
             "text": prompt,
             "model": model,
             "revised_prompt": revised_prompt,
@@ -3013,18 +3030,10 @@ class LLMService:
 
         _log_response(f"{provider} Image", response, elapsed_ms)
 
-        data = getattr(response, "data", None)
-        if not data:
-            raise ValueError("No image returned by provider")
-
-        image_data = data[0]
-        b64_image = image_data.b64_json if hasattr(image_data, "b64_json") else ""
-        revised_prompt = (
-            image_data.revised_prompt if hasattr(image_data, "revised_prompt") else None
-        )
+        image, revised_prompt = _first_image(response)
 
         return {
-            "image": f"data:image/png;base64,{b64_image}" if b64_image else "",
+            "image": image,
             "text": prompt,
             "model": model,
             "revised_prompt": revised_prompt,
