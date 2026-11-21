@@ -4046,7 +4046,7 @@ class WorkflowExecutor(WorkflowBranchRoutingMixin):
                 invoked_by_agent=True,
                 execution_id=str(_sub_execution_id),
                 llm_session_id=self.llm_session_id,
-                node_pool=self._node_pool,
+                node_pool=_BACKGROUND_NODE_EXECUTOR,
                 file_scope=self.file_scope,
                 http_cookies=self.http_cookies,
             )

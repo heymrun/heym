@@ -43,7 +43,7 @@ _WORKFLOW_CACHE = {
 _FAN_OUT = 12
 
 
-def _execute_node(node_id: str) -> dict:
+def _execute_node(node_id: str, *, do_not_wait: bool = True) -> dict:
     return {
         "id": node_id,
         "type": "execute",
@@ -51,7 +51,7 @@ def _execute_node(node_id: str) -> dict:
             "label": node_id,
             "executeWorkflowId": TARGET_WF_ID,
             "executeInputMappings": [{"key": "n", "value": "1"}],
-            "executeDoNotWait": True,
+            "executeDoNotWait": do_not_wait,
         },
     }
 
@@ -153,6 +153,42 @@ class DoNotWaitPoolIsolationTests(unittest.TestCase):
             dispatched_work,
             total * 2,
             "dispatched sub-workflows were serialized behind the caller's node pool",
+        )
+
+    def test_waiting_executes_do_not_deadlock_the_node_pool(self) -> None:
+        """Eight Execute nodes waiting on a sub-workflow must finish.
+
+        Each waiter already holds a ``_SHARED_EXECUTOR`` worker. Child nodes on
+        that same pool never start.
+        """
+        nodes: list[dict] = [
+            {
+                "id": "start",
+                "type": "textInput",
+                "data": {"label": "start", "inputFields": [{"key": "text"}]},
+            }
+        ]
+        edges: list[dict] = []
+        for index in range(8):
+            node_id = f"w{index}"
+            nodes.append(_execute_node(node_id, do_not_wait=False))
+            edges.append({"id": f"we{index}", "source": "start", "target": node_id})
+
+        executor = WorkflowExecutor(
+            nodes=nodes,
+            edges=edges,
+            workflow_cache=_WORKFLOW_CACHE,
+            workflow_id=uuid.uuid4(),
+        )
+        total = self._run_in_thread(executor, timeout=8)
+        self.assertIsNotNone(
+            total,
+            "8 waiting Execute nodes deadlocked the shared node pool",
+        )
+        self.assertEqual(len(executor.sub_workflow_executions), 8)
+        self.assertEqual(
+            {sub.status for sub in executor.sub_workflow_executions},
+            {"success"},
         )
 
 
