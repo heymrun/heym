@@ -9,7 +9,7 @@ import Input from "@/components/ui/Input.vue";
 import Label from "@/components/ui/Label.vue";
 import { randomUUID } from "@/lib/uuid";
 
-const props = defineProps<{ column: DataTableColumn | null }>();
+const props = defineProps<{ column: DataTableColumn | null; error?: string }>();
 const emit = defineEmits<{ save: [column: DataTableColumn]; close: [] }>();
 
 const name = ref(props.column?.name ?? "");
@@ -121,6 +121,14 @@ function handleSave() {
           class="mt-1"
         />
       </div>
+
+      <p
+        v-if="error"
+        class="text-sm text-red-600 dark:text-red-400"
+        data-testid="column-editor-error"
+      >
+        {{ error }}
+      </p>
 
       <div class="flex justify-end">
         <Button

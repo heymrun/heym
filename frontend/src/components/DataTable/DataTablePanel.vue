@@ -31,6 +31,7 @@ import Input from "@/components/ui/Input.vue";
 import Label from "@/components/ui/Label.vue";
 import Textarea from "@/components/ui/Textarea.vue";
 import { useListSearchShortcut } from "@/composables/useListSearchShortcut";
+import { apiErrorDetail } from "@/lib/apiErrorDetail";
 import { formatDate } from "@/lib/utils";
 import { dataTablesApi } from "@/services/api";
 import { playSuccessSound } from "@/utils/audio";
@@ -325,6 +326,7 @@ function copyRowId(id: string) {
 // ── Column management ──
 
 function openAddColumn() {
+  error.value = "";
   editingColumn.value = null;
   showColumnEditor.value = true;
 }
@@ -340,12 +342,13 @@ async function handleColumnSave(column: DataTableColumn) {
   } else {
     updatedColumns = [...existing, { ...column, order: existing.length }];
   }
+  error.value = "";
   try {
     selectedTable.value = await dataTablesApi.update(selectedTable.value.id, { columns: updatedColumns });
     showColumnEditor.value = false;
     editingColumn.value = null;
-  } catch {
-    error.value = "Failed to update columns";
+  } catch (err: unknown) {
+    error.value = apiErrorDetail(err, "Failed to update columns");
   }
 }
 
@@ -355,8 +358,8 @@ async function handleColumnDelete(colId: string) {
   const updatedColumns = (selectedTable.value.columns || []).filter((c) => c.id !== colId);
   try {
     selectedTable.value = await dataTablesApi.update(selectedTable.value.id, { columns: updatedColumns });
-  } catch {
-    error.value = "Failed to remove column";
+  } catch (err: unknown) {
+    error.value = apiErrorDetail(err, "Failed to remove column");
   }
 }
 
@@ -1382,6 +1385,7 @@ onUnmounted(() => window.removeEventListener("keydown", handleCreateDialogEscape
     <DataTableColumnEditor
       v-if="showColumnEditor"
       :column="editingColumn"
+      :error="error"
       @save="handleColumnSave"
       @close="showColumnEditor = false"
     />
