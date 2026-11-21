@@ -155,8 +155,8 @@ def execute(ctx: NodeExecutionContext) -> object:
             record_data = (
                 json.loads(record_data_str) if isinstance(record_data_str, str) else record_data_str
             )
-        except Exception:
-            record_data = {}
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"gristRecordData is not valid JSON: {exc}") from exc
 
         payload = {"records": [{"fields": record_data}]}
         response = client.post(
@@ -184,8 +184,8 @@ def execute(ctx: NodeExecutionContext) -> object:
                 if isinstance(records_data_str, str)
                 else records_data_str
             )
-        except Exception:
-            records_data = []
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"gristRecordsData is not valid JSON: {exc}") from exc
 
         if not isinstance(records_data, list):
             records_data = [records_data]
@@ -219,8 +219,8 @@ def execute(ctx: NodeExecutionContext) -> object:
             record_data = (
                 json.loads(record_data_str) if isinstance(record_data_str, str) else record_data_str
             )
-        except Exception:
-            record_data = {}
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"gristRecordData is not valid JSON: {exc}") from exc
 
         payload = {"records": [{"id": int(record_id), "fields": record_data}]}
         response = client.patch(
@@ -245,8 +245,8 @@ def execute(ctx: NodeExecutionContext) -> object:
                 if isinstance(records_data_str, str)
                 else records_data_str
             )
-        except Exception:
-            records_data = []
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"gristRecordsData is not valid JSON: {exc}") from exc
 
         if not isinstance(records_data, list):
             records_data = [records_data]
