@@ -44,12 +44,17 @@ def parse_curl(
     basic_user: str | None = None
     json_option = False
     data_indexes: set[int] = set()
+    explicit_method = False
+    get_option = False
     i = 0
     while i < len(tokens):
         token = tokens[i]
         if token in ("-X", "--request") and i + 1 < len(tokens):
             i += 1
             method = rendered(tokens[i]).upper()
+            explicit_method = True
+        elif token in ("-G", "--get"):
+            get_option = True
         elif token in ("-H", "--header") and i + 1 < len(tokens):
             i += 1
             header = rendered(tokens[i])
@@ -98,6 +103,15 @@ def parse_curl(
             if candidate.startswith(("http://", "https://")):
                 url = candidate
                 break
+
+    if get_option:
+        # curl -G: the data goes into the URL's query string and the request is a GET.
+        # Stripe documents its list endpoints as `curl -G URL -d limit=3`.
+        if not explicit_method:
+            method = "GET"
+        if data is not None:
+            url += ("&" if "?" in url else "?") + rendered(data)
+            data = None
 
     if json_option:
         # curl 7.82+ `--json <data>`: a JSON body, and JSON headers unless the command sets them.

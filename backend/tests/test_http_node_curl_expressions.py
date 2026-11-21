@@ -220,5 +220,34 @@ class HttpNodeCurlRepeatedDataTests(unittest.TestCase):
         self.assertEqual(request.content, b"a=1&b=2")
 
 
+class HttpNodeCurlGetOptionTests(unittest.TestCase):
+    """curl -G sends the -d data as the query string of a GET (Stripe's list endpoints)."""
+
+    def test_get_option_moves_the_data_into_the_query(self) -> None:
+        request = _run_curl(
+            "curl -G https://api.stripe.com/v1/customers -u sk_test_1: "
+            "-d limit=$source.limit -d email=jenny@example.com",
+            inputs={"source": {"limit": 3}},
+        )
+
+        self.assertEqual(request.method, "GET")
+        self.assertEqual(
+            str(request.url),
+            "https://api.stripe.com/v1/customers?limit=3&email=jenny@example.com",
+        )
+        self.assertEqual(request.content, b"")
+
+    def test_an_existing_query_string_is_extended(self) -> None:
+        request = _run_curl("curl --get 'https://api.example.com/search?q=heym' -d page=2")
+
+        self.assertEqual(str(request.url), "https://api.example.com/search?q=heym&page=2")
+
+    def test_an_explicit_method_is_kept(self) -> None:
+        request = _run_curl("curl -X DELETE -G https://api.example.com/items -d id=7")
+
+        self.assertEqual(request.method, "DELETE")
+        self.assertEqual(str(request.url), "https://api.example.com/items?id=7")
+
+
 if __name__ == "__main__":
     unittest.main()
