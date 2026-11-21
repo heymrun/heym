@@ -1133,6 +1133,12 @@ class DotStr(str):
     def or_empty(self) -> "DotStr":
         return self.orEmpty()
 
+    def toString(self) -> "DotStr":  # noqa: N802
+        return self
+
+    def to_string(self) -> "DotStr":
+        return self
+
     def upper(self) -> "DotStr":
         return DotStr(str.upper(self))
 

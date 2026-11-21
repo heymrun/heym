@@ -111,6 +111,8 @@ OPERATOR_CASES: list[tuple[str, str, Expected]] = [
     ("strUrlDecode", "$sample.url.urlEncode().urlDecode()", SAMPLE_URL),
     ("strToJson", "$sample.jsonText.toJson().name", "ada"),
     ("strOrEmpty", "$sample.missing.orEmpty()", ""),
+    ("strToString", "$sample.text.trim().toString()", "Heym Workflow"),
+    ("strToStringSnake", "$sample.text.trim().to_string()", "Heym Workflow"),
     # --- DotInt / DotFloat / DotBool --------------------------------------------
     ("intToString", "$sample.num.toString()", "7"),
     ("floatToString", "$sample.ratio.toString()", "2.5"),
