@@ -42,6 +42,7 @@ from websockets.exceptions import InvalidStatus
 
 from app.config import settings
 from app.http_identity import HEYM_USER_AGENT
+from app.services.http_run_cookies import add_run_cookies, keep_run_cookies, refusing_cookie_jar
 
 _ALLOWED_URL_SCHEMES = ("http", "https")
 _ALLOWED_WEBSOCKET_SCHEMES = ("ws", "wss")
@@ -562,6 +563,8 @@ def get_guarded_http_client() -> httpx.Client:
                 timeout=_wf.HTTP_TIMEOUT,
                 follow_redirects=False,
                 headers={"User-Agent": HEYM_USER_AGENT},
+                cookies=refusing_cookie_jar(),
+                event_hooks={"request": [add_run_cookies], "response": [keep_run_cookies]},
             )
             _GUARDED_CLIENT = client
         return _GUARDED_CLIENT

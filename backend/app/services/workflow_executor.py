@@ -2003,6 +2003,7 @@ class WorkflowExecutor(WorkflowBranchRoutingMixin):
         node_pool: ThreadPoolExecutor | None = None,
         llm_session_id: str | None = None,
         file_scope: RunFileScope | None = None,
+        http_cookies: httpx.Cookies | None = None,
     ) -> None:
         self.nodes = {node["id"]: node for node in nodes}
         self._node_pool = node_pool or _SHARED_EXECUTOR
@@ -2027,6 +2028,8 @@ class WorkflowExecutor(WorkflowBranchRoutingMixin):
         self.global_variables_context = global_variables_context or {}
         self.workflow_id = workflow_id
         self.file_scope = (file_scope or RunFileScope()).including_workflow(workflow_id)
+        # The HTTP node's cookies for this run; a sub-workflow keeps its parent's.
+        self.http_cookies = http_cookies if http_cookies is not None else httpx.Cookies()
         self.workflow_name = workflow_name
         self.workflow_description = workflow_description
         self.execution_id = execution_id
@@ -4039,6 +4042,7 @@ class WorkflowExecutor(WorkflowBranchRoutingMixin):
                 llm_session_id=self.llm_session_id,
                 node_pool=self._node_pool,
                 file_scope=self.file_scope,
+                http_cookies=self.http_cookies,
             )
             enriched_inputs = {
                 "headers": {},
