@@ -253,11 +253,17 @@ class SupabaseService:
         return str(value)
 
     @classmethod
-    def _format_operator_filter(cls, operator: str, value: Any) -> str:
+    def _format_operator_filter(cls, operator: str, value: Any, *, top_level: bool = False) -> str:
         """Format a PostgREST operator/value pair."""
         normalized_operator = operator.strip().lower()
         if normalized_operator not in cls._SUPPORTED_FILTER_OPERATORS:
             raise ValueError(f"Unsupported Supabase filter operator: {operator}")
+
+        list_operators = {"in", "cs", "cd", "ov"}
+        if top_level and isinstance(value, str) and normalized_operator not in list_operators:
+            # PostgREST reads a top-level value verbatim and removes double quotes only
+            # inside `in.(...)` lists and `or`/`and` groups: `eq."a.b@c.com"` matches nothing.
+            return f"{normalized_operator}.{value}"
 
         if normalized_operator == "eq":
             if value is None:
@@ -288,7 +294,9 @@ class SupabaseService:
         return f"{normalized_operator}.{encoded}"
 
     @classmethod
-    def _compile_field_filter_fragments(cls, field: str, value: Any) -> list[str]:
+    def _compile_field_filter_fragments(
+        cls, field: str, value: Any, *, top_level: bool = False
+    ) -> list[str]:
         """Compile a single field filter into one or more PostgREST fragments."""
         normalized_field = str(field).strip()
         if not normalized_field:
@@ -301,12 +309,15 @@ class SupabaseService:
                 )
             fragments: list[str] = []
             for operator, operator_value in value.items():
-                fragments.append(
-                    f"{normalized_field}.{cls._format_operator_filter(str(operator), operator_value)}"
+                formatted = cls._format_operator_filter(
+                    str(operator), operator_value, top_level=top_level
                 )
+                fragments.append(f"{normalized_field}.{formatted}")
             return fragments
 
-        return [f"{normalized_field}.{cls._format_operator_filter('eq', value)}"]
+        return [
+            f"{normalized_field}.{cls._format_operator_filter('eq', value, top_level=top_level)}"
+        ]
 
     @classmethod
     def _compile_condition_fragment(cls, condition: Any) -> str:
@@ -356,7 +367,9 @@ class SupabaseService:
                     raise ValueError(f"Failed to compile Supabase '{normalized_key}' filter")
                 params.append((normalized_key, logical_group[len(normalized_key) :]))
                 continue
-            for fragment in cls._compile_field_filter_fragments(normalized_key, value):
+            for fragment in cls._compile_field_filter_fragments(
+                normalized_key, value, top_level=True
+            ):
                 field_name, encoded_value = fragment.split(".", 1)
                 params.append((field_name, encoded_value))
         return params
