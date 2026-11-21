@@ -35,6 +35,8 @@ The **DataTable** node reads, writes, and manages data in Heym DataTables. Use i
 | `remove` | dataTableId, dataTableRowId | Delete a row |
 | `upsert` | dataTableId, dataTableFilter, dataTableData | Update if match found, insert otherwise |
 
+`insert`, and `upsert` when it inserts, fill the table's column default values for columns the data leaves out, as the DataTable tab does. The node does not refuse a row for a missing required column, a value of another type or an unknown column, so a workflow that writes, for example, model output into a number column keeps running. Unique columns are enforced, and `update` and `upsert` check only the values they change.
+
 ## Example - Find Rows
 
 ```json
