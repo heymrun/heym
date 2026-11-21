@@ -76,6 +76,33 @@ class ExecuteNodeMissingTargetTests(unittest.TestCase):
         self.assertEqual(row["status"], "success")
         self.assertEqual(row["output"], {"text": "Bonjour from Zürich"})
 
+    def test_a_nested_deleted_target_fails_the_calling_execute_node(self) -> None:
+        deleted = str(uuid.uuid4())
+        child_id = str(uuid.uuid4())
+        child_call = {
+            "id": "child_call",
+            "type": "execute",
+            "position": {"x": 300, "y": 0},
+            "data": {
+                "label": "callMissing",
+                "executeWorkflowId": deleted,
+                "executeInputMappings": [{"key": "text", "value": "$start.body.text"}],
+            },
+        }
+        child_workflow = {
+            "nodes": [_START, child_call],
+            "edges": [{"id": "ce1", "source": "start", "target": "child_call"}],
+            "name": "ChildCallingMissing",
+            "input_fields": [],
+        }
+
+        row = _run(child_id, {child_id: child_workflow})
+
+        self.assertEqual(row["status"], "error")
+        self.assertEqual(
+            row["error"], f"The workflow to execute ({deleted}) was not found or has no nodes"
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
