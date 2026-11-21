@@ -4,6 +4,8 @@ import json
 import math
 import re
 import uuid
+from datetime import timedelta
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
@@ -272,28 +274,84 @@ def _column_names(columns: list[dict]) -> set[str]:
     }
 
 
+def _renamed_columns(old_columns: object, new_columns: list[dict]) -> dict[str, str]:
+    """Old name -> new name for each column whose id stays and whose name changes.
+
+    A new name that another column also has is left out: moving the values there would
+    overwrite that column's own values.
+    """
+    new_names = {str(col.get("id")): col.get("name") for col in new_columns}
+    renamed: dict[str, str] = {}
+    for col in old_columns if isinstance(old_columns, list) else []:
+        if not isinstance(col, dict) or not col.get("name"):
+            continue
+        column_id = str(col.get("id"))
+        new_name = new_names.get(column_id)
+        if not new_name or new_name == col["name"]:
+            continue
+        if any(name == new_name and cid != column_id for cid, name in new_names.items()):
+            continue
+        renamed[str(col["name"])] = str(new_name)
+    return renamed
+
+
 async def _prune_rows_to_columns(
     table_id: uuid.UUID,
     columns: list[dict],
     db: AsyncSession,
     updated_by: uuid.UUID,
+    renamed: dict[str, str] | None = None,
 ) -> None:
-    """Remove row JSON keys that no longer exist in the table schema."""
+    """Remove row JSON keys that no longer exist in the table schema.
+
+    A renamed column's values move to its new name instead of being removed.
+    """
     allowed_names = _column_names(columns)
+    renamed = renamed or {}
+    # A key that a renamed column moves into only takes the renamed column's value.
+    moved_keys = set(renamed) | set(renamed.values())
     result = await db.execute(select(DataTableRow).where(DataTableRow.table_id == table_id))
     rows = result.scalars().all()
     for row in rows:
         row_data = row.data if isinstance(row.data, dict) else {}
-        pruned_data = {key: value for key, value in row_data.items() if key in allowed_names}
+        pruned_data = {
+            key: value
+            for key, value in row_data.items()
+            if key in allowed_names and key not in moved_keys
+        }
+        for old_name, new_name in renamed.items():
+            if old_name in row_data:
+                pruned_data[new_name] = row_data[old_name]
         if pruned_data != row_data:
             row.data = pruned_data
             row.updated_by = updated_by
+
+
+def _row_timestamps(index: int) -> dict:
+    """Timestamps for the index-th row one request writes, so the rows keep their order.
+
+    `now()` is the transaction's start time: every row of one import or clone got the
+    same created_at, and listing them fell back to the random row id.
+    """
+    stamp = func.now() + timedelta(microseconds=index)
+    return {"created_at": stamp, "updated_at": stamp}
 
 
 def _normalize_unique_value(value: Any, col_type: str = "string") -> str:
     """Normalize unique column value for comparison with PostgreSQL JSONB text."""
     if isinstance(value, bool) or col_type == "boolean":
         return "true" if (value is True or str(value).lower() in ("true", "1", "yes")) else "false"
+    if col_type == "number":
+        # 1, 1.0 and "1.00" are one number; JSONB keeps them as written.
+        try:
+            number = Decimal(str(value))
+        except InvalidOperation:
+            return str(value)
+        # A value past float range (1e200000) is left as written, as before.
+        if number.is_finite() and math.isfinite(float(number)):
+            if number == number.to_integral_value():
+                return str(int(number))
+            return format(number.normalize(), "f")
     return str(value)
 
 
@@ -331,6 +389,9 @@ def _prepare_unique_checks(
     return unique_checks, col_type_map
 
 
+_JSON_NUMBER = re.compile(r"-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?")
+
+
 def _unique_lock_statement(table_id: str | uuid.UUID) -> tuple[str, dict]:
     """Build the statement that serialises unique-constraint checks for one table.
 
@@ -350,16 +411,32 @@ def _unique_lock_statement(table_id: str | uuid.UUID) -> tuple[str, dict]:
     )
 
 
+def _compares_as_number(col_value: str, col_type: object) -> bool:
+    """Whether a number column's value is also compared as a jsonb number.
+
+    String columns compare text only, and a value too large for a float (1e200000)
+    would overflow PostgreSQL's numeric cast.
+    """
+    if str(col_type).lower() != "number" or not _JSON_NUMBER.fullmatch(col_value):
+        return False
+    return math.isfinite(float(col_value))
+
+
 def _build_unique_query(
     table_id: str | uuid.UUID,
     unique_checks: list[tuple[str, str]],
     exclude_row_id: str | uuid.UUID | None = None,
+    col_type_map: dict[str, str] | None = None,
 ) -> tuple[str, dict]:
     """Build the SQL query and parameter dict for checking unique constraints."""
     conditions = []
     params: dict = {"table_id": str(table_id)}
     for i, (col_name, col_value) in enumerate(unique_checks):
-        conditions.append(f"data ->> :cn{i} = :cv{i}")
+        condition = f"data ->> :cn{i} = :cv{i}"
+        if _compares_as_number(col_value, (col_type_map or {}).get(col_name)):
+            # A number stored as 1.0 reads back as the text "1.0"; jsonb compares it as 1.
+            condition = f"({condition} OR CAST(data -> :cn{i} AS jsonb) = CAST(:cv{i} AS jsonb))"
+        conditions.append(condition)
         params[f"cn{i}"] = col_name
         params[f"cv{i}"] = col_value
 
@@ -410,7 +487,7 @@ async def _check_unique_constraints(
     lock_sql, lock_params = _unique_lock_statement(table_id)
     await db.execute(text(lock_sql), lock_params)
 
-    sql, params = _build_unique_query(table_id, unique_checks, exclude_row_id)
+    sql, params = _build_unique_query(table_id, unique_checks, exclude_row_id, col_type_map)
     result = await db.execute(text(sql), params)
     existing_rows = result.fetchall()
 
@@ -435,7 +512,7 @@ def _check_unique_constraints_sync(
     lock_sql, lock_params = _unique_lock_statement(table_id)
     db.execute(text(lock_sql), lock_params)
 
-    sql, params = _build_unique_query(table_id, unique_checks, exclude_row_id)
+    sql, params = _build_unique_query(table_id, unique_checks, exclude_row_id, col_type_map)
     result = db.execute(text(sql), params)
     existing_rows = result.fetchall()
 
@@ -644,7 +721,8 @@ async def update_data_table(
         for i, col in enumerate(columns_json):
             col["id"] = str(col.get("id", uuid.uuid4()))
             col["order"] = col.get("order", i)
-        await _prune_rows_to_columns(table_id, columns_json, db, current_user.id)
+        renamed = _renamed_columns(table.columns, columns_json)
+        await _prune_rows_to_columns(table_id, columns_json, db, current_user.id, renamed)
         table.columns = columns_json
 
     await db.flush()
@@ -727,7 +805,11 @@ async def clone_data_table(
     db.add(new_table)
     await db.flush()
 
-    source_rows = await db.execute(select(DataTableRow).where(DataTableRow.table_id == source.id))
+    source_rows = await db.execute(
+        select(DataTableRow)
+        .where(DataTableRow.table_id == source.id)
+        .order_by(DataTableRow.created_at.asc(), DataTableRow.id.asc())
+    )
     row_count = 0
     for src_row in source_rows.scalars():
         db.add(
@@ -736,6 +818,7 @@ async def clone_data_table(
                 data=src_row.data,
                 created_by=current_user.id,
                 updated_by=current_user.id,
+                **_row_timestamps(row_count),
             )
         )
         row_count += 1
@@ -970,7 +1053,11 @@ async def bulk_create_rows(
             errors.append({"row": i + 1, "errors": unique_errors})
             continue
         row = DataTableRow(
-            table_id=table_id, data=data, created_by=current_user.id, updated_by=current_user.id
+            table_id=table_id,
+            data=data,
+            created_by=current_user.id,
+            updated_by=current_user.id,
+            **_row_timestamps(imported),
         )
         db.add(row)
         await db.flush()
@@ -1031,7 +1118,11 @@ async def import_csv(
             errors.append({"row": i + 1, "errors": unique_errors})
             continue
         row = DataTableRow(
-            table_id=table_id, data=data, created_by=current_user.id, updated_by=current_user.id
+            table_id=table_id,
+            data=data,
+            created_by=current_user.id,
+            updated_by=current_user.id,
+            **_row_timestamps(imported),
         )
         db.add(row)
         await db.flush()

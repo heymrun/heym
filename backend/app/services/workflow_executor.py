@@ -1774,6 +1774,13 @@ TERMINAL_MAPPER_NODE_TYPES: frozenset[str] = frozenset({"jsonOutputMapper", "htm
 OUTPUT_TERMINAL_NODE_TYPES: frozenset[str] = frozenset({"output", *TERMINAL_MAPPER_NODE_TYPES})
 
 
+def error_flow_terminal_output(result: "NodeResult", output: object) -> dict[str, Any]:
+    """An error flow's final output: a jsonOutputMapper's object is the body, as on success."""
+    if result.node_type == "jsonOutputMapper" and isinstance(output, dict):
+        return output
+    return {result.node_label: output}
+
+
 def unwrap_single_json_output_terminal_outputs(
     wf_executor: "WorkflowExecutor",
     final_outputs: dict[str, Any],
@@ -7464,8 +7471,9 @@ class WorkflowExecutor(WorkflowBranchRoutingMixin):
             results.append(result)
             completed.add(node_id)
 
-            if node_type == "output" and result.status == "success":
-                error_flow_output = {result.node_label: result.output}
+            # An htmlOutputMapper here still ends with the error message, as before.
+            if node_type in ("output", "jsonOutputMapper") and result.status == "success":
+                error_flow_output = error_flow_terminal_output(result, result.output)
                 if node_id in output_nodes_with_downstream:
                     remaining_queue = list(queue)
                     remaining_pending = dict(pending_count)
@@ -9377,7 +9385,7 @@ def _execute_error_flow_streaming(
         completed.add(node_id)
 
         if node_type in OUTPUT_TERMINAL_NODE_TYPES and result.status == "success":
-            error_flow_output = {result.node_label: output}
+            error_flow_output = error_flow_terminal_output(result, output)
             if not final_output_emitted:
                 final_output_emitted = True
                 yield {
