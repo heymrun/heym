@@ -2758,7 +2758,28 @@ class LLMService:
 
         _log_response(f"{provider} Image Edit", response, elapsed_ms)
 
-        image_data = response.data[0]
+        data = getattr(response, "data", None)
+        if not data:
+            result = {
+                "image": "",
+                "text": prompt,
+                "model": model,
+                "revised_prompt": None,
+                "error": "No image returned by provider",
+                "elapsed_ms": round(elapsed_ms, 2),
+            }
+            self._record_trace(
+                request_type="images.edit",
+                provider=provider,
+                model=model,
+                request=trace_request,
+                response=_sanitize_image_response(result),
+                error=result["error"],
+                elapsed_ms=round(elapsed_ms, 2),
+            )
+            return result
+
+        image_data = data[0]
         b64_image = image_data.b64_json if hasattr(image_data, "b64_json") else ""
         revised_prompt = (
             image_data.revised_prompt if hasattr(image_data, "revised_prompt") else None
@@ -3000,7 +3021,18 @@ class LLMService:
 
         _log_response(f"{provider} Image", response, elapsed_ms)
 
-        image_data = response.data[0]
+        data = getattr(response, "data", None)
+        if not data:
+            return {
+                "image": "",
+                "text": prompt,
+                "model": model,
+                "revised_prompt": None,
+                "error": "No image returned by provider",
+                "elapsed_ms": round(elapsed_ms, 2),
+            }
+
+        image_data = data[0]
         b64_image = image_data.b64_json if hasattr(image_data, "b64_json") else ""
         revised_prompt = (
             image_data.revised_prompt if hasattr(image_data, "revised_prompt") else None
