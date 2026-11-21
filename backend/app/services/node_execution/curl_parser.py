@@ -43,6 +43,7 @@ def parse_curl(
     follow_redirects = False
     basic_user: str | None = None
     json_option = False
+    data_indexes: set[int] = set()
     i = 0
     while i < len(tokens):
         token = tokens[i]
@@ -71,7 +72,12 @@ def parse_curl(
         ) and i + 1 < len(tokens):
             json_option = json_option or token == "--json"
             i += 1
-            data = tokens[i]
+            data_indexes.add(i)
+            if data is None:
+                data = tokens[i]
+            else:
+                # As curl does: repeated -d values are joined with "&", --json pieces as-is.
+                data += ("" if token == "--json" else "&") + tokens[i]
             if method == "GET":
                 method = "POST"
         elif token == "--url" and i + 1 < len(tokens):
@@ -84,8 +90,9 @@ def parse_curl(
         i += 1
 
     if not url:
-        for token in reversed(tokens):
-            if token is data:
+        for index in range(len(tokens) - 1, -1, -1):
+            token = tokens[index]
+            if index in data_indexes:
                 continue
             candidate = rendered(token)
             if candidate.startswith(("http://", "https://")):

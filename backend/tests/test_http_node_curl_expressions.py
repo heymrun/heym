@@ -195,5 +195,30 @@ class HttpNodeCurlJsonOptionTests(unittest.TestCase):
         self.assertEqual(request.headers["content-type"], "application/json")
 
 
+class HttpNodeCurlRepeatedDataTests(unittest.TestCase):
+    """curl joins repeated -d values with "&"; only the last one used to be sent."""
+
+    def test_every_data_option_is_sent(self) -> None:
+        request = _run_curl(
+            "curl https://api.stripe.com/v1/customers -u sk_test_1: "
+            "-d name=$source.name -d email=jenny@example.com -d 'metadata[plan]=pro'",
+            inputs={"source": {"name": "Jenny"}},
+        )
+
+        self.assertEqual(request.method, "POST")
+        self.assertEqual(request.content, b"name=Jenny&email=jenny@example.com&metadata[plan]=pro")
+
+    def test_the_url_after_the_data_is_still_found(self) -> None:
+        request = _run_curl("curl -d a=1 --data b=2 https://api.example.com/form")
+
+        self.assertEqual(str(request.url), "https://api.example.com/form")
+        self.assertEqual(request.content, b"a=1&b=2")
+
+    def test_one_data_option_is_sent_as_written(self) -> None:
+        request = _run_curl("curl https://api.example.com/form -d 'a=1&b=2'")
+
+        self.assertEqual(request.content, b"a=1&b=2")
+
+
 if __name__ == "__main__":
     unittest.main()
