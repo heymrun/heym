@@ -67,7 +67,7 @@ curl -G https://api.stripe.com/v1/customers -u "$credentials.Stripe:" -d limit=3
 curl -G "https://quickbooks.api.intuit.com/v3/company/$input.body.realm/query" --data-urlencode "query=SELECT * FROM Customer WHERE PrimaryEmailAddr = '$input.body.email'"
 ```
 
-`-x` (`--proxy`) is not used: the node connects to the URL directly.
+`-I` (`--head`) sends a `HEAD` request unless `-X` sets the method. `-x` (`--proxy`) is not used: the node connects to the URL directly.
 
 Quotes and spaces inside an expression belong to the expression, not to the cURL command, so methods that take string arguments work inline:
 

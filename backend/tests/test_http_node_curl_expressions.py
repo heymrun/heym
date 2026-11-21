@@ -344,5 +344,21 @@ class HttpNodeCurlProxyOptionTests(unittest.TestCase):
         self.assertEqual(str(request.url), "https://api.example.com/v1/me")
 
 
+class HttpNodeCurlHeadOptionTests(unittest.TestCase):
+    """-I/--head asks for the headers only, as a HEAD request."""
+
+    def test_head_option_sends_head(self) -> None:
+        for option in ("-I", "--head"):
+            with self.subTest(option=option):
+                request = _run_curl(f"curl {option} https://example.com/file.zip")
+
+                self.assertEqual(request.method, "HEAD")
+
+    def test_an_explicit_method_is_kept(self) -> None:
+        request = _run_curl("curl -I -X GET https://example.com/file.zip")
+
+        self.assertEqual(request.method, "GET")
+
+
 if __name__ == "__main__":
     unittest.main()

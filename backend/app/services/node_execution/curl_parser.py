@@ -68,6 +68,7 @@ def parse_curl(
     data_indexes: set[int] = set()
     explicit_method = False
     get_option = False
+    head_option = False
     option_headers: dict[str, str] = {}
     i = 0
     while i < len(tokens):
@@ -94,6 +95,8 @@ def parse_curl(
         elif token in ("-x", "--proxy", "--preproxy") and i + 1 < len(tokens):
             # The node connects directly. Consumed so the proxy address is never the URL.
             i += 1
+        elif token in ("-I", "--head"):
+            head_option = True
         elif token in ("-L", "--location"):
             follow_redirects = True
         elif token in ("-u", "--user") and i + 1 < len(tokens):
@@ -154,6 +157,10 @@ def parse_curl(
         if data is not None:
             url += ("&" if "?" in url else "?") + rendered(data)
             data = None
+
+    if head_option and not explicit_method:
+        # curl -I: headers only, as a HEAD request.
+        method = "HEAD"
 
     if json_option:
         # curl 7.82+ `--json <data>`: a JSON body, and JSON headers unless the command sets them.
