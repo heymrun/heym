@@ -324,5 +324,25 @@ class HttpNodeCurlDataUrlencodeTests(unittest.TestCase):
         self.assertEqual(request.content, b"a%20b&c%2Bd")
 
 
+class HttpNodeCurlProxyOptionTests(unittest.TestCase):
+    """-x/--proxy takes a URL; it must never become the request URL."""
+
+    def test_a_proxy_after_the_url_does_not_replace_it(self) -> None:
+        for option in ("-x", "--proxy", "--preproxy"):
+            with self.subTest(option=option):
+                request = _run_curl(
+                    "curl https://api.example.com/v1/me -H 'Authorization: Bearer t' "
+                    f"{option} http://proxy.local:3128"
+                )
+
+                self.assertEqual(str(request.url), "https://api.example.com/v1/me")
+                self.assertEqual(request.headers["authorization"], "Bearer t")
+
+    def test_a_proxy_before_the_url_is_skipped_too(self) -> None:
+        request = _run_curl("curl -x http://proxy.local:3128 https://api.example.com/v1/me")
+
+        self.assertEqual(str(request.url), "https://api.example.com/v1/me")
+
+
 if __name__ == "__main__":
     unittest.main()

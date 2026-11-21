@@ -91,6 +91,9 @@ def parse_curl(
             # `-b name` without "=" names a cookie file, which a workflow cannot read.
             if token not in ("-b", "--cookie") or "=" in value:
                 option_headers[_HEADER_OPTIONS[token]] = value
+        elif token in ("-x", "--proxy", "--preproxy") and i + 1 < len(tokens):
+            # The node connects directly. Consumed so the proxy address is never the URL.
+            i += 1
         elif token in ("-L", "--location"):
             follow_redirects = True
         elif token in ("-u", "--user") and i + 1 < len(tokens):
