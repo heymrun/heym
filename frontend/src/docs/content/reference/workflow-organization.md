@@ -73,6 +73,8 @@ Editing the canvas, name, and description is unaffected.
 
 A collaborator can mint an execution token for a workflow shared with them. The run is attributed to **whoever minted the token**, so it uses that user's credentials and global variables, not the owner's. Only a genuinely anonymous call — `auth_type: anonymous` with no caller — runs in the owner's context.
 
+The [Heym node](../nodes/heym-node.md#access-scope) follows the same rule. When a collaborator runs the workflow, it reads the workflows and run history that collaborator can reach. A Cron or other triggered run has no caller, so it reads with the owner's reach, and a **Write** collaborator can add such a trigger. Share **Read** with people who should not reach what you can.
+
 ### Who counts as the caller
 
 On `/execute` and `/execute/stream`, a caller is someone who chose to run the workflow: a bearer token in the `Authorization` header (API clients, execution tokens), or Heym's own app, which marks its requests with `X-Heym-Client`. The browser's session cookie on its own does not make the visitor the caller. Opening an execute URL from a link, an e-mail or another site while signed in is therefore treated like a call with no session: an `Anonymous` workflow runs in the owner's context, and a `JWT` workflow answers `401`. This keeps a link from running a workflow with the credentials of whoever happens to click it.

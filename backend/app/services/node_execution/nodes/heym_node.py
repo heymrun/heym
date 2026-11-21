@@ -12,7 +12,7 @@ from app.services.node_execution.base import NodeExecutionContext
 # would only be theatre.
 NO_LIST_LIMIT = 0
 
-# `heymWorkflowId` value that reads the history of every workflow the owner can reach.
+# `heymWorkflowId` value that reads the history of every workflow the run's user can reach.
 ALL_WORKFLOWS = "all"
 
 
@@ -74,8 +74,8 @@ def _workflow_detail(workflow: Any) -> dict[str, Any]:
 
     ``data`` carries every configured field, which is what makes scanning
     possible: a workflow cannot be audited for a hardcoded API key or token that
-    the node refuses to show. This grants no new reach - the caller is already
-    scoped to workflows the owner can open in the editor - and stored credential
+    the node refuses to show. This grants no new reach - the read is already
+    scoped to workflows the run's user can open in the editor - and stored credential
     secrets still are not here, since node data holds only credential ids while
     the secrets themselves live encrypted in the credentials table.
     """
@@ -103,10 +103,43 @@ def _workflow_detail(workflow: Any) -> dict[str, Any]:
     return detail
 
 
+def _run_user_id(ctx: NodeExecutionContext, db: Any, workflow_model: Any) -> uuid.UUID:
+    """Return the user whose reach this run reads with.
+
+    That is the run's actor, the same user its credentials and global variables
+    resolve for: whoever ran it from the canvas, the API, an execution token, chat
+    or MCP, and the workflow owner for cron, portal, event and other triggered runs,
+    which their entry points start as the owner. Only a run that carries no actor
+    at all falls back to the owner of the workflow this node lives in.
+    """
+    from sqlalchemy import select
+
+    actor_user_id = ctx.executor.actor_user_id
+    if actor_user_id is not None:
+        return actor_user_id
+
+    owning = None
+    try:
+        owning = db.execute(
+            select(workflow_model).where(
+                workflow_model.id == uuid.UUID(str(ctx.executor.workflow_id))
+            )
+        ).scalar_one_or_none()
+    except (TypeError, ValueError):
+        # An unsaved workflow has no persisted id to look the owner up by.
+        owning = None
+    if owning is None:
+        raise ValueError(
+            "Heym node cannot resolve which user's workflows to read. "
+            "Save the workflow before running this node."
+        )
+    return owning.owner_id
+
+
 def _require_workflow(ctx: NodeExecutionContext, db: Any, workflow_model: Any, access: Any) -> Any:
     """Load the selected workflow or refuse in a way that leaks nothing.
 
-    A workflow that does not exist and a workflow the owner cannot reach produce
+    A workflow that does not exist and a workflow the run's user cannot reach produce
     the same message, so the node cannot be used to probe for workflow ids.
     """
     from sqlalchemy import select
@@ -142,26 +175,7 @@ def execute(ctx: NodeExecutionContext) -> object:
         raise ValueError("Heym node requires an operation")
 
     with db_session.SessionLocal() as db:
-        # Scope every read to the owner of the workflow this node lives in, not the
-        # actor who started the run. Cron, portal, and event triggered runs have no
-        # actor, and owner scoping keeps one workflow's results identical however it
-        # was started - the same rule credentials and global variables already follow.
-        owning = None
-        try:
-            owning = db.execute(
-                select(Workflow).where(Workflow.id == uuid.UUID(str(ctx.executor.workflow_id)))
-            ).scalar_one_or_none()
-        except (TypeError, ValueError):
-            # An unsaved workflow or a single-node test run has no persisted id yet.
-            # Fall back to the actor rather than failing the node on a parse error.
-            owning = None
-        owner_id = owning.owner_id if owning is not None else ctx.executor.actor_user_id
-        if owner_id is None:
-            raise ValueError(
-                "Heym node cannot resolve which user's workflows to read. "
-                "Save the workflow before running this node."
-            )
-        access = workflow_access_clause(owner_id)
+        access = workflow_access_clause(_run_user_id(ctx, db, Workflow))
         limit = _parse_int(_resolve(ctx, "heymLimit"), NO_LIST_LIMIT)
 
         if operation == "listWorkflows":

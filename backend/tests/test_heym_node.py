@@ -5,16 +5,22 @@ import uuid
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
+from sqlalchemy import true
 from sqlalchemy.dialects import postgresql
 
 from app.services.node_execution.base import NodeExecutionContext
 from app.services.node_execution.nodes import heym_node
 
 
-def _ctx(node_data: dict, workflow_id: uuid.UUID | None = None) -> NodeExecutionContext:
+def _ctx(
+    node_data: dict,
+    workflow_id: uuid.UUID | None = None,
+    actor_user_id: uuid.UUID | None = None,
+) -> NodeExecutionContext:
+    """A node context; without an actor the handler looks up the owning workflow first."""
     executor = MagicMock()
     executor.workflow_id = str(workflow_id or uuid.uuid4())
-    executor.actor_user_id = uuid.uuid4()
+    executor.actor_user_id = actor_user_id
     executor.evaluate_message_template.side_effect = lambda v, *_a, **_kw: str(v) if v else ""
     node = {"id": "n1", "type": "heym", "data": node_data}
     return NodeExecutionContext(
@@ -417,7 +423,7 @@ class GetExecutionHistoryTest(HeymNodeTestBase):
 
         self.assertIsNotNone(result["since"])
 
-    # `heymWorkflowId` of `all` reads the history of every workflow the owner can reach.
+    # `heymWorkflowId` of `all` reads the history of every workflow the run's user can reach.
 
     def _queue_all(self, rows: list[tuple[MagicMock, str]], counts: dict[str, int]) -> None:
         """Queue the four statements the handler issues: owner, breakdown, encrypted, slice."""
@@ -516,7 +522,7 @@ class OwnerResolutionTest(HeymNodeTestBase):
     def test_unsaved_workflow_id_falls_back_to_the_actor(self) -> None:
         rows = [_workflow("Mine", self.owner_id)]
         self.db.execute.side_effect = [self._scalars(rows)]
-        ctx = _ctx({"heymOperation": "listWorkflows"})
+        ctx = _ctx({"heymOperation": "listWorkflows"}, actor_user_id=uuid.uuid4())
         ctx.executor.workflow_id = None
 
         result = heym_node.execute(ctx)
@@ -532,3 +538,89 @@ class OwnerResolutionTest(HeymNodeTestBase):
             heym_node.execute(ctx)
 
         self.assertIn("save the workflow", str(caught.exception).lower())
+
+
+class RunUserScopeTest(HeymNodeTestBase):
+    """Reads follow the run's user, the same user its credentials resolve for."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.collaborator_id = uuid.uuid4()
+        self.subjects: list[uuid.UUID] = []
+
+        def capture(user_id: uuid.UUID, **_kwargs: object) -> object:
+            self.subjects.append(user_id)
+            return true()
+
+        patcher = patch("app.services.workflow_access.workflow_access_clause", side_effect=capture)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_a_collaborators_run_reads_with_the_collaborators_reach(self) -> None:
+        """A collaborator's editor or API run must not read with the owner's reach."""
+        self.db.execute.side_effect = [self._scalars([])]
+
+        heym_node.execute(
+            _ctx({"heymOperation": "listWorkflows"}, actor_user_id=self.collaborator_id)
+        )
+
+        self.assertEqual(self.subjects, [self.collaborator_id])
+        self.assertNotIn(self.owner_id, self.subjects)
+        # The actor decides, so the owning workflow is not even looked up.
+        self.assertEqual(self.db.execute.call_count, 1)
+
+    def test_a_collaborators_get_workflow_is_checked_against_the_collaborator(self) -> None:
+        target = _workflow("Owner only", self.owner_id)
+        self.db.execute.side_effect = [self._scalar_one(None)]
+
+        with self.assertRaises(ValueError) as caught:
+            heym_node.execute(
+                _ctx(
+                    {"heymOperation": "getWorkflow", "heymWorkflowId": str(target.id)},
+                    actor_user_id=self.collaborator_id,
+                )
+            )
+
+        self.assertIn("not found", str(caught.exception).lower())
+        self.assertEqual(self.subjects, [self.collaborator_id])
+
+    def test_a_collaborators_all_history_covers_only_the_collaborators_reach(self) -> None:
+        counts, encrypted, sliced = MagicMock(), MagicMock(), MagicMock()
+        counts.all.return_value = []
+        encrypted.scalar_one.return_value = 0
+        sliced.all.return_value = []
+        self.db.execute.side_effect = [counts, encrypted, sliced]
+
+        heym_node.execute(
+            _ctx(
+                {"heymOperation": "getExecutionHistory", "heymWorkflowId": "all"},
+                actor_user_id=self.collaborator_id,
+            )
+        )
+
+        self.assertEqual(self.subjects, [self.collaborator_id])
+
+    def test_a_run_started_as_the_owner_reads_with_the_owners_reach(self) -> None:
+        """Cron, portal and other triggered runs start with the owner as their actor."""
+        self.db.execute.side_effect = [self._scalars([])]
+
+        heym_node.execute(_ctx({"heymOperation": "listWorkflows"}, actor_user_id=self.owner_id))
+
+        self.assertEqual(self.subjects, [self.owner_id])
+
+    def test_a_run_without_an_actor_falls_back_to_the_workflow_owner(self) -> None:
+        owning = _workflow("Owning", self.owner_id)
+        self.db.execute.side_effect = [self._scalar_one(owning), self._scalars([])]
+
+        heym_node.execute(_ctx({"heymOperation": "listWorkflows"}, workflow_id=owning.id))
+
+        self.assertEqual(self.subjects, [self.owner_id])
+
+    def test_a_run_without_an_actor_or_a_saved_workflow_refuses(self) -> None:
+        self.db.execute.side_effect = [self._scalar_one(None)]
+
+        with self.assertRaises(ValueError) as caught:
+            heym_node.execute(_ctx({"heymOperation": "listWorkflows"}))
+
+        self.assertIn("save the workflow", str(caught.exception).lower())
+        self.assertEqual(self.subjects, [])

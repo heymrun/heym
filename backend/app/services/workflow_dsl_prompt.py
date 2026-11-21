@@ -5365,14 +5365,14 @@ The credential requests the full `https://www.googleapis.com/auth/drive` scope, 
 ```
 
 ### 43. heym (Heym Platform Data)
-- **Purpose**: Read Heym's own data - the workflows the owner can reach, one workflow's structure, and its execution history
+- **Purpose**: Read Heym's own data - the workflows the run's user can reach, one workflow's structure, and its execution history
 - **Inputs**: 1 | **Outputs**: 1
 - **WHEN TO USE**: Meta-workflows that report on the Heym instance itself - inventories, health digests, execution summaries
-- **No credential required.** Results are scoped to the owner of the workflow this node lives in: workflows they own plus workflows shared with them directly or through a team.
+- **No credential required.** Results are scoped to the user the run belongs to, like credentials: the person who runs it from the editor, the API, Chat or MCP, and the workflow owner on Cron, portal, event and other triggered runs. That user sees the workflows they own plus workflows shared with them directly or through a team.
 - **Data fields**:
   - `label`: Node identifier (e.g., "heymData")
   - `heymOperation`: One of `listWorkflows`, `getWorkflow`, `getExecutionHistory`
-  - `heymWorkflowId`: Target workflow UUID. Required for `getWorkflow` and `getExecutionHistory`. Use `all` with `getExecutionHistory` to read the history of every workflow the owner can reach. Expression-capable.
+  - `heymWorkflowId`: Target workflow UUID. Required for `getWorkflow` and `getExecutionHistory`. Use `all` with `getExecutionHistory` to read the history of every workflow the run's user can reach. Expression-capable.
   - `heymLimit`: Maximum rows for `listWorkflows` and `getExecutionHistory`. **Empty or `0` returns everything** - that is the default. Expression-capable.
   - `heymStatus`: Optional status filter for `getExecutionHistory` (e.g. `success`, `error`). Expression-capable.
   - `heymSinceDays`: Optional lookback in days for `getExecutionHistory`. Empty covers the full history. Expression-capable.

@@ -25,13 +25,21 @@ The workflow picker is a searchable dropdown listing every workflow you can reac
 
 ## Access Scope
 
-Results are scoped to the **owner of the workflow the node lives in** — not to whoever started the run. The visible set is:
+Results are scoped to **the user the run belongs to**, the same user its credentials and global variables resolve for:
 
-- workflows the owner owns,
-- workflows shared directly with the owner,
-- workflows shared with a team the owner belongs to.
+- **Someone runs the workflow.** A run started from the canvas, the API, an execution token, Chat or MCP reads with the reach of the person who started it. A collaborator who runs a shared workflow sees the workflows they can open themselves, not the owner's.
+- **Nobody runs it.** Cron, portal, platform event, anonymous webhook and other triggered runs belong to the **workflow owner**, so the node reads with the owner's reach.
 
-Owner scoping is what makes the node behave identically whether a run was started manually, by cron, from a portal, or by a platform event. Actor scoping would return nothing on every unattended run. It is the same rule Heym already uses for credentials and global variables.
+For that user, the visible set is:
+
+- workflows they own,
+- workflows shared with them directly,
+- workflows shared with a team they belong to,
+- every workflow on the instance when they are an [instance administrator](../tabs/workflows-tab.md#instance-administration).
+
+The same workflow can therefore return different results depending on who runs it. A scheduled report built on this node returns the owner's view on every Cron run, while a teammate testing it from the editor sees their own.
+
+> **Write access reaches triggered runs.** Anyone with **Write** on a workflow can put a Cron or another trigger in front of a Heym node. That run belongs to the owner, so it reads with the owner's reach, and its output lands in the workflow's run history, which collaborators can open. Give **Read** to people who should not reach what you can, see [Sharing Workflows](../reference/workflow-organization.md#sharing-workflows). To keep a workflow's run data out of every Heym node, switch on [Encrypt run history](../reference/run-history-encryption.md): encrypted runs are counted but never listed. Keep secrets in credentials rather than pasting them into node fields, because **Get Workflow** returns node configuration as it was saved.
 
 A workflow you cannot reach and a workflow that does not exist produce the same error message, so the node cannot be used to probe for workflow ids.
 
@@ -39,7 +47,7 @@ A workflow you cannot reach and a workflow that does not exist produce the same 
 
 ### List Workflows
 
-Returns every workflow the owner can reach, most recently updated first.
+Returns every workflow the run's user can reach, most recently updated first.
 
 | Expression | Description |
 |------------|-------------|
@@ -69,7 +77,7 @@ Returns one workflow's identity and shape.
 
 `data` is the **full node configuration** — every field as it was saved. That is what makes auditing possible: you cannot scan a workflow for an API key someone pasted into a field if the node refuses to show the field.
 
-This grants no reach the caller did not already have. The node is scoped to workflows the owner can open in the editor anyway, and stored credential secrets are still not here: node data holds only credential **ids**, while the secrets themselves live encrypted in the credentials table.
+This grants no reach the run's user did not already have. The node is scoped to workflows that user can open in the editor anyway (the owner, on a triggered run), and stored credential secrets are still not here: node data holds only credential **ids**, while the secrets themselves live encrypted in the credentials table.
 
 ### Scanning for hardcoded secrets
 

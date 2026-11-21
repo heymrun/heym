@@ -3,7 +3,7 @@ interface WorkflowOption {
   label: string;
 }
 
-/** `heymWorkflowId` value the backend reads as every workflow the owner can reach. */
+/** `heymWorkflowId` value the backend reads as every workflow the run's user can reach. */
 export const HEYM_ALL_WORKFLOWS = "all";
 
 /** Only the execution history can span workflows. */
