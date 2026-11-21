@@ -36,8 +36,10 @@ class DataTableCsvRoundTripTests(unittest.IsolatedAsyncioTestCase):
         chunks = [chunk async for chunk in response.body_iterator]
         return "".join(c.decode() if isinstance(c, bytes) else c for c in chunks)
 
-    async def _import(self, csv_text: str) -> tuple[list[dict], list]:
-        table = SimpleNamespace(id=uuid.uuid4(), name="Customers", columns=COLUMNS)
+    async def _import(
+        self, csv_text: str, table: SimpleNamespace | None = None
+    ) -> tuple[list[dict], list]:
+        table = table or SimpleNamespace(id=uuid.uuid4(), name="Customers", columns=COLUMNS)
         db = AsyncMock()
         db.add = MagicMock()
         upload = UploadFile(file=io.BytesIO(csv_text.encode()), filename="customers.csv")
@@ -76,6 +78,31 @@ class DataTableCsvRoundTripTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(errors, [])
         self.assertEqual([row["score"] for row in stored], [1e-05, 1e15, 2000.0, 42, 1.5])
         self.assertIsInstance(stored[3]["score"], int)
+
+    async def test_spaces_around_a_header_name_still_match_the_column(self) -> None:
+        # The import dialog trims headers and shows " name " as matched; the import
+        # used to keep no cell and store an empty row.
+        stored, errors = await self._import("name , score\nAda,42\n")
+        self.assertEqual(errors, [])
+        self.assertEqual(stored, [{"name": "Ada", "score": 42}])
+
+    async def test_a_column_name_with_a_leading_space_still_matches_exactly(self) -> None:
+        table = SimpleNamespace(
+            id=uuid.uuid4(),
+            name="Contacts",
+            columns=[
+                {"id": "c1", "name": "name", "type": "string", "order": 0},
+                {"id": "c2", "name": " city", "type": "string", "order": 1},
+            ],
+        )
+        stored, errors = await self._import("name, city\nAda,Lyon\n", table=table)
+        self.assertEqual(errors, [])
+        self.assertEqual(stored, [{"name": "Ada", " city": "Lyon"}])
+
+    async def test_a_header_that_matches_no_column_is_still_ignored(self) -> None:
+        stored, errors = await self._import("name,Score\nAda,42\n")
+        self.assertEqual(errors, [])
+        self.assertEqual(stored, [{"name": "Ada"}])
 
 
 class NumberCellTests(unittest.TestCase):

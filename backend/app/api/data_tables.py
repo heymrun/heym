@@ -1119,8 +1119,13 @@ async def import_csv(
         total += 1
         data: dict = {}
         for key, value in csv_row.items():
-            if key and key in col_names:
-                data[key] = value
+            if not isinstance(key, str):
+                continue
+            # The exact header first (a column name may start with a space), then the
+            # trimmed one, as the import dialog shows it matched.
+            name = key if key in col_names else key.strip()
+            if name and name in col_names:
+                data[name] = value
         data = _apply_defaults(data, columns)
         data, coerce_errors = _coerce_row_data(data, columns)
         row_errors = coerce_errors + _validate_row_data(data, columns)
