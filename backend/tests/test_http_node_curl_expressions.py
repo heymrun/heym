@@ -249,5 +249,38 @@ class HttpNodeCurlGetOptionTests(unittest.TestCase):
         self.assertEqual(str(request.url), "https://api.example.com/items?id=7")
 
 
+class HttpNodeCurlHeaderOptionTests(unittest.TestCase):
+    """-A, -b and -e set User-Agent, Cookie and Referer; they used to be dropped."""
+
+    def test_header_options_are_sent(self) -> None:
+        request = _run_curl(
+            "curl https://api.example.com/me -A 'heym-bot/1.0' -b 'session=$source.sid' "
+            "-e 'https://app.example.com/'",
+            inputs={"source": {"sid": "abc123"}},
+        )
+
+        self.assertEqual(request.headers["user-agent"], "heym-bot/1.0")
+        self.assertEqual(request.headers["cookie"], "session=abc123")
+        self.assertEqual(request.headers["referer"], "https://app.example.com/")
+
+    def test_a_referer_url_is_not_taken_as_the_request_url(self) -> None:
+        request = _run_curl("curl https://api.example.com/me --referer https://app.example.com/")
+
+        self.assertEqual(str(request.url), "https://api.example.com/me")
+
+    def test_a_header_set_with_h_wins(self) -> None:
+        request = _run_curl(
+            "curl https://api.example.com/me -A 'heym-bot/1.0' -H 'User-Agent: custom/2.0'"
+        )
+
+        self.assertEqual(request.headers["user-agent"], "custom/2.0")
+
+    def test_a_cookie_file_name_sets_no_cookie(self) -> None:
+        request = _run_curl("curl -b cookies.txt https://api.example.com/me")
+
+        self.assertNotIn("cookie", request.headers)
+        self.assertEqual(str(request.url), "https://api.example.com/me")
+
+
 if __name__ == "__main__":
     unittest.main()

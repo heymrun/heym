@@ -6,6 +6,16 @@ import base64
 from collections.abc import Callable
 from typing import Any
 
+# Options that set one header. A header the command also sets with -H wins, as in curl.
+_HEADER_OPTIONS = {
+    "-A": "User-Agent",
+    "--user-agent": "User-Agent",
+    "-b": "Cookie",
+    "--cookie": "Cookie",
+    "-e": "Referer",
+    "--referer": "Referer",
+}
+
 
 def parse_curl(
     executor: Any,
@@ -46,6 +56,7 @@ def parse_curl(
     data_indexes: set[int] = set()
     explicit_method = False
     get_option = False
+    option_headers: dict[str, str] = {}
     i = 0
     while i < len(tokens):
         token = tokens[i]
@@ -61,6 +72,13 @@ def parse_curl(
             if ":" in header:
                 key, value = header.split(":", 1)
                 headers[key.strip()] = value.strip()
+        elif token in _HEADER_OPTIONS and i + 1 < len(tokens):
+            # Consumed here so the value (a Referer is a URL) is never taken as the URL.
+            i += 1
+            value = rendered(tokens[i])
+            # `-b name` without "=" names a cookie file, which a workflow cannot read.
+            if token not in ("-b", "--cookie") or "=" in value:
+                option_headers[_HEADER_OPTIONS[token]] = value
         elif token in ("-L", "--location"):
             follow_redirects = True
         elif token in ("-u", "--user") and i + 1 < len(tokens):
@@ -103,6 +121,10 @@ def parse_curl(
             if candidate.startswith(("http://", "https://")):
                 url = candidate
                 break
+
+    for name, value in option_headers.items():
+        if not any(k.lower() == name.lower() for k in headers):
+            headers[name] = value
 
     if get_option:
         # curl -G: the data goes into the URL's query string and the request is a GET.
