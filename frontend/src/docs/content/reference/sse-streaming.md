@@ -89,7 +89,7 @@ data: {"type":"execution_complete","status":"success","outputs":{"LLM":{"text":"
 - `anonymous`, `jwt`, and `header_auth` workflows behave the same as the regular webhook endpoint
 - response caching still applies when `cache_ttl_seconds` is configured
 - workflow rate limits still apply when `rate_limit_requests` and `rate_limit_window_seconds` are configured
-- `test_run` bypasses both cache and rate limiting, the same way it does for `/execute`
+- the editor's own test runs bypass both cache and rate limiting, the same way they do for `/execute`; `test_run=true` from any other caller runs as a normal call
 
 ## Related
 

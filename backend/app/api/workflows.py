@@ -521,7 +521,12 @@ async def persist_stream_execution_result(
     node_results = final_result.get("node_results", [])
     sub_workflow_executions = final_result.get("sub_workflow_executions", [])
 
-    if workflow.cache_ttl_seconds and workflow.cache_ttl_seconds > 0 and status_value == "success":
+    if (
+        not test_run
+        and workflow.cache_ttl_seconds
+        and workflow.cache_ttl_seconds > 0
+        and status_value == "success"
+    ):
         await response_cache.set(
             db,
             str(workflow.id),
@@ -3655,8 +3660,9 @@ ALLOWED_WORKFLOW_HTTP_METHODS: frozenset[str] = frozenset({"GET", "POST", "PUT",
 def enforce_workflow_http_method(workflow: Workflow, request: Request, test_run: bool) -> None:
     """Reject a verb the workflow is not configured for.
 
-    ``test_run`` requests are exempt: the editor's Run button and the debug panel always POST,
-    and a workflow set to GET would otherwise be untestable from inside the product.
+    The editor's own test runs are exempt (see ``_editor_test_run``): its Run button and the
+    debug panel always POST, and a workflow set to GET would otherwise be untestable from
+    inside the product.
     """
     if test_run:
         return
@@ -3667,6 +3673,21 @@ def enforce_workflow_http_method(workflow: Workflow, request: Request, test_run:
             detail=f"This workflow accepts {configured} requests only",
             headers={"Allow": configured},
         )
+
+
+async def _editor_test_run(
+    db: AsyncSession, workflow: Workflow, session_user: User | None, requested: bool
+) -> bool:
+    """Whether a request that asks for a test run is the editor's own.
+
+    ``test_run`` is read from the request, so any caller can send it. A test run skips the
+    rate limit, the response cache and the HTTP method check, and uses pinned node outputs in
+    place of live ones. Only a signed-in session that can open the workflow gets one; any
+    other caller runs as a production call.
+    """
+    if not requested or session_user is None:
+        return False
+    return await user_has_workflow_access(db, workflow, session_user.id)
 
 
 @router.post("/{workflow_id}/execute", response_model=WorkflowExecuteResponse)
@@ -3694,6 +3715,7 @@ async def execute_workflow_endpoint(
     session_user = current_user
     current_user = await validate_workflow_auth(workflow, request, current_user, db)
     started_by_user_id = current_user.id if current_user else None
+    test_run = await _editor_test_run(db, workflow, session_user, test_run)
     enforce_workflow_http_method(workflow, request, test_run)
 
     enriched_inputs = {
@@ -3847,12 +3869,6 @@ async def execute_workflow_endpoint(
         trigger_source=trigger_source,
         actor_user_id=credentials_owner_id,
     )
-    # Only the editor's own test runs skip the queue; ?test_run=true alone does not.
-    concurrency_exempt = bool(
-        test_run
-        and session_user is not None
-        and await user_has_workflow_access(db, workflow, session_user.id)
-    )
     await db.commit()
     try:
         execution_result = await dispatch_workflow(
@@ -3874,7 +3890,7 @@ async def execute_workflow_endpoint(
             cancel_event=cancel_event,
             timeout_seconds=getattr(workflow, "workflow_timeout_seconds", None),
             concurrency_limit=getattr(workflow, "concurrency_limit", None),
-            concurrency_exempt=concurrency_exempt,
+            concurrency_exempt=test_run,
             on_queued="return",
             # Anonymous callers read their run with it; for an encrypted workflow it is the
             # only way back to the outputs without an audited unlock.
@@ -4011,7 +4027,8 @@ async def execute_workflow_endpoint(
         )
 
     if (
-        workflow.cache_ttl_seconds
+        not test_run
+        and workflow.cache_ttl_seconds
         and workflow.cache_ttl_seconds > 0
         and execution_result.status == "success"
     ):
@@ -4555,6 +4572,7 @@ async def execute_workflow_stream(
     session_user = current_user
     current_user = await validate_workflow_auth(workflow, request, current_user, db)
     started_by_user_id = current_user.id if current_user else None
+    test_run = await _editor_test_run(db, workflow, session_user, test_run)
     enforce_workflow_http_method(workflow, request, test_run)
 
     if not workflow.sse_enabled and trigger_source not in _INTERNAL_STREAM_TRIGGER_SOURCES:
@@ -4733,14 +4751,8 @@ async def execute_workflow_stream(
     run_workflow_name = workflow.name
 
     execution_id = uuid.uuid4()
-    # Only the editor's own test runs skip the queue; ?test_run=true alone does not.
-    concurrency_exempt = bool(
-        test_run
-        and session_user is not None
-        and await user_has_workflow_access(db, workflow, session_user.id)
-    )
     holds_slot = False
-    if getattr(workflow, "concurrency_limit", None) is not None and not concurrency_exempt:
+    if getattr(workflow, "concurrency_limit", None) is not None and not test_run:
         admission = await workflow_concurrency.admit(
             workflow_concurrency.HeldRun(
                 workflow_id=workflow.id,

@@ -2511,7 +2511,9 @@ class ExecuteWorkflowApiDownstreamFailureTests(unittest.IsolatedAsyncioTestCase)
 
 
 class TestRunExecuteNoHistoryTests(unittest.IsolatedAsyncioTestCase):
-    """test_run=True (e.g. expression preview) must not insert ExecutionHistory rows."""
+    """The editor's own test run (e.g. expression preview) must not insert ExecutionHistory rows."""
+
+    EDITOR = SimpleNamespace(id=uuid.uuid4())
 
     def _make_workflow(self) -> SimpleNamespace:
         return SimpleNamespace(
@@ -2546,6 +2548,7 @@ class TestRunExecuteNoHistoryTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch("app.api.workflows.validate_workflow_auth", AsyncMock()),
+            patch("app.api.workflows.user_has_workflow_access", AsyncMock(return_value=True)),
             patch("app.api.workflows.collect_referenced_workflows", AsyncMock(return_value={})),
             patch("app.api.workflows.get_credentials_context", AsyncMock(return_value={})),
             patch("app.api.workflows.get_global_variables_context", AsyncMock(return_value={})),
@@ -2559,7 +2562,7 @@ class TestRunExecuteNoHistoryTests(unittest.IsolatedAsyncioTestCase):
             await execute_workflow_endpoint(
                 workflow_id=workflow.id,
                 request=make_request(query_string=b"test_run=true&trigger_source=Canvas"),
-                current_user=None,
+                current_user=self.EDITOR,
                 db=db,
             )
 
@@ -2593,6 +2596,7 @@ class TestRunExecuteNoHistoryTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch("app.api.workflows.validate_workflow_auth", AsyncMock()),
+            patch("app.api.workflows.user_has_workflow_access", AsyncMock(return_value=True)),
             patch("app.api.workflows.collect_referenced_workflows", AsyncMock(return_value={})),
             patch("app.api.workflows.get_credentials_context", AsyncMock(return_value={})),
             patch("app.api.workflows.get_global_variables_context", AsyncMock(return_value={})),
@@ -2606,7 +2610,7 @@ class TestRunExecuteNoHistoryTests(unittest.IsolatedAsyncioTestCase):
             await execute_workflow_endpoint(
                 workflow_id=workflow.id,
                 request=make_request(query_string=b"test_run=true&trigger_source=Canvas"),
-                current_user=None,
+                current_user=self.EDITOR,
                 db=db,
             )
 
@@ -2623,6 +2627,7 @@ class TestRunExecuteNoHistoryTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch("app.api.workflows.validate_workflow_auth", AsyncMock()),
+            patch("app.api.workflows.user_has_workflow_access", AsyncMock(return_value=True)),
             patch("app.api.workflows.collect_referenced_workflows", AsyncMock(return_value={})),
             patch("app.api.workflows.get_credentials_context", AsyncMock(return_value={})),
             patch("app.api.workflows.get_global_variables_context", AsyncMock(return_value={})),
@@ -2639,7 +2644,7 @@ class TestRunExecuteNoHistoryTests(unittest.IsolatedAsyncioTestCase):
                 await execute_workflow_endpoint(
                     workflow_id=workflow.id,
                     request=make_request(query_string=b"test_run=true&trigger_source=Canvas"),
-                    current_user=None,
+                    current_user=self.EDITOR,
                     db=db,
                 )
 
