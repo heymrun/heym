@@ -7,12 +7,15 @@ whole request with `Invalid column "id"`, so no record was updated.
 
 from __future__ import annotations
 
+import re
 import unittest
 import uuid
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import httpx
 
+from app.services.workflow_dsl_prompt import WORKFLOW_DSL_SYSTEM_PROMPT
 from app.services.workflow_executor import WorkflowExecutor
 
 
@@ -96,6 +99,17 @@ class GristUpdateRecordsFlatTests(unittest.TestCase):
 
         self.assertEqual(row["status"], "success")
         self.assertEqual(self.sent[0]["json"], {"records": [{"id": 1, "fields": {"Note": "x"}}]})
+
+    def test_the_docs_and_the_dsl_show_both_record_shapes(self) -> None:
+        page = (
+            Path(__file__).resolve().parents[2] / "frontend/src/docs/content/nodes/grist-node.md"
+        ).read_text(encoding="utf-8")
+        dsl_line = re.search(r"`gristRecordsData`:[^\n]*", WORKFLOW_DSL_SYSTEM_PROMPT)
+        assert dsl_line is not None
+
+        for text in (page, dsl_line.group(0)):
+            self.assertIn('{"id": 1, "fields": {"Status": "Done"}}', text)
+            self.assertIn('{"id": 1, "Status": "Done"}', text)
 
 
 if __name__ == "__main__":
