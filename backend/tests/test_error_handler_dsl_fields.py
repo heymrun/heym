@@ -9,6 +9,7 @@ builder wrote from the DSL read `Error in $catchErrors.errorNode: {"node_id": ..
 import re
 import unittest
 import uuid
+from pathlib import Path
 
 from app.services.workflow_dsl_prompt import WORKFLOW_DSL_SYSTEM_PROMPT
 from app.services.workflow_executor import WorkflowExecutor
@@ -71,6 +72,23 @@ class ErrorHandlerDslFieldTests(unittest.TestCase):
         _, notice = _handler_output(example.group(1))
 
         self.assertEqual(notice, "Error in checkOrder: Order 42 not found")
+
+
+class ErrorHandlerPageTests(unittest.TestCase):
+    DOCS = Path(__file__).resolve().parents[2] / "frontend/src/docs/content"
+
+    def test_the_message_row_keeps_the_canvas_default(self) -> None:
+        page = (self.DOCS / "nodes/error-handler-node.md").read_text(encoding="utf-8")
+        row = next(line for line in page.splitlines() if line.startswith("| `message`"))
+
+        self.assertIn("`$error.message`", row)
+
+    def test_the_features_page_names_the_real_fields(self) -> None:
+        features = (self.DOCS / "reference/features.md").read_text(encoding="utf-8")
+        section = features.split("#### [Error Handler]", 1)[1].split("####", 1)[0]
+
+        self.assertNotIn("timestamp", section)
+        self.assertIn("$errorHandler.error.message", section)
 
 
 if __name__ == "__main__":

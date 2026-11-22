@@ -15,7 +15,7 @@ The **Error Handler** node catches errors from any node in the workflow. When pr
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `label` | string | Node identifier (camelCase) |
-| `message` | expression | Optional. Its text is added to the output as `message`. Inside it, `$error.message`, `$error.node_label`, `$error.node_type` and `$error.node_id` describe the failure |
+| `message` | expression | Optional. Default (pre-filled on the canvas): `$error.message`. Its text is added to the output as `message`. Inside it, `$error.message`, `$error.node_label`, `$error.node_type` and `$error.node_id` describe the failure |
 
 ## Error Context
 

@@ -124,7 +124,7 @@ Pairs with [Condition](../nodes/condition-node.md), [Error Handler](../nodes/err
 
 #### [Error Handler](../nodes/error-handler-node.md)
 
-The Error Handler node runs automatically when any node in the workflow fails. No incoming edges are needed; it is triggered by the engine. Output includes error message, failed node label, node type, and timestamp. Use it to send notifications through [Slack](../nodes/slack-node.md), [Telegram](../nodes/telegram-node.md), or [Send Email](../nodes/send-email-node.md), log errors, or return custom error responses.
+The Error Handler node runs automatically when any node in the workflow fails. No incoming edges are needed; it is triggered by the engine. Output is `error` with the message, the failed node's label, type and id (`$errorHandler.error.message`, `.error.node_label`, `.error.node_type`, `.error.node_id`). Use it to send notifications through [Slack](../nodes/slack-node.md), [Telegram](../nodes/telegram-node.md), or [Send Email](../nodes/send-email-node.md), log errors, or return custom error responses.
 
 As an alternative to handling errors on the canvas, a workflow can also delegate failures to a separate workflow — see [Error Workflow](#error-workflow). If the canvas already contains an Error Handler node, the error workflow is **not** called (the local handler takes precedence).
 
