@@ -72,11 +72,19 @@ async def get_slot_status(
     if status_str == "pending" and now > expires:
         status_str = "expired"
 
+    consumed_at_iso = None
+    if slot.consumed_at:
+        consumed_at = slot.consumed_at
+        if consumed_at.tzinfo is None:
+            consumed_at = consumed_at.replace(tzinfo=timezone.utc)
+        consumed_at_iso = consumed_at.isoformat()
+
     result: dict = {
         "status": status_str,
         "run_id": slot.run_id,
         "run": None,
         "expires_at": expires.isoformat(),
+        "consumed_at": consumed_at_iso,
     }
     if slot.status == "consumed" and slot.run_id:
         try:

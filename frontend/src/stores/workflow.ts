@@ -1661,27 +1661,18 @@ export const useWorkflowStore = defineStore("workflow", () => {
 
       let hiddenDelayMs = isAcceptedUpload ? 15000 : 60000;
 
+      // The local expiry timestamp serves only as a scheduling hint to align the
+      // wake-up with the expected expiry, not as proof that the slot expired.
+      // Expiration is determined authoritatively by the backend status response.
       if (!isAcceptedUpload && expiresAtMs !== null) {
         const remainingToExpiry = expiresAtMs - Date.now();
-        if (remainingToExpiry <= 0) {
-          if (!isWorkflowOpen(workflowId)) return;
-          executionResult.value = {
-            workflow_id: workflowId,
-            status: "error",
-            outputs: {
-              error: "Upload link expired before a file was uploaded",
-              slot_id: slotId,
-            },
-            node_results: [],
-            execution_time_ms: 0,
-          };
-          return;
-        }
-        if (remainingToExpiry < delayMs) {
-          delayMs = remainingToExpiry;
-        }
-        if (remainingToExpiry < hiddenDelayMs) {
-          hiddenDelayMs = remainingToExpiry;
+        if (remainingToExpiry > 0) {
+          if (remainingToExpiry < delayMs) {
+            delayMs = remainingToExpiry;
+          }
+          if (remainingToExpiry < hiddenDelayMs) {
+            hiddenDelayMs = remainingToExpiry;
+          }
         }
       }
 
@@ -1689,21 +1680,6 @@ export const useWorkflowStore = defineStore("workflow", () => {
       if (signal.aborted) return;
       if (!isWorkflowOpen(workflowId)) return;
       if (executionResult.value?.status !== "awaiting_file_upload") return;
-
-      if (!isAcceptedUpload && expiresAtMs !== null && Date.now() >= expiresAtMs) {
-        if (!isWorkflowOpen(workflowId)) return;
-        executionResult.value = {
-          workflow_id: workflowId,
-          status: "error",
-          outputs: {
-            error: "Upload link expired before a file was uploaded",
-            slot_id: slotId,
-          },
-          node_results: [],
-          execution_time_ms: 0,
-        };
-        return;
-      }
 
       let slot: FileUploadSlotStatus;
       try {
@@ -1723,6 +1699,8 @@ export const useWorkflowStore = defineStore("workflow", () => {
         }
       }
 
+      // Backend status is authoritative. If the backend reports expired, transition
+      // the canvas to the explicit error state and stop polling.
       if (slot.status === "expired") {
         if (!isWorkflowOpen(workflowId)) return;
         executionResult.value = {
@@ -1759,26 +1737,35 @@ export const useWorkflowStore = defineStore("workflow", () => {
         return;
       }
 
+      // If the upload was accepted, continue polling for the execution result even if
+      // the slot's original upload expiry timestamp has passed.
       if (slot.status === "consumed") {
         isAcceptedUpload = true;
         if (consumedAtMs === null) {
-          consumedAtMs = Date.now();
+          if (slot.consumed_at) {
+            const parsed = Date.parse(slot.consumed_at);
+            consumedAtMs = Number.isNaN(parsed) ? Date.now() : parsed;
+          } else {
+            consumedAtMs = Date.now();
+          }
         }
-        const configuredTimeout = currentWorkflow.value?.workflow_timeout_seconds ?? 900;
-        const executionBudgetMs = (configuredTimeout + 30) * 1000;
-        if (Date.now() - consumedAtMs > executionBudgetMs) {
-          if (!isWorkflowOpen(workflowId)) return;
-          executionResult.value = {
-            workflow_id: workflowId,
-            status: "error",
-            outputs: {
-              error: `Workflow execution timed out after ${configuredTimeout}s without reporting a result`,
-              slot_id: slotId,
-            },
-            node_results: [],
-            execution_time_ms: 0,
-          };
-          return;
+        const configuredTimeout = currentWorkflow.value?.workflow_timeout_seconds;
+        if (typeof configuredTimeout === "number" && configuredTimeout > 0) {
+          const executionBudgetMs = (configuredTimeout + 30) * 1000;
+          if (Date.now() - consumedAtMs > executionBudgetMs) {
+            if (!isWorkflowOpen(workflowId)) return;
+            executionResult.value = {
+              workflow_id: workflowId,
+              status: "error",
+              outputs: {
+                error: `Workflow execution timed out after ${configuredTimeout}s without reporting a result`,
+                slot_id: slotId,
+              },
+              node_results: [],
+              execution_time_ms: 0,
+            };
+            return;
+          }
         }
       }
     }

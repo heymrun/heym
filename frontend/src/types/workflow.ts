@@ -1324,6 +1324,7 @@ export interface FileUploadSlotStatus {
     execution_history_id: string;
   } | null;
   expires_at?: string;
+  consumed_at?: string | null;
 }
 
 export interface ExecutionHistoryEntry {

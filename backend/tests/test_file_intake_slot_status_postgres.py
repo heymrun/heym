@@ -176,6 +176,7 @@ class SlotStatusAccessPostgresTests(unittest.IsolatedAsyncioTestCase):
                 mint_source="canvas",
             )
             slot.status = "consumed"
+            slot.consumed_at = datetime.now(timezone.utc)
             slot.run_id = None
             await db.commit()
             slot_id = slot.id
@@ -184,6 +185,7 @@ class SlotStatusAccessPostgresTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["status"], "consumed")
         self.assertIsNone(result["run_id"])
         self.assertIsNone(result["run"])
+        self.assertIsNotNone(result.get("consumed_at"))
 
     async def test_consumed_slot_past_original_expiry_remains_consumed_with_run(self) -> None:
         slot_id = await self._uploaded_slot(self.minter)

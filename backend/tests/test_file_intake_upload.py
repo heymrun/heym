@@ -54,6 +54,7 @@ def _make_slot(**overrides) -> MagicMock:
     slot.uploaded_file_id = None
     slot.run_id = None
     slot.initial_inputs = None
+    slot.consumed_at = None
     for k, v in overrides.items():
         setattr(slot, k, v)
     return slot

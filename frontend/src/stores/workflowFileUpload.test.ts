@@ -254,12 +254,12 @@ describe("fileUploadTrigger lifecycle & polling", () => {
       },
     );
 
-    vi.mocked(workflowApi.getFileUploadSlot).mockResolvedValue({
-      status: "pending",
+    vi.mocked(workflowApi.getFileUploadSlot).mockImplementation(async () => ({
+      status: Date.now() >= Date.parse(expiryIso) ? "expired" : "pending",
       run_id: null,
       run: null,
       expires_at: expiryIso,
-    });
+    }));
 
     await store.executeWorkflow({});
     expect(store.executionResult?.status).toBe("awaiting_file_upload");
@@ -549,5 +549,323 @@ describe("fileUploadTrigger lifecycle & polling", () => {
     // Immediate status check is triggered by visibilitychange!
     await vi.advanceTimersByTimeAsync(0);
     expect(vi.mocked(workflowApi.getFileUploadSlot).mock.calls.length).toBe(callCountBeforeHidden + 1);
+  });
+
+  it("A. Workflow timeout is null: accepted upload does not abort after 15m30s without timeout", async () => {
+    const store = useWorkflowStore();
+    const wf = makeFileUploadWorkflow("wf-notimeout", 60, undefined);
+    expect(wf.workflow_timeout_seconds).toBeNull();
+
+    vi.mocked(workflowApi.get).mockResolvedValue(wf);
+    await store.loadWorkflow("wf-notimeout");
+
+    vi.mocked(workflowApi.executeStream).mockImplementation(
+      (_id, _body, onStarted, _onNodeStart, _onNodeComplete, onComplete) => {
+        onStarted?.({ execution_id: "exec-a" });
+        onComplete?.({
+          workflow_id: "wf-notimeout",
+          status: "awaiting_file_upload",
+          outputs: {
+            slot_id: "slot-a",
+            expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+          },
+          execution_time_ms: 0,
+          node_results: [],
+        });
+      },
+    );
+
+    // Initial polls return status consumed with run_id null
+    vi.mocked(workflowApi.getFileUploadSlot).mockResolvedValue({
+      status: "consumed",
+      run_id: null,
+      run: null,
+    });
+
+    await store.executeWorkflow({});
+    await vi.advanceTimersByTimeAsync(2500);
+    expect(store.executionResult?.status).toBe("awaiting_file_upload");
+
+    // Advance fake time beyond 15 minutes and 30 seconds (16 minutes = 960,000ms)
+    await vi.advanceTimersByTimeAsync(16 * 60 * 1000);
+
+    // Verify the canvas has not been marked as failed merely because of an invented timeout
+    expect(store.executionResult?.status).toBe("awaiting_file_upload");
+
+    // Later return a completed run
+    vi.mocked(workflowApi.getFileUploadSlot).mockResolvedValue({
+      status: "consumed",
+      run_id: "run-a",
+      run: {
+        status: "success",
+        outputs: { result: "Completed after 20 minutes" },
+        node_results: [
+          {
+            node_id: "upload-node",
+            node_label: "Upload",
+            node_type: "fileUploadTrigger",
+            status: "success",
+            output: {},
+            execution_time_ms: 5,
+            error: null,
+          },
+        ],
+        execution_time_ms: 1200000,
+        execution_history_id: "run-a",
+      },
+    });
+
+    await vi.advanceTimersByTimeAsync(2500);
+
+    // Verify the canvas displays the completed output
+    expect(store.executionResult?.status).toBe("success");
+    expect(store.executionResult?.outputs).toEqual({ result: "Completed after 20 minutes" });
+  });
+
+  it("B. Upload accepted just before expiry: does not report expiration if next poll wakes after expiry", async () => {
+    const store = useWorkflowStore();
+    const wf = makeFileUploadWorkflow("wf-race", 60);
+
+    vi.mocked(workflowApi.get).mockResolvedValue(wf);
+    await store.loadWorkflow("wf-race");
+
+    const expiryMs = 60 * 60 * 1000;
+    const expiryIso = new Date(Date.now() + expiryMs).toISOString();
+
+    vi.mocked(workflowApi.executeStream).mockImplementation(
+      (_id, _body, onStarted, _onNodeStart, _onNodeComplete, onComplete) => {
+        onStarted?.({ execution_id: "exec-b" });
+        onComplete?.({
+          workflow_id: "wf-race",
+          status: "awaiting_file_upload",
+          outputs: {
+            slot_id: "slot-b",
+            expires_at: expiryIso,
+          },
+          execution_time_ms: 0,
+          node_results: [],
+        });
+      },
+    );
+
+    // Initial polls return pending
+    vi.mocked(workflowApi.getFileUploadSlot).mockResolvedValue({
+      status: "pending",
+      run_id: null,
+      run: null,
+      expires_at: expiryIso,
+    });
+
+    await store.executeWorkflow({});
+
+    // Arrange the last pending poll immediately before expiry (minute 59, second 30)
+    await vi.advanceTimersByTimeAsync(59 * 60 * 1000 + 30 * 1000);
+    expect(store.executionResult?.status).toBe("awaiting_file_upload");
+
+    // Simulate upload acceptance just before expiry: status=consumed, run_id=null
+    vi.mocked(workflowApi.getFileUploadSlot).mockResolvedValue({
+      status: "consumed",
+      run_id: null,
+      run: null,
+      expires_at: expiryIso,
+    });
+
+    // Make the next poll wake after expiry (advance 35 seconds, which crosses the 60m expiry mark)
+    await vi.advanceTimersByTimeAsync(35 * 1000);
+
+    // Verify the frontend does not report expiration
+    expect(store.executionResult?.status).toBe("awaiting_file_upload");
+
+    // Return the completed run on a subsequent poll
+    vi.mocked(workflowApi.getFileUploadSlot).mockResolvedValue({
+      status: "consumed",
+      run_id: "run-b",
+      run: {
+        status: "success",
+        outputs: { result: "Race won: upload accepted just before expiry" },
+        node_results: [
+          {
+            node_id: "upload-node",
+            node_label: "Upload",
+            node_type: "fileUploadTrigger",
+            status: "success",
+            output: {},
+            execution_time_ms: 10,
+            error: null,
+          },
+        ],
+        execution_time_ms: 50,
+        execution_history_id: "run-b",
+      },
+    });
+
+    await vi.advanceTimersByTimeAsync(2500);
+
+    // Verify the canvas displays it
+    expect(store.executionResult?.status).toBe("success");
+    expect(store.executionResult?.outputs).toEqual({
+      result: "Race won: upload accepted just before expiry",
+    });
+  });
+
+  it("C. Backend-authoritative expiry: transitions to explicit error when backend reports expired and stops polling", async () => {
+    const store = useWorkflowStore();
+    const wf = makeFileUploadWorkflow("wf-authoritative-expiry", 10);
+
+    vi.mocked(workflowApi.get).mockResolvedValue(wf);
+    await store.loadWorkflow("wf-authoritative-expiry");
+
+    const tenMinutesMs = 10 * 60 * 1000;
+    const expiryIso = new Date(Date.now() + tenMinutesMs).toISOString();
+
+    vi.mocked(workflowApi.executeStream).mockImplementation(
+      (_id, _body, onStarted, _onNodeStart, _onNodeComplete, onComplete) => {
+        onStarted?.({ execution_id: "exec-c" });
+        onComplete?.({
+          workflow_id: "wf-authoritative-expiry",
+          status: "awaiting_file_upload",
+          outputs: {
+            slot_id: "slot-c",
+            expires_at: expiryIso,
+          },
+          execution_time_ms: 0,
+          node_results: [],
+        });
+      },
+    );
+
+    // Status endpoint returns pending before expiry, expired after expiry time
+    vi.mocked(workflowApi.getFileUploadSlot).mockImplementation(async () => {
+      const isPastExpiry = Date.now() >= Date.parse(expiryIso);
+      return {
+        status: isPastExpiry ? "expired" : "pending",
+        run_id: null,
+        run: null,
+        expires_at: expiryIso,
+      };
+    });
+
+    await store.executeWorkflow({});
+    expect(store.executionResult?.status).toBe("awaiting_file_upload");
+
+    // Advance time past expiry
+    await vi.advanceTimersByTimeAsync(tenMinutesMs + 5000);
+
+    // Verify canvas transitions to explicit expiry error
+    expect(store.executionResult?.status).toBe("error");
+    expect(store.executionResult?.outputs).toMatchObject({
+      error: "Upload link expired before a file was uploaded",
+      slot_id: "slot-c",
+    });
+
+    // Verify polling terminates
+    const callCount = vi.mocked(workflowApi.getFileUploadSlot).mock.calls.length;
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(vi.mocked(workflowApi.getFileUploadSlot).mock.calls.length).toBe(callCount);
+  });
+
+  it("D. Clock skew: browser clock ahead of server does not declare slot expired solely from local clock", async () => {
+    const store = useWorkflowStore();
+    const wf = makeFileUploadWorkflow("wf-skew", 10);
+
+    vi.mocked(workflowApi.get).mockResolvedValue(wf);
+    await store.loadWorkflow("wf-skew");
+
+    const tenMinutesMs = 10 * 60 * 1000;
+    const expiryIso = new Date(Date.now() + tenMinutesMs).toISOString();
+
+    vi.mocked(workflowApi.executeStream).mockImplementation(
+      (_id, _body, onStarted, _onNodeStart, _onNodeComplete, onComplete) => {
+        onStarted?.({ execution_id: "exec-d" });
+        onComplete?.({
+          workflow_id: "wf-skew",
+          status: "awaiting_file_upload",
+          outputs: {
+            slot_id: "slot-d",
+            expires_at: expiryIso,
+          },
+          execution_time_ms: 0,
+          node_results: [],
+        });
+      },
+    );
+
+    // Backend still reports "pending" even when local time passes expiresAt
+    vi.mocked(workflowApi.getFileUploadSlot).mockResolvedValue({
+      status: "pending",
+      run_id: null,
+      run: null,
+      expires_at: expiryIso,
+    });
+
+    await store.executeWorkflow({});
+
+    // Advance local time past expiry timestamp
+    await vi.advanceTimersByTimeAsync(tenMinutesMs + 5000);
+
+    // Verify the browser does NOT independently declare the slot expired solely from its local clock
+    expect(store.executionResult?.status).toBe("awaiting_file_upload");
+    expect(vi.mocked(workflowApi.getFileUploadSlot)).toHaveBeenCalled();
+
+    // Now server finally marks it expired:
+    vi.mocked(workflowApi.getFileUploadSlot).mockResolvedValue({
+      status: "expired",
+      run_id: null,
+      run: null,
+      expires_at: expiryIso,
+    });
+
+    await vi.advanceTimersByTimeAsync(30000);
+
+    // Now that backend reports expired, canvas transitions to error
+    expect(store.executionResult?.status).toBe("error");
+    expect(store.executionResult?.outputs).toMatchObject({
+      error: "Upload link expired before a file was uploaded",
+      slot_id: "slot-d",
+    });
+  });
+
+  it("E. Positive workflow timeout: times out if accepted upload exceeds configured timeout + grace period", async () => {
+    const store = useWorkflowStore();
+    const wf = makeFileUploadWorkflow("wf-timeout-pos", 60, 20);
+
+    vi.mocked(workflowApi.get).mockResolvedValue(wf);
+    await store.loadWorkflow("wf-timeout-pos");
+
+    vi.mocked(workflowApi.executeStream).mockImplementation(
+      (_id, _body, onStarted, _onNodeStart, _onNodeComplete, onComplete) => {
+        onStarted?.({ execution_id: "exec-pos" });
+        onComplete?.({
+          workflow_id: "wf-timeout-pos",
+          status: "awaiting_file_upload",
+          outputs: {
+            slot_id: "slot-pos",
+            expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+          },
+          execution_time_ms: 0,
+          node_results: [],
+        });
+      },
+    );
+
+    vi.mocked(workflowApi.getFileUploadSlot).mockResolvedValue({
+      status: "consumed",
+      run_id: null,
+      run: null,
+      consumed_at: new Date(Date.now()).toISOString(),
+    });
+
+    await store.executeWorkflow({});
+    await vi.advanceTimersByTimeAsync(2500);
+    expect(store.executionResult?.status).toBe("awaiting_file_upload");
+
+    // Advance 51 seconds (> 20s timeout + 30s grace)
+    await vi.advanceTimersByTimeAsync(51 * 1000);
+
+    expect(store.executionResult?.status).toBe("error");
+    expect(store.executionResult?.outputs).toMatchObject({
+      error: "Workflow execution timed out after 20s without reporting a result",
+      slot_id: "slot-pos",
+    });
   });
 });
