@@ -46,6 +46,7 @@ class _Session:
         self.commit = AsyncMock()
         self.flush = AsyncMock(side_effect=self._assign_ids)
         self.execute = AsyncMock(side_effect=list(results or []))
+        self.refresh = AsyncMock()
 
     async def _assign_ids(self) -> None:
         for obj in self.added:
@@ -55,7 +56,7 @@ class _Session:
     def add(self, obj: object) -> None:
         self.added.append(obj)
 
-    async def get(self, model: type, pk: uuid.UUID) -> object:
+    async def get(self, model: type, pk: uuid.UUID, **_kwargs: object) -> object:
         return self.objects.get((model.__name__, pk))
 
     async def __aenter__(self) -> "_Session":

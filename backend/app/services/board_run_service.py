@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import select, update
+from sqlalchemy.orm.exc import ObjectDeletedError
 
 from app.api.analytics import upsert_workflow_analytics_snapshot
 from app.api.workflows import (
@@ -1000,6 +1001,7 @@ async def enqueue_card_chain(
     ).first()
     if locked is None:
         return ENQUEUE_BLOCKED
+    await db.refresh(card)
     if await blocking_card_runs(db, card.id):
         return ENQUEUE_BLOCKED
     links = await _column_links(db, column.id)
@@ -1095,6 +1097,23 @@ async def _reindex_column(db, column_id: uuid.UUID) -> None:
         card.position = index
 
 
+async def _settle_card_if_idle(db, card: BoardCard) -> None:
+    """When a card is moved out of auto-advance or cascade ends without a chain, settle its
+    status to success if no runs are currently active on it. Never overwrites 'failed'
+    produced by dead-run cleanup."""
+    if card.run_status != "running":
+        return
+    blocking = await blocking_card_runs(db, card.id)
+    if blocking:
+        return
+    await db.refresh(card)
+    if card.run_status == "running":
+        card.run_status = "success"
+        await db.commit()
+    elif card.run_status == "failed":
+        await db.commit()
+
+
 async def _auto_advance(
     *,
     card_id: uuid.UUID,
@@ -1121,19 +1140,29 @@ async def _auto_advance(
             if not enabled:
                 # The board keeps cards where people put them: settle a card a caller
                 # flipped to running for the cascade, and move nothing.
-                settled = await db.get(BoardCard, card_id)
-                if settled is not None and settled.run_status == "running":
-                    settled.run_status = "success"
-                    await db.commit()
+                try:
+                    settled = await db.get(
+                        BoardCard, card_id, with_for_update=True, populate_existing=True
+                    )
+                except ObjectDeletedError:
+                    return
+                if settled is not None:
+                    await _settle_card_if_idle(db, settled)
                 return
-            moved = await db.get(BoardCard, card_id)
-            if moved is None:
+            try:
+                card = await db.get(
+                    BoardCard, card_id, with_for_update=True, populate_existing=True
+                )
+            except ObjectDeletedError:
                 return
-            if moved.column_id != from_column_id:
+            if card is None:
+                return
+            if card.column_id != from_column_id:
                 # A person moved the card while this chain ran: it stays where they put
                 # it. Advancing from the old column would pull it back into the cascade.
-                # Its status is left alone: this chain already settled it, and "running"
-                # now belongs to the chain its new column started.
+                # If the move did not start another chain (or moved to a chain-less column),
+                # settle the card so it does not stay stuck in 'running'.
+                await _settle_card_if_idle(db, card)
                 return
             columns = (
                 (
@@ -1148,15 +1177,27 @@ async def _auto_advance(
             )
             ids = [c.id for c in columns]
             if from_column_id not in ids:
+                await _settle_card_if_idle(db, card)
                 return
             from_index = ids.index(from_column_id)
             if not ignore_gate and from_index < GATE_COLUMN_INDEX:
                 # Leftmost + its right neighbor: run, then wait for the human.
+                await _settle_card_if_idle(db, card)
                 return
             prev_name = columns[from_index].name
+            current_column_id = from_column_id
             for target in columns[from_index + 1 :]:
-                card = await db.get(BoardCard, card_id)
-                if card is None:
+                try:
+                    card = await db.get(
+                        BoardCard, card_id, with_for_update=True, populate_existing=True
+                    )
+                except ObjectDeletedError:
+                    return
+                if card is None or card.column_id != current_column_id:
+                    # A person moved or deleted the card while this cascade ran: it stays
+                    # where they put it. Advancing further would pull it back into the cascade.
+                    if card is not None:
+                        await _settle_card_if_idle(db, card)
                     return
                 old_column_id = card.column_id
                 card.column_id = target.id
@@ -1208,14 +1249,19 @@ async def _auto_advance(
                     )
                     return
                 await db.commit()
+                current_column_id = target.id
                 prev_name = target.name
 
             # The cascade ran out of columns without finding a chain to start, so the card
             # is not executing anything and must not stay marked as running.
-            settled = await db.get(BoardCard, card_id)
-            if settled is not None and settled.run_status == "running":
-                settled.run_status = "success"
-                await db.commit()
+            try:
+                settled = await db.get(
+                    BoardCard, card_id, with_for_update=True, populate_existing=True
+                )
+            except ObjectDeletedError:
+                return
+            if settled is not None:
+                await _settle_card_if_idle(db, settled)
     except Exception:  # noqa: BLE001 - auto-advance must never break a completed chain
         logger.exception("Board auto-advance failed for card %s", card_id)
 

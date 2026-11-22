@@ -94,6 +94,7 @@ class _FakeSession:
         self.added = []
         self.commit = AsyncMock()
         self.flush = AsyncMock(side_effect=self._assign_ids)
+        self.refresh = AsyncMock()
 
     async def _assign_ids(self):
         for obj in self.added:
@@ -103,7 +104,7 @@ class _FakeSession:
     def add(self, obj):
         self.added.append(obj)
 
-    async def get(self, model, pk):
+    async def get(self, model, pk, *args, **kwargs):
         return self.objects.get((model.__name__, pk))
 
     async def __aenter__(self):
@@ -985,6 +986,93 @@ class TestAutoAdvanceAfterAManualMove(unittest.IsolatedAsyncioTestCase):
         auto_advance_on.scalar_one_or_none.return_value = True
         session.execute = AsyncMock(return_value=auto_advance_on)
 
+        with patch.object(
+            board_run_service, "blocking_card_runs", AsyncMock(return_value=[MagicMock()])
+        ):
+            await board_run_service._auto_advance(
+                card_id=card.id,
+                board_id=uuid.uuid4(),
+                from_column_id=development,
+                actor_user_id=None,
+                session_factory=lambda: session,
+            )
+
+        self.assertEqual(card.column_id, review)
+        self.assertEqual(card.run_status, "running")
+        self.assertEqual(session.added, [])
+
+    async def test_a_card_moved_away_without_active_chain_settles_to_success(self) -> None:
+        from app.db.models import BoardCard
+
+        development, review = uuid.uuid4(), uuid.uuid4()
+        card = SimpleNamespace(id=uuid.uuid4(), column_id=review, run_status="running")
+        session = _FakeSession({(BoardCard.__name__, card.id): card})
+        auto_advance_on = MagicMock()
+        auto_advance_on.scalar_one_or_none.return_value = True
+        session.execute = AsyncMock(return_value=auto_advance_on)
+
+        with patch.object(board_run_service, "blocking_card_runs", AsyncMock(return_value=[])):
+            await board_run_service._auto_advance(
+                card_id=card.id,
+                board_id=uuid.uuid4(),
+                from_column_id=development,
+                actor_user_id=None,
+                session_factory=lambda: session,
+            )
+
+        self.assertEqual(card.column_id, review)
+        self.assertEqual(card.run_status, "success")
+        session.commit.assert_awaited()
+
+    async def test_card_moved_during_empty_column_cascade_is_not_advanced_further(self) -> None:
+        from app.db.models import BoardCard
+
+        backlog, planning, development, staging, qa, done = (uuid.uuid4() for _ in range(6))
+        cols = [
+            SimpleNamespace(id=backlog, name="Backlog", position=0),
+            SimpleNamespace(id=planning, name="Planning", position=1),
+            SimpleNamespace(id=development, name="Development", position=2),
+            SimpleNamespace(id=staging, name="Staging", position=3),
+            SimpleNamespace(id=qa, name="QA", position=4),
+            SimpleNamespace(id=done, name="Done", position=5),
+        ]
+        card = SimpleNamespace(
+            id=uuid.uuid4(), column_id=development, position=0, run_status="success"
+        )
+        session = _FakeSession({(BoardCard.__name__, card.id): card})
+
+        auto_advance_on = MagicMock()
+        auto_advance_on.scalar_one_or_none.return_value = True
+
+        cols_result = MagicMock()
+        cols_result.scalars.return_value.all.return_value = cols
+
+        empty_cards = MagicMock()
+        empty_cards.scalars.return_value.all.return_value = []
+
+        empty_links = MagicMock()
+        empty_links.all.return_value = []
+
+        async def on_commit():
+            if card.column_id == staging:
+                card.column_id = backlog
+
+        session.commit.side_effect = on_commit
+
+        def fake_execute(stmt):
+            sql = str(stmt)
+            if "boards.auto_advance" in sql:
+                return auto_advance_on
+            if "board_columns" in sql and "board_column_workflows" not in sql:
+                return cols_result
+            if "board_cards" in sql:
+                return empty_cards
+            if "board_column_workflows" in sql:
+                return empty_links
+            return MagicMock()
+
+        session.execute = AsyncMock(side_effect=fake_execute)
+
         await board_run_service._auto_advance(
             card_id=card.id,
             board_id=uuid.uuid4(),
@@ -993,10 +1081,7 @@ class TestAutoAdvanceAfterAManualMove(unittest.IsolatedAsyncioTestCase):
             session_factory=lambda: session,
         )
 
-        self.assertEqual(card.column_id, review)
-        self.assertEqual(card.run_status, "running")
-        self.assertEqual(session.added, [])
-        session.execute.assert_awaited_once()  # only the auto-advance setting was read
+        self.assertEqual(card.column_id, backlog)
 
 
 class TestNextLinkIndex(unittest.TestCase):
