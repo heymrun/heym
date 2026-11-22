@@ -447,6 +447,42 @@ class TestPollerPayload(unittest.TestCase):
 
         walk(email)
 
+    def test_baseline_poll_on_empty_mailbox_returns_zero_cursor_and_no_emails(self) -> None:
+        _Harness(self, {})
+        cursor, emails = fetch_imap_messages(CONFIG, None)
+        self.assertEqual(cursor, ImapCursor(uidvalidity="42", last_uid=0))
+        self.assertEqual(emails, [])
+
+    def test_baseline_poll_on_mailbox_with_messages_returns_latest_uid_and_no_emails(self) -> None:
+        _Harness(self, {"1": _raw_email([]), "2": _raw_email([])})
+        cursor, emails = fetch_imap_messages(CONFIG, None)
+        self.assertEqual(cursor, ImapCursor(uidvalidity="42", last_uid=2))
+        self.assertEqual(emails, [])
+
+    def test_poll_with_zero_cursor_fetches_new_emails(self) -> None:
+        _Harness(self, {"1": _raw_email([]), "2": _raw_email([])})
+        cursor, emails = fetch_imap_messages(CONFIG, ImapCursor(uidvalidity="42", last_uid=0))
+        self.assertEqual(cursor, ImapCursor(uidvalidity="42", last_uid=2))
+        self.assertEqual([e["uid"] for e in emails], ["1", "2"])
+
+    def test_poll_on_emptied_mailbox_retains_last_uid_and_returns_no_emails(self) -> None:
+        _Harness(self, {})
+        cursor, emails = fetch_imap_messages(CONFIG, ImapCursor(uidvalidity="42", last_uid=5))
+        self.assertEqual(cursor, ImapCursor(uidvalidity="42", last_uid=5))
+        self.assertEqual(emails, [])
+
+    def test_poll_when_older_uids_remain_does_not_move_cursor_backwards(self) -> None:
+        _Harness(self, {"2": _raw_email([]), "3": _raw_email([])})
+        cursor, emails = fetch_imap_messages(CONFIG, ImapCursor(uidvalidity="42", last_uid=5))
+        self.assertEqual(cursor, ImapCursor(uidvalidity="42", last_uid=5))
+        self.assertEqual(emails, [])
+
+    def test_uidvalidity_change_resets_cursor_to_latest_uid_and_returns_no_emails(self) -> None:
+        _Harness(self, {"1": _raw_email([]), "2": _raw_email([])})
+        cursor, emails = fetch_imap_messages(CONFIG, ImapCursor(uidvalidity="99", last_uid=50))
+        self.assertEqual(cursor, ImapCursor(uidvalidity="42", last_uid=2))
+        self.assertEqual(emails, [])
+
 
 if __name__ == "__main__":
     unittest.main()

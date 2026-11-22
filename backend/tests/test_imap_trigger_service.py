@@ -99,12 +99,41 @@ class ImapTriggerManagerPollingTests(unittest.IsolatedAsyncioTestCase):
         mocks = await self._poll(_CursorClaim(due=True), (ImapCursor("7", 55), []))
 
         mocks["_fetch_node_messages"].assert_awaited_once_with(
-            {"imap_host": "imap.example.com"}, ImapCursor()
+            {"imap_host": "imap.example.com"}, None
         )
         mocks["_insert_baseline"].assert_awaited_once_with(
             self.workflow.id, "imap-node", ImapCursor("7", 55), 5
         )
         mocks["_execute_workflow_for_email"].assert_not_awaited()
+
+    async def test_poll_workflow_node_with_cursor_zero_executes_new_emails(self) -> None:
+        emails = [
+            {"uid": "1", "subject": "First"},
+            {"uid": "2", "subject": "Second"},
+        ]
+        stored = ImapCursor(uidvalidity="1", last_uid=0)
+
+        mocks = await self._poll(
+            _CursorClaim(due=True, cursor=stored), (ImapCursor("1", 2), emails)
+        )
+
+        execute = mocks["_execute_workflow_for_email"]
+        self.assertEqual(
+            execute.await_args_list,
+            [
+                unittest.mock.call(self.workflow, "imap-node", emails[0]),
+                unittest.mock.call(self.workflow, "imap-node", emails[1]),
+            ],
+        )
+        wf, node = self.workflow.id, "imap-node"
+        self.assertEqual(
+            mocks["_advance_cursor"].await_args_list,
+            [
+                unittest.mock.call(wf, node, stored, ImapCursor("1", 1)),
+                unittest.mock.call(wf, node, ImapCursor("1", 1), ImapCursor("1", 2)),
+                unittest.mock.call(wf, node, ImapCursor("1", 2), ImapCursor("1", 2)),
+            ],
+        )
 
     async def test_poll_workflow_node_applies_cursor_on_empty_batch(self) -> None:
         stored = ImapCursor(uidvalidity="7", last_uid=50)
@@ -152,7 +181,7 @@ class ImapParallelPollCapTests(unittest.IsolatedAsyncioTestCase):
         release = asyncio.Event()
         fetching: list[str] = []
 
-        async def fetch(config: dict, _cursor: ImapCursor) -> tuple:
+        async def fetch(config: dict, _cursor: ImapCursor | None) -> tuple:
             fetching.append(config["name"])
             if config["name"] == "a":
                 await release.wait()

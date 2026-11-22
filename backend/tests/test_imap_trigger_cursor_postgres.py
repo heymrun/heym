@@ -18,12 +18,16 @@ NODE = {"id": "imap-1", "type": "imapTrigger", "data": {"credentialId": "c1"}}
 MAILBOX = [100, 101, 102, 103]
 
 
-def _mailbox(_config: dict, cursor: ImapCursor) -> tuple[ImapCursor, list[dict]]:
+def _mailbox(_config: dict, cursor: ImapCursor | None) -> tuple[ImapCursor, list[dict]]:
     """Answers like fetch_imap_messages: a baseline first, then the UIDs after the cursor."""
-    latest = ImapCursor(uidvalidity="77", last_uid=MAILBOX[-1])
-    if cursor.last_uid == 0:
-        return latest, []
-    return latest, [{"uid": str(uid)} for uid in MAILBOX if uid > cursor.last_uid]
+    latest_uid = MAILBOX[-1] if MAILBOX else 0
+    if cursor is None:
+        return ImapCursor(uidvalidity="77", last_uid=latest_uid), []
+    last_uid = max(cursor.last_uid, latest_uid)
+    return (
+        ImapCursor(uidvalidity="77", last_uid=last_uid),
+        [{"uid": str(uid)} for uid in MAILBOX if uid > cursor.last_uid],
+    )
 
 
 class ImapCursorStorageTests(ConcurrencyPostgresCase):
@@ -85,9 +89,44 @@ class ImapCursorStorageTests(ConcurrencyPostgresCase):
     async def test_the_first_poll_records_a_baseline_and_runs_nothing(self) -> None:
         fetch = await self._poll(ImapTriggerManager())
 
-        self.assertEqual(fetch.await_args.args[1], ImapCursor())
+        self.assertIsNone(fetch.await_args.args[1])
         self.assertEqual(await self._stored(), ImapCursor(uidvalidity="77", last_uid=103))
         self.assertEqual(self.runs, Counter())
+
+    async def test_a_baseline_on_an_empty_mailbox_runs_subsequent_new_emails(self) -> None:
+        with patch(f"{__name__}.MAILBOX", []):
+            fetch = await self._poll(ImapTriggerManager())
+
+        self.assertIsNone(fetch.await_args.args[1])
+        self.assertEqual(await self._stored(), ImapCursor(uidvalidity="77", last_uid=0))
+        self.assertEqual(self.runs, Counter())
+
+        await self._arrive_and_wait_interval()
+        with patch(f"{__name__}.MAILBOX", [1, 2]):
+            fetch = await self._poll(ImapTriggerManager())
+
+        self.assertEqual(fetch.await_args.args[1], ImapCursor(uidvalidity="77", last_uid=0))
+        self.assertEqual(self.runs, Counter({"1": 1, "2": 1}))
+        self.assertEqual(await self._stored(), ImapCursor(uidvalidity="77", last_uid=2))
+
+    async def test_an_emptied_mailbox_keeps_its_cursor_and_runs_future_emails(self) -> None:
+        await self._poll(ImapTriggerManager())
+        self.assertEqual(await self._stored(), ImapCursor(uidvalidity="77", last_uid=103))
+
+        await self._arrive_and_wait_interval()
+        with patch(f"{__name__}.MAILBOX", []):
+            await self._poll(ImapTriggerManager())
+
+        self.assertEqual(await self._stored(), ImapCursor(uidvalidity="77", last_uid=103))
+        self.assertEqual(self.runs, Counter())
+
+        await self._arrive_and_wait_interval()
+        with patch(f"{__name__}.MAILBOX", [104, 105]):
+            fetch = await self._poll(ImapTriggerManager())
+
+        self.assertEqual(fetch.await_args.args[1], ImapCursor(uidvalidity="77", last_uid=103))
+        self.assertEqual(self.runs, Counter({"104": 1, "105": 1}))
+        self.assertEqual(await self._stored(), ImapCursor(uidvalidity="77", last_uid=105))
 
     async def test_a_new_process_continues_from_the_stored_cursor(self) -> None:
         await self._poll(ImapTriggerManager())

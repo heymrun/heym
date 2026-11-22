@@ -299,7 +299,7 @@ def _open_mailbox(credential_config: dict[str, Any]) -> Iterator[tuple[Any, str 
 
 def fetch_imap_messages(
     credential_config: dict[str, Any],
-    cursor: ImapCursor,
+    cursor: ImapCursor | None = None,
 ) -> tuple[ImapCursor, list[dict[str, Any]]]:
     """Fetch newly arrived emails using IMAP UIDs, baselining existing inbox contents on first poll."""
     mailbox = str(credential_config.get("imap_mailbox", "INBOX")).strip() or "INBOX"
@@ -309,16 +309,23 @@ def fetch_imap_messages(
             raise ValueError("IMAP UID search failed")
 
         raw_uid_list = search_data[0].split() if search_data and search_data[0] else []
-        uid_list = [int(item) for item in raw_uid_list]
+        uid_list = sorted(int(item) for item in raw_uid_list)
         latest_uid = uid_list[-1] if uid_list else 0
-        next_cursor = ImapCursor(uidvalidity=uidvalidity, last_uid=latest_uid)
 
-        if cursor.uidvalidity and uidvalidity and cursor.uidvalidity != uidvalidity:
+        if (
+            cursor is not None
+            and cursor.uidvalidity
+            and uidvalidity
+            and cursor.uidvalidity != uidvalidity
+        ):
             logger.info("IMAP UIDVALIDITY changed for mailbox %s, resetting cursor", mailbox)
-            return next_cursor, []
+            return ImapCursor(uidvalidity=uidvalidity, last_uid=latest_uid), []
 
-        if cursor.last_uid == 0:
-            return next_cursor, []
+        if cursor is None:
+            return ImapCursor(uidvalidity=uidvalidity, last_uid=latest_uid), []
+
+        next_last_uid = max(cursor.last_uid, latest_uid)
+        next_cursor = ImapCursor(uidvalidity=uidvalidity, last_uid=next_last_uid)
 
         new_uids = [uid for uid in uid_list if uid > cursor.last_uid]
         emails: list[dict[str, Any]] = []
@@ -541,11 +548,12 @@ class ImapTriggerManager:
                 )
                 return
 
-            cursor = claim.cursor or ImapCursor()
-            next_cursor, emails = await self._fetch_node_messages(credential_config, cursor)
+            next_cursor, emails = await self._fetch_node_messages(credential_config, claim.cursor)
             if claim.cursor is None:
                 await self._insert_baseline(workflow.id, node_id, next_cursor, poll_minutes)
                 return
+
+            cursor = claim.cursor
             if emails:
                 logger.info(
                     "IMAP trigger found %d new email(s) for workflow %s node %s",
@@ -739,7 +747,7 @@ class ImapTriggerManager:
     async def _fetch_node_messages(
         self,
         credential_config: dict[str, Any],
-        cursor: ImapCursor,
+        cursor: ImapCursor | None,
     ) -> tuple[ImapCursor, list[dict[str, Any]]]:
         return await asyncio.to_thread(fetch_imap_messages, credential_config, cursor)
 
