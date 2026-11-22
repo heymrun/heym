@@ -114,6 +114,19 @@ class HttpNodeCurlValueClusterTests(unittest.TestCase):
 
         self.assertEqual(received[0].content, b"-5")
 
+    def test_head_and_proxy_inside_a_cluster_work_as_on_their_own(self) -> None:
+        _output, received = _run_curl("curl -sI https://downloads.example.com/file.zip")
+        self.assertEqual(received[0].method, "HEAD")
+
+        _output, received = _run_curl(
+            "curl -sx http://proxy.local:3128 https://api.example.com/v1/me"
+        )
+        self.assertEqual(str(received[0].url), "https://api.example.com/v1/me")
+
+    def test_head_inside_a_cluster_still_refuses_data(self) -> None:
+        with self.assertRaisesRegex(ValueError, "cannot send data"):
+            _run_curl("curl -sI -d a=1 https://api.example.com/items")
+
     def test_eight_is_not_a_curl_option(self) -> None:
         from app.services.node_execution.curl_parser import _split_short_options
 
