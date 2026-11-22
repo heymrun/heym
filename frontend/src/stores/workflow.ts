@@ -1640,12 +1640,24 @@ export const useWorkflowStore = defineStore("workflow", () => {
       if (executionResult.value?.status !== "awaiting_file_upload") return;
 
       let delayMs: number;
+      let hiddenDelayMs: number;
       const isHidden = typeof document !== "undefined" && document.visibilityState === "hidden";
 
       if (isAcceptedUpload) {
-        delayMs = isHidden ? 15000 : 2500;
+        const elapsedAcceptedMs = Date.now() - (consumedAtMs ?? pollStartMs);
+        if (elapsedAcceptedMs < 30_000) {
+          delayMs = 2500;
+        } else if (elapsedAcceptedMs < 120_000) {
+          delayMs = 5000;
+        } else if (elapsedAcceptedMs < 600_000) {
+          delayMs = 10000;
+        } else {
+          delayMs = 30000;
+        }
+        hiddenDelayMs = Math.max(delayMs, 15000);
       } else if (isHidden) {
         delayMs = 60000;
+        hiddenDelayMs = 60000;
       } else {
         const elapsedPendingMs = Date.now() - pollStartMs;
         if (elapsedPendingMs < 30_000) {
@@ -1657,9 +1669,8 @@ export const useWorkflowStore = defineStore("workflow", () => {
         } else {
           delayMs = 30000;
         }
+        hiddenDelayMs = 60000;
       }
-
-      let hiddenDelayMs = isAcceptedUpload ? 15000 : 60000;
 
       // The local expiry timestamp serves only as a scheduling hint to align the
       // wake-up with the expected expiry, not as proof that the slot expired.
@@ -1684,7 +1695,24 @@ export const useWorkflowStore = defineStore("workflow", () => {
       let slot: FileUploadSlotStatus;
       try {
         slot = await workflowApi.getFileUploadSlot(slotId);
-      } catch {
+      } catch (err) {
+        const is404 =
+          (axios.isAxiosError(err) && err.response?.status === 404) ||
+          ((err as { response?: { status?: number } })?.response?.status === 404);
+        if (is404) {
+          if (!isWorkflowOpen(workflowId)) return;
+          executionResult.value = {
+            workflow_id: workflowId,
+            status: "error",
+            outputs: {
+              error: "Upload slot not found",
+              slot_id: slotId,
+            },
+            node_results: [],
+            execution_time_ms: 0,
+          };
+          return;
+        }
         continue;
       }
 
@@ -1742,12 +1770,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
       if (slot.status === "consumed") {
         isAcceptedUpload = true;
         if (consumedAtMs === null) {
-          if (slot.consumed_at) {
-            const parsed = Date.parse(slot.consumed_at);
-            consumedAtMs = Number.isNaN(parsed) ? Date.now() : parsed;
-          } else {
-            consumedAtMs = Date.now();
-          }
+          consumedAtMs = Date.now();
         }
         const configuredTimeout = currentWorkflow.value?.workflow_timeout_seconds;
         if (typeof configuredTimeout === "number" && configuredTimeout > 0) {

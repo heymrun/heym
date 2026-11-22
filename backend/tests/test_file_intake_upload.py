@@ -509,11 +509,12 @@ class UploadHappyPathTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(res["status"], "error")
+        self.assertEqual(res["output"], {"error": "Workflow execution failed"})
         history = next(
             args[0] for (args, _kw) in db.add.call_args_list if hasattr(args[0], "outputs")
         )
         self.assertEqual(history.status, "error")
-        self.assertEqual(history.outputs, {"error": "executor boom"})
+        self.assertEqual(history.outputs, {"error": "Workflow execution failed"})
 
     async def test_concurrent_loser_rejected_when_consume_returns_zero(self) -> None:
         slot = _make_slot()

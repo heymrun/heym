@@ -347,7 +347,8 @@ describe("fileUploadTrigger lifecycle & polling", () => {
       },
     });
 
-    await vi.advanceTimersByTimeAsync(2500);
+    // Advance by the backed-off polling interval at minute 5 of execution (10s)
+    await vi.advanceTimersByTimeAsync(10000);
 
     expect(store.executionResult?.status).toBe("success");
     expect(store.executionResult?.outputs).toEqual({ result: "Crossing expiry run done" });
@@ -615,7 +616,8 @@ describe("fileUploadTrigger lifecycle & polling", () => {
       },
     });
 
-    await vi.advanceTimersByTimeAsync(2500);
+    // Advance by the backed-off polling interval at minute 20 of execution (30s)
+    await vi.advanceTimersByTimeAsync(30000);
 
     // Verify the canvas displays the completed output
     expect(store.executionResult?.status).toBe("success");
@@ -859,13 +861,152 @@ describe("fileUploadTrigger lifecycle & polling", () => {
     await vi.advanceTimersByTimeAsync(2500);
     expect(store.executionResult?.status).toBe("awaiting_file_upload");
 
-    // Advance 51 seconds (> 20s timeout + 30s grace)
-    await vi.advanceTimersByTimeAsync(51 * 1000);
+    // Advance past 50s budget (20s timeout + 30s grace). Because polling backs off to 5s
+    // intervals after 30s, advance 56s so the scheduled timer fires and detects the timeout.
+    await vi.advanceTimersByTimeAsync(56 * 1000);
 
     expect(store.executionResult?.status).toBe("error");
     expect(store.executionResult?.outputs).toMatchObject({
       error: "Workflow execution timed out after 20s without reporting a result",
       slot_id: "slot-pos",
     });
+  });
+
+  it("F. Stop polling on 404 from the slot endpoint", async () => {
+    const store = useWorkflowStore();
+    const wf = makeFileUploadWorkflow("wf-404", 60);
+
+    vi.mocked(workflowApi.get).mockResolvedValue(wf);
+    await store.loadWorkflow("wf-404");
+
+    vi.mocked(workflowApi.executeStream).mockImplementation(
+      (_id, _body, onStarted, _onNodeStart, _onNodeComplete, onComplete) => {
+        onStarted?.({ execution_id: "exec-404" });
+        onComplete?.({
+          workflow_id: "wf-404",
+          status: "awaiting_file_upload",
+          outputs: {
+            slot_id: "slot-missing",
+            expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+          },
+          execution_time_ms: 0,
+          node_results: [],
+        });
+      },
+    );
+
+    // Mock 404 Axios error
+    const err404 = Object.assign(new Error("Not Found"), {
+      isAxiosError: true,
+      response: { status: 404, data: { detail: "Upload slot not found" } },
+    });
+    vi.mocked(workflowApi.getFileUploadSlot).mockRejectedValue(err404);
+
+    await store.executeWorkflow({});
+    await vi.advanceTimersByTimeAsync(2500);
+
+    // Canvas transitions to explicit error on 404
+    expect(store.executionResult?.status).toBe("error");
+    expect(store.executionResult?.outputs).toMatchObject({
+      error: "Upload slot not found",
+      slot_id: "slot-missing",
+    });
+
+    // Polling terminates; advancing further triggers no additional calls
+    const callCount = vi.mocked(workflowApi.getFileUploadSlot).mock.calls.length;
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(vi.mocked(workflowApi.getFileUploadSlot).mock.calls.length).toBe(callCount);
+  });
+
+  it("G. Clock skew in execution budget: starting budget from local time prevents premature timeout", async () => {
+    const store = useWorkflowStore();
+    // 60s timeout -> 90s budget (60s + 30s grace)
+    const wf = makeFileUploadWorkflow("wf-skew-budget", 60, 60);
+
+    vi.mocked(workflowApi.get).mockResolvedValue(wf);
+    await store.loadWorkflow("wf-skew-budget");
+
+    vi.mocked(workflowApi.executeStream).mockImplementation(
+      (_id, _body, onStarted, _onNodeStart, _onNodeComplete, onComplete) => {
+        onStarted?.({ execution_id: "exec-skew-budget" });
+        onComplete?.({
+          workflow_id: "wf-skew-budget",
+          status: "awaiting_file_upload",
+          outputs: {
+            slot_id: "slot-skew-budget",
+            expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+          },
+          execution_time_ms: 0,
+          node_results: [],
+        });
+      },
+    );
+
+    // Server says consumed_at was 2 minutes ago (e.g. browser clock is 2 minutes ahead)
+    vi.mocked(workflowApi.getFileUploadSlot).mockResolvedValue({
+      status: "consumed",
+      run_id: null,
+      run: null,
+      consumed_at: new Date(Date.now() - 120 * 1000).toISOString(),
+    });
+
+    await store.executeWorkflow({});
+    await vi.advanceTimersByTimeAsync(2500);
+
+    // Browser does NOT report timed out on first poll despite server consumed_at being 2m ago
+    expect(store.executionResult?.status).toBe("awaiting_file_upload");
+
+    // Advance 30s locally; still executing and not timed out
+    await vi.advanceTimersByTimeAsync(30 * 1000);
+    expect(store.executionResult?.status).toBe("awaiting_file_upload");
+
+    // Advance past 90s local budget (e.g. 65s more -> 97.5s total local elapsed)
+    await vi.advanceTimersByTimeAsync(65 * 1000);
+    expect(store.executionResult?.status).toBe("error");
+    expect(store.executionResult?.outputs).toMatchObject({
+      error: "Workflow execution timed out after 60s without reporting a result",
+      slot_id: "slot-skew-budget",
+    });
+  });
+
+  it("H. Backoff in accepted phase: avoids unbounded rapid polling during long executions", async () => {
+    const store = useWorkflowStore();
+    const wf = makeFileUploadWorkflow("wf-accepted-backoff", 60);
+
+    vi.mocked(workflowApi.get).mockResolvedValue(wf);
+    await store.loadWorkflow("wf-accepted-backoff");
+
+    vi.mocked(workflowApi.executeStream).mockImplementation(
+      (_id, _body, onStarted, _onNodeStart, _onNodeComplete, onComplete) => {
+        onStarted?.({ execution_id: "exec-backoff" });
+        onComplete?.({
+          workflow_id: "wf-accepted-backoff",
+          status: "awaiting_file_upload",
+          outputs: {
+            slot_id: "slot-backoff",
+            expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+          },
+          execution_time_ms: 0,
+          node_results: [],
+        });
+      },
+    );
+
+    vi.mocked(workflowApi.getFileUploadSlot).mockResolvedValue({
+      status: "consumed",
+      run_id: null,
+      run: null,
+    });
+
+    await store.executeWorkflow({});
+
+    // Advance 3 hours (10,800s)
+    await vi.advanceTimersByTimeAsync(3 * 60 * 60 * 1000);
+
+    const callCount = vi.mocked(workflowApi.getFileUploadSlot).mock.calls.length;
+    // Without backoff at 2.5s fixed interval, 3 hours would be 4,320 requests.
+    // With progressive backoff (2.5s -> 5s -> 10s -> 30s), calls should be around ~418.
+    expect(callCount).toBeLessThan(500);
+    expect(callCount).toBeGreaterThan(350);
   });
 });

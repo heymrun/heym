@@ -7,6 +7,7 @@ stores the file, runs the workflow synchronously, and returns its output.
 """
 
 import asyncio
+import logging
 import mimetypes
 import uuid
 from datetime import datetime, timezone
@@ -30,6 +31,7 @@ from app.services.workflow_access import user_has_workflow_access
 from app.services.workflow_executor import ExecutionResult, WorkflowCancelledError, execute_workflow
 
 router = APIRouter(prefix="/file-intake", tags=["file-intake"])
+logger = logging.getLogger(__name__)
 
 
 def _client_ip(request: Request) -> str | None:
@@ -288,11 +290,12 @@ async def upload_to_slot(
                     outputs={"error": str(exc)},
                     execution_time_ms=0.0,
                 )
-            except Exception as exc:
+            except Exception:
+                logger.exception("Upload-triggered workflow execution failed for slot %s", slot.id)
                 execution_result = ExecutionResult(
                     workflow_id=workflow.id,
                     status="error",
-                    outputs={"error": str(exc)},
+                    outputs={"error": "Workflow execution failed"},
                     execution_time_ms=0.0,
                 )
 
