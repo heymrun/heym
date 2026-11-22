@@ -55,8 +55,11 @@ def parse_curl(
     executor: Any,
     curl_command: str,
     resolve: Callable[[str], str] | None = None,
-) -> tuple[str, str, dict[str, str], str | None, bool]:
+) -> tuple[str, str, dict[str, str], str | None, bool, bool]:
     """Parse a curl DSL command into its request parts.
+
+    Returns the method, URL, headers, body, whether to follow redirects (`-L`), and whether
+    `--location-trusted` sends the command's headers to every redirect target.
 
     ``resolve`` renders ``$…`` spans in every token except the ``-d`` payload,
     which callers render themselves so JSON bodies keep their types. It must be
@@ -65,7 +68,7 @@ def parse_curl(
     so parsing the raw template would drop the header and lose the URL.
     """
     if not curl_command:
-        return "GET", "", {}, None, False
+        return "GET", "", {}, None, False, False
     normalized_cmd = curl_command.replace("\\\n", " ").replace("\\\r\n", " ")
     masked_cmd, masked_expressions = executor._mask_curl_expressions(normalized_cmd)
     tokens = [
@@ -85,6 +88,7 @@ def parse_curl(
     data = None
     url = ""
     follow_redirects = False
+    location_trusted = False
     basic_user: str | None = None
     json_option = False
     data_indexes: set[int] = set()
@@ -128,6 +132,9 @@ def parse_curl(
             head_option = True
         elif token in ("-L", "--location"):
             follow_redirects = True
+        elif token == "--location-trusted":
+            # As curl does: follow, and send -H, -u, -b and credentials to every host.
+            follow_redirects = location_trusted = True
         elif token in ("-u", "--user") and i + 1 < len(tokens):
             # How Stripe, Twilio and Mailgun document their APIs: `-u sk_test_123:`.
             i += 1
@@ -205,4 +212,4 @@ def parse_curl(
         user_pass = basic_user if ":" in basic_user else f"{basic_user}:"
         headers["Authorization"] = "Basic " + base64.b64encode(user_pass.encode()).decode()
 
-    return method, url, headers, data, follow_redirects
+    return method, url, headers, data, follow_redirects, location_trusted

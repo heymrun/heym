@@ -6,7 +6,7 @@ from typing import Any
 
 import httpx
 
-from app.services.http_run_cookies import run_cookies
+from app.services.http_run_cookies import run_cookie_header, run_cookies
 from app.services.node_execution.base import NodeExecutionContext
 
 # What a redirect to another scheme, host or port still carries from the command's headers.
@@ -15,32 +15,77 @@ _CROSS_ORIGIN_HEADERS = frozenset({"accept", "content-type", "user-agent"})
 _MAX_REDIRECTS = 20
 
 
-def _origin(url: httpx.URL) -> tuple[str, str, int | None]:
-    return (url.scheme, url.host, url.port)
+def _same_origin(first: httpx.URL, url: httpx.URL) -> bool:
+    """Whether ``url`` is the command's own origin, counting an http to https upgrade.
+
+    An upgrade on the same host with default ports keeps the headers, as on main.
+    """
+    if (url.scheme, url.host, url.port) == (first.scheme, first.host, first.port):
+        return True
+    return (
+        first.scheme == "http"
+        and url.scheme == "https"
+        and url.host == first.host
+        and first.port is None
+        and url.port is None
+    )
+
+
+def _cookie_header(url: httpx.URL, command_cookie: str | None) -> str | None:
+    """The cookies the server set for ``url`` in this run, then the `-b` cookies, as curl sends."""
+    server_cookie = run_cookie_header(url)
+    if not command_cookie:
+        return server_cookie
+    if not server_cookie:
+        return command_cookie
+    server_names = {part.split("=", 1)[0].strip() for part in server_cookie.split(";")}
+    extra = [
+        part.strip()
+        for part in command_cookie.split(";")
+        if part.strip() and part.split("=", 1)[0].strip() not in server_names
+    ]
+    return "; ".join([server_cookie, *extra])
 
 
 def _send_following_redirects(
-    client: httpx.Client, method: str, url: str, headers: dict[str, str], body: Any
+    client: httpx.Client,
+    method: str,
+    url: str,
+    headers: dict[str, str],
+    body: Any,
+    *,
+    trusted: bool = False,
 ) -> httpx.Response:
     """Send the request and follow redirects (curl -L), one guarded hop at a time.
 
     httpx alone forwards every custom header to another origin except Authorization, so an
     API key in `-H` or a header credential reached the redirect target; and it drops the
-    Cookie header on every hop, so `-b session=...` lost the session on its own origin.
+    Cookie header on every hop. A hop to another origin now carries only
+    `_CROSS_ORIGIN_HEADERS` from the command; a hop to the command's origin (again, after
+    leaving it) gets every command header back, with the cookies the server set in this run
+    and the `-b` cookie. `--location-trusted` sends the command headers to every hop, as
+    curl does.
     """
     response = client.request(method, url, headers=headers, content=body, follow_redirects=False)
-    origin = _origin(response.request.url)
-    cookie = next((value for key, value in headers.items() if key.lower() == "cookie"), None)
+    first = response.request.url
+    command_cookie = next(
+        (value for key, value in headers.items() if key.lower() == "cookie"), None
+    )
     for _ in range(_MAX_REDIRECTS):
         next_request = response.next_request
         if next_request is None:
             return response
-        if _origin(next_request.url) != origin:
+        if trusted or _same_origin(first, next_request.url):
+            for name, value in headers.items():
+                if name.lower() != "cookie":
+                    next_request.headers[name] = value
+            cookie = _cookie_header(next_request.url, command_cookie)
+            if cookie:
+                next_request.headers["Cookie"] = cookie
+        else:
             for name in headers:
                 if name.lower() not in _CROSS_ORIGIN_HEADERS:
                     next_request.headers.pop(name, None)
-        elif cookie is not None and "cookie" not in next_request.headers:
-            next_request.headers["Cookie"] = cookie
         response.close()
         response = client.send(next_request, follow_redirects=False)
     raise httpx.TooManyRedirects("Exceeded maximum allowed redirects.", request=response.request)
@@ -155,7 +200,9 @@ def execute(ctx: NodeExecutionContext) -> object:
     # Resolve while parsing: an expression can supply a whole header line or the
     # whole URL, and parsing the raw template would drop it. The body is left raw
     # so it can be rendered JSON-aware below.
-    method, url, headers, body, follow_redirects = self.parse_curl(curl_template, resolve=render)
+    method, url, headers, body, follow_redirects, location_trusted = self.parse_curl(
+        curl_template, resolve=render
+    )
     if not url:
         raise ValueError("HTTP node requires a URL")
     # Refuse targets that resolve to internal/metadata addresses before dialing
@@ -178,7 +225,9 @@ def execute(ctx: NodeExecutionContext) -> object:
     http_client = ssrf_guard.get_guarded_http_client()
     with run_cookies(self.http_cookies):
         if follow_redirects:
-            response = _send_following_redirects(http_client, method, url, headers, body)
+            response = _send_following_redirects(
+                http_client, method, url, headers, body, trusted=location_trusted
+            )
         else:
             response = http_client.request(
                 method, url, headers=headers, content=body, follow_redirects=False

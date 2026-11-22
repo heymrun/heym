@@ -44,3 +44,13 @@ def keep_run_cookies(response: httpx.Response) -> None:
     jar = _RUN_COOKIES.get()
     if jar is not None:
         jar.extract_cookies(response)
+
+
+def run_cookie_header(url: httpx.URL) -> str | None:
+    """The Cookie header the run's jar would send to ``url``, or None."""
+    jar = _RUN_COOKIES.get()
+    if jar is None:
+        return None
+    probe = httpx.Request("GET", url)
+    jar.set_cookie_header(probe)
+    return probe.headers.get("cookie")

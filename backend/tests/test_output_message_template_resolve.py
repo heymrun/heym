@@ -168,7 +168,7 @@ class WorkflowExecutorCurlDslTests(unittest.TestCase):
             {"setMessage": {"content": content}},
             None,
         )
-        method, url, headers, body, follow_redirects = ex.parse_curl(resolved)
+        method, url, headers, body, follow_redirects, _trusted = ex.parse_curl(resolved)
 
         self.assertEqual(method, "POST")
         self.assertEqual(url, "https://example.test/webhook")
