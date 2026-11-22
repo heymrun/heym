@@ -428,6 +428,92 @@ class UploadHappyPathTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(commits_at_run), 1)
         self.assertGreaterEqual(commits_at_run[0], 1)
 
+    async def test_upload_with_workflow_timeout_passes_timeout_to_executor(self) -> None:
+        slot = _make_slot()
+        workflow = SimpleNamespace(
+            id=slot.workflow_id,
+            owner_id=uuid.uuid4(),
+            nodes=[{"id": "n1", "type": "fileUploadTrigger", "data": {"label": "audio"}}],
+            edges=[],
+            workflow_timeout_seconds=45,
+        )
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.execute.side_effect = [_select_result(slot), _update_result(1), _select_result(workflow)]
+        stored = SimpleNamespace(
+            id=uuid.uuid4(), filename="rec.mp3", mime_type="audio/mpeg", size_bytes=3
+        )
+        exec_result = SimpleNamespace(
+            outputs={}, node_results=[], status="success", execution_time_ms=1.0
+        )
+        execute = MagicMock(return_value=exec_result)
+
+        with (
+            patch(
+                "app.api.file_intake.file_storage.store_file",
+                new=AsyncMock(return_value=stored),
+            ),
+            patch("app.api.file_intake.execute_workflow", execute),
+            patch("app.api.mcp.get_credentials_context_for_user", new=AsyncMock(return_value={})),
+            patch("app.api.workflows.collect_referenced_workflows", new=AsyncMock(return_value={})),
+            patch(
+                "app.services.global_variables_service.get_global_variables_context",
+                new=AsyncMock(return_value={}),
+            ),
+        ):
+            await upload_to_slot(
+                token="t",
+                request=_make_request(),
+                file=_make_upload(b"abc", "rec.mp3", "audio/mpeg"),
+                db=db,
+            )
+
+        self.assertEqual(execute.call_args.kwargs["timeout_seconds"], 45)
+
+    async def test_upload_records_error_history_on_execution_exception(self) -> None:
+        slot = _make_slot()
+        workflow = SimpleNamespace(
+            id=slot.workflow_id,
+            owner_id=uuid.uuid4(),
+            nodes=[{"id": "n1", "type": "fileUploadTrigger", "data": {"label": "audio"}}],
+            edges=[],
+        )
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.execute.side_effect = [_select_result(slot), _update_result(1), _select_result(workflow)]
+        stored = SimpleNamespace(
+            id=uuid.uuid4(), filename="rec.mp3", mime_type="audio/mpeg", size_bytes=3
+        )
+
+        with (
+            patch(
+                "app.api.file_intake.file_storage.store_file",
+                new=AsyncMock(return_value=stored),
+            ),
+            patch(
+                "app.api.file_intake.execute_workflow", side_effect=RuntimeError("executor boom")
+            ),
+            patch("app.api.mcp.get_credentials_context_for_user", new=AsyncMock(return_value={})),
+            patch("app.api.workflows.collect_referenced_workflows", new=AsyncMock(return_value={})),
+            patch(
+                "app.services.global_variables_service.get_global_variables_context",
+                new=AsyncMock(return_value={}),
+            ),
+        ):
+            res = await upload_to_slot(
+                token="t",
+                request=_make_request(),
+                file=_make_upload(b"abc", "rec.mp3", "audio/mpeg"),
+                db=db,
+            )
+
+        self.assertEqual(res["status"], "error")
+        history = next(
+            args[0] for (args, _kw) in db.add.call_args_list if hasattr(args[0], "outputs")
+        )
+        self.assertEqual(history.status, "error")
+        self.assertEqual(history.outputs, {"error": "executor boom"})
+
     async def test_concurrent_loser_rejected_when_consume_returns_zero(self) -> None:
         slot = _make_slot()
         db = AsyncMock()
@@ -452,7 +538,9 @@ class SlotStatusTests(unittest.IsolatedAsyncioTestCase):
         from app.api.file_intake import get_slot_status
 
         owner_id = uuid.uuid4()
-        slot = _make_slot(status="pending")
+        now = datetime.now(timezone.utc)
+        expires = now + timedelta(hours=1)
+        slot = _make_slot(status="pending", expires_at=expires)
         workflow = SimpleNamespace(id=slot.workflow_id, owner_id=owner_id)
         db = AsyncMock()
         db.get.side_effect = [slot, workflow]
@@ -461,6 +549,64 @@ class SlotStatusTests(unittest.IsolatedAsyncioTestCase):
         result = await get_slot_status(slot_id=slot.id, current_user=user, db=db)
         self.assertEqual(result["status"], "pending")
         self.assertIsNone(result["run"])
+        self.assertEqual(result["expires_at"], expires.isoformat())
+
+    async def test_pending_expired_slot_returns_derived_expired_status(self) -> None:
+        from app.api.file_intake import get_slot_status
+
+        owner_id = uuid.uuid4()
+        now = datetime.now(timezone.utc)
+        expires = now - timedelta(minutes=5)
+        slot = _make_slot(status="pending", expires_at=expires)
+        workflow = SimpleNamespace(id=slot.workflow_id, owner_id=owner_id)
+        db = AsyncMock()
+        db.get.side_effect = [slot, workflow]
+        user = SimpleNamespace(id=owner_id)
+
+        result = await get_slot_status(slot_id=slot.id, current_user=user, db=db)
+        self.assertEqual(result["status"], "expired")
+        self.assertIsNone(result["run"])
+        self.assertEqual(result["expires_at"], expires.isoformat())
+
+    async def test_consumed_slot_executing_without_run_id_returns_consumed_and_no_run(self) -> None:
+        from app.api.file_intake import get_slot_status
+
+        owner_id = uuid.uuid4()
+        slot = _make_slot(status="consumed", run_id=None)
+        workflow = SimpleNamespace(id=slot.workflow_id, owner_id=owner_id)
+        db = AsyncMock()
+        db.get.side_effect = [slot, workflow]
+        user = SimpleNamespace(id=owner_id)
+
+        result = await get_slot_status(slot_id=slot.id, current_user=user, db=db)
+        self.assertEqual(result["status"], "consumed")
+        self.assertIsNone(result["run_id"])
+        self.assertIsNone(result["run"])
+
+    async def test_consumed_slot_past_expiry_remains_consumed_not_expired(self) -> None:
+        from app.api.file_intake import get_slot_status
+
+        owner_id = uuid.uuid4()
+        run_id = uuid.uuid4()
+        now = datetime.now(timezone.utc)
+        expires = now - timedelta(minutes=15)
+        slot = _make_slot(status="consumed", expires_at=expires, run_id=str(run_id))
+        workflow = SimpleNamespace(id=slot.workflow_id, owner_id=owner_id)
+        history = SimpleNamespace(
+            id=run_id,
+            status="success",
+            outputs={"result": "done"},
+            node_results=[],
+            execution_time_ms=2.0,
+        )
+        db = AsyncMock()
+        db.get.side_effect = [slot, workflow, history]
+        user = SimpleNamespace(id=owner_id)
+
+        result = await get_slot_status(slot_id=slot.id, current_user=user, db=db)
+        self.assertEqual(result["status"], "consumed")
+        self.assertIsNotNone(result["run"])
+        self.assertEqual(result["run"]["status"], "success")
 
     async def test_consumed_slot_returns_run_result(self) -> None:
         from app.api.file_intake import get_slot_status

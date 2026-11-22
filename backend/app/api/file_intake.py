@@ -63,7 +63,21 @@ async def get_slot_status(
     if not allowed:
         raise HTTPException(status_code=404, detail="Upload slot not found")
 
-    result: dict = {"status": slot.status, "run_id": slot.run_id, "run": None}
+    now = datetime.now(timezone.utc)
+    expires = slot.expires_at
+    if expires.tzinfo is None:
+        expires = expires.replace(tzinfo=timezone.utc)
+
+    status_str = slot.status
+    if status_str == "pending" and now > expires:
+        status_str = "expired"
+
+    result: dict = {
+        "status": status_str,
+        "run_id": slot.run_id,
+        "run": None,
+        "expires_at": expires.isoformat(),
+    }
     if slot.status == "consumed" and slot.run_id:
         try:
             history = await db.get(ExecutionHistory, uuid.UUID(slot.run_id))
@@ -257,11 +271,19 @@ async def upload_to_slot(
                     actor_user_id=workflow.owner_id,
                     cancel_event=cancel_event,
                     execution_id=str(execution_id),
+                    timeout_seconds=getattr(workflow, "workflow_timeout_seconds", None),
                 )
             except WorkflowCancelledError as exc:
                 execution_result = ExecutionResult(
                     workflow_id=workflow.id,
                     status="cancelled",
+                    outputs={"error": str(exc)},
+                    execution_time_ms=0.0,
+                )
+            except Exception as exc:
+                execution_result = ExecutionResult(
+                    workflow_id=workflow.id,
+                    status="error",
                     outputs={"error": str(exc)},
                     execution_time_ms=0.0,
                 )

@@ -2,6 +2,7 @@
 
 import unittest
 import uuid
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from fastapi import HTTPException
@@ -128,6 +129,74 @@ class SlotStatusAccessPostgresTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(HTTPException) as caught:
             await self._poll(slot_id, self.minter)
         self.assertEqual(caught.exception.status_code, 404)
+
+    async def test_pending_unexpired_slot_returns_pending_and_expires_at(self) -> None:
+        async with AsyncSession(self.engine, expire_on_commit=False) as db:
+            slot, _token = await mint_slot(
+                db,
+                workflow_id=self.workflow.id,
+                node=NODE,
+                created_by_user_id=self.minter.id,
+                mint_source="canvas",
+            )
+            await db.commit()
+            slot_id = slot.id
+
+        result = await self._poll(slot_id, self.minter)
+        self.assertEqual(result["status"], "pending")
+        self.assertIsNone(result["run_id"])
+        self.assertIsNone(result["run"])
+        self.assertIsNotNone(result.get("expires_at"))
+
+    async def test_pending_expired_slot_returns_derived_expired_status(self) -> None:
+        async with AsyncSession(self.engine, expire_on_commit=False) as db:
+            slot, _token = await mint_slot(
+                db,
+                workflow_id=self.workflow.id,
+                node=NODE,
+                created_by_user_id=self.minter.id,
+                mint_source="canvas",
+            )
+            slot.expires_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+            await db.commit()
+            slot_id = slot.id
+
+        result = await self._poll(slot_id, self.minter)
+        self.assertEqual(result["status"], "expired")
+        self.assertIsNone(result["run_id"])
+        self.assertIsNone(result["run"])
+
+    async def test_consumed_slot_executing_without_run_id_returns_consumed_and_no_run(self) -> None:
+        async with AsyncSession(self.engine, expire_on_commit=False) as db:
+            slot, _token = await mint_slot(
+                db,
+                workflow_id=self.workflow.id,
+                node=NODE,
+                created_by_user_id=self.minter.id,
+                mint_source="canvas",
+            )
+            slot.status = "consumed"
+            slot.run_id = None
+            await db.commit()
+            slot_id = slot.id
+
+        result = await self._poll(slot_id, self.minter)
+        self.assertEqual(result["status"], "consumed")
+        self.assertIsNone(result["run_id"])
+        self.assertIsNone(result["run"])
+
+    async def test_consumed_slot_past_original_expiry_remains_consumed_with_run(self) -> None:
+        slot_id = await self._uploaded_slot(self.minter)
+        async with AsyncSession(self.engine, expire_on_commit=False) as db:
+            slot = await db.get(FileUploadSlot, slot_id)
+            assert slot is not None
+            slot.expires_at = datetime.now(timezone.utc) - timedelta(hours=2)
+            await db.commit()
+
+        result = await self._poll(slot_id, self.minter)
+        self.assertEqual(result["status"], "consumed")
+        self.assertIsNotNone(result["run"])
+        self.assertEqual(result["run"]["outputs"], {"done": "Imported"})
 
 
 if __name__ == "__main__":
