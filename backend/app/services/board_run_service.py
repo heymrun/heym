@@ -1096,6 +1096,28 @@ async def _reindex_column(db, column_id: uuid.UUID) -> None:
         card.position = index
 
 
+async def _settle_card_if_idle(db, card: BoardCard) -> None:
+    """When a card is moved out of auto-advance or cascade ends without a chain, settle its
+    status to success if no runs are currently active on it. Never overwrites 'failed'
+    produced by dead-run cleanup."""
+    if card.run_status != "running":
+        return
+    blocking = await blocking_card_runs(db, card.id)
+    if blocking:
+        return
+    refresh_fn = getattr(db, "refresh", None)
+    if refresh_fn is not None:
+        try:
+            await refresh_fn(card)
+        except (ObjectDeletedError, Exception):
+            return
+    if card.run_status == "running":
+        card.run_status = "success"
+        await db.commit()
+    elif card.run_status == "failed":
+        await db.commit()
+
+
 async def _auto_advance(
     *,
     card_id: uuid.UUID,
@@ -1122,19 +1144,29 @@ async def _auto_advance(
             if not enabled:
                 # The board keeps cards where people put them: settle a card a caller
                 # flipped to running for the cascade, and move nothing.
-                settled = await db.get(BoardCard, card_id)
-                if settled is not None and settled.run_status == "running":
-                    settled.run_status = "success"
-                    await db.commit()
+                try:
+                    settled = await db.get(
+                        BoardCard, card_id, with_for_update=True, populate_existing=True
+                    )
+                except ObjectDeletedError:
+                    return
+                if settled is not None:
+                    await _settle_card_if_idle(db, settled)
                 return
-            moved = await db.get(BoardCard, card_id)
-            if moved is None:
+            try:
+                card = await db.get(
+                    BoardCard, card_id, with_for_update=True, populate_existing=True
+                )
+            except ObjectDeletedError:
                 return
-            if moved.column_id != from_column_id:
+            if card is None:
+                return
+            if card.column_id != from_column_id:
                 # A person moved the card while this chain ran: it stays where they put
                 # it. Advancing from the old column would pull it back into the cascade.
-                # Its status is left alone: this chain already settled it, and "running"
-                # now belongs to the chain its new column started.
+                # If the move did not start another chain (or moved to a chain-less column),
+                # settle the card so it does not stay stuck in 'running'.
+                await _settle_card_if_idle(db, card)
                 return
             columns = (
                 (
@@ -1149,10 +1181,12 @@ async def _auto_advance(
             )
             ids = [c.id for c in columns]
             if from_column_id not in ids:
+                await _settle_card_if_idle(db, card)
                 return
             from_index = ids.index(from_column_id)
             if not ignore_gate and from_index < GATE_COLUMN_INDEX:
                 # Leftmost + its right neighbor: run, then wait for the human.
+                await _settle_card_if_idle(db, card)
                 return
             prev_name = columns[from_index].name
             current_column_id = from_column_id
@@ -1166,6 +1200,8 @@ async def _auto_advance(
                 if card is None or card.column_id != current_column_id:
                     # A person moved or deleted the card while this cascade ran: it stays
                     # where they put it. Advancing further would pull it back into the cascade.
+                    if card is not None:
+                        await _settle_card_if_idle(db, card)
                     return
                 old_column_id = card.column_id
                 card.column_id = target.id
@@ -1228,13 +1264,8 @@ async def _auto_advance(
                 )
             except ObjectDeletedError:
                 return
-            if (
-                settled is not None
-                and settled.column_id == current_column_id
-                and settled.run_status == "running"
-            ):
-                settled.run_status = "success"
-                await db.commit()
+            if settled is not None:
+                await _settle_card_if_idle(db, settled)
     except Exception:  # noqa: BLE001 - auto-advance must never break a completed chain
         logger.exception("Board auto-advance failed for card %s", card_id)
 

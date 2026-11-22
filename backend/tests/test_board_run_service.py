@@ -986,18 +986,43 @@ class TestAutoAdvanceAfterAManualMove(unittest.IsolatedAsyncioTestCase):
         auto_advance_on.scalar_one_or_none.return_value = True
         session.execute = AsyncMock(return_value=auto_advance_on)
 
-        await board_run_service._auto_advance(
-            card_id=card.id,
-            board_id=uuid.uuid4(),
-            from_column_id=development,
-            actor_user_id=None,
-            session_factory=lambda: session,
-        )
+        with patch.object(
+            board_run_service, "blocking_card_runs", AsyncMock(return_value=[MagicMock()])
+        ):
+            await board_run_service._auto_advance(
+                card_id=card.id,
+                board_id=uuid.uuid4(),
+                from_column_id=development,
+                actor_user_id=None,
+                session_factory=lambda: session,
+            )
 
         self.assertEqual(card.column_id, review)
         self.assertEqual(card.run_status, "running")
         self.assertEqual(session.added, [])
-        session.execute.assert_awaited_once()  # only the auto-advance setting was read
+
+    async def test_a_card_moved_away_without_active_chain_settles_to_success(self) -> None:
+        from app.db.models import BoardCard
+
+        development, review = uuid.uuid4(), uuid.uuid4()
+        card = SimpleNamespace(id=uuid.uuid4(), column_id=review, run_status="running")
+        session = _FakeSession({(BoardCard.__name__, card.id): card})
+        auto_advance_on = MagicMock()
+        auto_advance_on.scalar_one_or_none.return_value = True
+        session.execute = AsyncMock(return_value=auto_advance_on)
+
+        with patch.object(board_run_service, "blocking_card_runs", AsyncMock(return_value=[])):
+            await board_run_service._auto_advance(
+                card_id=card.id,
+                board_id=uuid.uuid4(),
+                from_column_id=development,
+                actor_user_id=None,
+                session_factory=lambda: session,
+            )
+
+        self.assertEqual(card.column_id, review)
+        self.assertEqual(card.run_status, "success")
+        session.commit.assert_awaited()
 
     async def test_card_moved_during_empty_column_cascade_is_not_advanced_further(self) -> None:
         from app.db.models import BoardCard

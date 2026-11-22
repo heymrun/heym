@@ -117,18 +117,18 @@ class ConcurrentEnqueueRealPostgresTests(_RealBoardFixture):
     async def test_concurrent_enqueue_only_one_chain_starts(self) -> None:
         async def _attempt() -> str:
             async with async_session_maker() as db:
-                with patch.object(board_run_service, "_spawn_chain", MagicMock()):
-                    return await board_run_service.enqueue_card_chain(
-                        db,
-                        card=self.card,
-                        column=self.column,
-                        board=self.board,
-                        move=None,
-                        rerun=True,
-                        actor_user_id=self.user_id,
-                    )
+                return await board_run_service.enqueue_card_chain(
+                    db,
+                    card=self.card,
+                    column=self.column,
+                    board=self.board,
+                    move=None,
+                    rerun=True,
+                    actor_user_id=self.user_id,
+                )
 
-        results = await asyncio.gather(*[_attempt() for _ in range(8)])
+        with patch.object(board_run_service, "_spawn_chain", MagicMock()):
+            results = await asyncio.gather(*[_attempt() for _ in range(8)])
 
         self.assertEqual(results.count(board_run_service.ENQUEUE_STARTED), 1)
         self.assertEqual(results.count(board_run_service.ENQUEUE_BLOCKED), 7)
