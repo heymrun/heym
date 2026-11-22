@@ -78,6 +78,10 @@ def parse_curl(
             i += 1
             method = rendered(tokens[i]).upper()
             explicit_method = True
+        elif token.startswith("-X") and len(token) > 2:
+            # curl reads `-XDELETE` as `-X DELETE`, as Elasticsearch's docs write it.
+            method = rendered(token[2:]).upper()
+            explicit_method = True
         elif token in ("-G", "--get"):
             get_option = True
         elif token in ("-H", "--header") and i + 1 < len(tokens):
