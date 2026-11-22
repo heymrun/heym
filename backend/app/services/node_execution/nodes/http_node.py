@@ -12,6 +12,9 @@ from app.services.node_execution.base import NodeExecutionContext
 # What a redirect to another scheme, host or port still carries from the command's headers.
 # Everything else (-H, -b, -u, a credential) stays with the origin the command named.
 _CROSS_ORIGIN_HEADERS = frozenset({"accept", "content-type", "user-agent"})
+# Set by httpx for each hop from its real body and URL: a 302 that turns a POST into a GET
+# has no body, so the command's Content-Length must never be copied onto it.
+_HOP_HEADERS = frozenset({"content-length", "transfer-encoding", "host"})
 _MAX_REDIRECTS = 20
 
 
@@ -77,14 +80,14 @@ def _send_following_redirects(
             return response
         if trusted or _same_origin(first, next_request.url):
             for name, value in headers.items():
-                if name.lower() != "cookie":
+                if name.lower() != "cookie" and name.lower() not in _HOP_HEADERS:
                     next_request.headers[name] = value
             cookie = _cookie_header(next_request.url, command_cookie)
             if cookie:
                 next_request.headers["Cookie"] = cookie
         else:
             for name in headers:
-                if name.lower() not in _CROSS_ORIGIN_HEADERS:
+                if name.lower() not in _CROSS_ORIGIN_HEADERS | _HOP_HEADERS:
                     next_request.headers.pop(name, None)
         response.close()
         response = client.send(next_request, follow_redirects=False)

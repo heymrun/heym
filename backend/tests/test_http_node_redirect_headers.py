@@ -148,6 +148,30 @@ class RedirectHeaderTests(unittest.TestCase):
             self.assertIn(name, second.headers)
         self.assertEqual(second.headers["x-api-key"], "k1")
 
+    def test_a_302_post_with_a_content_length_header_follows_as_a_get(self) -> None:
+        # The command's Content-Length must not be copied onto the body-less GET.
+        for command in (
+            "curl -L -X POST -H 'Content-Length: 2' -d '{}' https://api.example.com/save",
+            "curl --location-trusted -X POST -H 'Content-Length: 2' -d '{}' "
+            "https://api.example.com/save",
+        ):
+            with self.subTest(command=command):
+                second = _run(command, [_redirect("/saved")])[1]
+
+                self.assertEqual(second.method, "GET")
+                self.assertEqual(second.content, b"")
+                self.assertNotIn("content-length", second.headers)
+
+    def test_a_307_with_a_content_length_header_keeps_its_body_on_another_origin(self) -> None:
+        second = _run(
+            "curl -L -H 'Content-Length: 3' -d 'a=1' https://api.example.com/upload",
+            [_redirect("https://other.example.net/upload", status=307)],
+        )[1]
+
+        self.assertEqual(second.method, "POST")
+        self.assertEqual(second.content, b"a=1")
+        self.assertEqual(second.headers["content-length"], "3")
+
     def test_a_307_keeps_the_method_and_body_on_another_origin(self) -> None:
         second = _run(
             "curl -sL https://api.example.com/upload -d 'a=1'",
