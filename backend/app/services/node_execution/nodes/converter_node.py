@@ -74,8 +74,9 @@ def _coerce_rows(value: object) -> list:
             return []
         try:
             value = json.loads(stripped)
-        except (ValueError, TypeError):
-            return []
+        except ValueError as exc:
+            # Text that is not JSON (NDJSON, a trailing comma) has rows the CSV would lose.
+            raise ValueError(f"Converter node: invalid JSON input: {exc}") from exc
     if isinstance(value, dict):
         return [value]
     if isinstance(value, list):

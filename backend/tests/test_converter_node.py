@@ -291,6 +291,13 @@ class JsonToCsvTests(unittest.TestCase):
 
         self.assertEqual(output["result"], "")
 
+    def test_text_that_is_not_json_fails_instead_of_an_empty_csv(self) -> None:
+        # NDJSON, as export APIs return it, and a trailing comma lost every row.
+        for text in ('{"a": 1}\n{"a": 2}', '[{"a": 1},]'):
+            with self.subTest(text=text):
+                with self.assertRaisesRegex(ValueError, "invalid JSON input"):
+                    converter_node.execute(_ctx({"conversion": "jsonToCsv"}, text))
+
 
 class JsonToCsvInternalTests(unittest.TestCase):
     def test_infer_fieldnames_preserves_order_and_skips_non_dicts(self) -> None:
