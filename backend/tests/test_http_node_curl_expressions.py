@@ -324,5 +324,70 @@ class HttpNodeCurlDataUrlencodeTests(unittest.TestCase):
         self.assertEqual(request.content, b"a%20b&c%2Bd")
 
 
+class HttpNodeCurlProxyOptionTests(unittest.TestCase):
+    """-x/--proxy takes a URL; it must never become the request URL."""
+
+    def test_a_proxy_after_the_url_does_not_replace_it(self) -> None:
+        for option in ("-x", "--proxy", "--preproxy"):
+            with self.subTest(option=option):
+                request = _run_curl(
+                    "curl https://api.example.com/v1/me -H 'Authorization: Bearer t' "
+                    f"{option} http://proxy.local:3128"
+                )
+
+                self.assertEqual(str(request.url), "https://api.example.com/v1/me")
+                self.assertEqual(request.headers["authorization"], "Bearer t")
+
+    def test_a_proxy_before_the_url_is_skipped_too(self) -> None:
+        for option in ("-x", "--proxy1.0"):
+            with self.subTest(option=option):
+                request = _run_curl(
+                    f"curl {option} http://proxy.local:3128 https://api.example.com/v1/me"
+                )
+
+                self.assertEqual(str(request.url), "https://api.example.com/v1/me")
+
+    def test_a_proxy_is_never_the_url_when_the_url_has_no_scheme(self) -> None:
+        # The fallback scan for an http(s) token used to pick the proxy value.
+        for option in ("-x", "--proxy1.0"):
+            with self.subTest(option=option):
+                parsed = WorkflowExecutor(nodes=[], edges=[]).parse_curl(
+                    f"curl {option} http://proxy.example.com:3128 example.com/v1/me"
+                )
+
+                self.assertNotIn("proxy.example.com", parsed[1])
+
+
+class HttpNodeCurlHeadOptionTests(unittest.TestCase):
+    """-I/--head asks for the headers only, as a HEAD request."""
+
+    def test_head_option_sends_head(self) -> None:
+        for option in ("-I", "--head"):
+            with self.subTest(option=option):
+                request = _run_curl(f"curl {option} https://example.com/file.zip")
+
+                self.assertEqual(request.method, "HEAD")
+
+    def test_an_explicit_method_is_kept(self) -> None:
+        request = _run_curl("curl -I -X GET https://example.com/file.zip")
+
+        self.assertEqual(request.method, "GET")
+
+    def test_head_with_data_is_refused(self) -> None:
+        # curl refuses -I with a body; the node sent a HEAD with one.
+        for data in ("-d a=1", "--json '{}'", "--data-urlencode q=x"):
+            with self.subTest(data=data):
+                with self.assertRaisesRegex(ValueError, "cannot send data"):
+                    WorkflowExecutor(nodes=[], edges=[]).parse_curl(
+                        f"curl -I {data} https://example.com/items"
+                    )
+
+    def test_head_with_get_data_sends_a_query(self) -> None:
+        request = _run_curl("curl -I -G -d q=x https://example.com/items")
+
+        self.assertEqual(request.method, "HEAD")
+        self.assertEqual(str(request.url), "https://example.com/items?q=x")
+
+
 if __name__ == "__main__":
     unittest.main()

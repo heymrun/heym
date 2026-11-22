@@ -165,7 +165,9 @@ class TestSupabaseService(unittest.TestCase):
         params = _params_to_dict(mock_request.call_args[1]["params"])
         self.assertEqual(params["deleted_at"], "is.null")
 
-    def test_select_rows_quotes_string_filters_for_postgrest(self) -> None:
+    def test_select_rows_sends_top_level_string_filters_verbatim(self) -> None:
+        # PostgREST removes double quotes only inside in-lists and or/and groups; a
+        # top-level eq."alice.smith@example.com" compares with the quotes and matches nothing.
         svc = self._make_service()
         mock_response = MagicMock()
         mock_response.is_success = True
@@ -180,10 +182,10 @@ class TestSupabaseService(unittest.TestCase):
                 },
             )
         params = _params_to_dict(mock_request.call_args[1]["params"])
-        self.assertEqual(params["email"], 'eq."alice.smith@example.com"')
-        self.assertEqual(params["display_name"], 'eq."Alice \\"Admin\\", Inc."')
+        self.assertEqual(params["email"], "eq.alice.smith@example.com")
+        self.assertEqual(params["display_name"], 'eq.Alice "Admin", Inc.')
 
-    def test_select_rows_quotes_hyphenated_string_filters_for_postgrest(self) -> None:
+    def test_select_rows_quotes_hyphenated_values_only_inside_in_lists(self) -> None:
         svc = self._make_service()
         mock_response = MagicMock()
         mock_response.is_success = True
@@ -198,7 +200,7 @@ class TestSupabaseService(unittest.TestCase):
                 },
             )
         params = _params_to_dict(mock_request.call_args[1]["params"])
-        self.assertEqual(params["external_id"], 'eq."user-123"')
+        self.assertEqual(params["external_id"], "eq.user-123")
         self.assertEqual(params["status"], 'in.("trial-user",active)')
 
     def test_select_rows_supports_operator_filters(self) -> None:
@@ -219,7 +221,7 @@ class TestSupabaseService(unittest.TestCase):
         params = _params_to_dict(mock_request.call_args[1]["params"])
         self.assertEqual(params["score"], "gte.10")
         self.assertEqual(params["status"], "in.(active,paused)")
-        self.assertEqual(params["email"], 'ilike."*@example.com"')
+        self.assertEqual(params["email"], "ilike.*@example.com")
 
     def test_select_rows_supports_logical_groups(self) -> None:
         svc = self._make_service()
@@ -242,6 +244,68 @@ class TestSupabaseService(unittest.TestCase):
             params["or"],
             "(status.eq.active,and(status.eq.pending,score.gte.5))",
         )
+
+    def test_full_text_filters_keep_their_quotes(self) -> None:
+        # websearch_to_tsquery reads wfts."report weekly" as a phrase; without the quotes it
+        # matches the words in any order, so update and delete would touch more rows.
+        from app.services.supabase_service import SupabaseService
+
+        for operator, value, expected in (
+            ("wfts", "report weekly", 'wfts."report weekly"'),
+            ("phfts", "report weekly", 'phfts."report weekly"'),
+            ("plfts", "a.b", 'plfts."a.b"'),
+            ("fts", "report", "fts.report"),
+        ):
+            with self.subTest(operator=operator):
+                self.assertEqual(
+                    SupabaseService._compile_filter_params({"title": {operator: value}}),
+                    [("title", expected)],
+                )
+
+    def test_select_rows_keeps_quotes_inside_logical_groups(self) -> None:
+        svc = self._make_service()
+        mock_response = MagicMock()
+        mock_response.is_success = True
+        mock_response.headers = {}
+        mock_response.json.return_value = []
+        with patch("httpx.request", return_value=mock_response) as mock_request:
+            svc.select_rows(
+                "users",
+                filters={
+                    "or": [{"email": "a.b@example.com"}, {"name": "John Smith"}],
+                    "team": "core-team",
+                },
+            )
+        params = _params_to_dict(mock_request.call_args[1]["params"])
+        self.assertEqual(params["or"], '(email.eq."a.b@example.com",name.eq."John Smith")')
+        self.assertEqual(params["team"], "eq.core-team")
+
+    def test_select_rows_sends_an_empty_top_level_string_as_empty(self) -> None:
+        svc = self._make_service()
+        mock_response = MagicMock()
+        mock_response.is_success = True
+        mock_response.headers = {}
+        mock_response.json.return_value = []
+        with patch("httpx.request", return_value=mock_response) as mock_request:
+            svc.select_rows("users", filters={"nickname": ""})
+        params = _params_to_dict(mock_request.call_args[1]["params"])
+        self.assertEqual(params["nickname"], "eq.")
+
+    def test_update_and_delete_send_top_level_string_filters_verbatim(self) -> None:
+        # An update or delete filtered on a quoted value matched no row and reported
+        # success with count 0.
+        svc = self._make_service()
+        mock_response = MagicMock()
+        mock_response.is_success = True
+        mock_response.headers = {}
+        mock_response.json.return_value = []
+        with patch("httpx.request", return_value=mock_response) as mock_request:
+            svc.update_rows("users", {"plan": "pro"}, filters={"email": "a.b@example.com"})
+            svc.delete_rows("users", filters={"name": {"neq": "John Smith"}})
+        update_params = _params_to_dict(mock_request.call_args_list[0][1]["params"])
+        delete_params = _params_to_dict(mock_request.call_args_list[1][1]["params"])
+        self.assertEqual(update_params["email"], "eq.a.b@example.com")
+        self.assertEqual(delete_params["name"], "neq.John Smith")
 
     def test_select_rows_rejects_unsupported_filter_operator(self) -> None:
         svc = self._make_service()
