@@ -6,6 +6,7 @@ from unittest.mock import patch
 from app.services import ocr_service, speech_to_text_service
 from app.services.node_execution.base import NodeExecutionContext
 from app.services.node_execution.nodes import converter_node
+from app.services.workflow_dsl_prompt import WORKFLOW_DSL_SYSTEM_PROMPT
 
 _FILE_UUID = uuid.UUID("11111111-2222-3333-4444-555555555555")
 _NEW_FILE_UUID = uuid.UUID("22222222-3333-4444-5555-666666666666")
@@ -290,6 +291,36 @@ class JsonToCsvTests(unittest.TestCase):
         output = converter_node.execute(_ctx({"conversion": "jsonToCsv"}, ""))
 
         self.assertEqual(output["result"], "")
+
+    def test_a_leading_bom_is_stripped_before_parsing(self) -> None:
+        output = converter_node.execute(_ctx({"conversion": "jsonToCsv"}, '\ufeff[{"a": 1}]'))
+
+        self.assertEqual(output["result"], "a\n1")
+
+    def test_a_json_scalar_fails_instead_of_an_empty_csv(self) -> None:
+        for value in ('"text"', "123", "true", 123, True, "plain words"):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    converter_node.execute(_ctx({"conversion": "jsonToCsv"}, value))
+
+    def test_the_dsl_says_bad_json_text_fails_the_run(self) -> None:
+        line = next(
+            line for line in WORKFLOW_DSL_SYSTEM_PROMPT.splitlines() if "`jsonToCsv` source" in line
+        )
+
+        self.assertIn("fails the run", line)
+
+    def test_no_source_still_gives_an_empty_csv(self) -> None:
+        output = converter_node.execute(_ctx({"conversion": "jsonToCsv"}, None))
+
+        self.assertEqual(output["result"], "")
+
+    def test_text_that_is_not_json_fails_instead_of_an_empty_csv(self) -> None:
+        # NDJSON, as export APIs return it, and a trailing comma lost every row.
+        for text in ('{"a": 1}\n{"a": 2}', '[{"a": 1},]'):
+            with self.subTest(text=text):
+                with self.assertRaisesRegex(ValueError, "invalid JSON input"):
+                    converter_node.execute(_ctx({"conversion": "jsonToCsv"}, text))
 
 
 class JsonToCsvInternalTests(unittest.TestCase):

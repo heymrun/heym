@@ -47,7 +47,7 @@ The **HTTP** node makes HTTP requests using cURL syntax. It can be a workflow st
 }
 ```
 
-Use cURL syntax with `-H` for headers, `-d` for POST body, etc. Expressions can be used anywhere in the curl string, including the URL, a header, or a whole header line. A [Header credential](../reference/credentials.md) resolves to `key: value`, so `-H "$credentials.MyApiKey"` sends the complete header:
+Use cURL syntax with `-H` for headers, `-d` for POST body, etc. As in curl, `-XDELETE` is read as `-X DELETE`, and short options combine: `-fsSL` follows redirects and `-sXPOST` is `-s -X POST`. A redirect followed with `-L` to another scheme, host or port carries only the command's `Accept`, `Content-Type` and `User-Agent`; headers from `-H`, `-b`, `-u` or a credential stay with the first origin. A redirect to the first origin keeps them all, including an http to https upgrade on the same host and a redirect that comes back after visiting another origin, and it sends the cookies the server set during the run together with the `-b` cookie. `--location-trusted` follows redirects and sends the command's headers to every host, as curl does; use it only for hosts you trust with those credentials. A 307 or 308 redirect sends the same method and body to the new location, including another origin; 301, 302 and 303 switch a POST to GET without the body. Expressions can be used anywhere in the curl string, including the URL, a header, or a whole header line. A [Header credential](../reference/credentials.md) resolves to `key: value`, so `-H "$credentials.MyApiKey"` sends the complete header:
 
 ```
 curl -X GET "https://api.example.com/search?q=$query.body.text.urlEncode()" -H "$credentials.MyApiKey"

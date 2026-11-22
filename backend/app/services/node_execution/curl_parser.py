@@ -17,6 +17,28 @@ _HEADER_OPTIONS = {
     "--referer": "Referer",
 }
 
+# curl's short options, which it reads combined: `-fsSL` is `-f -s -S -L`, and in `-sXPOST` the
+# value-taking `-X` takes the rest of the token (`-s -X POST`), or the next token when none is left.
+_NO_VALUE_SHORT_OPTIONS = frozenset("012346aBfgGhiIjJklLMnNOpqRsSvVZ#")
+_VALUE_SHORT_OPTIONS = frozenset("AbcCdDeEFHKmoPQrtTuUwxXyYz")
+
+
+def _split_short_options(token: str) -> list[str] | None:
+    """A short option cluster as the separate tokens curl reads, or None if it is not one."""
+    if len(token) < 3 or token[0] != "-" or token[1] == "-":
+        return None
+    parts: list[str] = []
+    for index, letter in enumerate(token[1:], start=1):
+        if letter in _VALUE_SHORT_OPTIONS:
+            parts.append(f"-{letter}")
+            if index + 1 < len(token):
+                parts.append(token[index + 1 :])
+            return parts
+        if letter not in _NO_VALUE_SHORT_OPTIONS:
+            return None
+        parts.append(f"-{letter}")
+    return parts
+
 
 def _url_encoded(value: str) -> str:
     """A --data-urlencode piece as curl sends it: the content after the first "=" encoded.
@@ -33,8 +55,11 @@ def parse_curl(
     executor: Any,
     curl_command: str,
     resolve: Callable[[str], str] | None = None,
-) -> tuple[str, str, dict[str, str], str | None, bool]:
+) -> tuple[str, str, dict[str, str], str | None, bool, bool]:
     """Parse a curl DSL command into its request parts.
+
+    Returns the method, URL, headers, body, whether to follow redirects (`-L`), and whether
+    `--location-trusted` sends the command's headers to every redirect target.
 
     ``resolve`` renders ``$…`` spans in every token except the ``-d`` payload,
     which callers render themselves so JSON bodies keep their types. It must be
@@ -43,7 +68,7 @@ def parse_curl(
     so parsing the raw template would drop the header and lose the URL.
     """
     if not curl_command:
-        return "GET", "", {}, None, False
+        return "GET", "", {}, None, False, False
     normalized_cmd = curl_command.replace("\\\n", " ").replace("\\\r\n", " ")
     masked_cmd, masked_expressions = executor._mask_curl_expressions(normalized_cmd)
     tokens = [
@@ -63,6 +88,7 @@ def parse_curl(
     data = None
     url = ""
     follow_redirects = False
+    location_trusted = False
     basic_user: str | None = None
     json_option = False
     data_indexes: set[int] = set()
@@ -74,6 +100,11 @@ def parse_curl(
     i = 0
     while i < len(tokens):
         token = tokens[i]
+        split = _split_short_options(token)
+        if split is not None:
+            # Read in option position only, so a value such as `-d -5` is never split.
+            tokens[i : i + 1] = split
+            continue
         if token in ("-X", "--request") and i + 1 < len(tokens):
             i += 1
             method = rendered(tokens[i]).upper()
@@ -101,6 +132,9 @@ def parse_curl(
             head_option = True
         elif token in ("-L", "--location"):
             follow_redirects = True
+        elif token == "--location-trusted":
+            # As curl does: follow, and send -H, -u, -b and credentials to every host.
+            follow_redirects = location_trusted = True
         elif token in ("-u", "--user") and i + 1 < len(tokens):
             # How Stripe, Twilio and Mailgun document their APIs: `-u sk_test_123:`.
             i += 1
@@ -178,4 +212,4 @@ def parse_curl(
         user_pass = basic_user if ":" in basic_user else f"{basic_user}:"
         headers["Authorization"] = "Basic " + base64.b64encode(user_pass.encode()).decode()
 
-    return method, url, headers, data, follow_redirects
+    return method, url, headers, data, follow_redirects, location_trusted

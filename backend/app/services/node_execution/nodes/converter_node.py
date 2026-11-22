@@ -69,18 +69,23 @@ def _dedupe_headers(header: list[str]) -> list[str]:
 def _coerce_rows(value: object) -> list:
     """Normalize an arbitrary value into a list of rows for CSV building."""
     if isinstance(value, str):
-        stripped = value.strip()
+        # A leading UTF-8 BOM, as csvToJson strips it, is not part of the JSON.
+        stripped = value.lstrip("\ufeff").strip()
         if not stripped:
             return []
         try:
             value = json.loads(stripped)
-        except (ValueError, TypeError):
-            return []
+        except ValueError as exc:
+            # Text that is not JSON (NDJSON, a trailing comma) has rows the CSV would lose.
+            raise ValueError(f"Converter node: invalid JSON input: {exc}") from exc
     if isinstance(value, dict):
         return [value]
     if isinstance(value, list):
         return list(value)
-    return []
+    if value is None:
+        return []
+    # A JSON scalar ("text", 123, true) has no rows: an empty CSV would hide that.
+    raise ValueError("Converter node: JSON to CSV requires an array of rows or an object")
 
 
 def _normalize_columns(columns_raw: object) -> list[str] | None:

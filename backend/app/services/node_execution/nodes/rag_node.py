@@ -232,13 +232,18 @@ def execute(ctx: NodeExecutionContext) -> object:
         search_limit = int(node_data.get("searchLimit", 5))
 
         metadata_filter_json = node_data.get("metadataFilters", "{}")
-        try:
-            if isinstance(metadata_filter_json, str):
-                metadata_filter = json.loads(metadata_filter_json) if metadata_filter_json else None
-            else:
-                metadata_filter = metadata_filter_json or None
-        except Exception:
-            metadata_filter = None
+        if isinstance(metadata_filter_json, str):
+            filter_text = metadata_filter_json.strip()
+            try:
+                metadata_filter = json.loads(filter_text) if filter_text else None
+            except json.JSONDecodeError as exc:
+                # Searching without the filter would return documents it is there to exclude.
+                raise ValueError(f"metadataFilters is not valid JSON: {exc}") from exc
+        else:
+            metadata_filter = metadata_filter_json or None
+        if metadata_filter is not None and not isinstance(metadata_filter, dict):
+            # A list or a value would search the whole collection as well.
+            raise ValueError("metadataFilters must be a JSON object")
         if metadata_filter is not None:
             metadata_filter = _resolve_filter_expressions(self, metadata_filter, inputs, node_id)
 

@@ -6876,7 +6876,7 @@ class WorkflowExecutor(WorkflowBranchRoutingMixin):
         self,
         curl_command: str,
         resolve: Callable[[str], str] | None = None,
-    ) -> tuple[str, str, dict[str, str], str | None, bool]:
+    ) -> tuple[str, str, dict[str, str], str | None, bool, bool]:
         """Parse a curl DSL command into its request parts (see `curl_parser.parse_curl`)."""
         from app.services.node_execution.curl_parser import parse_curl
 

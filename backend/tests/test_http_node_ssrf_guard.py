@@ -320,7 +320,7 @@ class HttpNodeIntegrationTests(unittest.TestCase):
     def _ctx(self, curl: str):
         executor = MagicMock()
         executor.evaluate_message_template.side_effect = lambda text, *_a, **_k: text
-        executor.parse_curl.return_value = ("GET", curl, {}, None, False)
+        executor.parse_curl.return_value = ("GET", curl, {}, None, False, False)
         ctx = MagicMock()
         ctx.executor = executor
         ctx.node_id = "n1"

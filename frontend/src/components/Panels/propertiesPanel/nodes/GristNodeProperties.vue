@@ -229,7 +229,7 @@ const {
         <div class="flex items-center justify-between">
           <p class="text-xs text-muted-foreground">
             <template v-if="selectedNode.data.gristOperation === 'updateRecords'">
-              Array of objects with "id" and "fields" properties
+              Array of {"id", "fields": {...}} objects, or flat {"id", "Column": value} objects
             </template>
             <template v-else>
               Array of record objects (batch create)
