@@ -2708,7 +2708,7 @@ The last node in the iteration body MUST connect BACK to the loop node's `loop` 
   - `gristRecordsData`: JSON array of records for batch operations - **use column IDs (underscore format), not labels** (supports expressions). For `updateRecords`, each record is `{"id": 1, "fields": {"Status": "Done"}}` or the flat `{"id": 1, "Status": "Done"}`, where every key but `id` is a column
   - `gristFilter`: Filter JSON using Grist filter syntax {"Column_ID": [allowed_values]} - **use column IDs** (for getRecords)
   - `gristSort`: Sort expression like "Column_ID,-Created_At" - **use column IDs** (prefix with - for descending)
-  - `gristLimit`: Maximum records to return (default: 100, for getRecords)
+  - `gristLimit`: Maximum records to return (for getRecords). Omitted returns every record
   - `gristRecordIds`: JSON array of record IDs for batch delete
 
 **SETUP**: Requires a Grist credential with API key and server URL.

@@ -23,7 +23,7 @@ The **Grist** node reads, writes, and manages data in Grist spreadsheets. Use it
 | `gristRecordsData` | JSON string | Array of records for batch ops. For `updateRecords`, each record is `{"id": 1, "fields": {"Status": "Done"}}` or the flat `{"id": 1, "Status": "Done"}`, where every key but `id` is a column |
 | `gristFilter` | JSON string | Filter: `{"Column_ID": [values]}` |
 | `gristSort` | string | Sort: `Column_ID` or `-Column_ID` (descending) |
-| `gristLimit` | number | Max records (default: 100) |
+| `gristLimit` | number | Max records. A node added from the canvas starts at `100`; empty returns every record |
 
 ## Column IDs vs Labels
 
