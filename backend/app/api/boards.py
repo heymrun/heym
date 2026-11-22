@@ -16,6 +16,7 @@ from fastapi import (
 )
 from pydantic import BaseModel
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
@@ -849,19 +850,44 @@ async def create_card(
     updates = await _field_updates(db, board, request)
     if updates:
         card.card_metadata = merge_metadata({}, updates=updates)
+    target_column_id = column.id
     db.add(card)
-    await db.flush()
-    await _place_card(db, card, column.id, request.position)
-    db.add(
-        BoardCardActivity(
-            card_id=card.id,
-            kind="event",
-            author_type="system",
-            content=f"Card created in {column.name}",
-            data={"column_id": str(column.id)},
+    try:
+        await db.flush()
+        await _place_card(db, card, target_column_id, request.position)
+        db.add(
+            BoardCardActivity(
+                card_id=card.id,
+                kind="event",
+                author_type="system",
+                content=f"Card created in {column.name}",
+                data={"column_id": str(target_column_id)},
+            )
         )
-    )
-    await db.commit()
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        cause = getattr(exc.orig, "__cause__", None)
+        constraint = getattr(cause, "constraint_name", None)
+        is_column_fk = (
+            constraint == "board_cards_column_id_fkey"
+            or "board_cards_column_id_fkey" in str(exc)
+            or "column_id" in str(exc)
+        )
+        if is_column_fk:
+            column_exists = (
+                await db.execute(
+                    select(BoardColumn.id).where(
+                        BoardColumn.id == target_column_id, BoardColumn.board_id == board_id
+                    )
+                )
+            ).scalar_one_or_none()
+            if column_exists is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Column not found",
+                )
+        raise
     await db.refresh(card)
     audit(
         action="board.card_create",
