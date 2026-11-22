@@ -2888,7 +2888,6 @@ When creating or updating records in Grist, you MUST use **column IDs** (interna
   - `gsSheetName`: Sheet tab name, e.g., "Sheet1" (supports expressions; not required for getSheetInfo)
   - `gsStartRow` / `gsMaxRows` / `gsHasHeader`: for `readRange` — 1-based start row, max rows (0 = all), and whether row 1 is a header. When `gsHasHeader` is false, each row object uses **column letters** (A, B, …) as keys (not "1","2"). Supports expressions.
   - `gsUpdateRow`: for `updateRange` — 1-based sheet row where values are written (columns A–Z); if omitted, `gsStartRow` is used. Single values API PUT, not spreadsheets.batchUpdate. Supports expressions.
-  - `gsRange`: A1 notation range, e.g., "A1:D10" (legacy examples; read uses start/max/header fields in the product)
   - `gsKeepHeader`: boolean, optional for `clearRange` — when true, row 1 is preserved and rows below are cleared (columns A–Z)
   - `gsValues`: JSON 2D array of values, e.g., `[["Name","Age"],["Alice",30]]` (required for appendRows, updateRange). Put one expression per cell, e.g. `[["$mail.email.subject", "$mail.email.text"]]`: each cell is resolved on its own, so quotes and line breaks in values cannot break the JSON
   - `gsAppendPlacement`: optional `"append"` | `"prepend"` for appendRows — prepend inserts under row 1 via the Sheets API (batch insert rows + write)
@@ -2907,7 +2906,7 @@ The backend **FRONTEND_URL** env var must be the public app URL (scheme + host);
 
 | Operation | Required Fields | Description |
 |-----------|-----------------|-------------|
-| `readRange` | gsSpreadsheetId, gsSheetName, gsRange | Read cell values from a range |
+| `readRange` | gsSpreadsheetId, gsSheetName, gsStartRow, gsMaxRows, gsHasHeader | Read cell values (columns A–Z) |
 | `appendRows` | gsSpreadsheetId, gsSheetName, gsValues | Append rows after the last row with data |
 | `updateRange` | gsSpreadsheetId, gsSheetName, gsUpdateRow (or gsStartRow), gsValues | Overwrite row(s) from a 1-based row number (A–Z) |
 | `clearRange` | gsSpreadsheetId, gsSheetName | Clear all values in columns A–Z for the tab; optional `gsKeepHeader` keeps row 1 |
@@ -2978,7 +2977,9 @@ Each row object includes **`rowIndex`**: the 1-based sheet row number (useful fo
     "gsOperation": "readRange",
     "gsSpreadsheetId": "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms",
     "gsSheetName": "Sheet1",
-    "gsRange": "A1:C100"
+    "gsStartRow": "1",
+    "gsMaxRows": "100",
+    "gsHasHeader": true
   }
 }
 ```
