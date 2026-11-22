@@ -50,10 +50,11 @@ def row_cells(header: list, cells: list, width: int = 0) -> tuple[dict, dict]:
 
     The first dict is keyed as it always was: each title holds its column's cell, so a
     repeated title holds the last such column and blank titles share ``""``. The second holds
-    the cells that lose out that way (an earlier column with a repeated or blank title) and
-    those past the header row's end (Sheets drops trailing empty header cells), for at least
-    ``width`` columns, keyed by the column letter, or ``B_2``, ``B_3``, … when that key is
-    taken. Callers put it after every key they returned before, so those keep their value
+    the cells of every blank-titled column (the columns endpoint names those by their letter,
+    and Heym Work saves that name), of an earlier column with a repeated title, and of the
+    columns past the header row's end (Sheets drops trailing empty header cells), for at
+    least ``width`` columns, keyed by the column letter, or ``B_2``, ``B_3``, … when that key
+    is taken. Callers put it after every key they returned before, so those keep their value
     and order.
     """
     titles = [str(title) for title in header]
@@ -61,7 +62,8 @@ def row_cells(header: list, cells: list, width: int = 0) -> tuple[dict, dict]:
     last_column = {title: index for index, title in enumerate(titles)}
     dropped: dict = {}
     for index in range(max(len(titles), len(cells), width)):
-        if index < len(titles) and last_column[titles[index]] == index:
+        title = titles[index] if index < len(titles) else ""
+        if title.strip() and last_column[title] == index:
             continue
         letter = _column_letter_zero_based(index)
         key, suffix = letter, 2

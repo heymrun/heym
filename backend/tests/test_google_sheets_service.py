@@ -123,10 +123,19 @@ class TestReadRange(unittest.TestCase):
                     ("", "vip"),
                     ("Notes", "emailed"),
                     ("rowIndex", 2),
+                    ("B", "vip"),
                     ("C", "called"),
                     ("E", "late"),
                 ],
-                [("Name", "Bob"), ("", ""), ("Notes", ""), ("rowIndex", 3), ("C", ""), ("E", "")],
+                [
+                    ("Name", "Bob"),
+                    ("", ""),
+                    ("Notes", ""),
+                    ("rowIndex", 3),
+                    ("B", ""),
+                    ("C", ""),
+                    ("E", ""),
+                ],
             ],
         )
 
@@ -160,6 +169,21 @@ class TestReadRange(unittest.TestCase):
             WORKFLOW_DSL_SYSTEM_PROMPT,
         ):
             self.assertIn("the cells no title holds", text)
+
+    def test_a_single_blank_title_is_also_keyed_by_its_letter(self) -> None:
+        # The columns endpoint names it "B", and Heym Work saves that name.
+        [row] = self._read([["Name", "", "Email"], ["Ada", "vip", "ada@example.com"]])
+
+        self.assertEqual(
+            list(row.items()),
+            [
+                ("Name", "Ada"),
+                ("", "vip"),
+                ("Email", "ada@example.com"),
+                ("rowIndex", 2),
+                ("B", "vip"),
+            ],
+        )
 
     def test_a_dropped_cell_whose_letter_is_taken_gets_a_suffix(self) -> None:
         [row] = self._read([["A", "A"], ["first", "second"]])

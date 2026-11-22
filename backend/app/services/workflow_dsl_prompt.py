@@ -2998,7 +2998,7 @@ Each row object includes **`rowIndex`**: the 1-based sheet row number (useful fo
 ```
 
 **Accessing Google Sheets Output**:
-- `$readUsers.rows` — array of row objects (for readRange); with header, keys are header names; without header, keys are column letters (A, B, …). Each object has **`rowIndex`** (1-based sheet row). With a header, each title holds its column's cell (a repeated title the last such column, blank titles the key `""`), then, after `rowIndex`, the cells no title holds (an earlier column with a repeated or blank title, a column past the header row's end) keyed by the column letter, or `C_2` when that key is taken.
+- `$readUsers.rows` — array of row objects (for readRange); with header, keys are header names; without header, keys are column letters (A, B, …). Each object has **`rowIndex`** (1-based sheet row). With a header, each title holds its column's cell (a repeated title the last such column, blank titles the key `""`), then, after `rowIndex`, the cells no title holds (every blank-titled column, which also keeps `""`; an earlier column with a repeated title; a column past the header row's end) keyed by the column letter, or `C_2` when that key is taken.
 - `$readUsers.rows[0].Name` — first data row, column Name (header mode)
 - `$readUsers.rows[0].A` — first row, column A (no-header mode)
 - `$readUsers.rows[0].rowIndex` — sheet row number for that row
