@@ -45,6 +45,34 @@ def _column_letter_zero_based(col_index: int) -> str:
     return letters
 
 
+def row_cells(header: list, cells: list, width: int = 0) -> tuple[dict, dict]:
+    """A row's cells by header title, and the cells no title holds.
+
+    The first dict is keyed as it always was: each title holds its column's cell, so a
+    repeated title holds the last such column and blank titles share ``""``. The second holds
+    the cells of every blank-titled column (the columns endpoint names those by their letter,
+    and Heym Work saves that name), of an earlier column with a repeated title, and of the
+    columns past the header row's end (Sheets drops trailing empty header cells), for at
+    least ``width`` columns, keyed by the column letter, or ``B_2``, ``B_3``, … when that key
+    is taken. Callers put it after every key they returned before, so those keep their value
+    and order.
+    """
+    titles = [str(title) for title in header]
+    by_title = {title: (cells[i] if i < len(cells) else "") for i, title in enumerate(titles)}
+    last_column = {title: index for index, title in enumerate(titles)}
+    dropped: dict = {}
+    for index in range(max(len(titles), len(cells), width)):
+        title = titles[index] if index < len(titles) else ""
+        if title.strip() and last_column[title] == index:
+            continue
+        letter = _column_letter_zero_based(index)
+        key, suffix = letter, 2
+        while key in by_title or key in dropped or key == "rowIndex":
+            key, suffix = f"{letter}_{suffix}", suffix + 1
+        dropped[key] = cells[index] if index < len(cells) else ""
+    return by_title, dropped
+
+
 class GoogleSheetsService:
     """Sync Google Sheets API client.
 
@@ -161,16 +189,16 @@ class GoogleSheetsService:
             return {"rows": [], "total": 0, "success": True}
 
         if has_header:
-            headers = [str(h) for h in raw[0]]
             data_raw = (
                 raw[data_offset : data_offset + max_rows] if max_rows > 0 else raw[data_offset:]
             )
+            width = max((len(row) for row in data_raw), default=0)
             rows = []
             for j, row in enumerate(data_raw):
                 raw_index = data_offset + j
                 row_index_1based = raw_index + 1
-                cells = {headers[i]: (row[i] if i < len(row) else "") for i in range(len(headers))}
-                rows.append({**cells, "rowIndex": row_index_1based})
+                cells, dropped = row_cells(raw[0], row, width)
+                rows.append({**cells, "rowIndex": row_index_1based, **dropped})
         else:
             rows = []
             for j, row in enumerate(raw):

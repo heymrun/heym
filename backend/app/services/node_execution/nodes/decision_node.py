@@ -126,7 +126,13 @@ def execute(ctx: NodeExecutionContext) -> object:
             )
             body = build_decision_body(
                 model=str(node_data.get("model") or ""),
-                state=_resolve(self, node_data.get("state"), inputs, node_id),
+                # Unset reads the input, as documented and as the canvas sets it.
+                state=_resolve(
+                    self,
+                    "$input.text" if node_data.get("state") is None else node_data["state"],
+                    inputs,
+                    node_id,
+                ),
                 questions=_resolve_questions(
                     self, node_data.get("questions") or [], inputs, node_id
                 ),

@@ -13,7 +13,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from app.services.google_sheets_service import _column_letter_zero_based
+from app.services.google_sheets_service import _column_letter_zero_based, row_cells
 from app.services.google_triggers.config import SheetsTriggerConfig
 from app.services.google_triggers.events import MOVED, ItemWrite, PollSkippedError, TriggerEvent
 from app.services.google_triggers.fingerprint import Fingerprinter
@@ -38,6 +38,8 @@ class SheetSnapshot:
 
     header: list[str]
     rows: list[SheetRow]
+    # The widest row's cell count, computed once per poll for the row objects.
+    width: int = 0
 
 
 @dataclass(frozen=True)
@@ -69,7 +71,8 @@ def build_snapshot(values: list[list[Any]], has_header: bool) -> SheetSnapshot:
 
     if len(rows) > SHEET_ROW_LIMIT:
         raise PollSkippedError(f"sheet has more than {SHEET_ROW_LIMIT} rows")
-    return SheetSnapshot(header=header, rows=rows)
+    width = max((len(row.cells) for row in rows), default=0)
+    return SheetSnapshot(header=header, rows=rows, width=width)
 
 
 def header_fingerprint(snapshot: SheetSnapshot, fingerprinter: Fingerprinter) -> str:
@@ -112,12 +115,9 @@ def column_name(index: int, snapshot: SheetSnapshot, has_header: bool) -> str:
 def row_object(row: SheetRow, snapshot: SheetSnapshot, has_header: bool) -> dict[str, Any]:
     """A row in the shape the Google Sheets node's readRange returns."""
     if has_header:
-        cells = {
-            title: (row.cells[index] if index < len(row.cells) else "")
-            for index, title in enumerate(snapshot.header)
-        }
-    else:
-        cells = {_column_letter_zero_based(index): value for index, value in enumerate(row.cells)}
+        cells, dropped = row_cells(snapshot.header, row.cells, snapshot.width)
+        return {**cells, "rowIndex": row.row_index, **dropped}
+    cells = {_column_letter_zero_based(index): value for index, value in enumerate(row.cells)}
     return {**cells, "rowIndex": row.row_index}
 
 

@@ -8,9 +8,11 @@ from app.services.google_triggers.events import MOVED, PollSkippedError
 from app.services.google_triggers.fingerprint import Fingerprinter
 from app.services.google_triggers.sheets_source import (
     SHEET_ROW_LIMIT,
+    SheetSnapshot,
     build_snapshot,
     diff_sheet,
     header_fingerprint,
+    row_object,
     sheet_items,
 )
 
@@ -116,6 +118,36 @@ class DiffSheetTests(unittest.TestCase):
         second = header_fingerprint(build_snapshot([["Name", "Mail", "Status"]], True), FP)
         self.assertNotEqual(first, second)
         self.assertEqual(header_fingerprint(build_snapshot([["Ada"]], False), FP), "")
+
+
+class RepeatedAndBlankHeaderTests(unittest.TestCase):
+    """Rows keep every column: the keys they always had, then the other cells by letter."""
+
+    def test_the_other_cells_follow_the_old_keys(self) -> None:
+        header = ["Name", "", "Notes", "Notes"]
+        [change] = _diff([header], [header, ["Ada", "vip", "called", "emailed", "late"]])
+
+        self.assertEqual(
+            list(change.payload["row"].items()),
+            [
+                ("Name", "Ada"),
+                ("", "vip"),
+                ("Notes", "emailed"),
+                ("rowIndex", 2),
+                ("B", "vip"),
+                ("C", "called"),
+                ("E", "late"),
+            ],
+        )
+
+    def test_the_snapshot_width_is_computed_once_and_used_for_every_row(self) -> None:
+        snapshot = build_snapshot([["Name"], ["Ada", "x", "y"], ["Bob"]], True)
+        self.assertEqual(snapshot.width, 3)
+
+        # row_object reads the width from the snapshot instead of rescanning every row.
+        wider = SheetSnapshot(header=snapshot.header, rows=snapshot.rows, width=4)
+        row = row_object(snapshot.rows[1], wider, True)
+        self.assertEqual(list(row), ["Name", "rowIndex", "B", "C", "D"])
 
 
 if __name__ == "__main__":

@@ -101,6 +101,95 @@ class TestReadRange(unittest.TestCase):
         self.assertEqual(result["total"], 2)
         self.assertTrue(result["success"])
 
+    def _read(self, values: list[list[str]]) -> list[dict]:
+        svc = self._make_service()
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"values": values}
+        mock_response.raise_for_status = MagicMock()
+        with patch("httpx.get", return_value=mock_response):
+            return svc.read_range("spreadsheet-id", "Sheet1", has_header=True)["rows"]
+
+    def test_read_range_adds_the_cells_a_title_cannot_hold_after_the_old_keys(self) -> None:
+        # The earlier "Notes" column and the column past the header's end were dropped.
+        rows = self._read(
+            [["Name", "", "Notes", "Notes"], ["Ada", "vip", "called", "emailed", "late"], ["Bob"]]
+        )
+
+        self.assertEqual(
+            [list(row.items()) for row in rows],
+            [
+                [
+                    ("Name", "Ada"),
+                    ("", "vip"),
+                    ("Notes", "emailed"),
+                    ("rowIndex", 2),
+                    ("B", "vip"),
+                    ("C", "called"),
+                    ("E", "late"),
+                ],
+                [
+                    ("Name", "Bob"),
+                    ("", ""),
+                    ("Notes", ""),
+                    ("rowIndex", 3),
+                    ("B", ""),
+                    ("C", ""),
+                    ("E", ""),
+                ],
+            ],
+        )
+
+    def test_every_key_main_returns_keeps_its_value_and_order(self) -> None:
+        def main_row(header: list[str], row: list[str], index: int) -> dict:
+            # read_range on main: one key per title, the last column wins.
+            cells = {header[i]: (row[i] if i < len(row) else "") for i in range(len(header))}
+            return {**cells, "rowIndex": index}
+
+        for header, row in (
+            (["Name", "", "Notes", "Notes"], ["Ada", "vip", "called", "emailed", "late"]),
+            (["", "Email", "", ""], ["x", "a@b.c", "y", "z"]),
+            (["A", "A", "B"], ["1", "2", "3", "4"]),
+            (["Name", "Email"], ["Ada", "ada@example.com"]),
+        ):
+            with self.subTest(header=header):
+                [new] = self._read([header, row])
+                old = main_row(header, row, 2)
+
+                self.assertEqual(list(new.items())[: len(old)], list(old.items()))
+
+    def test_the_docs_and_dsl_describe_the_row_keys(self) -> None:
+        from pathlib import Path
+
+        from app.services.workflow_dsl_prompt import WORKFLOW_DSL_SYSTEM_PROMPT
+
+        docs = Path(__file__).resolve().parents[2] / "frontend/src/docs/content/nodes"
+        for text in (
+            (docs / "google-sheets-node.md").read_text(encoding="utf-8"),
+            (docs / "google-sheets-trigger-node.md").read_text(encoding="utf-8"),
+            WORKFLOW_DSL_SYSTEM_PROMPT,
+        ):
+            self.assertIn("the cells no title holds", text)
+
+    def test_a_single_blank_title_is_also_keyed_by_its_letter(self) -> None:
+        # The columns endpoint names it "B", and Heym Work saves that name.
+        [row] = self._read([["Name", "", "Email"], ["Ada", "vip", "ada@example.com"]])
+
+        self.assertEqual(
+            list(row.items()),
+            [
+                ("Name", "Ada"),
+                ("", "vip"),
+                ("Email", "ada@example.com"),
+                ("rowIndex", 2),
+                ("B", "vip"),
+            ],
+        )
+
+    def test_a_dropped_cell_whose_letter_is_taken_gets_a_suffix(self) -> None:
+        [row] = self._read([["A", "A"], ["first", "second"]])
+
+        self.assertEqual(row, {"A": "second", "rowIndex": 2, "A_2": "first"})
+
     def test_read_range_header_respects_start_row(self) -> None:
         """When has_header=True, row 1 is the header; start_row sets where DATA begins.
 

@@ -82,7 +82,9 @@ def execute(ctx: NodeExecutionContext) -> object:
         start_row = max(1, int(float(_sr_ev or "1")))
     except (ValueError, TypeError):
         start_row = 1
-    _mr_raw = str(node_data.get("gsMaxRows", "100") or "100")
+    # 0, blank or unset means every row, as the editor shows it ("Max rows (0 = all)").
+    _mr_value = node_data.get("gsMaxRows")
+    _mr_raw = "0" if _mr_value is None or str(_mr_value).strip() == "" else str(_mr_value)
     _mr_ev = self.evaluate_nonempty_message_template(_mr_raw, inputs, node_id).strip()
     try:
         max_rows = int(float(_mr_ev or "0"))

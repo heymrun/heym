@@ -95,6 +95,20 @@ class DecisionNodeTests(unittest.TestCase):
         self._run(_base_node(state="$input"))
         self.assertEqual(self.call.call_args.kwargs["body"]["state"], {"ticket": "structured"})
 
+    def test_an_unset_state_reads_the_input_text(self) -> None:
+        # Documented default `$input.text`; a node built without the field sent null.
+        node = _base_node()
+        del node["state"]
+        with mock.patch.object(
+            _FakeExecutor, "_resolve_template", side_effect=lambda t, *_a: f"resolved:{t}"
+        ):
+            with mock.patch.object(
+                _FakeExecutor, "_is_single_dollar_expression", return_value=False
+            ):
+                self._run(node)
+
+        self.assertEqual(self.call.call_args.kwargs["body"]["state"], "resolved:$input.text")
+
     def test_a_literal_state_is_left_alone(self) -> None:
         self._run(_base_node(state="A plain sentence."))
         self.assertEqual(self.call.call_args.kwargs["body"]["state"], "A plain sentence.")
