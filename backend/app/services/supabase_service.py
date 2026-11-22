@@ -259,8 +259,10 @@ class SupabaseService:
         if normalized_operator not in cls._SUPPORTED_FILTER_OPERATORS:
             raise ValueError(f"Unsupported Supabase filter operator: {operator}")
 
-        list_operators = {"in", "cs", "cd", "ov"}
-        if top_level and isinstance(value, str) and normalized_operator not in list_operators:
+        # Full-text values keep main's encoding: `wfts."report weekly"` reads as a phrase in
+        # websearch_to_tsquery, and dropping the quotes would match the words in any order.
+        quoted_operators = {"in", "cs", "cd", "ov", "fts", "plfts", "phfts", "wfts"}
+        if top_level and isinstance(value, str) and normalized_operator not in quoted_operators:
             # PostgREST reads a top-level value verbatim and removes double quotes only
             # inside `in.(...)` lists and `or`/`and` groups: `eq."a.b@c.com"` matches nothing.
             return f"{normalized_operator}.{value}"

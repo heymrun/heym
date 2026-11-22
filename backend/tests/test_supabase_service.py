@@ -245,6 +245,23 @@ class TestSupabaseService(unittest.TestCase):
             "(status.eq.active,and(status.eq.pending,score.gte.5))",
         )
 
+    def test_full_text_filters_keep_their_quotes(self) -> None:
+        # websearch_to_tsquery reads wfts."report weekly" as a phrase; without the quotes it
+        # matches the words in any order, so update and delete would touch more rows.
+        from app.services.supabase_service import SupabaseService
+
+        for operator, value, expected in (
+            ("wfts", "report weekly", 'wfts."report weekly"'),
+            ("phfts", "report weekly", 'phfts."report weekly"'),
+            ("plfts", "a.b", 'plfts."a.b"'),
+            ("fts", "report", "fts.report"),
+        ):
+            with self.subTest(operator=operator):
+                self.assertEqual(
+                    SupabaseService._compile_filter_params({"title": {operator: value}}),
+                    [("title", expected)],
+                )
+
     def test_select_rows_keeps_quotes_inside_logical_groups(self) -> None:
         svc = self._make_service()
         mock_response = MagicMock()
