@@ -47,7 +47,7 @@ The **HTTP** node makes HTTP requests using cURL syntax. It can be a workflow st
 }
 ```
 
-Use cURL syntax with `-H` for headers, `-d` for POST body, etc. As in curl, `-XDELETE` is read as `-X DELETE`, and short options combine, so `-fsSL` follows redirects. Expressions can be used anywhere in the curl string, including the URL, a header, or a whole header line. A [Header credential](../reference/credentials.md) resolves to `key: value`, so `-H "$credentials.MyApiKey"` sends the complete header:
+Use cURL syntax with `-H` for headers, `-d` for POST body, etc. As in curl, `-XDELETE` is read as `-X DELETE`, and short options combine: `-fsSL` follows redirects and `-sXPOST` is `-s -X POST`. A redirect followed with `-L` to another scheme, host or port carries only the command's `Accept`, `Content-Type` and `User-Agent`; headers from `-H`, `-b`, `-u` or a credential stay with the first origin, and a same-origin redirect keeps them all. Expressions can be used anywhere in the curl string, including the URL, a header, or a whole header line. A [Header credential](../reference/credentials.md) resolves to `key: value`, so `-H "$credentials.MyApiKey"` sends the complete header:
 
 ```
 curl -X GET "https://api.example.com/search?q=$query.body.text.urlEncode()" -H "$credentials.MyApiKey"

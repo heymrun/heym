@@ -4,8 +4,46 @@ import json
 from importlib import import_module
 from typing import Any
 
+import httpx
+
 from app.services.http_run_cookies import run_cookies
 from app.services.node_execution.base import NodeExecutionContext
+
+# What a redirect to another scheme, host or port still carries from the command's headers.
+# Everything else (-H, -b, -u, a credential) stays with the origin the command named.
+_CROSS_ORIGIN_HEADERS = frozenset({"accept", "content-type", "user-agent"})
+_MAX_REDIRECTS = 20
+
+
+def _origin(url: httpx.URL) -> tuple[str, str, int | None]:
+    return (url.scheme, url.host, url.port)
+
+
+def _send_following_redirects(
+    client: httpx.Client, method: str, url: str, headers: dict[str, str], body: Any
+) -> httpx.Response:
+    """Send the request and follow redirects (curl -L), one guarded hop at a time.
+
+    httpx alone forwards every custom header to another origin except Authorization, so an
+    API key in `-H` or a header credential reached the redirect target; and it drops the
+    Cookie header on every hop, so `-b session=...` lost the session on its own origin.
+    """
+    response = client.request(method, url, headers=headers, content=body, follow_redirects=False)
+    origin = _origin(response.request.url)
+    cookie = next((value for key, value in headers.items() if key.lower() == "cookie"), None)
+    for _ in range(_MAX_REDIRECTS):
+        next_request = response.next_request
+        if next_request is None:
+            return response
+        if _origin(next_request.url) != origin:
+            for name in headers:
+                if name.lower() not in _CROSS_ORIGIN_HEADERS:
+                    next_request.headers.pop(name, None)
+        elif cookie is not None and "cookie" not in next_request.headers:
+            next_request.headers["Cookie"] = cookie
+        response.close()
+        response = client.send(next_request, follow_redirects=False)
+    raise httpx.TooManyRedirects("Exceeded maximum allowed redirects.", request=response.request)
 
 
 def _json_media_type(headers: dict[str, str]) -> str | None:
@@ -139,13 +177,12 @@ def execute(ctx: NodeExecutionContext) -> object:
             body = self.evaluate_message_template(body, inputs, node_id)
     http_client = ssrf_guard.get_guarded_http_client()
     with run_cookies(self.http_cookies):
-        response = http_client.request(
-            method,
-            url,
-            headers=headers,
-            content=body,
-            follow_redirects=follow_redirects,
-        )
+        if follow_redirects:
+            response = _send_following_redirects(http_client, method, url, headers, body)
+        else:
+            response = http_client.request(
+                method, url, headers=headers, content=body, follow_redirects=False
+            )
     try:
         response_body = response.json()
     except ValueError:
