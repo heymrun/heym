@@ -1,5 +1,6 @@
 """Board API behavior for team kanban use, on a real PostgreSQL."""
 
+import asyncio
 import unittest
 import uuid
 from datetime import date
@@ -9,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import boards as boards_api
-from app.db.models import BoardCard, Workflow
+from app.db.models import Board, BoardCard, BoardColumn, Workflow
 from app.models.board_schemas import (
     BoardCreateRequest,
     BoardUpdateRequest,
@@ -18,6 +19,7 @@ from app.models.board_schemas import (
     CardUpdateRequest,
     ColumnUpdateRequest,
 )
+from app.services import board_run_service
 from tests.board_pg_support import cleanup, connect_or_skip, make_board, make_user, share_board
 
 
@@ -96,6 +98,164 @@ class AutoAdvanceTests(KanbanPgCase):
         async with self.session() as db:
             card = await db.get(BoardCard, card_id)
             self.assertEqual(card.column_id, columns[3].id)
+
+    async def test_concurrent_user_move_during_empty_column_cascade_is_preserved(
+        self,
+    ) -> None:
+        col_names = ["Backlog", "Planning", "Development", "Staging", "QA", "Done"]
+        async with self.session() as db:
+            board = Board(owner_id=self.owner.id, name="Auto-advance Race Board", auto_advance=True)
+            db.add(board)
+            await db.flush()
+            columns = [
+                BoardColumn(id=uuid.uuid4(), board_id=board.id, name=name, position=idx)
+                for idx, name in enumerate(col_names)
+            ]
+            db.add_all(columns)
+            await db.flush()
+            card = BoardCard(
+                board_id=board.id,
+                column_id=columns[2].id,
+                title="Task 1",
+                position=0,
+                run_status="success",
+            )
+            db.add(card)
+            await db.commit()
+            card_id = card.id
+            board_id = board.id
+            staging_id = columns[3].id
+            backlog_id = columns[0].id
+
+        paused_event = asyncio.Event()
+        resume_event = asyncio.Event()
+        first_empty_col_committed = False
+        original_commit = AsyncSession.commit
+
+        async def hook_commit(session_self):
+            nonlocal first_empty_col_committed
+            await original_commit(session_self)
+            if not first_empty_col_committed:
+                c = await session_self.get(BoardCard, card_id)
+                if c is not None and c.column_id == staging_id:
+                    first_empty_col_committed = True
+                    paused_event.set()
+                    await resume_event.wait()
+
+        async def run_advance():
+            session = AsyncSession(self.engine, expire_on_commit=False)
+            session.commit = lambda: hook_commit(session)
+            try:
+                await board_run_service._auto_advance(
+                    card_id=card_id,
+                    board_id=board_id,
+                    from_column_id=columns[2].id,
+                    actor_user_id=self.owner.id,
+                    session_factory=lambda: session,
+                )
+            finally:
+                await session.close()
+
+        advance_task = asyncio.create_task(run_advance())
+        await paused_event.wait()
+
+        async with self.session() as user_db:
+            await boards_api.move_card(
+                board_id=board_id,
+                card_id=card_id,
+                request=CardMoveRequest(to_column_id=backlog_id),
+                db=user_db,
+                current_user=self.owner,
+            )
+
+        resume_event.set()
+        await advance_task
+
+        async with self.session() as db:
+            final_card = await db.get(BoardCard, card_id)
+            self.assertIsNotNone(final_card)
+            assert final_card is not None
+            self.assertEqual(final_card.column_id, backlog_id)
+
+    async def test_concurrent_column_deletion_during_empty_column_cascade_is_preserved(
+        self,
+    ) -> None:
+        col_names = ["Backlog", "Planning", "Development", "Staging", "QA", "Done"]
+        async with self.session() as db:
+            board = Board(
+                owner_id=self.owner.id, name="Column Delete Race Board", auto_advance=True
+            )
+            db.add(board)
+            await db.flush()
+            columns = [
+                BoardColumn(id=uuid.uuid4(), board_id=board.id, name=name, position=idx)
+                for idx, name in enumerate(col_names)
+            ]
+            db.add_all(columns)
+            await db.flush()
+            card = BoardCard(
+                board_id=board.id,
+                column_id=columns[2].id,
+                title="Task 2",
+                position=0,
+                run_status="success",
+            )
+            db.add(card)
+            await db.commit()
+            card_id = card.id
+            board_id = board.id
+            staging_id = columns[3].id
+            backlog_id = columns[0].id
+
+        paused_event = asyncio.Event()
+        resume_event = asyncio.Event()
+        first_empty_col_committed = False
+        original_commit = AsyncSession.commit
+
+        async def hook_commit(session_self):
+            nonlocal first_empty_col_committed
+            await original_commit(session_self)
+            if not first_empty_col_committed:
+                c = await session_self.get(BoardCard, card_id)
+                if c is not None and c.column_id == staging_id:
+                    first_empty_col_committed = True
+                    paused_event.set()
+                    await resume_event.wait()
+
+        async def run_advance():
+            session = AsyncSession(self.engine, expire_on_commit=False)
+            session.commit = lambda: hook_commit(session)
+            try:
+                await board_run_service._auto_advance(
+                    card_id=card_id,
+                    board_id=board_id,
+                    from_column_id=columns[2].id,
+                    actor_user_id=self.owner.id,
+                    session_factory=lambda: session,
+                )
+            finally:
+                await session.close()
+
+        advance_task = asyncio.create_task(run_advance())
+        await paused_event.wait()
+
+        async with self.session() as user_db:
+            await boards_api.delete_column(
+                board_id=board_id,
+                column_id=staging_id,
+                move_cards_to_column_id=backlog_id,
+                db=user_db,
+                current_user=self.owner,
+            )
+
+        resume_event.set()
+        await advance_task
+
+        async with self.session() as db:
+            final_card = await db.get(BoardCard, card_id)
+            self.assertIsNotNone(final_card)
+            assert final_card is not None
+            self.assertEqual(final_card.column_id, backlog_id)
 
 
 class CardFieldApiTests(KanbanPgCase):
