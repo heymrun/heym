@@ -8,6 +8,7 @@ field out expecting 100 rows got the whole table.
 import re
 import unittest
 import uuid
+from pathlib import Path
 
 from sqlalchemy import delete, text
 
@@ -89,12 +90,26 @@ class DataTableLimitDefaultTests(unittest.TestCase):
     def test_a_limit_caps_the_rows(self) -> None:
         self.assertEqual(self._count("getAll", dataTableLimit=10), 10)
 
+
+class DataTableLimitDocsTests(unittest.TestCase):
+    """Reads only the DSL prompt and the node page, so it runs without a database."""
+
     def test_the_dsl_does_not_promise_a_default_limit(self) -> None:
         line = re.search(r"`dataTableLimit`:[^\n]*", WORKFLOW_DSL_SYSTEM_PROMPT)
         assert line is not None
 
         self.assertNotIn("default", line.group(0))
         self.assertIn("every matching row", line.group(0))
+
+    def test_the_page_names_the_canvas_start_and_no_limit(self) -> None:
+        page = (
+            Path(__file__).resolve().parents[2]
+            / "frontend/src/docs/content/nodes/datatable-node.md"
+        ).read_text(encoding="utf-8")
+        row = next(line for line in page.splitlines() if line.startswith("| `dataTableLimit`"))
+
+        self.assertIn("starts at `100`", row)
+        self.assertIn("every matching row", row)
 
 
 if __name__ == "__main__":
