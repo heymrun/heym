@@ -53,6 +53,7 @@ class _SequencedSession:
         self._results = list(results)
         self.commit = AsyncMock()
         self.add = MagicMock()
+        self.refresh = AsyncMock()
         self.executed = 0
         self.statements = []
 

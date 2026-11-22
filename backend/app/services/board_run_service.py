@@ -1001,10 +1001,7 @@ async def enqueue_card_chain(
     ).first()
     if locked is None:
         return ENQUEUE_BLOCKED
-    try:
-        await db.refresh(card)
-    except Exception:
-        pass
+    await db.refresh(card)
     if await blocking_card_runs(db, card.id):
         return ENQUEUE_BLOCKED
     links = await _column_links(db, column.id)
@@ -1109,12 +1106,7 @@ async def _settle_card_if_idle(db, card: BoardCard) -> None:
     blocking = await blocking_card_runs(db, card.id)
     if blocking:
         return
-    refresh_fn = getattr(db, "refresh", None)
-    if refresh_fn is not None:
-        try:
-            await refresh_fn(card)
-        except (ObjectDeletedError, Exception):
-            return
+    await db.refresh(card)
     if card.run_status == "running":
         card.run_status = "success"
         await db.commit()

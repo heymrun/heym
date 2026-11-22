@@ -117,9 +117,11 @@ class ConcurrentEnqueueRealPostgresTests(_RealBoardFixture):
     async def test_concurrent_enqueue_only_one_chain_starts(self) -> None:
         async def _attempt() -> str:
             async with async_session_maker() as db:
+                card = await db.get(BoardCard, self.card_id)
+                assert card is not None
                 return await board_run_service.enqueue_card_chain(
                     db,
-                    card=self.card,
+                    card=card,
                     column=self.column,
                     board=self.board,
                     move=None,
@@ -149,9 +151,11 @@ class ConcurrentEnqueueRealPostgresTests(_RealBoardFixture):
         window even when the two calls are strictly one-after-another."""
         with patch.object(board_run_service, "_spawn_chain", MagicMock()):
             async with async_session_maker() as db:
+                card = await db.get(BoardCard, self.card_id)
+                assert card is not None
                 first = await board_run_service.enqueue_card_chain(
                     db,
-                    card=self.card,
+                    card=card,
                     column=self.column,
                     board=self.board,
                     move=None,
@@ -159,9 +163,11 @@ class ConcurrentEnqueueRealPostgresTests(_RealBoardFixture):
                     actor_user_id=self.user_id,
                 )
             async with async_session_maker() as db:
+                card = await db.get(BoardCard, self.card_id)
+                assert card is not None
                 second = await board_run_service.enqueue_card_chain(
                     db,
-                    card=self.card,
+                    card=card,
                     column=self.column,
                     board=self.board,
                     move=None,
@@ -183,9 +189,11 @@ class ConcurrentEnqueueRealPostgresTests(_RealBoardFixture):
     async def test_move_into_column_without_a_chain_is_not_blocked(self) -> None:
         with patch.object(board_run_service, "_auto_advance", AsyncMock()):
             async with async_session_maker() as db:
+                card = await db.get(BoardCard, self.card_id)
+                assert card is not None
                 result = await board_run_service.enqueue_card_chain(
                     db,
-                    card=self.card,
+                    card=card,
                     column=self.empty_column,
                     board=self.board,
                     move=None,
@@ -270,10 +278,12 @@ class _RealFourColumnBoardFixture(unittest.IsolatedAsyncioTestCase):
         it must be verified against the real, unmocked _auto_advance, not a mock.
         """
         async with async_session_maker() as db:
+            card = await db.get(BoardCard, self.card_id)
+            assert card is not None
             result = await asyncio.wait_for(
                 board_run_service.enqueue_card_chain(
                     db,
-                    card=self.card,
+                    card=card,
                     column=self.target_column,
                     board=self.board,
                     move={"from_column": "Planning", "to_column": "Development"},
