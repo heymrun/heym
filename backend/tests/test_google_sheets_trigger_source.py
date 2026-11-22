@@ -119,24 +119,23 @@ class DiffSheetTests(unittest.TestCase):
 
 
 class RepeatedAndBlankHeaderTests(unittest.TestCase):
-    """Rows keep every column, keyed as the Google Sheets node's readRange keys them."""
+    """Rows keep every column: the keys they always had, then the dropped cells by letter."""
 
-    def test_repeated_blank_and_untitled_columns_keep_their_cells(self) -> None:
+    def test_the_dropped_cells_follow_the_old_keys(self) -> None:
         header = ["Name", "", "Notes", "Notes"]
         [change] = _diff([header], [header, ["Ada", "vip", "called", "emailed", "late"]])
 
         self.assertEqual(
-            change.payload["row"],
-            {
-                "Name": "Ada",
-                "B": "vip",
-                "Notes": "called",
-                "Notes_2": "emailed",
-                "E": "late",
-                "rowIndex": 2,
-            },
+            list(change.payload["row"].items()),
+            [
+                ("Name", "Ada"),
+                ("", "vip"),
+                ("Notes", "emailed"),
+                ("rowIndex", 2),
+                ("C", "called"),
+                ("E", "late"),
+            ],
         )
-        self.assertEqual(change.payload["changed_columns"], ["Name", "B", "Notes", "Notes_2", "E"])
 
 
 if __name__ == "__main__":

@@ -21,7 +21,6 @@ from app.services.google_sheets_service import (
     _SHEETS_BASE,
     GoogleSheetsService,
     _values_url,
-    header_keys,
 )
 
 router = APIRouter()
@@ -112,5 +111,8 @@ async def sheet_columns(
         )
     except httpx.HTTPError as exc:
         raise _google_error(exc) from exc
-    columns = header_keys([str(value).strip() for value in header[: len(ascii_uppercase)]])
+    columns = [
+        str(value).strip() or ascii_uppercase[index]
+        for index, value in enumerate(header[: len(ascii_uppercase)])
+    ]
     return SheetColumnsResponse(columns=columns)

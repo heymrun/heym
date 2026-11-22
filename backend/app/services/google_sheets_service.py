@@ -45,29 +45,30 @@ def _column_letter_zero_based(col_index: int) -> str:
     return letters
 
 
-def header_keys(header: list, width: int = 0) -> list[str]:
-    """The key each column gets in a row object, for at least ``width`` columns.
+def row_cells(header: list, cells: list, width: int = 0) -> tuple[dict, dict]:
+    """A row's cells by header title, and the cells no title holds.
 
-    A column's title, or its letter when the title is blank or the column lies past the
-    header row's end (Sheets drops trailing empty cells). A repeated key gets ``_2``,
-    ``_3``, … that no other column uses, as the Converter names repeated CSV headers, so
-    no column's cell overwrites another's.
+    The first dict is keyed as it always was: each title holds its column's cell, so a
+    repeated title holds the last such column and blank titles share ``""``. The second holds
+    the cells that lose out that way (an earlier column with a repeated or blank title) and
+    those past the header row's end (Sheets drops trailing empty header cells), for at least
+    ``width`` columns, keyed by the column letter, or ``B_2``, ``B_3``, … when that key is
+    taken. Callers put it after every key they returned before, so those keep their value
+    and order.
     """
     titles = [str(title) for title in header]
-    titles += [""] * (width - len(titles))
-    real_titles = {title for title in titles if title.strip()}
-    keys: list[str] = []
-    used: set[str] = set()
-    for index, title in enumerate(titles):
-        generated = not title.strip()
-        name = _column_letter_zero_based(index) if generated else title
-        key, suffix = name, 2
-        # A real title keeps its name; a letter or suffix never takes one.
-        while key in used or ((generated or key != name) and key in real_titles):
-            key, suffix = f"{name}_{suffix}", suffix + 1
-        used.add(key)
-        keys.append(key)
-    return keys
+    by_title = {title: (cells[i] if i < len(cells) else "") for i, title in enumerate(titles)}
+    last_column = {title: index for index, title in enumerate(titles)}
+    dropped: dict = {}
+    for index in range(max(len(titles), len(cells), width)):
+        if index < len(titles) and last_column[titles[index]] == index:
+            continue
+        letter = _column_letter_zero_based(index)
+        key, suffix = letter, 2
+        while key in by_title or key in dropped or key == "rowIndex":
+            key, suffix = f"{letter}_{suffix}", suffix + 1
+        dropped[key] = cells[index] if index < len(cells) else ""
+    return by_title, dropped
 
 
 class GoogleSheetsService:
@@ -189,13 +190,13 @@ class GoogleSheetsService:
             data_raw = (
                 raw[data_offset : data_offset + max_rows] if max_rows > 0 else raw[data_offset:]
             )
-            headers = header_keys(raw[0], max((len(row) for row in data_raw), default=0))
+            width = max((len(row) for row in data_raw), default=0)
             rows = []
             for j, row in enumerate(data_raw):
                 raw_index = data_offset + j
                 row_index_1based = raw_index + 1
-                cells = {headers[i]: (row[i] if i < len(row) else "") for i in range(len(headers))}
-                rows.append({**cells, "rowIndex": row_index_1based})
+                cells, dropped = row_cells(raw[0], row, width)
+                rows.append({**cells, "rowIndex": row_index_1based, **dropped})
         else:
             rows = []
             for j, row in enumerate(raw):
