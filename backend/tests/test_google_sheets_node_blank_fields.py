@@ -230,6 +230,30 @@ class GoogleSheetsBlankFieldTests(unittest.TestCase):
         self.assertIn("/sheet_123/values/Sheet1!A1:Z", self.sent[0]["url"])
         self.assertNotIn(SECRET, str(self.sent))
 
+    def test_zero_blank_or_unset_max_rows_reads_every_row(self) -> None:
+        # "Max rows (0 = all)": a number 0, a cleared field or no field read 100 rows.
+        base = {"gsOperation": "readRange", "gsSpreadsheetId": "sheet_123", "gsSheetName": "Sheet1"}
+        for extra in ({"gsMaxRows": 0}, {"gsMaxRows": ""}, {}, {"gsMaxRows": "0"}):
+            with self.subTest(extra=extra):
+                self.sent.clear()
+                status, error = _run({**base, **extra})
+
+                self.assertEqual((status, error), ("success", ""))
+                self.assertTrue(self.sent[0]["url"].endswith("/sheet_123/values/Sheet1!A1:Z"))
+
+    def test_a_max_rows_number_still_caps_the_range(self) -> None:
+        status, _ = _run(
+            {
+                "gsOperation": "readRange",
+                "gsSpreadsheetId": "sheet_123",
+                "gsSheetName": "Sheet1",
+                "gsMaxRows": 25,
+            }
+        )
+
+        self.assertEqual(status, "success")
+        self.assertTrue(self.sent[0]["url"].endswith("/sheet_123/values/Sheet1!A1:Z26"))
+
 
 if __name__ == "__main__":
     unittest.main()
