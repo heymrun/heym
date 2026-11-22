@@ -202,6 +202,13 @@ class FeaturesPageTests(unittest.TestCase):
                 self.assertNotIn("passes through", section.lower())
                 self.assertNotIn("passed through", section.lower())
 
+    def test_switch_value_is_what_the_expression_evaluated_to(self) -> None:
+        features = (DOCS.parent / "reference" / "features.md").read_text(encoding="utf-8")
+        section = features.split("#### [Switch]", 1)[1].split("####", 1)[0]
+
+        self.assertNotIn("the `value` it matched", section)
+        self.assertIn("what the expression evaluated to", section)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -89,6 +89,7 @@ class ErrorHandlerPageTests(unittest.TestCase):
 
         self.assertNotIn("timestamp", section)
         self.assertIn("$errorHandler.error.message", section)
+        self.assertIn("and `message`", section)
 
 
 if __name__ == "__main__":

@@ -124,7 +124,7 @@ Pairs with [Condition](../nodes/condition-node.md), [Error Handler](../nodes/err
 
 #### [Error Handler](../nodes/error-handler-node.md)
 
-The Error Handler node runs automatically when any node in the workflow fails. No incoming edges are needed; it is triggered by the engine. Output is `error` with the message, the failed node's label, type and id (`$errorHandler.error.message`, `.error.node_label`, `.error.node_type`, `.error.node_id`). Use it to send notifications through [Slack](../nodes/slack-node.md), [Telegram](../nodes/telegram-node.md), or [Send Email](../nodes/send-email-node.md), log errors, or return custom error responses.
+The Error Handler node runs automatically when any node in the workflow fails. No incoming edges are needed; it is triggered by the engine. Output is `error` with the message, the failed node's label, type and id (`$errorHandler.error.message`, `.error.node_label`, `.error.node_type`, `.error.node_id`), and `message`, the node's `message` field rendered (a canvas node pre-fills it with `$error.message`). Use it to send notifications through [Slack](../nodes/slack-node.md), [Telegram](../nodes/telegram-node.md), or [Send Email](../nodes/send-email-node.md), log errors, or return custom error responses.
 
 As an alternative to handling errors on the canvas, a workflow can also delegate failures to a separate workflow — see [Error Workflow](#error-workflow). If the canvas already contains an Error Handler node, the error workflow is **not** called (the local handler takes precedence).
 
@@ -198,7 +198,7 @@ See also [Switch](../nodes/switch-node.md), [Throw Error](../nodes/throw-error-n
 
 #### [Switch](../nodes/switch-node.md)
 
-The Switch node routes execution to different paths by matching a value against cases. Configure an expression to evaluate and a list of case values; each case gets a source handle and a default handle is used for non-matching values. The node outputs its `branch` and the `value` it matched; read earlier nodes' fields by their labels.
+The Switch node routes execution to different paths by matching a value against cases. Configure an expression to evaluate and a list of case values; each case gets a source handle and a default handle is used for non-matching values. The node outputs its `branch` and `value`, what the expression evaluated to (on `default` it matched no case); read earlier nodes' fields by their labels.
 
 Use [Condition](../nodes/condition-node.md) for binary branching and [Merge](../nodes/merge-node.md) to rejoin routed paths; matching rules are covered in [Expression DSL](./expression-dsl.md).
 
