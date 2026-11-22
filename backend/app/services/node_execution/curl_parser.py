@@ -17,6 +17,9 @@ _HEADER_OPTIONS = {
     "--referer": "Referer",
 }
 
+# curl's short options that take no value, which it reads combined: `-fsSL` is `-f -s -S -L`.
+_NO_VALUE_SHORT_OPTIONS = frozenset("0123468aBfgGiIjJklLMnNOpqRsSvVZ#")
+
 
 def _url_encoded(value: str) -> str:
     """A --data-urlencode piece as curl sends it: the content after the first "=" encoded.
@@ -135,6 +138,14 @@ def parse_curl(
         elif token == "--url" and i + 1 < len(tokens):
             i += 1
             url = rendered(tokens[i])
+        elif (
+            len(token) > 2
+            and token[0] == "-"
+            and token[1] != "-"
+            and set(token[1:]) <= _NO_VALUE_SHORT_OPTIONS
+        ):
+            follow_redirects = follow_redirects or "L" in token
+            get_option = get_option or "G" in token
         elif not token.startswith("-"):
             candidate = rendered(token)
             if candidate.startswith(("http://", "https://")):

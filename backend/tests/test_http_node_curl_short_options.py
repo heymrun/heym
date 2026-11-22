@@ -64,5 +64,26 @@ class HttpNodeCurlAttachedMethodTests(unittest.TestCase):
         self.assertEqual(received[0].method, "DELETE")
 
 
+class HttpNodeCurlCombinedFlagsTests(unittest.TestCase):
+    def test_combined_flags_with_l_follow_the_redirect(self) -> None:
+        for flags in ("-sL", "-Ls", "-fsSL"):
+            with self.subTest(flags=flags):
+                output, _received = _run_curl(f"curl {flags} https://downloads.example.com/old")
+
+                self.assertEqual(output["status"], 200)
+                self.assertEqual(output["body"], "GET /new")
+
+    def test_combined_flags_without_l_return_the_redirect(self) -> None:
+        output, _received = _run_curl("curl -fsS https://downloads.example.com/old")
+
+        self.assertEqual(output["status"], 301)
+
+    def test_combined_flags_with_g_send_the_data_as_the_query(self) -> None:
+        _output, received = _run_curl("curl -sG https://api.example.com/search -d q=heym")
+
+        self.assertEqual(received[0].method, "GET")
+        self.assertEqual(str(received[0].url), "https://api.example.com/search?q=heym")
+
+
 if __name__ == "__main__":
     unittest.main()
