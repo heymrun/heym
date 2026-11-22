@@ -85,5 +85,40 @@ class HttpNodeCurlCombinedFlagsTests(unittest.TestCase):
         self.assertEqual(str(received[0].url), "https://api.example.com/search?q=heym")
 
 
+class HttpNodeCurlValueClusterTests(unittest.TestCase):
+    """A letter that takes a value uses the rest of the token or the next token, as in curl."""
+
+    def test_a_method_inside_a_cluster_is_sent(self) -> None:
+        for curl, method in (
+            ("curl -sXPOST https://api.example.com/items", "POST"),
+            ("curl -LX POST https://api.example.com/items", "POST"),
+            ("curl -sXPUT https://api.example.com/items -d '{}'", "PUT"),
+        ):
+            with self.subTest(curl=curl):
+                _output, received = _run_curl(curl)
+
+                self.assertEqual(received[0].method, method)
+
+    def test_header_data_and_user_inside_a_cluster_are_read(self) -> None:
+        _output, received = _run_curl(
+            "curl -sH 'X-Api-Key: k1' https://api.example.com/items -sd a=1 -su user:pw"
+        )
+
+        self.assertEqual(received[0].method, "POST")
+        self.assertEqual(received[0].headers["x-api-key"], "k1")
+        self.assertEqual(received[0].content, b"a=1")
+        self.assertTrue(received[0].headers["authorization"].startswith("Basic "))
+
+    def test_a_value_that_starts_with_a_dash_is_not_split(self) -> None:
+        _output, received = _run_curl("curl https://api.example.com/items -d -5")
+
+        self.assertEqual(received[0].content, b"-5")
+
+    def test_eight_is_not_a_curl_option(self) -> None:
+        from app.services.node_execution.curl_parser import _split_short_options
+
+        self.assertIsNone(_split_short_options("-s8"))
+
+
 if __name__ == "__main__":
     unittest.main()

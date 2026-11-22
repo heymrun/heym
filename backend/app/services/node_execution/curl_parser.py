@@ -17,8 +17,27 @@ _HEADER_OPTIONS = {
     "--referer": "Referer",
 }
 
-# curl's short options that take no value, which it reads combined: `-fsSL` is `-f -s -S -L`.
-_NO_VALUE_SHORT_OPTIONS = frozenset("0123468aBfgGiIjJklLMnNOpqRsSvVZ#")
+# curl's short options, which it reads combined: `-fsSL` is `-f -s -S -L`, and in `-sXPOST` the
+# value-taking `-X` takes the rest of the token (`-s -X POST`), or the next token when none is left.
+_NO_VALUE_SHORT_OPTIONS = frozenset("012346aBfgGhiIjJklLMnNOpqRsSvVZ#")
+_VALUE_SHORT_OPTIONS = frozenset("AbcCdDeEFHKmoPQrtTuUwxXyYz")
+
+
+def _split_short_options(token: str) -> list[str] | None:
+    """A short option cluster as the separate tokens curl reads, or None if it is not one."""
+    if len(token) < 3 or token[0] != "-" or token[1] == "-":
+        return None
+    parts: list[str] = []
+    for index, letter in enumerate(token[1:], start=1):
+        if letter in _VALUE_SHORT_OPTIONS:
+            parts.append(f"-{letter}")
+            if index + 1 < len(token):
+                parts.append(token[index + 1 :])
+            return parts
+        if letter not in _NO_VALUE_SHORT_OPTIONS:
+            return None
+        parts.append(f"-{letter}")
+    return parts
 
 
 def _url_encoded(value: str) -> str:
@@ -77,13 +96,14 @@ def parse_curl(
     i = 0
     while i < len(tokens):
         token = tokens[i]
+        split = _split_short_options(token)
+        if split is not None:
+            # Read in option position only, so a value such as `-d -5` is never split.
+            tokens[i : i + 1] = split
+            continue
         if token in ("-X", "--request") and i + 1 < len(tokens):
             i += 1
             method = rendered(tokens[i]).upper()
-            explicit_method = True
-        elif token.startswith("-X") and len(token) > 2:
-            # curl reads `-XDELETE` as `-X DELETE`, as Elasticsearch's docs write it.
-            method = rendered(token[2:]).upper()
             explicit_method = True
         elif token in ("-G", "--get"):
             get_option = True
@@ -138,14 +158,6 @@ def parse_curl(
         elif token == "--url" and i + 1 < len(tokens):
             i += 1
             url = rendered(tokens[i])
-        elif (
-            len(token) > 2
-            and token[0] == "-"
-            and token[1] != "-"
-            and set(token[1:]) <= _NO_VALUE_SHORT_OPTIONS
-        ):
-            follow_redirects = follow_redirects or "L" in token
-            get_option = get_option or "G" in token
         elif not token.startswith("-"):
             candidate = rendered(token)
             if candidate.startswith(("http://", "https://")):
