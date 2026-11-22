@@ -104,7 +104,7 @@ class _FakeSession:
     def add(self, obj):
         self.added.append(obj)
 
-    async def get(self, model, pk):
+    async def get(self, model, pk, *args, **kwargs):
         return self.objects.get((model.__name__, pk))
 
     async def __aenter__(self):

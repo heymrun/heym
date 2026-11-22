@@ -99,6 +99,147 @@ class AutoAdvanceTests(KanbanPgCase):
             card = await db.get(BoardCard, card_id)
             self.assertEqual(card.column_id, columns[3].id)
 
+    async def test_user_moves_before_auto_advance_obtains_lock_is_preserved(
+        self,
+    ) -> None:
+        col_names = ["Backlog", "Planning", "Development", "Staging", "QA", "Done"]
+        async with self.session() as db:
+            board = Board(owner_id=self.owner.id, name="Move Before Lock Board", auto_advance=True)
+            db.add(board)
+            await db.flush()
+            columns = [
+                BoardColumn(id=uuid.uuid4(), board_id=board.id, name=name, position=idx)
+                for idx, name in enumerate(col_names)
+            ]
+            db.add_all(columns)
+            await db.flush()
+            card = BoardCard(
+                board_id=board.id,
+                column_id=columns[2].id,
+                title="Task Pre-move",
+                position=0,
+                run_status="success",
+            )
+            db.add(card)
+            await db.commit()
+            card_id = card.id
+            board_id = board.id
+            development_id = columns[2].id
+            backlog_id = columns[0].id
+
+        async with self.session() as user_db:
+            await boards_api.move_card(
+                board_id=board_id,
+                card_id=card_id,
+                request=CardMoveRequest(to_column_id=backlog_id),
+                db=user_db,
+                current_user=self.owner,
+            )
+
+        async with self.session() as session:
+            await board_run_service._auto_advance(
+                card_id=card_id,
+                board_id=board_id,
+                from_column_id=development_id,
+                actor_user_id=self.owner.id,
+                session_factory=lambda: session,
+            )
+
+        async with self.session() as db:
+            final_card = await db.get(BoardCard, card_id)
+            self.assertIsNotNone(final_card)
+            assert final_card is not None
+            self.assertEqual(final_card.column_id, backlog_id)
+
+    async def test_user_moves_while_auto_advance_holds_lock_waits_and_completes(
+        self,
+    ) -> None:
+        col_names = ["Backlog", "Planning", "Development", "Staging", "QA", "Done"]
+        async with self.session() as db:
+            board = Board(owner_id=self.owner.id, name="Lock Race Board", auto_advance=True)
+            db.add(board)
+            await db.flush()
+            columns = [
+                BoardColumn(id=uuid.uuid4(), board_id=board.id, name=name, position=idx)
+                for idx, name in enumerate(col_names)
+            ]
+            db.add_all(columns)
+            await db.flush()
+            card = BoardCard(
+                board_id=board.id,
+                column_id=columns[2].id,
+                title="Task Lock Test",
+                position=0,
+                run_status="success",
+            )
+            db.add(card)
+            await db.commit()
+            card_id = card.id
+            board_id = board.id
+            development_id = columns[2].id
+            backlog_id = columns[0].id
+
+        lock_acquired_event = asyncio.Event()
+        resume_advance_event = asyncio.Event()
+        lock_hook_fired = False
+
+        original_get = AsyncSession.get
+
+        async def hook_get(session_self, entity, ident, *args, **kwargs):
+            nonlocal lock_hook_fired
+            result = await original_get(session_self, entity, ident, *args, **kwargs)
+            if (
+                not lock_hook_fired
+                and kwargs.get("with_for_update")
+                and entity is BoardCard
+                and ident == card_id
+            ):
+                lock_hook_fired = True
+                lock_acquired_event.set()
+                await resume_advance_event.wait()
+            return result
+
+        async def run_advance():
+            session = AsyncSession(self.engine, expire_on_commit=False)
+            session.get = lambda entity, ident, *a, **kw: hook_get(session, entity, ident, *a, **kw)
+            try:
+                await board_run_service._auto_advance(
+                    card_id=card_id,
+                    board_id=board_id,
+                    from_column_id=development_id,
+                    actor_user_id=self.owner.id,
+                    session_factory=lambda: session,
+                )
+            finally:
+                await session.close()
+
+        advance_task = asyncio.create_task(run_advance())
+        await lock_acquired_event.wait()
+
+        async def run_user_move():
+            async with self.session() as user_db:
+                await boards_api.move_card(
+                    board_id=board_id,
+                    card_id=card_id,
+                    request=CardMoveRequest(to_column_id=backlog_id),
+                    db=user_db,
+                    current_user=self.owner,
+                )
+
+        user_move_task = asyncio.create_task(run_user_move())
+        await asyncio.sleep(0.05)
+        self.assertFalse(user_move_task.done())
+
+        resume_advance_event.set()
+        await user_move_task
+        await advance_task
+
+        async with self.session() as db:
+            final_card = await db.get(BoardCard, card_id)
+            self.assertIsNotNone(final_card)
+            assert final_card is not None
+            self.assertEqual(final_card.column_id, backlog_id)
+
     async def test_concurrent_user_move_during_empty_column_cascade_is_preserved(
         self,
     ) -> None:

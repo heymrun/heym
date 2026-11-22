@@ -1157,16 +1157,15 @@ async def _auto_advance(
             prev_name = columns[from_index].name
             current_column_id = from_column_id
             for target in columns[from_index + 1 :]:
-                card = await db.get(BoardCard, card_id)
-                if card is None:
-                    return
                 try:
-                    await db.refresh(card)
+                    card = await db.get(
+                        BoardCard, card_id, with_for_update=True, populate_existing=True
+                    )
                 except ObjectDeletedError:
                     return
-                if card.column_id != current_column_id:
-                    # A person moved the card while this cascade ran: it stays where
-                    # they put it. Advancing further would pull it back into the cascade.
+                if card is None or card.column_id != current_column_id:
+                    # A person moved or deleted the card while this cascade ran: it stays
+                    # where they put it. Advancing further would pull it back into the cascade.
                     return
                 old_column_id = card.column_id
                 card.column_id = target.id
@@ -1223,15 +1222,19 @@ async def _auto_advance(
 
             # The cascade ran out of columns without finding a chain to start, so the card
             # is not executing anything and must not stay marked as running.
-            settled = await db.get(BoardCard, card_id)
-            if settled is not None:
-                try:
-                    await db.refresh(settled)
-                except ObjectDeletedError:
-                    return
-                if settled.column_id == current_column_id and settled.run_status == "running":
-                    settled.run_status = "success"
-                    await db.commit()
+            try:
+                settled = await db.get(
+                    BoardCard, card_id, with_for_update=True, populate_existing=True
+                )
+            except ObjectDeletedError:
+                return
+            if (
+                settled is not None
+                and settled.column_id == current_column_id
+                and settled.run_status == "running"
+            ):
+                settled.run_status = "success"
+                await db.commit()
     except Exception:  # noqa: BLE001 - auto-advance must never break a completed chain
         logger.exception("Board auto-advance failed for card %s", card_id)
 
