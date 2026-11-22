@@ -35,7 +35,7 @@ targets. See [Custom Embeddings](../reference/integrations.md#custom-embeddings-
 | `documentId` | expression | Value of the unique id (upsert, delete) |
 | `queryText` | expression | Search query (search only) |
 | `searchLimit` | number | Max results (default: 5) |
-| `metadataFilters` | JSON string | Metadata filters for search (values support expressions) |
+| `metadataFilters` | JSON string | Metadata filters for search (values support expressions). Text that is not valid JSON fails the node rather than searching without a filter |
 | `hybridSearch` | boolean | Combine vector search with BM25 keyword search (search only; default: off) |
 | `enableReranker` | boolean | Rerank search results by relevance to the query |
 | `rerankerCredentialId` | UUID | Cohere or Decision Model credential that does the reranking |

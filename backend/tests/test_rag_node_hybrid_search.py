@@ -209,5 +209,22 @@ class TestRagHybridSearchDsl(unittest.TestCase):
         self.assertIn("hybridSearch (optional)", row)
 
 
+class TestRagNodeMetadataFilters(unittest.TestCase):
+    def test_filters_that_are_not_json_fail_instead_of_searching_everything(self) -> None:
+        service = _service()
+
+        with self.assertRaisesRegex(ValueError, "metadataFilters is not valid JSON"):
+            _run({"metadataFilters": '{"team": "a",}'}, service)
+
+        service.search.assert_not_called()
+
+    def test_blank_filters_search_without_a_filter(self) -> None:
+        for blank in ("", "  "):
+            with self.subTest(value=blank):
+                _, service = _run({"metadataFilters": blank})
+
+                self.assertIsNone(service.search.call_args.kwargs["metadata_filter"])
+
+
 if __name__ == "__main__":
     unittest.main()
