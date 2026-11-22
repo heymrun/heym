@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import select, update
+from sqlalchemy.exc import InvalidRequestError
 from sqlalchemy.orm.exc import ObjectDeletedError
 
 from app.api.analytics import upsert_workflow_analytics_snapshot
@@ -1001,7 +1002,10 @@ async def enqueue_card_chain(
     ).first()
     if locked is None:
         return ENQUEUE_BLOCKED
-    await db.refresh(card)
+    try:
+        await db.refresh(card)
+    except (InvalidRequestError, ObjectDeletedError):
+        return ENQUEUE_BLOCKED
     if await blocking_card_runs(db, card.id):
         return ENQUEUE_BLOCKED
     links = await _column_links(db, column.id)
@@ -1106,7 +1110,10 @@ async def _settle_card_if_idle(db, card: BoardCard) -> None:
     blocking = await blocking_card_runs(db, card.id)
     if blocking:
         return
-    await db.refresh(card)
+    try:
+        await db.refresh(card)
+    except (InvalidRequestError, ObjectDeletedError):
+        return
     if card.run_status == "running":
         card.run_status = "success"
         await db.commit()
@@ -1186,7 +1193,21 @@ async def _auto_advance(
                 return
             prev_name = columns[from_index].name
             current_column_id = from_column_id
-            for target in columns[from_index + 1 :]:
+            for target_col_info in columns[from_index + 1 :]:
+                target = (
+                    await db.execute(
+                        select(BoardColumn)
+                        .where(
+                            BoardColumn.id == target_col_info.id,
+                            BoardColumn.board_id == board_id,
+                        )
+                        .with_for_update(read=True, key_share=True)
+                    )
+                ).scalar_one_or_none()
+                if target is None:
+                    if card is not None:
+                        await _settle_card_if_idle(db, card)
+                    return
                 try:
                     card = await db.get(
                         BoardCard, card_id, with_for_update=True, populate_existing=True

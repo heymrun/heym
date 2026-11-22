@@ -526,6 +526,100 @@ class AutoAdvanceTests(KanbanPgCase):
             self.assertEqual(final_card.column_id, backlog_id)
             self.assertEqual(final_card.run_status, "success")
 
+    async def test_concurrent_empty_column_deletion_without_target_stops_cascade_cleanly(
+        self,
+    ) -> None:
+        """Deleting an empty column ahead of a cascading card without a target column must stop
+        the cascade cleanly without foreign key error or card deletion."""
+        col_names = ["Backlog", "Planning", "Development", "Staging", "QA", "Done"]
+        async with self.session() as db:
+            board = Board(
+                owner_id=self.owner.id, name="Cascade Column Delete Board", auto_advance=True
+            )
+            db.add(board)
+            await db.flush()
+            columns = [
+                BoardColumn(id=uuid.uuid4(), board_id=board.id, name=name, position=idx)
+                for idx, name in enumerate(col_names)
+            ]
+            db.add_all(columns)
+            await db.flush()
+            card = BoardCard(
+                board_id=board.id,
+                column_id=columns[2].id,
+                title="Task Cascade",
+                position=0,
+                run_status="success",
+            )
+            db.add(card)
+            await db.commit()
+            card_id = card.id
+            board_id = board.id
+            staging_id = columns[3].id
+            qa_id = columns[4].id
+
+        paused_event = asyncio.Event()
+        resume_event = asyncio.Event()
+        staging_committed = False
+        original_commit = AsyncSession.commit
+
+        async def hook_commit(session_self):
+            nonlocal staging_committed
+            await original_commit(session_self)
+            if not staging_committed:
+                c = await session_self.get(BoardCard, card_id)
+                if c is not None and c.column_id == staging_id:
+                    staging_committed = True
+                    paused_event.set()
+                    await asyncio.wait_for(resume_event.wait(), timeout=5)
+
+        async def run_advance():
+            session = AsyncSession(self.engine, expire_on_commit=False)
+            session.commit = lambda: hook_commit(session)
+            try:
+                await board_run_service._auto_advance(
+                    card_id=card_id,
+                    board_id=board_id,
+                    from_column_id=columns[2].id,
+                    actor_user_id=self.owner.id,
+                    session_factory=lambda: session,
+                )
+            finally:
+                await session.close()
+
+        advance_task = asyncio.create_task(run_advance())
+        try:
+            await asyncio.wait_for(paused_event.wait(), timeout=5)
+
+            # While card is in Staging, delete QA (the next empty column) with no target
+            async with self.session() as user_db:
+                await boards_api.delete_column(
+                    board_id=board_id,
+                    column_id=qa_id,
+                    move_cards_to_column_id=None,
+                    db=user_db,
+                    current_user=self.owner,
+                )
+
+            resume_event.set()
+            await asyncio.wait_for(advance_task, timeout=5)
+        finally:
+            resume_event.set()
+            if not advance_task.done():
+                advance_task.cancel()
+                try:
+                    await advance_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+
+        async with self.session() as db:
+            final_card = await db.get(BoardCard, card_id)
+            self.assertIsNotNone(final_card)
+            assert final_card is not None
+            # Card safely stopped in Staging and settled to success
+            self.assertEqual(final_card.column_id, staging_id)
+            self.assertEqual(final_card.run_status, "success")
+
     async def test_mid_cascade_move_to_column_with_workflow_preserves_running_status(
         self,
     ) -> None:
@@ -997,6 +1091,151 @@ class ColumnDeleteTests(KanbanPgCase):
         with self.assertRaises(HTTPException) as ctx:
             await self.delete(self.columns[1].id)
         self.assertEqual(ctx.exception.status_code, 400)
+
+    async def test_concurrent_move_into_column_being_deleted_preserves_card(self) -> None:
+        """When a column is deleted concurrently with a card moving into it, the card must not be
+        deleted. The requests serialize via row-locking: either the move completes first and the
+        delete raises 409 (or moves the card), or the delete completes first and the move
+        raises 404 (Column not found)."""
+        board, columns = await make_board(self.engine, self.owner, auto_advance=False)
+        card_id = await self.card_in(board.id, columns[0].id, "Target Card")
+        planning_id = columns[1].id
+        backlog_id = columns[0].id
+
+        delete_paused = asyncio.Event()
+        resume_delete = asyncio.Event()
+
+        original_execute = AsyncSession.execute
+
+        async def hook_execute(session_self, stmt, *args, **kwargs):
+            res = await original_execute(session_self, stmt, *args, **kwargs)
+            sql = str(stmt)
+            if "board_columns" in sql and "FOR UPDATE" in sql:
+                params = getattr(stmt.compile(), "params", {})
+                if planning_id in params.values() or str(planning_id) in sql:
+                    delete_paused.set()
+                    await asyncio.wait_for(resume_delete.wait(), timeout=5)
+            return res
+
+        async def run_delete():
+            session = AsyncSession(self.engine, expire_on_commit=False)
+            session.execute = lambda stmt, *a, **kw: hook_execute(session, stmt, *a, **kw)
+            try:
+                await boards_api.delete_column(
+                    board_id=board.id,
+                    column_id=planning_id,
+                    move_cards_to_column_id=None,
+                    db=session,
+                    current_user=self.owner,
+                )
+            finally:
+                await session.close()
+
+        delete_task = asyncio.create_task(run_delete())
+        try:
+            await asyncio.wait_for(delete_paused.wait(), timeout=5)
+
+            async def run_move():
+                async with self.session() as move_db:
+                    return await boards_api.move_card(
+                        board_id=board.id,
+                        card_id=card_id,
+                        request=CardMoveRequest(to_column_id=planning_id),
+                        db=move_db,
+                        current_user=self.owner,
+                    )
+
+            move_task = asyncio.create_task(run_move())
+            await asyncio.sleep(0.05)
+            # move_task is blocked in Postgres waiting for delete_column's FOR UPDATE lock
+            self.assertFalse(move_task.done())
+
+            # Now let delete_column finish deleting Planning
+            resume_delete.set()
+            await asyncio.wait_for(delete_task, timeout=5)
+
+            # move_task unblocks and raises 404 (Column not found) instead of 500
+            with self.assertRaises(HTTPException) as ctx:
+                await asyncio.wait_for(move_task, timeout=5)
+            self.assertEqual(ctx.exception.status_code, 404)
+            self.assertEqual(ctx.exception.detail, "Column not found")
+        finally:
+            resume_delete.set()
+            for t in (delete_task, move_task if "move_task" in locals() else None):
+                if t and not t.done():
+                    t.cancel()
+                    try:
+                        await t
+                    except (asyncio.CancelledError, Exception):
+                        pass
+
+        # Most importantly: the card STILL EXISTS in Backlog! It was not deleted!
+        async with self.session() as db:
+            final_card = await db.get(BoardCard, card_id)
+            self.assertIsNotNone(final_card)
+            assert final_card is not None
+            self.assertEqual(final_card.column_id, backlog_id)
+
+    async def test_concurrent_move_commits_before_delete_column_causes_conflict(self) -> None:
+        """When move_card commits into an empty column before delete_column reads its cards,
+        delete_column must see the card and reject the delete with 409 Conflict."""
+        board, columns = await make_board(self.engine, self.owner, auto_advance=False)
+        card_id = await self.card_in(board.id, columns[0].id, "Target Card")
+        planning_id = columns[1].id
+
+        async with self.session() as db:
+            await boards_api.move_card(
+                board_id=board.id,
+                card_id=card_id,
+                request=CardMoveRequest(to_column_id=planning_id),
+                db=db,
+                current_user=self.owner,
+            )
+
+        async with self.session() as db:
+            with self.assertRaises(HTTPException) as ctx:
+                await boards_api.delete_column(
+                    board_id=board.id,
+                    column_id=planning_id,
+                    move_cards_to_column_id=None,
+                    db=db,
+                    current_user=self.owner,
+                )
+            self.assertEqual(ctx.exception.status_code, 409)
+
+        async with self.session() as db:
+            final_card = await db.get(BoardCard, card_id)
+            self.assertIsNotNone(final_card)
+            assert final_card is not None
+            self.assertEqual(final_card.column_id, planning_id)
+
+    async def test_move_card_when_card_deleted_concurrently_answers_404(self) -> None:
+        """When a card is deleted while move_card is processing, it answers 404 Not Found."""
+        board, columns = await make_board(self.engine, self.owner, auto_advance=False)
+        card_id = await self.card_in(board.id, columns[0].id, "Doomed Card")
+
+        original_place_card = boards_api._place_card
+
+        async def hook_place_card(db, card, target_column_id, position):
+            async with self.session() as other_db:
+                c = await other_db.get(BoardCard, card_id)
+                if c is not None:
+                    await other_db.delete(c)
+                    await other_db.commit()
+            return await original_place_card(db, card, target_column_id, position)
+
+        with patch.object(boards_api, "_place_card", side_effect=hook_place_card):
+            async with self.session() as db:
+                with self.assertRaises(HTTPException) as ctx:
+                    await boards_api.move_card(
+                        board_id=board.id,
+                        card_id=card_id,
+                        request=CardMoveRequest(to_column_id=columns[1].id),
+                        db=db,
+                        current_user=self.owner,
+                    )
+                self.assertEqual(ctx.exception.status_code, 404)
+                self.assertEqual(ctx.exception.detail, "Card not found")
 
 
 class RevisionTests(KanbanPgCase):

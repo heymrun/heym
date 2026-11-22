@@ -1059,11 +1059,20 @@ class TestAutoAdvanceAfterAManualMove(unittest.IsolatedAsyncioTestCase):
 
         session.commit.side_effect = on_commit
 
+        cols_by_id = {c.id: c for c in cols}
+
         def fake_execute(stmt):
             sql = str(stmt)
             if "boards.auto_advance" in sql:
                 return auto_advance_on
             if "board_columns" in sql and "board_column_workflows" not in sql:
+                if "board_columns.id =" in sql:
+                    params = getattr(stmt.compile(), "params", {})
+                    for val in params.values():
+                        if val in cols_by_id:
+                            res = MagicMock()
+                            res.scalar_one_or_none.return_value = cols_by_id[val]
+                            return res
                 return cols_result
             if "board_cards" in sql:
                 return empty_cards

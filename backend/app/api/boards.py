@@ -16,7 +16,9 @@ from fastapi import (
 )
 from pydantic import BaseModel
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError, InvalidRequestError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.exc import ObjectDeletedError, StaleDataError
 
 from app.api.deps import get_current_user
 from app.db.models import (
@@ -134,10 +136,13 @@ async def _get_board_for_user(
     return board, permission
 
 
-async def _get_board_column(db: AsyncSession, board: Board, column_id: uuid.UUID) -> BoardColumn:
-    result = await db.execute(
-        select(BoardColumn).where(BoardColumn.id == column_id, BoardColumn.board_id == board.id)
-    )
+async def _get_board_column(
+    db: AsyncSession, board: Board, column_id: uuid.UUID, *, for_update: bool = False
+) -> BoardColumn:
+    stmt = select(BoardColumn).where(BoardColumn.id == column_id, BoardColumn.board_id == board.id)
+    if for_update:
+        stmt = stmt.with_for_update()
+    result = await db.execute(stmt)
     column = result.scalar_one_or_none()
     if column is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Column not found")
@@ -705,7 +710,7 @@ async def delete_column(
     """Delete a column. Its cards block the delete unless ``move_cards_to_column_id`` names
     another column of the board: they then move to its top, without running its chain."""
     board, _ = await _get_board_for_user(db, board_id, current_user, write=True)
-    column = await _get_board_column(db, board, column_id)
+    column = await _get_board_column(db, board, column_id, for_update=True)
     cards = list(
         (
             await db.execute(
@@ -1094,26 +1099,49 @@ async def move_card(
 
     old_column_id = card.column_id
     current_index = card.position
-    card.column_id = target.id
-    index = request.position
-    if index is None and not column_changed:
-        index = current_index
-    await _place_card(db, card, target.id, index)
-    if column_changed:
-        await _reindex_cards(db, old_column_id)
-        db.add(
-            BoardCardActivity(
-                card_id=card.id,
-                kind="event",
-                author_type="system",
-                content=f"Moved from {source.name} to {target.name}",
-                data={
-                    "from_column_id": str(old_column_id),
-                    "to_column_id": str(target.id),
-                },
+    try:
+        card.column_id = target.id
+        index = request.position
+        if index is None and not column_changed:
+            index = current_index
+        await _place_card(db, card, target.id, index)
+        if column_changed:
+            await _reindex_cards(db, old_column_id)
+            db.add(
+                BoardCardActivity(
+                    card_id=card.id,
+                    kind="event",
+                    author_type="system",
+                    content=f"Moved from {source.name} to {target.name}",
+                    data={
+                        "from_column_id": str(old_column_id),
+                        "to_column_id": str(target.id),
+                    },
+                )
             )
-        )
-    await db.commit()
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        card_exists = (
+            await db.execute(
+                select(BoardCard.id).where(BoardCard.id == card_id, BoardCard.board_id == board_id)
+            )
+        ).scalar_one_or_none()
+        if card_exists is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Card not found")
+        target_exists = (
+            await db.execute(
+                select(BoardColumn.id).where(
+                    BoardColumn.id == request.to_column_id, BoardColumn.board_id == board_id
+                )
+            )
+        ).scalar_one_or_none()
+        if target_exists is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Column not found")
+        raise
+    except (StaleDataError, ObjectDeletedError):
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Card not found")
 
     if column_changed:
         if card.run_status == "pending":
@@ -1168,7 +1196,11 @@ async def move_card(
                     data={"column_id": str(target.id)},
                 )
             )
-            await db.commit()
+            try:
+                await db.commit()
+            except (IntegrityError, StaleDataError, ObjectDeletedError):
+                await db.rollback()
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Card not found")
     audit(
         action="board.card_move",
         actor=current_user,
@@ -1180,7 +1212,10 @@ async def move_card(
         from_column=source.name,
         to_column=target.name,
     )
-    await db.refresh(card)
+    try:
+        await db.refresh(card)
+    except (InvalidRequestError, ObjectDeletedError):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Card not found")
     return _card_response(card)
 
 
