@@ -3311,7 +3311,7 @@ accepts at most two nested levels of block children per request.
   - `dataTableFilter`: JSON object for filtering (for find, upsert, count). Boolean columns use unquoted JSON `true` and `false` values (e.g. `{"is_active": true}`). `find` and `count` support comparison operators via object values: {"age": {"$gt": 18}} — supported operators: $eq $ne $gt $gte $lt $lte $contains (case-insensitive substring) $in (array). A plain value still means equals. Numeric comparisons apply to columns typed as "number". You can also filter on row metadata (`id`, `table_id`, `created_at`, `updated_at`, `created_by`, `updated_by`) which are real columns outside the JSON data blob — use a full date for range comparisons (e.g. {"created_at": {"$gt": "2026-06-04"}}) or $contains for partial date text matches. `upsert` uses the same type-aware exact-match {"column_name": "value"} filtering to locate an existing row (comparison operators are not supported for upsert).
   - `dataTableData`: JSON object mapping column names to values (for insert, update, upsert)
   - `dataTableRowId`: Row UUID for single-row operations (for getById, update, remove)
-  - `dataTableLimit`: Maximum rows to return (default: 100, for find, getAll)
+  - `dataTableLimit`: Maximum rows to return (for find, getAll). Omitted or 0 returns every matching row
   - `dataTableSort`: Sort column name, prefix with - for descending e.g. "-created_at" (for find, getAll)
 
 **Operations Reference**:
