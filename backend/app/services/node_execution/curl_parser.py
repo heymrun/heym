@@ -160,6 +160,10 @@ def parse_curl(
             url += ("&" if "?" in url else "?") + rendered(data)
             data = None
 
+    if head_option and data is not None:
+        # curl refuses -I with a body ("You can only select one HTTP request method!").
+        raise ValueError("cURL -I (--head) cannot send data: remove -I or -d/--data/--json")
+
     if head_option and not explicit_method:
         # curl -I: headers only, as a HEAD request.
         method = "HEAD"

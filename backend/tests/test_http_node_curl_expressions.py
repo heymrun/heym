@@ -373,6 +373,21 @@ class HttpNodeCurlHeadOptionTests(unittest.TestCase):
 
         self.assertEqual(request.method, "GET")
 
+    def test_head_with_data_is_refused(self) -> None:
+        # curl refuses -I with a body; the node sent a HEAD with one.
+        for data in ("-d a=1", "--json '{}'", "--data-urlencode q=x"):
+            with self.subTest(data=data):
+                with self.assertRaisesRegex(ValueError, "cannot send data"):
+                    WorkflowExecutor(nodes=[], edges=[]).parse_curl(
+                        f"curl -I {data} https://example.com/items"
+                    )
+
+    def test_head_with_get_data_sends_a_query(self) -> None:
+        request = _run_curl("curl -I -G -d q=x https://example.com/items")
+
+        self.assertEqual(request.method, "HEAD")
+        self.assertEqual(str(request.url), "https://example.com/items?q=x")
+
 
 if __name__ == "__main__":
     unittest.main()
