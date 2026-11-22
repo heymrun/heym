@@ -192,5 +192,16 @@ class BranchPageTests(unittest.TestCase):
                 self.assertLessEqual(named, set(self._branch_output(node)))
 
 
+class FeaturesPageTests(unittest.TestCase):
+    def test_condition_and_switch_do_not_pass_the_input_through(self) -> None:
+        features = (DOCS.parent / "reference" / "features.md").read_text(encoding="utf-8")
+        for heading in ("#### [Condition]", "#### [Switch]"):
+            with self.subTest(heading=heading):
+                section = features.split(heading, 1)[1].split("####", 1)[0]
+
+                self.assertNotIn("passes through", section.lower())
+                self.assertNotIn("passed through", section.lower())
+
+
 if __name__ == "__main__":
     unittest.main()
