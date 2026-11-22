@@ -44,7 +44,7 @@ The **Telegram** node sends a message through the Telegram Bot API. Use it for c
 
 | Expression | Description |
 |------------|-------------|
-| `$nodeLabel.status` | `"sent"` on success |
+| `$nodeLabel.status` | HTTP status code of Telegram's response (`200` on success) |
 | `$nodeLabel.ok` | Telegram API success flag |
 | `$nodeLabel.result` | Raw `sendMessage` result object from Telegram |
 | `$nodeLabel.result.message_id` | Telegram message ID |

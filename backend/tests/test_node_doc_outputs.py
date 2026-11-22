@@ -2,7 +2,10 @@
 
 The Crawler page listed `$nodeLabel.body`, which the node never returns (it returns `html`,
 `url`, `status` and, in extract mode, `extracted`), and its selector example had no `name`
-and no `crawlerMode: "extract"`, so it extracted nothing.
+and no `crawlerMode: "extract"`, so it extracted nothing. The Slack, Discord and Telegram
+trigger pages listed `triggered_by` and `trigger_node_id`, which are run inputs the trigger
+nodes do not copy into their output, and the Condition and Switch pages said the input
+passes through, while they output only their branch.
 """
 
 from __future__ import annotations
@@ -11,12 +14,19 @@ import json
 import re
 import types
 import unittest
+import uuid
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from app.services import ssrf_guard
 from app.services.node_execution.base import NodeExecutionContext
-from app.services.node_execution.nodes import crawler_node
+from app.services.node_execution.nodes import (
+    crawler_node,
+    discord_trigger_node,
+    slack_trigger_node,
+    telegram_trigger_node,
+)
+from app.services.workflow_executor import WorkflowExecutor
 
 DOCS = Path(__file__).resolve().parents[2] / "frontend" / "src" / "docs" / "content" / "nodes"
 
@@ -104,6 +114,82 @@ class CrawlerPageTests(unittest.TestCase):
         )
 
         self.assertLessEqual(_overview_fields(_page("crawler-node.md")), set(output))
+
+
+class TriggerPageTests(unittest.TestCase):
+    RUN_INPUTS = {
+        "event": {},
+        "interaction": {},
+        "type": 2,
+        "data": {},
+        "update": {},
+        "message": {},
+        "callback_query": {},
+        "headers": {},
+        "triggered_by": "webhook",
+        "trigger_node_id": "trigger_1",
+        "triggered_at": "2026-01-01T00:00:00+00:00",
+    }
+
+    def test_every_output_the_page_names_is_returned(self) -> None:
+        for page, handler in (
+            ("slack-trigger-node.md", slack_trigger_node),
+            ("discord-trigger-node.md", discord_trigger_node),
+            ("telegram-trigger-node.md", telegram_trigger_node),
+        ):
+            with self.subTest(page=page):
+                ctx = types.SimpleNamespace(node_data={"_initial_inputs": self.RUN_INPUTS})
+                output = handler.execute(ctx)
+
+                self.assertLessEqual(_overview_fields(_page(page)), set(output))
+
+
+class BranchPageTests(unittest.TestCase):
+    def _branch_output(self, node: dict) -> dict:
+        nodes = [
+            {
+                "id": "in_1",
+                "type": "textInput",
+                "position": {"x": 0, "y": 0},
+                "data": {"label": "userInput", "inputFields": [{"key": "text"}]},
+            },
+            {**node, "position": {"x": 300, "y": 0}},
+        ]
+        edges = [{"id": "e1", "source": "in_1", "target": node["id"]}]
+        result = WorkflowExecutor(nodes=nodes, edges=edges, actor_user_id=uuid.uuid4()).execute(
+            workflow_id=uuid.uuid4(),
+            initial_inputs={"headers": {}, "query": {}, "body": {"text": "hello"}},
+        )
+        return next(r for r in result.node_results if r["node_id"] == node["id"])["output"]
+
+    def test_every_output_the_page_names_is_returned(self) -> None:
+        for page, node in (
+            (
+                "condition-node.md",
+                {
+                    "id": "c1",
+                    "type": "condition",
+                    "data": {"label": "isLong", "condition": "$userInput.body.text.length > 1"},
+                },
+            ),
+            (
+                "switch-node.md",
+                {
+                    "id": "s1",
+                    "type": "switch",
+                    "data": {
+                        "label": "route",
+                        "expression": "$userInput.body.text",
+                        "cases": ["hello"],
+                    },
+                },
+            ),
+        ):
+            with self.subTest(page=page):
+                named = _overview_fields(_page(page))
+
+                self.assertTrue(named)
+                self.assertLessEqual(named, set(self._branch_output(node)))
 
 
 if __name__ == "__main__":

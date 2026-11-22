@@ -8,7 +8,7 @@ The **Telegram Trigger** node is a zero-input entry point that starts a workflow
 |----------|-------|
 | Inputs | 0 |
 | Outputs | 1 |
-| Output | `$nodeLabel.update`, `$nodeLabel.message`, `$nodeLabel.callback_query`, `$nodeLabel.headers`, `$nodeLabel.triggered_by`, `$nodeLabel.trigger_node_id`, `$nodeLabel.triggered_at` |
+| Output | `$nodeLabel.update`, `$nodeLabel.message`, `$nodeLabel.callback_query`, `$nodeLabel.headers`, `$nodeLabel.triggered_at` |
 
 ## Parameters
 
@@ -63,8 +63,6 @@ After the node triggers, downstream nodes can access:
 | `$nodeLabel.message.from.id` | Telegram user ID |
 | `$nodeLabel.callback_query` | Callback payload when the update came from an inline keyboard |
 | `$nodeLabel.headers` | Sanitized webhook headers |
-| `$nodeLabel.triggered_by` | Trigger source label (`"telegram"`) |
-| `$nodeLabel.trigger_node_id` | Canvas node ID that received the Telegram update |
 | `$nodeLabel.triggered_at` | ISO timestamp for this workflow execution |
 
 ## Example Workflow

@@ -8,7 +8,7 @@ The **Discord Trigger** node is a zero-input entry point that receives Discord I
 |----------|-------|
 | Inputs | 0 |
 | Outputs | 1 |
-| Output | `$nodeLabel.interaction`, `$nodeLabel.type`, `$nodeLabel.data`, `$nodeLabel.headers`, `$nodeLabel.triggered_by`, `$nodeLabel.trigger_node_id`, `$nodeLabel.triggered_at` |
+| Output | `$nodeLabel.interaction`, `$nodeLabel.type`, `$nodeLabel.data`, `$nodeLabel.headers`, `$nodeLabel.triggered_at` |
 
 ## Parameters
 
@@ -54,8 +54,6 @@ After the node triggers, downstream nodes can access:
 | `$nodeLabel.data.name` | Slash command name, when applicable |
 | `$nodeLabel.data.options` | Slash command options array |
 | `$nodeLabel.headers` | Sanitized webhook headers |
-| `$nodeLabel.triggered_by` | Trigger source label (`"Discord"`) |
-| `$nodeLabel.trigger_node_id` | Canvas node ID that received the Discord interaction |
 | `$nodeLabel.triggered_at` | ISO timestamp for this workflow execution |
 
 ## Example Workflow
