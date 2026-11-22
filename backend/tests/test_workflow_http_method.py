@@ -59,7 +59,13 @@ class WorkflowHttpMethodTests(unittest.IsolatedAsyncioTestCase):
             name="Method Workflow",
         )
 
-    async def _call(self, workflow: SimpleNamespace, method: str, query: bytes = b"") -> object:
+    async def _call(
+        self,
+        workflow: SimpleNamespace,
+        method: str,
+        query: bytes = b"",
+        current_user: SimpleNamespace | None = None,
+    ) -> object:
         execution_result = ExecutionResult(
             workflow_id=workflow.id,
             status="success",
@@ -72,6 +78,7 @@ class WorkflowHttpMethodTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch("app.api.workflows.validate_workflow_auth", AsyncMock()),
+            patch("app.api.workflows.user_has_workflow_access", AsyncMock(return_value=True)),
             patch("app.api.workflows.collect_referenced_workflows", AsyncMock(return_value={})),
             patch("app.api.workflows.get_credentials_context", AsyncMock(return_value={})),
             patch("app.api.workflows.get_global_variables_context", AsyncMock(return_value={})),
@@ -87,7 +94,7 @@ class WorkflowHttpMethodTests(unittest.IsolatedAsyncioTestCase):
             return await execute_workflow_endpoint(
                 workflow_id=workflow.id,
                 request=make_request(method=method, query_string=query),
-                current_user=None,
+                current_user=current_user,
                 db=db,
             )
 
@@ -109,8 +116,16 @@ class WorkflowHttpMethodTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_test_run_bypasses_enforcement(self) -> None:
         """The editor's Run button must keep working whatever the dropdown says."""
-        response = await self._call(self._workflow("GET"), "POST", query=b"test_run=true")
+        editor = SimpleNamespace(id=uuid.uuid4())
+        response = await self._call(
+            self._workflow("GET"), "POST", query=b"test_run=true", current_user=editor
+        )
         self.assertEqual(response.status_code, 200)
+
+    async def test_test_run_from_outside_the_editor_is_enforced(self) -> None:
+        with self.assertRaises(HTTPException) as ctx:
+            await self._call(self._workflow("GET"), "POST", query=b"test_run=true")
+        self.assertEqual(ctx.exception.status_code, 405)
 
     async def test_a_missing_column_value_is_treated_as_post(self) -> None:
         """Rows predating the migration must behave exactly as they do today."""

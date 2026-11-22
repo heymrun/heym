@@ -20,7 +20,7 @@ HTTP/1.1 405 Method Not Allowed
 Allow: GET
 ```
 
-One exception: requests carrying `?test_run=true` skip the check. That is what the editor's **Run** button and the debug panel send, so a workflow set to `GET` stays testable from inside the product.
+One exception: the editor's own test runs skip the check. The **Run** button and the debug panel send `?test_run=true` from a signed-in session that can open the workflow, so a workflow set to `GET` stays testable from inside the product. From any other caller, `test_run=true` is checked like a normal call.
 
 ### Bodyless methods
 
@@ -48,7 +48,7 @@ The request body is passed as `body` to [Input](../nodes/input-node.md) nodes. H
 - **Wrapped format** – `{"inputs": {...}, "test_run": false}`
 - **Form-encoded** – `application/x-www-form-urlencoded`, as Twilio, Slack slash commands and Mailgun post it. The fields arrive as an object (`$input.body.From`, `$input.body.Body`); a field sent more than once is a list.
 
-When using the wrapped format, `inputs` is extracted and passed as `body`. `test_run` bypasses rate limiting and response caching. You can also send `?test_run=true` as a query parameter when posting raw JSON.
+When using the wrapped format, `inputs` is extracted and passed as `body`. `test_run` marks the editor's own test run, which skips rate limiting and response caching and uses pinned node outputs. It only counts from a signed-in session that can open the workflow; from any other caller the request runs as a normal production call. You can also send `?test_run=true` as a query parameter when posting raw JSON.
 
 ## Request Body Modes
 
@@ -91,7 +91,7 @@ Configure `cache_ttl_seconds` per workflow. When set and greater than 0:
 | `cache_ttl_seconds` = 0 or null | Caching disabled |
 | `cache_ttl_seconds` > 0 | Responses cached for this many seconds |
 
-`test_run` requests bypass the cache (no read, no write).
+The editor's own test runs bypass the cache (no read, no write). A `test_run=true` from any other caller reads and writes it like a normal call.
 
 When response caching is enabled in the cURL dialog, **Clear cache** evicts the current workflow's cached responses immediately.
 
@@ -108,7 +108,7 @@ Configure per workflow: `rate_limit_requests` and `rate_limit_window_seconds`.
 | `rate_limit_requests` | Max requests allowed in the window |
 | `rate_limit_window_seconds` | Window duration in seconds |
 
-`test_run` requests bypass rate limiting.
+The editor's own test runs bypass rate limiting. A `test_run=true` sent without a signed-in session that can open the workflow is rate limited like any other call.
 
 ## Concurrency Limit and Queued Runs
 
