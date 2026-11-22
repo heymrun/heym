@@ -2,17 +2,23 @@
 leader handoffs, and the cursor is forgotten when the trigger goes."""
 
 import asyncio
+import uuid
 from collections import Counter
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from sqlalchemy import delete, func, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from workflow_concurrency_fixtures import ConcurrencyPostgresCase
 
 from app.db.models import TriggerPollState
 from app.db.session import async_session_maker
 from app.services import imap_trigger_service
-from app.services.imap_trigger_service import ImapCursor, ImapTriggerManager
+from app.services.imap_trigger_service import (
+    ImapCursor,
+    ImapTriggerManager,
+    mailbox_fingerprint,
+)
 
 NODE = {"id": "imap-1", "type": "imapTrigger", "data": {"credentialId": "c1"}}
 MAILBOX = [100, 101, 102, 103]
@@ -52,26 +58,50 @@ class ImapCursorStorageTests(ConcurrencyPostgresCase):
     async def _record(self, _workflow: object, _node_id: str, email: dict) -> None:
         self.runs[email["uid"]] += 1
 
-    async def _poll(self, manager: ImapTriggerManager, run=None, fetch=None) -> AsyncMock:  # noqa: ANN001
+    async def _poll(
+        self,
+        manager: ImapTriggerManager,
+        run=None,  # noqa: ANN001
+        fetch=None,  # noqa: ANN001
+        node: dict | None = None,
+        config: dict | None = None,
+    ) -> AsyncMock:
         fetch = fetch or AsyncMock(side_effect=_mailbox)
+        target_node = node or NODE
+        target_config = config if config is not None else {}
         with (
-            patch.object(manager, "_load_credential_config", AsyncMock(return_value={})),
+            patch.object(manager, "_load_credential_config", AsyncMock(return_value=target_config)),
             patch.object(manager, "_fetch_node_messages", fetch),
             patch.object(manager, "_execute_workflow_for_email", run or self._record),
         ):
-            await manager._poll_workflow_node(self.workflow, NODE)
+            await manager._poll_workflow_node(self.workflow, target_node)
         return fetch
 
     async def _stored(self) -> ImapCursor | None:
         async with async_session_maker() as db:
             row = (
                 await db.execute(
-                    select(TriggerPollState.scope_fingerprint, TriggerPollState.version).where(
+                    select(
+                        TriggerPollState.scope_fingerprint,
+                        TriggerPollState.version,
+                        TriggerPollState.key_id,
+                    ).where(TriggerPollState.workflow_id == self.workflow_id)
+                )
+            ).first()
+        return (
+            None if row is None else ImapCursor(row.scope_fingerprint, int(row.version), row.key_id)
+        )
+
+    async def _stored_key_id(self) -> str | None:
+        async with async_session_maker() as db:
+            row = (
+                await db.execute(
+                    select(TriggerPollState.key_id).where(
                         TriggerPollState.workflow_id == self.workflow_id
                     )
                 )
             ).first()
-        return None if row is None else ImapCursor(row.scope_fingerprint, int(row.version))
+        return None if row is None else row.key_id
 
     async def _arrive_and_wait_interval(self, last_uid: int | None = None) -> None:
         """New mail arrived after ``last_uid``, and the node's poll interval has passed."""
@@ -233,3 +263,82 @@ class ImapCursorStorageTests(ConcurrencyPostgresCase):
         )
 
         self.assertEqual(await self._stored(), ImapCursor(uidvalidity="77", last_uid=103))
+
+    async def test_switching_mailbox_with_zero_cursor_takes_new_baseline(self) -> None:
+        # Mailbox A starts empty, establishing a baseline with last_uid=0
+        with patch(f"{__name__}.MAILBOX", []):
+            await self._poll(ImapTriggerManager(), config={"imap_mailbox": "INBOX"})
+
+        self.assertEqual(await self._stored(), ImapCursor(uidvalidity="77", last_uid=0))
+        self.assertEqual(self.runs, Counter())
+
+        # Switch the node to mailbox B which already has emails [100, 101, 102, 103]
+        # and shares the same UIDVALIDITY ("77").
+        await self._arrive_and_wait_interval()
+        fetch = await self._poll(ImapTriggerManager(), config={"imap_mailbox": "Archive"})
+
+        # Establishing a new baseline fetches with cursor=None and runs no emails
+        self.assertIsNone(fetch.await_args.args[1])
+        self.assertEqual(await self._stored(), ImapCursor(uidvalidity="77", last_uid=103))
+        self.assertEqual(self.runs, Counter())
+
+        # The next poll on mailbox B runs only newly arrived email
+        await self._arrive_and_wait_interval()
+        with patch(f"{__name__}.MAILBOX", [100, 101, 102, 103, 104]):
+            fetch = await self._poll(ImapTriggerManager(), config={"imap_mailbox": "Archive"})
+
+        self.assertEqual(fetch.await_args.args[1], ImapCursor(uidvalidity="77", last_uid=103))
+        self.assertEqual(self.runs, Counter({"104": 1}))
+        self.assertEqual(await self._stored(), ImapCursor(uidvalidity="77", last_uid=104))
+
+    async def test_switching_mailbox_with_non_zero_cursor_takes_new_baseline(self) -> None:
+        # Mailbox A establishes baseline at 103
+        await self._poll(ImapTriggerManager(), config={"imap_mailbox": "INBOX"})
+        self.assertEqual(await self._stored(), ImapCursor(uidvalidity="77", last_uid=103))
+
+        # Switch to mailbox B which has emails [200, 201] and shares UIDVALIDITY ("77")
+        await self._arrive_and_wait_interval()
+        with patch(f"{__name__}.MAILBOX", [200, 201]):
+            fetch = await self._poll(ImapTriggerManager(), config={"imap_mailbox": "Archive"})
+
+        self.assertIsNone(fetch.await_args.args[1])
+        self.assertEqual(await self._stored(), ImapCursor(uidvalidity="77", last_uid=201))
+        self.assertEqual(self.runs, Counter())
+
+        # Next poll runs only new emails
+        await self._arrive_and_wait_interval()
+        with patch(f"{__name__}.MAILBOX", [200, 201, 202]):
+            fetch = await self._poll(ImapTriggerManager(), config={"imap_mailbox": "Archive"})
+
+        self.assertEqual(fetch.await_args.args[1], ImapCursor(uidvalidity="77", last_uid=201))
+        self.assertEqual(self.runs, Counter({"202": 1}))
+        self.assertEqual(await self._stored(), ImapCursor(uidvalidity="77", last_uid=202))
+
+    async def test_legacy_cursor_adopts_current_mailbox_without_reset(self) -> None:
+        # Simulate a row saved before this change with key_id="imap" and last_uid=101
+        async with async_session_maker() as db:
+            await db.execute(
+                pg_insert(TriggerPollState).values(
+                    id=uuid.uuid4(),
+                    workflow_id=self.workflow_id,
+                    node_id="imap-1",
+                    node_type="imapTrigger",
+                    key_id="imap",
+                    scope_fingerprint="77",
+                    version=101,
+                    next_poll_at=func.now(),
+                )
+            )
+            await db.commit()
+
+        # First poll after upgrade should process pending emails 102 and 103 without reset
+        fetch = await self._poll(ImapTriggerManager())
+
+        self.assertEqual(fetch.await_args.args[1], ImapCursor(uidvalidity="77", last_uid=101))
+        self.assertEqual(self.runs, Counter({"102": 1, "103": 1}))
+        self.assertEqual(await self._stored(), ImapCursor(uidvalidity="77", last_uid=103))
+
+        # And key_id should now be adopted (no longer "imap")
+        key_id = await self._stored_key_id()
+        self.assertNotEqual(key_id, "imap")
+        self.assertEqual(key_id, mailbox_fingerprint("c1", {}))

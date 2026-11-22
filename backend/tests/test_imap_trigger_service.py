@@ -145,6 +145,51 @@ class ImapTriggerManagerPollingTests(unittest.IsolatedAsyncioTestCase):
         )
         mocks["_execute_workflow_for_email"].assert_not_awaited()
 
+    async def test_poll_workflow_node_takes_baseline_when_mailbox_changes(self) -> None:
+        stored = ImapCursor(uidvalidity="1", last_uid=0, mailbox_hash="old_mailbox_hash")
+        mocks = {
+            "_claim_cursor": AsyncMock(return_value=_CursorClaim(due=True, cursor=stored)),
+            "_fetch_node_messages": AsyncMock(return_value=(ImapCursor("1", 50), [])),
+            "_execute_workflow_for_email": AsyncMock(),
+            "_insert_baseline": AsyncMock(),
+            "_advance_cursor": AsyncMock(return_value=True),
+        }
+        with patch.multiple(self.manager, **mocks):
+            await self.manager._poll_workflow_node(self.workflow, self.node)
+
+        # Baseline is fetched with None, and no emails are executed
+        mocks["_fetch_node_messages"].assert_awaited_once_with(
+            {"imap_host": "imap.example.com"}, None
+        )
+        mocks["_execute_workflow_for_email"].assert_not_awaited()
+        mocks["_advance_cursor"].assert_awaited_once_with(
+            self.workflow.id,
+            "imap-node",
+            stored,
+            ImapCursor("1", 50),
+        )
+
+    async def test_poll_workflow_node_legacy_cursor_does_not_reset(self) -> None:
+        stored = ImapCursor(uidvalidity="1", last_uid=100, mailbox_hash="imap")
+        emails = [{"uid": "101", "subject": "First"}]
+        mocks = {
+            "_claim_cursor": AsyncMock(return_value=_CursorClaim(due=True, cursor=stored)),
+            "_fetch_node_messages": AsyncMock(return_value=(ImapCursor("1", 101), emails)),
+            "_execute_workflow_for_email": AsyncMock(),
+            "_insert_baseline": AsyncMock(),
+            "_advance_cursor": AsyncMock(return_value=True),
+        }
+        with patch.multiple(self.manager, **mocks):
+            await self.manager._poll_workflow_node(self.workflow, self.node)
+
+        # Uses stored cursor directly without resetting or establishing baseline
+        mocks["_fetch_node_messages"].assert_awaited_once_with(
+            {"imap_host": "imap.example.com"}, stored
+        )
+        mocks["_execute_workflow_for_email"].assert_awaited_once_with(
+            self.workflow, "imap-node", emails[0]
+        )
+
     async def test_a_node_claimed_elsewhere_is_not_fetched(self) -> None:
         mocks = await self._poll(_CursorClaim(due=False), (ImapCursor(), []))
 
