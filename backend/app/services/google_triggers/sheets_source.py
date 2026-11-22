@@ -13,7 +13,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from app.services.google_sheets_service import _column_letter_zero_based
+from app.services.google_sheets_service import _column_letter_zero_based, header_keys
 from app.services.google_triggers.config import SheetsTriggerConfig
 from app.services.google_triggers.events import MOVED, ItemWrite, PollSkippedError, TriggerEvent
 from app.services.google_triggers.fingerprint import Fingerprinter
@@ -103,9 +103,9 @@ def key_column_index(key_column: str, snapshot: SheetSnapshot, has_header: bool)
 
 
 def column_name(index: int, snapshot: SheetSnapshot, has_header: bool) -> str:
-    """Header text for a column, or its letter when there is no header text."""
-    if has_header and index < len(snapshot.header) and snapshot.header[index]:
-        return snapshot.header[index]
+    """The column's key in the row object: its header text, or its letter without one."""
+    if has_header:
+        return header_keys(snapshot.header, index + 1)[index]
     return _column_letter_zero_based(index)
 
 
@@ -113,8 +113,8 @@ def row_object(row: SheetRow, snapshot: SheetSnapshot, has_header: bool) -> dict
     """A row in the shape the Google Sheets node's readRange returns."""
     if has_header:
         cells = {
-            title: (row.cells[index] if index < len(row.cells) else "")
-            for index, title in enumerate(snapshot.header)
+            key: (row.cells[index] if index < len(row.cells) else "")
+            for index, key in enumerate(header_keys(snapshot.header, len(row.cells)))
         }
     else:
         cells = {_column_letter_zero_based(index): value for index, value in enumerate(row.cells)}

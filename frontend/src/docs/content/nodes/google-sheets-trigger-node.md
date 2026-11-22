@@ -61,7 +61,7 @@ A workflow that writes to the sheet it watches causes its own `updated` events. 
 | `$nodeLabel.sheet_name` | Watched tab |
 | `$nodeLabel.triggered_at` | When the change was seen |
 
-For `deleted`, `row` holds only `rowIndex`, the row number it last had.
+Columns are keyed as the Google Sheets node's `readRange` keys them: a column without a title by its letter, a repeated title with `_2`, `_3`, …. For `deleted`, `row` holds only `rowIndex`, the row number it last had.
 
 ## What Heym Stores
 

@@ -101,6 +101,42 @@ class TestReadRange(unittest.TestCase):
         self.assertEqual(result["total"], 2)
         self.assertTrue(result["success"])
 
+    def test_read_range_keeps_repeated_blank_and_untitled_columns(self) -> None:
+        # Two "Notes" columns kept only the last one, blank titles shared the key "", and a
+        # column past the header's end (Sheets drops trailing empty cells) was dropped.
+        svc = self._make_service()
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "values": [
+                ["Name", "", "Notes", "Notes"],
+                ["Ada", "vip", "called", "emailed", "late"],
+                ["Bob"],
+            ],
+        }
+        mock_response.raise_for_status = MagicMock()
+        with patch("httpx.get", return_value=mock_response):
+            result = svc.read_range("spreadsheet-id", "Sheet1", has_header=True)
+
+        self.assertEqual(
+            result["rows"],
+            [
+                {
+                    "Name": "Ada",
+                    "B": "vip",
+                    "Notes": "called",
+                    "Notes_2": "emailed",
+                    "E": "late",
+                    "rowIndex": 2,
+                },
+                {"Name": "Bob", "B": "", "Notes": "", "Notes_2": "", "E": "", "rowIndex": 3},
+            ],
+        )
+
+    def test_header_keys_never_reuse_a_real_title(self) -> None:
+        from app.services.google_sheets_service import header_keys
+
+        self.assertEqual(header_keys(["A", "", "B_2", "B", "B"]), ["A", "B_3", "B_2", "B", "B_4"])
+
     def test_read_range_header_respects_start_row(self) -> None:
         """When has_header=True, row 1 is the header; start_row sets where DATA begins.
 

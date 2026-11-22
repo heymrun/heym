@@ -94,6 +94,27 @@ class PickerTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.columns, ["Name", "B", "Email"])
 
+    async def test_columns_name_a_repeated_title_as_the_node_does(self) -> None:
+        from app.api.google_sheets import sheet_columns
+
+        with (
+            patch(
+                "app.api.google_sheets.get_accessible_credential",
+                AsyncMock(return_value=_credential()),
+            ),
+            patch("app.api.google_sheets.decrypt_config", return_value={}),
+            patch("app.api.google_sheets._read_header", return_value=["Notes", " Notes ", ""]),
+        ):
+            result = await sheet_columns(
+                uuid.uuid4(),
+                spreadsheet="abc123",
+                tab="Leads",
+                current_user=SimpleNamespace(id=uuid.uuid4()),
+                db=AsyncMock(),
+            )
+
+        self.assertEqual(result.columns, ["Notes", "Notes_2", "C"])
+
     async def test_another_credential_type_is_not_found(self) -> None:
         from app.api.google_sheets import spreadsheet_tabs
 

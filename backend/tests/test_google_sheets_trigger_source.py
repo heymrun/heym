@@ -118,5 +118,26 @@ class DiffSheetTests(unittest.TestCase):
         self.assertEqual(header_fingerprint(build_snapshot([["Ada"]], False), FP), "")
 
 
+class RepeatedAndBlankHeaderTests(unittest.TestCase):
+    """Rows keep every column, keyed as the Google Sheets node's readRange keys them."""
+
+    def test_repeated_blank_and_untitled_columns_keep_their_cells(self) -> None:
+        header = ["Name", "", "Notes", "Notes"]
+        [change] = _diff([header], [header, ["Ada", "vip", "called", "emailed", "late"]])
+
+        self.assertEqual(
+            change.payload["row"],
+            {
+                "Name": "Ada",
+                "B": "vip",
+                "Notes": "called",
+                "Notes_2": "emailed",
+                "E": "late",
+                "rowIndex": 2,
+            },
+        )
+        self.assertEqual(change.payload["changed_columns"], ["Name", "B", "Notes", "Notes_2", "E"])
+
+
 if __name__ == "__main__":
     unittest.main()

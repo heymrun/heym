@@ -45,6 +45,31 @@ def _column_letter_zero_based(col_index: int) -> str:
     return letters
 
 
+def header_keys(header: list, width: int = 0) -> list[str]:
+    """The key each column gets in a row object, for at least ``width`` columns.
+
+    A column's title, or its letter when the title is blank or the column lies past the
+    header row's end (Sheets drops trailing empty cells). A repeated key gets ``_2``,
+    ``_3``, … that no other column uses, as the Converter names repeated CSV headers, so
+    no column's cell overwrites another's.
+    """
+    titles = [str(title) for title in header]
+    titles += [""] * (width - len(titles))
+    real_titles = {title for title in titles if title.strip()}
+    keys: list[str] = []
+    used: set[str] = set()
+    for index, title in enumerate(titles):
+        generated = not title.strip()
+        name = _column_letter_zero_based(index) if generated else title
+        key, suffix = name, 2
+        # A real title keeps its name; a letter or suffix never takes one.
+        while key in used or ((generated or key != name) and key in real_titles):
+            key, suffix = f"{name}_{suffix}", suffix + 1
+        used.add(key)
+        keys.append(key)
+    return keys
+
+
 class GoogleSheetsService:
     """Sync Google Sheets API client.
 
@@ -161,10 +186,10 @@ class GoogleSheetsService:
             return {"rows": [], "total": 0, "success": True}
 
         if has_header:
-            headers = [str(h) for h in raw[0]]
             data_raw = (
                 raw[data_offset : data_offset + max_rows] if max_rows > 0 else raw[data_offset:]
             )
+            headers = header_keys(raw[0], max((len(row) for row in data_raw), default=0))
             rows = []
             for j, row in enumerate(data_raw):
                 raw_index = data_offset + j

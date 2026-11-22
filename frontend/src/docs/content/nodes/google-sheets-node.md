@@ -63,7 +63,7 @@ Tokens refresh automatically in the background — no manual token management re
 
 | Operation | Output field | Type | Description |
 |-----------|-------------|------|-------------|
-| `readRange` | `.rows` | array | Row objects: column keys (header names or A, B, …) plus **`rowIndex`** (1-based sheet row) |
+| `readRange` | `.rows` | array | Row objects: column keys (header names or A, B, …) plus **`rowIndex`** (1-based sheet row). A column without a title is keyed by its letter, and a repeated title gets `_2`, `_3`, …, so every column keeps its cell |
 | `readRange` | `.total` | number | Number of data rows returned |
 | `appendRows` | `.updatedRange` | string | Range written |
 | `appendRows` | `.updates` | number | Number of rows appended |
