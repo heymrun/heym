@@ -46,6 +46,7 @@ class _Session:
         self.commit = AsyncMock()
         self.flush = AsyncMock(side_effect=self._assign_ids)
         self.execute = AsyncMock(side_effect=list(results or []))
+        self.refresh = AsyncMock()
 
     async def _assign_ids(self) -> None:
         for obj in self.added:

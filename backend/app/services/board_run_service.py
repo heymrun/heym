@@ -1001,6 +1001,10 @@ async def enqueue_card_chain(
     ).first()
     if locked is None:
         return ENQUEUE_BLOCKED
+    try:
+        await db.refresh(card)
+    except Exception:
+        pass
     if await blocking_card_runs(db, card.id):
         return ENQUEUE_BLOCKED
     links = await _column_links(db, column.id)
