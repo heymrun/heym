@@ -1546,6 +1546,70 @@ export const useWorkflowStore = defineStore("workflow", () => {
     );
   }
 
+  function sleepWithWake(
+    ms: number,
+    signal: AbortSignal,
+    hiddenMs?: number,
+  ): Promise<void> {
+    return new Promise((resolve) => {
+      if (signal.aborted) {
+        resolve();
+        return;
+      }
+
+      let timer: ReturnType<typeof setTimeout> | null = null;
+
+      const cleanup = (): void => {
+        if (timer !== null) {
+          clearTimeout(timer);
+          timer = null;
+        }
+        signal.removeEventListener("abort", handleAbort);
+        if (typeof document !== "undefined" && typeof document.removeEventListener === "function") {
+          document.removeEventListener("visibilitychange", handleVisibilityChange);
+        }
+      };
+
+      const handleAbort = (): void => {
+        cleanup();
+        resolve();
+      };
+
+      const handleVisibilityChange = (): void => {
+        if (typeof document === "undefined") return;
+        if (document.visibilityState === "visible") {
+          cleanup();
+          resolve();
+        } else if (document.visibilityState === "hidden" && hiddenMs !== undefined) {
+          if (timer !== null) {
+            clearTimeout(timer);
+          }
+          timer = setTimeout(() => {
+            cleanup();
+            resolve();
+          }, hiddenMs);
+        }
+      };
+
+      signal.addEventListener("abort", handleAbort, { once: true });
+      if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
+        document.addEventListener("visibilitychange", handleVisibilityChange);
+      }
+
+      const initialMs =
+        typeof document !== "undefined" &&
+        document.visibilityState === "hidden" &&
+        hiddenMs !== undefined
+          ? hiddenMs
+          : ms;
+
+      timer = setTimeout(() => {
+        cleanup();
+        resolve();
+      }, initialMs);
+    });
+  }
+
   /**
    * After a fileUploadTrigger workflow mints an upload link, the canvas run ends
    * with status "awaiting_file_upload". The actual file upload happens out of band
@@ -1556,20 +1620,128 @@ export const useWorkflowStore = defineStore("workflow", () => {
     slotId: string,
     signal: AbortSignal,
     workflowId: string,
+    expiresAtIso?: string,
   ): Promise<void> {
-    const deadlineMs = Date.now() + 30 * 60 * 1000;
-    while (!signal.aborted && Date.now() < deadlineMs) {
-      await new Promise((r) => setTimeout(r, 2500));
-      if (signal.aborted) return;
+    let expiresAtMs: number | null = null;
+    if (expiresAtIso) {
+      const parsed = Date.parse(expiresAtIso);
+      if (!Number.isNaN(parsed)) {
+        expiresAtMs = parsed;
+      }
+    }
+
+    const pollStartMs = Date.now();
+    let isAcceptedUpload = false;
+    let consumedAtMs: number | null = null;
+
+    while (!signal.aborted) {
       if (!isWorkflowOpen(workflowId)) return;
       // Stop if the user started another run or cleared the result.
+      if (executionResult.value?.status !== "awaiting_file_upload") return;
+
+      let delayMs: number;
+      let hiddenDelayMs: number;
+      const isHidden = typeof document !== "undefined" && document.visibilityState === "hidden";
+
+      if (isAcceptedUpload) {
+        const elapsedAcceptedMs = Date.now() - (consumedAtMs ?? pollStartMs);
+        if (elapsedAcceptedMs < 30_000) {
+          delayMs = 2500;
+        } else if (elapsedAcceptedMs < 120_000) {
+          delayMs = 5000;
+        } else if (elapsedAcceptedMs < 600_000) {
+          delayMs = 10000;
+        } else {
+          delayMs = 30000;
+        }
+        hiddenDelayMs = Math.max(delayMs, 15000);
+      } else if (isHidden) {
+        delayMs = 60000;
+        hiddenDelayMs = 60000;
+      } else {
+        const elapsedPendingMs = Date.now() - pollStartMs;
+        if (elapsedPendingMs < 30_000) {
+          delayMs = 2500;
+        } else if (elapsedPendingMs < 120_000) {
+          delayMs = 5000;
+        } else if (elapsedPendingMs < 600_000) {
+          delayMs = 10000;
+        } else {
+          delayMs = 30000;
+        }
+        hiddenDelayMs = 60000;
+      }
+
+      // The local expiry timestamp serves only as a scheduling hint to align the
+      // wake-up with the expected expiry, not as proof that the slot expired.
+      // Expiration is determined authoritatively by the backend status response.
+      if (!isAcceptedUpload && expiresAtMs !== null) {
+        const remainingToExpiry = expiresAtMs - Date.now();
+        if (remainingToExpiry > 0) {
+          if (remainingToExpiry < delayMs) {
+            delayMs = remainingToExpiry;
+          }
+          if (remainingToExpiry < hiddenDelayMs) {
+            hiddenDelayMs = remainingToExpiry;
+          }
+        }
+      }
+
+      await sleepWithWake(delayMs, signal, hiddenDelayMs);
+      if (signal.aborted) return;
+      if (!isWorkflowOpen(workflowId)) return;
       if (executionResult.value?.status !== "awaiting_file_upload") return;
 
       let slot: FileUploadSlotStatus;
       try {
         slot = await workflowApi.getFileUploadSlot(slotId);
-      } catch {
+      } catch (err) {
+        const is404 =
+          (axios.isAxiosError(err) && err.response?.status === 404) ||
+          ((err as { response?: { status?: number } })?.response?.status === 404);
+        if (is404) {
+          if (!isWorkflowOpen(workflowId)) return;
+          executionResult.value = {
+            workflow_id: workflowId,
+            status: "error",
+            outputs: {
+              error: "Upload slot not found",
+              slot_id: slotId,
+            },
+            node_results: [],
+            execution_time_ms: 0,
+          };
+          return;
+        }
         continue;
+      }
+
+      if (signal.aborted) return;
+      if (!isWorkflowOpen(workflowId)) return;
+      if (executionResult.value?.status !== "awaiting_file_upload") return;
+
+      if (expiresAtMs === null && slot.expires_at) {
+        const parsed = Date.parse(slot.expires_at);
+        if (!Number.isNaN(parsed)) {
+          expiresAtMs = parsed;
+        }
+      }
+
+      // Backend status is authoritative. If the backend reports expired, transition
+      // the canvas to the explicit error state and stop polling.
+      if (slot.status === "expired") {
+        if (!isWorkflowOpen(workflowId)) return;
+        executionResult.value = {
+          workflow_id: workflowId,
+          status: "error",
+          outputs: {
+            error: "Upload link expired before a file was uploaded",
+            slot_id: slotId,
+          },
+          node_results: [],
+          execution_time_ms: 0,
+        };
+        return;
       }
 
       if (slot.run) {
@@ -1591,6 +1763,33 @@ export const useWorkflowStore = defineStore("workflow", () => {
           );
         }
         return;
+      }
+
+      // If the upload was accepted, continue polling for the execution result even if
+      // the slot's original upload expiry timestamp has passed.
+      if (slot.status === "consumed") {
+        isAcceptedUpload = true;
+        if (consumedAtMs === null) {
+          consumedAtMs = Date.now();
+        }
+        const configuredTimeout = currentWorkflow.value?.workflow_timeout_seconds;
+        if (typeof configuredTimeout === "number" && configuredTimeout > 0) {
+          const executionBudgetMs = (configuredTimeout + 30) * 1000;
+          if (Date.now() - consumedAtMs > executionBudgetMs) {
+            if (!isWorkflowOpen(workflowId)) return;
+            executionResult.value = {
+              workflow_id: workflowId,
+              status: "error",
+              outputs: {
+                error: `Workflow execution timed out after ${configuredTimeout}s without reporting a result`,
+                slot_id: slotId,
+              },
+              node_results: [],
+              execution_time_ms: 0,
+            };
+            return;
+          }
+        }
       }
     }
   }
@@ -1737,11 +1936,18 @@ export const useWorkflowStore = defineStore("workflow", () => {
               abortController.value = null;
               currentExecutionId.value = null;
               currentExecutionWorkflowId.value = null;
-              const slotId = (result.outputs as Record<string, unknown>)?.slot_id;
+              const outputs = result.outputs as Record<string, unknown> | undefined;
+              const slotId = outputs?.slot_id;
+              const expiresAt = outputs?.expires_at;
               if (typeof slotId === "string") {
                 const pollAbort = new AbortController();
                 fileUploadPollAbortController.value = pollAbort;
-                void pollFileUploadSlot(slotId, pollAbort.signal, wf.id).finally(() => {
+                void pollFileUploadSlot(
+                  slotId,
+                  pollAbort.signal,
+                  wf.id,
+                  typeof expiresAt === "string" ? expiresAt : undefined,
+                ).finally(() => {
                   if (fileUploadPollAbortController.value === pollAbort) {
                     fileUploadPollAbortController.value = null;
                   }
