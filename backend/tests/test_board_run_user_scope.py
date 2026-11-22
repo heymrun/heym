@@ -55,7 +55,7 @@ class _Session:
     def add(self, obj: object) -> None:
         self.added.append(obj)
 
-    async def get(self, model: type, pk: uuid.UUID) -> object:
+    async def get(self, model: type, pk: uuid.UUID, **_kwargs: object) -> object:
         return self.objects.get((model.__name__, pk))
 
     async def __aenter__(self) -> "_Session":
