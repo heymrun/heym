@@ -8,14 +8,14 @@ The **Error Handler** node catches errors from any node in the workflow. When pr
 |----------|-------|
 | Inputs | 0 (triggered on error) |
 | Outputs | 1 |
-| Output | `$nodeLabel.error`, `$nodeLabel.errorNode`, `$nodeLabel.errorNodeType`, `$nodeLabel.timestamp` |
+| Output | `$nodeLabel.error.message`, `$nodeLabel.error.node_label`, `$nodeLabel.error.node_type`, `$nodeLabel.error.node_id`, and `$nodeLabel.message` when `message` is set |
 
 ## Parameters
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `label` | string | Node identifier (camelCase) |
-| `message` | expression | Optional. Default: `$error.message` |
+| `message` | expression | Optional. Default (pre-filled on the canvas): `$error.message`. Its text is added to the output as `message`. Inside it, `$error.message`, `$error.node_label`, `$error.node_type` and `$error.node_id` describe the failure |
 
 ## Error Context
 
@@ -23,10 +23,10 @@ When the error handler runs, these fields are available:
 
 | Field | Description |
 |-------|-------------|
-| `$errorHandler.error` | Error message string |
-| `$errorHandler.errorNode` | Label of the node that failed |
-| `$errorHandler.errorNodeType` | Type of the failed node |
-| `$errorHandler.timestamp` | When the error occurred |
+| `$errorHandler.error.message` | Error message string |
+| `$errorHandler.error.node_label` | Label of the node that failed |
+| `$errorHandler.error.node_type` | Type of the failed node |
+| `$errorHandler.error.node_id` | ID of the node that failed |
 
 ## Use Cases
 
@@ -49,12 +49,12 @@ Only one Error Handler per workflow.
 
 Connect to Output for custom error response:
 ```json
-{"message": "Error: $errorHandler.error at $errorHandler.errorNode"}
+{"message": "Error: $errorHandler.error.message at $errorHandler.error.node_label"}
 ```
 
 Or connect to Slack for notifications:
 ```json
-{"message": "Workflow failed: $errorHandler.error in $errorHandler.errorNode"}
+{"message": "Workflow failed: $errorHandler.error.message in $errorHandler.error.node_label"}
 ```
 
 ## Related

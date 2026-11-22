@@ -223,9 +223,12 @@ def email_payload(raw_bytes: bytes) -> dict[str, Any]:
     parsed_date_iso: str | None = None
     if parsed_date:
         try:
-            parsed_date_iso = (
-                parsedate_to_datetime(parsed_date).astimezone(timezone.utc).isoformat()
-            )
+            sent_at = parsedate_to_datetime(parsed_date)
+            if sent_at.tzinfo is None:
+                # "-0000" means UTC (RFC 5322 3.3). Python returns it naive, and astimezone
+                # would read it as the server's time zone (the image sets Europe/Berlin).
+                sent_at = sent_at.replace(tzinfo=timezone.utc)
+            parsed_date_iso = sent_at.astimezone(timezone.utc).isoformat()
         except Exception:
             parsed_date_iso = None
 

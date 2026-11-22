@@ -20,7 +20,7 @@ The **DataTable** node reads, writes, and manages data in Heym DataTables. Use i
 | `dataTableData` | JSON string | Column values: `{"column_name": "value"}` |
 | `dataTableFilter` | JSON string | Filter (find/upsert/count). Boolean columns use unquoted JSON `true` and `false`. `find` and `count` support operators `{"age": {"$gt": 18}}`; `upsert` uses type-aware exact-match `{"column_name": "value"}` (comparison operators are not supported for upsert) |
 | `dataTableSort` | string | Sort column, prefix `-` for descending |
-| `dataTableLimit` | number | Max rows returned (default: 100) |
+| `dataTableLimit` | number | Max rows returned. A node added from the canvas starts at `100`; empty or `0` returns every matching row |
 
 ## Operations
 

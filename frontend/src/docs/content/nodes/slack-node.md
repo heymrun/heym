@@ -101,7 +101,7 @@ The same Slack Bot credential also verifies [Slack Trigger](./slack-trigger-node
 
 Use with [Error Handler](./error-handler-node.md) for failure notifications:
 ```json
-"message": "Error in $errorHandler.errorNode: $errorHandler.error"
+"message": "Error in $errorHandler.error.node_label: $errorHandler.error.message"
 ```
 
 ## Egress Safety

@@ -8,7 +8,7 @@ The **Crawler** node scrapes web pages using FlareSolverr with optional HTML ext
 |----------|-------|
 | Inputs | 1 |
 | Outputs | 1 |
-| Output | `$nodeLabel.body` (HTML or extracted content) |
+| Output | `$nodeLabel.html`, `$nodeLabel.url`, `$nodeLabel.status`, and `$nodeLabel.extracted` in `extract` mode |
 
 ## Parameters
 
@@ -18,8 +18,8 @@ The **Crawler** node scrapes web pages using FlareSolverr with optional HTML ext
 | `crawlerUrl` | expression | URL to scrape (supports expressions) |
 | `crawlerWaitSeconds` | number | Seconds to wait before scraping (default: 0) |
 | `crawlerMaxTimeout` | number | Max timeout in ms (default: 60000) |
-| `crawlerMode` | string | `"basic"` or other modes |
-| `crawlerSelectors` | array | CSS selectors for extraction. Each: `{ selector, attribute? }` |
+| `crawlerMode` | string | `"basic"` returns the page HTML; `"extract"` also runs `crawlerSelectors` (default: `"basic"`) |
+| `crawlerSelectors` | array | `extract` mode only. Each: `{ name, selector, attributes? }`; a selector without a `name` is skipped |
 
 ## Example
 
@@ -31,13 +31,16 @@ The **Crawler** node scrapes web pages using FlareSolverr with optional HTML ext
     "credentialId": "flaresolverr-credential-uuid",
     "crawlerUrl": "$userInput.body.url",
     "crawlerWaitSeconds": 2,
+    "crawlerMode": "extract",
     "crawlerSelectors": [
-      { "selector": "h1" },
-      { "selector": ".content", "attribute": "innerHTML" }
+      { "name": "title", "selector": "h1" },
+      { "name": "links", "selector": "a.post-link", "attributes": ["href"] }
     ]
   }
 }
 ```
+
+`$scrapePage.extracted.title` is a list with one `{"text": ...}` object per matching element, and each `$scrapePage.extracted.links` item also carries its `href`. `$scrapePage.html` holds the page HTML in both modes.
 
 ## Egress Safety
 

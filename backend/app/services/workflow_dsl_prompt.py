@@ -1810,10 +1810,10 @@ Downstream nodes read `$scoreRows.result.total` and `$scoreRows.result.count`.
 **AUTOMATIC TRIGGER**: The errorHandler node does NOT need incoming connections! It automatically activates when ANY node in the workflow throws an error. Only ONE errorHandler per workflow is needed.
 
 **Error Context Available**:
-- `$errorHandler.error` - Error message string
-- `$errorHandler.errorNode` - Label of the node that failed
-- `$errorHandler.errorNodeType` - Type of the failed node
-- `$errorHandler.timestamp` - When the error occurred
+- `$errorHandler.error.message` - Error message string
+- `$errorHandler.error.node_label` - Label of the node that failed
+- `$errorHandler.error.node_type` - Type of the failed node
+- `$errorHandler.error.node_id` - ID of the node that failed
 
 **Use Cases** (only when requested):
 - Send Slack/email notifications on failure
@@ -1952,7 +1952,7 @@ Notes:
 **Example Message Formats**:
 - Simple: `"Workflow completed successfully!"`
 - Dynamic: `"User $userInput.body.text processed at $now.format('HH:mm')"`
-- Error notification: `"Error in $errorHandler.errorNode: $errorHandler.error"`
+- Error notification: `"Error in $errorHandler.error.node_label: $errorHandler.error.message"`
 
 ### 15b. discord (Send Discord Message)
 - **Purpose**: Send a message to a Discord channel via incoming webhook
@@ -2046,7 +2046,7 @@ Notes:
     "credentialId": "smtp-credential-uuid",
     "to": "admin@example.com",
     "subject": "Workflow Error Alert",
-    "emailBody": "Error in node $errorHandler.errorNode: $errorHandler.error"
+    "emailBody": "Error in node $errorHandler.error.node_label: $errorHandler.error.message"
   }
 }
 ```
@@ -3311,7 +3311,7 @@ accepts at most two nested levels of block children per request.
   - `dataTableFilter`: JSON object for filtering (for find, upsert, count). Boolean columns use unquoted JSON `true` and `false` values (e.g. `{"is_active": true}`). `find` and `count` support comparison operators via object values: {"age": {"$gt": 18}} — supported operators: $eq $ne $gt $gte $lt $lte $contains (case-insensitive substring) $in (array). A plain value still means equals. Numeric comparisons apply to columns typed as "number". You can also filter on row metadata (`id`, `table_id`, `created_at`, `updated_at`, `created_by`, `updated_by`) which are real columns outside the JSON data blob — use a full date for range comparisons (e.g. {"created_at": {"$gt": "2026-06-04"}}) or $contains for partial date text matches. `upsert` uses the same type-aware exact-match {"column_name": "value"} filtering to locate an existing row (comparison operators are not supported for upsert).
   - `dataTableData`: JSON object mapping column names to values (for insert, update, upsert)
   - `dataTableRowId`: Row UUID for single-row operations (for getById, update, remove)
-  - `dataTableLimit`: Maximum rows to return (default: 100, for find, getAll)
+  - `dataTableLimit`: Maximum rows to return (for find, getAll). Omitted or 0 returns every matching row
   - `dataTableSort`: Sort column name, prefix with - for descending e.g. "-created_at" (for find, getAll)
 
 **Operations Reference**:
@@ -5661,8 +5661,8 @@ Note:
     {"id": "node_2", "type": "http", "position": {"x": 350, "y": 100}, "data": {"label": "callApi", "curl": "curl -X GET https://api.example.com/data"}},
     {"id": "node_3", "type": "output", "position": {"x": 600, "y": 100}, "data": {"label": "successOutput", "message": "$callApi.body"}},
     {"id": "node_error", "type": "errorHandler", "position": {"x": 100, "y": 280}, "data": {"label": "errorHandler"}},
-    {"id": "node_error_out", "type": "output", "position": {"x": 350, "y": 280}, "data": {"label": "errorOutput", "message": "Error: $errorHandler.error", "allowDownstream": true}},
-    {"id": "node_slack", "type": "slack", "position": {"x": 600, "y": 280}, "data": {"label": "notifyError", "credentialId": "slack-credential-uuid", "message": "API Error: $errorHandler.error at $errorHandler.errorNode"}}
+    {"id": "node_error_out", "type": "output", "position": {"x": 350, "y": 280}, "data": {"label": "errorOutput", "message": "Error: $errorHandler.error.message", "allowDownstream": true}},
+    {"id": "node_slack", "type": "slack", "position": {"x": 600, "y": 280}, "data": {"label": "notifyError", "credentialId": "slack-credential-uuid", "message": "API Error: $errorHandler.error.message at $errorHandler.error.node_label"}}
   ],
   "edges": [
     {"id": "edge_1", "source": "node_1", "target": "node_2"},

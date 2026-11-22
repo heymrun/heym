@@ -8,7 +8,7 @@ The **Condition** node branches the workflow based on an if/else expression. Rou
 |----------|-------|
 | Inputs | 1 |
 | Outputs | 2 (true, false) |
-| Output | Passes through input to the chosen branch |
+| Output | `$nodeLabel.branch` (`"true"` or `"false"`). The input is not passed on: read an earlier node's fields by its label, such as `$userInput.body.text` |
 
 ## Parameters
 

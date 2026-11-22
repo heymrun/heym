@@ -8,7 +8,7 @@ The **Switch** node routes execution to different paths based on matching a valu
 |----------|-------|
 | Inputs | 1 |
 | Outputs | n (one per case + default) |
-| Output | Passes through input to the matched branch |
+| Output | `$nodeLabel.branch` (`case-0`, `case-1`, … or `default`) and `$nodeLabel.value`. The input is not passed on: read an earlier node's fields by its label |
 
 ## Parameters
 
