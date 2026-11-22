@@ -66,6 +66,7 @@ def parse_curl(
     basic_user: str | None = None
     json_option = False
     data_indexes: set[int] = set()
+    proxy_indexes: set[int] = set()
     explicit_method = False
     get_option = False
     head_option = False
@@ -92,9 +93,10 @@ def parse_curl(
             # `-b name` without "=" names a cookie file, which a workflow cannot read.
             if token not in ("-b", "--cookie") or "=" in value:
                 option_headers[_HEADER_OPTIONS[token]] = value
-        elif token in ("-x", "--proxy", "--preproxy") and i + 1 < len(tokens):
+        elif token in ("-x", "--proxy", "--preproxy", "--proxy1.0") and i + 1 < len(tokens):
             # The node connects directly. Consumed so the proxy address is never the URL.
             i += 1
+            proxy_indexes.add(i)
         elif token in ("-I", "--head"):
             head_option = True
         elif token in ("-L", "--location"):
@@ -138,7 +140,7 @@ def parse_curl(
     if not url:
         for index in range(len(tokens) - 1, -1, -1):
             token = tokens[index]
-            if index in data_indexes:
+            if index in data_indexes or index in proxy_indexes:
                 continue
             candidate = rendered(token)
             if candidate.startswith(("http://", "https://")):

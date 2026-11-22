@@ -339,9 +339,23 @@ class HttpNodeCurlProxyOptionTests(unittest.TestCase):
                 self.assertEqual(request.headers["authorization"], "Bearer t")
 
     def test_a_proxy_before_the_url_is_skipped_too(self) -> None:
-        request = _run_curl("curl -x http://proxy.local:3128 https://api.example.com/v1/me")
+        for option in ("-x", "--proxy1.0"):
+            with self.subTest(option=option):
+                request = _run_curl(
+                    f"curl {option} http://proxy.local:3128 https://api.example.com/v1/me"
+                )
 
-        self.assertEqual(str(request.url), "https://api.example.com/v1/me")
+                self.assertEqual(str(request.url), "https://api.example.com/v1/me")
+
+    def test_a_proxy_is_never_the_url_when_the_url_has_no_scheme(self) -> None:
+        # The fallback scan for an http(s) token used to pick the proxy value.
+        for option in ("-x", "--proxy1.0"):
+            with self.subTest(option=option):
+                parsed = WorkflowExecutor(nodes=[], edges=[]).parse_curl(
+                    f"curl {option} http://proxy.example.com:3128 example.com/v1/me"
+                )
+
+                self.assertNotIn("proxy.example.com", parsed[1])
 
 
 class HttpNodeCurlHeadOptionTests(unittest.TestCase):
