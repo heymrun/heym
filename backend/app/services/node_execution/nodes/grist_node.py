@@ -7,6 +7,18 @@ from app.services.node_execution.base import NodeExecutionContext
 from app.services.node_execution.json_fields import render_json_template
 
 
+def _record_template(node_data: dict, field: str, empty: str) -> object:
+    """The record data template, with a cleared field read as the editor shows it.
+
+    The editor shows `{}` / `[]` for an empty field but saves `""`, and rendering `""` gives
+    the whole input context, which is not the record data the user left empty.
+    """
+    value = node_data.get(field)
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return empty
+    return value
+
+
 def execute(ctx: NodeExecutionContext) -> object:
     """Execute the grist node."""
     self = ctx.executor
@@ -149,7 +161,7 @@ def execute(ctx: NodeExecutionContext) -> object:
     elif operation == "createRecord":
         if not doc_id or not table_id:
             raise ValueError("Grist createRecord requires document ID and table ID")
-        record_data_template = node_data.get("gristRecordData", "{}")
+        record_data_template = _record_template(node_data, "gristRecordData", "{}")
         record_data_str = render_json_template(self, record_data_template, inputs, node_id)
         try:
             record_data = (
@@ -176,7 +188,7 @@ def execute(ctx: NodeExecutionContext) -> object:
     elif operation == "createRecords":
         if not doc_id or not table_id:
             raise ValueError("Grist createRecords requires document ID and table ID")
-        records_data_template = node_data.get("gristRecordsData", "[]")
+        records_data_template = _record_template(node_data, "gristRecordsData", "[]")
         records_data_str = render_json_template(self, records_data_template, inputs, node_id)
         try:
             records_data = (
@@ -213,7 +225,7 @@ def execute(ctx: NodeExecutionContext) -> object:
         record_id = self.evaluate_nonempty_message_template(record_id_template, inputs, node_id)
         if not record_id:
             raise ValueError("Grist updateRecord requires a record ID")
-        record_data_template = node_data.get("gristRecordData", "{}")
+        record_data_template = _record_template(node_data, "gristRecordData", "{}")
         record_data_str = render_json_template(self, record_data_template, inputs, node_id)
         try:
             record_data = (
@@ -237,7 +249,7 @@ def execute(ctx: NodeExecutionContext) -> object:
     elif operation == "updateRecords":
         if not doc_id or not table_id:
             raise ValueError("Grist updateRecords requires document ID and table ID")
-        records_data_template = node_data.get("gristRecordsData", "[]")
+        records_data_template = _record_template(node_data, "gristRecordsData", "[]")
         records_data_str = render_json_template(self, records_data_template, inputs, node_id)
         try:
             records_data = (

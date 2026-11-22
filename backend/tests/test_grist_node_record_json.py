@@ -103,6 +103,26 @@ class GristRecordJsonTests(unittest.TestCase):
                 self.assertIn(f"{field} is not valid JSON", str(row.get("error")))
                 self.assertEqual(self.sent, [])
 
+    def test_a_cleared_field_is_read_as_the_empty_value_the_editor_shows(self) -> None:
+        # The editor shows {} / [] for an empty field and saves "", which renders as the
+        # whole input context.
+        cases = [
+            ("createRecord", "gristRecordData", {"records": [{"fields": {}}]}),
+            ("updateRecord", "gristRecordData", {"records": [{"id": 1, "fields": {}}]}),
+            ("createRecords", "gristRecordsData", {"records": []}),
+            ("updateRecords", "gristRecordsData", {"records": []}),
+        ]
+        for operation, field, payload in cases:
+            for blank in ("", "  "):
+                with self.subTest(operation=operation, blank=blank):
+                    self.sent.clear()
+                    row = self._run(
+                        {"gristOperation": operation, "gristRecordId": "1", field: blank}
+                    )
+
+                    self.assertEqual(row["status"], "success")
+                    self.assertEqual(self.sent[0]["json"], payload)
+
     def test_valid_record_data_is_still_sent(self) -> None:
         row = self._run(
             {
