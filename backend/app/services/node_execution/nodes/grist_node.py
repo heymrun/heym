@@ -265,7 +265,12 @@ def execute(ctx: NodeExecutionContext) -> object:
 
         payload = {
             "records": [
-                {"id": int(r.get("id", 0)), "fields": r.get("fields", r)} for r in records_data
+                {
+                    "id": int(r.get("id", 0)),
+                    # A flat record holds its columns next to `id`, which is not a column.
+                    "fields": r.get("fields", {k: v for k, v in r.items() if k != "id"}),
+                }
+                for r in records_data
             ]
         }
         response = client.patch(
