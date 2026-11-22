@@ -241,6 +241,9 @@ def execute(ctx: NodeExecutionContext) -> object:
                 raise ValueError(f"metadataFilters is not valid JSON: {exc}") from exc
         else:
             metadata_filter = metadata_filter_json or None
+        if metadata_filter is not None and not isinstance(metadata_filter, dict):
+            # A list or a value would search the whole collection as well.
+            raise ValueError("metadataFilters must be a JSON object")
         if metadata_filter is not None:
             metadata_filter = _resolve_filter_expressions(self, metadata_filter, inputs, node_id)
 
