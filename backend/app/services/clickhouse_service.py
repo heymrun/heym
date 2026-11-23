@@ -60,6 +60,33 @@ def _command_summary_result(summary: Any) -> Any:
     return result
 
 
+def _statement_start(sql: str) -> str:
+    """The SQL from its first keyword: whitespace, "(" and comments before it skipped.
+
+    ClickHouse reads `-- …` and `# …` to the end of the line and `/* … */` with nesting, so
+    `-- report\\nSELECT …` is a SELECT and must return its rows.
+    """
+    i, n = 0, len(sql)
+    while i < n:
+        if sql[i].isspace() or sql[i] == "(":
+            i += 1
+        elif sql.startswith("--", i) or sql[i] == "#":
+            end = sql.find("\n", i)
+            i = n if end < 0 else end + 1
+        elif sql.startswith("/*", i):
+            depth, i = 1, i + 2
+            while i < n and depth:
+                if sql.startswith("/*", i):
+                    depth, i = depth + 1, i + 2
+                elif sql.startswith("*/", i):
+                    depth, i = depth - 1, i + 2
+                else:
+                    i += 1
+        else:
+            break
+    return sql[i:]
+
+
 def _validate_identifier(value: str, kind: str) -> str:
     """Validate a table/column identifier; raise ValueError if unsafe."""
     normalized = str(value or "").strip()
@@ -226,7 +253,7 @@ class ClickHouseService:
         return " WHERE " + " AND ".join(clauses), params
 
     def _is_read(self, sql: str) -> bool:
-        head = sql.strip().lstrip("(").upper()
+        head = _statement_start(sql).upper()
         return any(head.startswith(prefix) for prefix in _READ_PREFIXES)
 
     def query(self, sql: str, parameters: dict[str, Any] | None = None) -> dict[str, Any]:

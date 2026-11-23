@@ -3179,7 +3179,7 @@ Each row object includes **`rowIndex`**: the 1-based sheet row number (useful fo
   - `credentialId`: UUID of the ClickHouse credential.
   - `clickhouseOperation`: `"query"` | `"find"` | `"getAll"` | `"count"` | `"getById"` | `"insert"` | `"update"` | `"remove"` | `"upsert"`.
   - `clickhouseTable`: Table name (simple identifier; supports expressions). Required for all ops except `query`.
-  - `clickhouseQuery`: Raw SQL for `query` (SELECT returns rows; other statements run as commands). Supports expressions.
+  - `clickhouseQuery`: Raw SQL for `query` (SELECT returns rows, also after leading `--`, `#` or `/* */` comments; other statements run as commands). Supports expressions.
   - `clickhouseFilter`: JSON object of equality filters, e.g. `{"status":"active"}`. Used by `find`, `count`, `update`, `remove`. Values are parameterized; `null` matches NULL cells (`IS NULL`).
   - `clickhouseLimit`: Max rows for `find` / `getAll` (`"0"` = unlimited, no LIMIT clause). Default `100`.
   - `clickhouseSort`: Optional `column` or `column ASC|DESC` for `find`.
