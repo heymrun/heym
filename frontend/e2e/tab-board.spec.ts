@@ -172,6 +172,17 @@ async function waitForCard(
   return { column, status };
 }
 
+async function cancelBoardRun(
+  page: Page,
+  workflowId: string,
+  executionId: string,
+  boardCard: { boardId: string; cardId: string },
+): Promise<void> {
+  await page.request.post(`/api/workflows/${workflowId}/executions/${executionId}/cancel`);
+  const settled = await waitForCard(page, boardCard.boardId, boardCard.cardId);
+  expect(["success", "failed"]).toContain(settled.status);
+}
+
 async function createSetOutputWorkflow(page: Page): Promise<{ id: string }> {
   return createWorkflow(
     page,
@@ -230,6 +241,12 @@ test("creates and reopens a board with a Model Router and Auto model", async ({ 
   const decision = (await decisionResponse.json()) as { id: string };
   let routerId: string | undefined;
   try {
+    // The create response can arrive before the credential's transaction commits.
+    await expect.poll(async () => {
+      const response = await page.request.get("/api/credentials");
+      const credentials = await response.json() as Array<{ id: string }>;
+      return credentials.some(({ id }) => id === decision.id);
+    }).toBe(true);
     const routerResponse = await page.request.post("/api/credentials", {
       data: {
         name: "Board Model Router",
@@ -805,10 +822,12 @@ test("opens a running card workflow on the live canvas", async ({ page }) => {
   );
 
   let activeExecutionId = "";
+  let boardCard: { boardId: string; cardId: string } | undefined;
   let cardRunId = "";
   let liveInputText = "";
   try {
     const { boardId, cardId, columns } = await createBoardWithCard(page, "watch live");
+    boardCard = { boardId, cardId };
     const planning = columns.find((column) => column.name === "Planning")!;
     await page.request.patch(`/api/boards/${boardId}/columns/${planning.id}`, {
       data: { workflow_ids: [wf.id] },
@@ -855,10 +874,8 @@ test("opens a running card workflow on the live canvas", async ({ page }) => {
     );
     await expect(page.getByPlaceholder("Enter board...")).toHaveValue(liveInputText);
   } finally {
-    if (activeExecutionId) {
-      await page.request.post(
-        `/api/workflows/${wf.id}/executions/${activeExecutionId}/cancel`,
-      );
+    if (activeExecutionId && boardCard) {
+      await cancelBoardRun(page, wf.id, activeExecutionId, boardCard);
     }
     await deleteAllBoards(page);
     await deleteWorkflow(page, wf.id);
@@ -893,8 +910,10 @@ test("shows the live canvas action after starting a card from its dialog", async
   );
 
   let activeExecutionId = "";
+  let boardCard: { boardId: string; cardId: string } | undefined;
   try {
     const { boardId, cardId, columns } = await createBoardWithCard(page, "run live from dialog");
+    boardCard = { boardId, cardId };
     const backlog = columns.find((column) => column.name === "Backlog")!;
     await page.request.patch(`/api/boards/${boardId}/columns/${backlog.id}`, {
       data: { workflow_ids: [wf.id] },
@@ -922,8 +941,8 @@ test("shows the live canvas action after starting a card from its dialog", async
       .poll(() => new URL(page.url()).pathname)
       .toBe(`/workflows/${wf.id}/${activeExecutionId}`);
   } finally {
-    if (activeExecutionId) {
-      await page.request.post(`/api/workflows/${wf.id}/executions/${activeExecutionId}/cancel`);
+    if (activeExecutionId && boardCard) {
+      await cancelBoardRun(page, wf.id, activeExecutionId, boardCard);
     }
     await deleteAllBoards(page);
     await deleteWorkflow(page, wf.id);
