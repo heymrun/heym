@@ -991,14 +991,25 @@ async def call_board_tool(
                 for error in exc.errors()
             )
         }
+    savepoint = await db.begin_nested()
     try:
         if name == CREATE_BOARD_TOOL:
-            return await _create_board(db, user, args, public_base_url, chat_llm)
-        if name == UPDATE_BOARD_TOOL:
-            return await _update_board(db, user, args, public_base_url, chat_llm)
-        return await handler(db, user, args, public_base_url)
+            result = await _create_board(db, user, args, public_base_url, chat_llm)
+        elif name == UPDATE_BOARD_TOOL:
+            result = await _update_board(db, user, args, public_base_url, chat_llm)
+        else:
+            result = await handler(db, user, args, public_base_url)
+        if savepoint.is_active:
+            await savepoint.commit()
+        return result
     except HTTPException as exc:
+        if savepoint.is_active:
+            await savepoint.rollback()
         return {"error": _detail(exc.detail)}
+    except Exception:
+        if savepoint.is_active:
+            await savepoint.rollback()
+        raise
 
 
 def summarize_board_tool(name: str, result: dict[str, Any]) -> str:

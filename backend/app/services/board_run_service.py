@@ -1135,7 +1135,11 @@ async def _auto_advance(
     try:
         async with session_factory() as db:
             enabled = (
-                await db.execute(select(Board.auto_advance).where(Board.id == board_id))
+                await db.execute(
+                    select(Board.auto_advance)
+                    .where(Board.id == board_id)
+                    .with_for_update(read=True, key_share=True)
+                )
             ).scalar_one_or_none()
             if not enabled:
                 # The board keeps cards where people put them: settle a card a caller
@@ -1186,7 +1190,28 @@ async def _auto_advance(
                 return
             prev_name = columns[from_index].name
             current_column_id = from_column_id
-            for target in columns[from_index + 1 :]:
+            for target_col_info in columns[from_index + 1 :]:
+                board_exists = (
+                    await db.execute(
+                        select(Board.id)
+                        .where(Board.id == board_id)
+                        .with_for_update(read=True, key_share=True)
+                    )
+                ).scalar_one_or_none()
+                if board_exists is None:
+                    return
+                target = (
+                    await db.execute(
+                        select(BoardColumn)
+                        .where(
+                            BoardColumn.id == target_col_info.id,
+                            BoardColumn.board_id == board_id,
+                        )
+                        .with_for_update(read=True, key_share=True)
+                    )
+                ).scalar_one_or_none()
+                if target is None:
+                    continue
                 try:
                     card = await db.get(
                         BoardCard, card_id, with_for_update=True, populate_existing=True

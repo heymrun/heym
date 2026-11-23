@@ -372,19 +372,24 @@ class ContinuationTests(unittest.IsolatedAsyncioTestCase):
         enabled = MagicMock()
         enabled.scalar_one_or_none.return_value = True
         columns = MagicMock()
+        target_column_obj = SimpleNamespace(id=target, name="Review")
         columns.scalars.return_value.all.return_value = [
             SimpleNamespace(id=uuid.uuid4(), name="Backlog"),
             SimpleNamespace(id=uuid.uuid4(), name="Planning"),
             SimpleNamespace(id=source, name="Development"),
-            SimpleNamespace(id=target, name="Review"),
+            target_column_obj,
         ]
+        board_lock = MagicMock()
+        board_lock.scalar_one_or_none.return_value = uuid.uuid4()
+        target_lock = MagicMock()
+        target_lock.scalar_one_or_none.return_value = target_column_obj
         reindex = MagicMock()
         reindex.scalars.return_value.all.return_value = []
         link_rows = MagicMock()
         link_rows.all.return_value = [(SimpleNamespace(workflow_id=uuid.uuid4(), position=0), "QA")]
         session = _Session(
             {(BoardCard.__name__, card.id): card},
-            results=[enabled, columns, reindex, reindex, link_rows],
+            results=[enabled, columns, board_lock, target_lock, reindex, reindex, link_rows],
         )
 
         with patch.object(board_run_service, "_spawn_chain", MagicMock()) as spawn:

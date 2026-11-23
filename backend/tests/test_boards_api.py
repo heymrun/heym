@@ -599,6 +599,7 @@ class TestMoveAndRun(unittest.IsolatedAsyncioTestCase):
                 _result_with(scalar=from_column),
                 _result_with(scalars_list=[]),
                 _result_with(scalars_list=[]),
+                _result_with(scalar=card.id),
             ]
         )
 
