@@ -1,10 +1,12 @@
 """RAG node search keeps to searchLimit when the reranker cannot run."""
 
+import re
 import unittest
 from unittest.mock import MagicMock, patch
 
 from app.services.node_execution.base import NodeExecutionContext
 from app.services.node_execution.nodes import rag_node
+from app.services.workflow_dsl_prompt import WORKFLOW_DSL_SYSTEM_PROMPT
 
 
 def _run(node_data: dict, reranker_credential: MagicMock | None) -> tuple[dict, MagicMock]:
@@ -65,3 +67,13 @@ class TestRagNodeSearchLimit(unittest.TestCase):
         )
 
         self.assertEqual(output["count"], 0)
+
+    def test_the_dsl_states_the_default_the_node_uses(self) -> None:
+        # The DSL said 3 while the node, its page and its editor use 5.
+        output, service = _run({}, None)
+        line = re.search(r"`searchLimit`:[^\n]*", WORKFLOW_DSL_SYSTEM_PROMPT)
+        assert line is not None
+
+        self.assertEqual(service.search.call_args.kwargs["limit"], 5)
+        self.assertEqual(output["count"], 5)
+        self.assertIn("default: 5", line.group(0))

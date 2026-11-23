@@ -2533,7 +2533,7 @@ The last node in the iteration body MUST connect BACK to the loop node's `loop` 
   - `documentIdField`: Payload field that carries the document's unique id (for "upsert" and "delete", default "doc_id")
   - `documentId`: Value of that unique id (for "upsert" and "delete", supports expressions)
   - `queryText`: Search query text (only for "search" operation, supports expressions)
-  - `searchLimit`: Maximum number of results to return (only for "search" operation, default: 3)
+  - `searchLimit`: Maximum number of results to return (only for "search" operation, default: 5)
   - `metadataFilters`: JSON object with metadata filters for search (only for "search" operation). String values support expressions and are resolved after the JSON is parsed, so `{"url": "$start.url"}` filters on the resolved value, and a whole-string expression keeps its type (`{"count": "$start.count"}` matches a stored number). Text that is not valid JSON, or a value that is not an object (an array, a string, a number), fails the run instead of searching the whole collection; blank, `{}` and `null` mean no filter
   - `hybridSearch`: Boolean (only for "search" operation, default false). When true, the vector search is fused with a BM25 keyword search over the stored text (reciprocal rank fusion), so exact terms such as ids, names and error codes are found next to semantic matches. Combines with `metadataFilters` and the reranker. Results then also carry `vector_score` and `keyword_score`, and `score` is the fused 0-1 score instead of a vector similarity
   - `enableReranker`: Boolean (only for "search" operation, default false). Reranks the hits by relevance to `queryText`; the search then fetches a wider pool (at least 20) for the reranker to choose from. Results carry `relevance_score` (0-1, higher is more relevant) next to `score`, and `reranked` is true
@@ -2708,7 +2708,7 @@ The last node in the iteration body MUST connect BACK to the loop node's `loop` 
   - `gristRecordsData`: JSON array of records for batch operations - **use column IDs (underscore format), not labels** (supports expressions). For `updateRecords`, each record is `{"id": 1, "fields": {"Status": "Done"}}` or the flat `{"id": 1, "Status": "Done"}`, where every key but `id` is a column
   - `gristFilter`: Filter JSON using Grist filter syntax {"Column_ID": [allowed_values]} - **use column IDs** (for getRecords)
   - `gristSort`: Sort expression like "Column_ID,-Created_At" - **use column IDs** (prefix with - for descending)
-  - `gristLimit`: Maximum records to return (default: 100, for getRecords)
+  - `gristLimit`: Maximum records to return (for getRecords). Omitted returns every record
   - `gristRecordIds`: JSON array of record IDs for batch delete
 
 **SETUP**: Requires a Grist credential with API key and server URL.
@@ -2888,7 +2888,6 @@ When creating or updating records in Grist, you MUST use **column IDs** (interna
   - `gsSheetName`: Sheet tab name, e.g., "Sheet1" (supports expressions; not required for getSheetInfo)
   - `gsStartRow` / `gsMaxRows` / `gsHasHeader`: for `readRange` — 1-based start row, max rows (0 = all), and whether row 1 is a header. When `gsHasHeader` is false, each row object uses **column letters** (A, B, …) as keys (not "1","2"). Supports expressions.
   - `gsUpdateRow`: for `updateRange` — 1-based sheet row where values are written (columns A–Z); if omitted, `gsStartRow` is used. Single values API PUT, not spreadsheets.batchUpdate. Supports expressions.
-  - `gsRange`: A1 notation range, e.g., "A1:D10" (legacy examples; read uses start/max/header fields in the product)
   - `gsKeepHeader`: boolean, optional for `clearRange` — when true, row 1 is preserved and rows below are cleared (columns A–Z)
   - `gsValues`: JSON 2D array of values, e.g., `[["Name","Age"],["Alice",30]]` (required for appendRows, updateRange). Put one expression per cell, e.g. `[["$mail.email.subject", "$mail.email.text"]]`: each cell is resolved on its own, so quotes and line breaks in values cannot break the JSON
   - `gsAppendPlacement`: optional `"append"` | `"prepend"` for appendRows — prepend inserts under row 1 via the Sheets API (batch insert rows + write)
@@ -2907,7 +2906,7 @@ The backend **FRONTEND_URL** env var must be the public app URL (scheme + host);
 
 | Operation | Required Fields | Description |
 |-----------|-----------------|-------------|
-| `readRange` | gsSpreadsheetId, gsSheetName, gsRange | Read cell values from a range |
+| `readRange` | gsSpreadsheetId, gsSheetName, gsStartRow, gsMaxRows, gsHasHeader | Read cell values (columns A–Z) |
 | `appendRows` | gsSpreadsheetId, gsSheetName, gsValues | Append rows after the last row with data |
 | `updateRange` | gsSpreadsheetId, gsSheetName, gsUpdateRow (or gsStartRow), gsValues | Overwrite row(s) from a 1-based row number (A–Z) |
 | `clearRange` | gsSpreadsheetId, gsSheetName | Clear all values in columns A–Z for the tab; optional `gsKeepHeader` keeps row 1 |
@@ -2978,7 +2977,9 @@ Each row object includes **`rowIndex`**: the 1-based sheet row number (useful fo
     "gsOperation": "readRange",
     "gsSpreadsheetId": "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms",
     "gsSheetName": "Sheet1",
-    "gsRange": "A1:C100"
+    "gsStartRow": "1",
+    "gsMaxRows": "100",
+    "gsHasHeader": true
   }
 }
 ```

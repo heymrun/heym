@@ -23,7 +23,6 @@ The **Google Sheets** node reads, writes, and manages data in Google Sheets spre
 | `gsMaxRows` | expression | For `readRange`: max rows of data (0 = all). |
 | `gsHasHeader` | boolean | For `readRange`: treat row 1 as column names when true. |
 | `gsUpdateRow` | expression | For `updateRange` only: 1-based sheet row number to update (columns A–Z); if unset, `gsStartRow` is used. Not batchUpdate — one values API PUT. |
-| `gsRange` | expression | A1 notation range (e.g. `A1:D100`). Legacy examples; the editor uses row fields for read/update. |
 | `gsKeepHeader` | boolean | For `clearRange` only: when true, row 1 is kept and data rows below are cleared (columns A–Z). |
 | `gsAppendPlacement` | `append` \| `prepend` | For `appendRows` only: **Bottom** adds after the last row with data; **Top** inserts new rows directly under row 1 (shifts data down). |
 | `gsValuesInputMode` | `raw` \| `selective` | For `appendRows` / `updateRange`: **Raw** = full JSON array; **Selective** = one sheet row, column fields only (no A1 labels). |
@@ -53,7 +52,7 @@ Tokens refresh automatically in the background — no manual token management re
 
 | Operation | Required Fields | Description |
 |-----------|-----------------|-------------|
-| `readRange` | gsSpreadsheetId, gsSheetName, gsStartRow, gsMaxRows, gsHasHeader | Read cell values (A–Z); optional `gsRange` in legacy flows |
+| `readRange` | gsSpreadsheetId, gsSheetName, gsStartRow, gsMaxRows, gsHasHeader | Read cell values (A–Z) |
 | `appendRows` | gsSpreadsheetId, gsSheetName, gsValues | Add rows at the bottom (`gsAppendPlacement` append) or under row 1 (`prepend`) |
 | `updateRange` | gsSpreadsheetId, gsSheetName, gsUpdateRow, gsValues | Overwrite row(s) starting at `gsUpdateRow` (A–Z); multi-row JSON writes consecutive rows |
 | `clearRange` | gsSpreadsheetId, gsSheetName | Clear all values in columns A–Z for the tab; optional `gsKeepHeader` keeps the first row |
@@ -86,7 +85,9 @@ All operations include `success: true` and `operation: "<name>"` in the output.
     "gsOperation": "readRange",
     "gsSpreadsheetId": "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms",
     "gsSheetName": "Sheet1",
-    "gsRange": "A1:D100"
+    "gsStartRow": "1",
+    "gsMaxRows": "100",
+    "gsHasHeader": true
   }
 }
 ```

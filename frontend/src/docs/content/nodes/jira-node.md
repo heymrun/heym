@@ -1,6 +1,6 @@
 # Jira Node
 
-The **Jira** node connects workflows to the Jira REST API for project, issue, comment, attachment, user, notification, and transition automation. The default operation is **Search Issues**.
+The **Jira** node connects workflows to the Jira REST API for project, issue, comment, attachment, user, notification, and transition automation. A new Jira node starts on **Search Issues**; a node without an operation fails with "Jira node requires an operation".
 
 ## Overview
 
@@ -87,7 +87,7 @@ Expression-capable text fields support [expressions](../reference/expression-dsl
 | Field | Used by | Notes |
 | --- | --- | --- |
 | `credentialId` | All operations | Owned Jira credential UUID |
-| `jiraOperation` | All operations | Defaults to `searchIssues` |
+| `jiraOperation` | All operations | Required. The editor sets `searchIssues` on a new node |
 | `jiraProjectKey` | Create Issue | Project key such as `ENG` |
 | `jiraIssueKey` | Issue, comment, attachment, notification, and transition operations | Issue key such as `ENG-123` or numeric issue ID |
 | `jiraIssueType` | Create Issue | Defaults to `Task` |
