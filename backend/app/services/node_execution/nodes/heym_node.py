@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import concurrent.futures
 import math
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -21,6 +22,15 @@ NO_LIST_LIMIT = 0
 
 # `heymWorkflowId` value that reads the history of every workflow the run's user can reach.
 ALL_WORKFLOWS = "all"
+
+CHAT_OPERATION = "sendChatMessage"
+
+# Chat <-> workflow hops a run may be nested in before a chat message is refused. Same
+# ceiling as sub-workflow calls, and both kinds of hop count toward it.
+MAX_CHAT_CALL_DEPTH = 5
+
+# How often a waiting chat message checks whether the run was stopped or timed out.
+_CHAT_CANCEL_POLL_SECONDS = 0.5
 
 BOARD_OPERATIONS = {
     "getBoard": ("heymBoardId", "Board", Board),
@@ -265,6 +275,99 @@ def _read_board_data(
     }
 
 
+def _int_attribute(owner: Any, name: str) -> int:
+    value = getattr(owner, name, 0)
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
+def _wait_for_chat(ctx: NodeExecutionContext, future: concurrent.futures.Future) -> dict:
+    """Wait for the chat coroutine; a Stop or timeout of the run cancels the turn."""
+    from app.services.workflow_executor import WorkflowCancelledError
+
+    while True:
+        try:
+            return future.result(timeout=_CHAT_CANCEL_POLL_SECONDS)
+        except concurrent.futures.TimeoutError:
+            pass
+        except concurrent.futures.CancelledError:
+            raise ValueError("The chat turn was cancelled before it finished.") from None
+        try:
+            ctx.executor.check_cancelled()
+        except WorkflowCancelledError:
+            future.cancel()
+            raise
+
+
+def _send_chat_message(ctx: NodeExecutionContext, user_id: uuid.UUID) -> dict:
+    """Send one Heym Chat message as the run's user (`sendChatMessage`)."""
+    from app.services import app_loop
+    from app.services.heym_agent.turn import AgentOutcome
+    from app.services.heym_chat_node import (
+        MAX_CHAT_MESSAGE_LENGTH,
+        QUESTION_OUTCOMES,
+        ChatNodeRequest,
+        conversation_not_found,
+        send_and_wait,
+        send_in_background,
+    )
+    from app.services.hitl_service import build_default_public_base_url
+
+    message = _resolve(ctx, "heymChatMessage")
+    if not message:
+        raise ValueError("Heym node requires a chat message")
+    if len(message) > MAX_CHAT_MESSAGE_LENGTH:
+        raise ValueError(f"Chat message is too long (max {MAX_CHAT_MESSAGE_LENGTH} characters)")
+
+    temporary = ctx.node_data.get("heymChatNoHistory") is True
+    continue_conversation = ctx.node_data.get("heymChatContinue") is True
+    fire_and_forget = ctx.node_data.get("heymChatFireAndForget") is True
+    if temporary and continue_conversation:
+        raise ValueError(
+            'Turn off either "Don\'t save chat history" or "Continue a conversation": '
+            "a conversation that is continued is saved."
+        )
+
+    conversation_id: uuid.UUID | None = None
+    if continue_conversation:
+        raw_id = _resolve(ctx, "heymChatConversationId")
+        try:
+            conversation_id = uuid.UUID(raw_id)
+        except ValueError:
+            raise conversation_not_found(raw_id) from None
+
+    depth = _int_attribute(ctx.executor, "_sub_workflow_invocation_depth") + _int_attribute(
+        ctx.executor, "chat_turn_depth"
+    )
+    if depth >= MAX_CHAT_CALL_DEPTH:
+        raise ValueError(
+            f"Max Heym Chat call depth exceeded ({MAX_CHAT_CALL_DEPTH}): this run was started "
+            "by a chain of chat messages and workflows that keeps calling itself."
+        )
+
+    request = ChatNodeRequest(
+        user_id=user_id,
+        message=message,
+        conversation_id=conversation_id,
+        temporary=temporary,
+        depth=depth + 1,
+        public_base_url=build_default_public_base_url(),
+    )
+    coroutine = send_in_background(request) if fire_and_forget else send_and_wait(request)
+    try:
+        future = app_loop.submit(coroutine)
+    except RuntimeError as exc:
+        raise ValueError(f"Heym Chat is not available here: {exc}") from exc
+    output = dict(_wait_for_chat(ctx, future))
+
+    # QUESTION exists only while a question can reach the node and be answered later: the
+    # node waits, and the conversation is kept. Otherwise everything leaves through OUT,
+    # `status` included, matching the handles the editor shows.
+    has_question_handle = not fire_and_forget and not temporary
+    waiting_on_person = has_question_handle and AgentOutcome(output["status"]) in QUESTION_OUTCOMES
+    output["_skip_source_handles"] = ["output"] if waiting_on_person else ["question"]
+    return output
+
+
 def execute(ctx: NodeExecutionContext) -> object:
     """Execute the heym node."""
     from sqlalchemy import func
@@ -278,6 +381,12 @@ def execute(ctx: NodeExecutionContext) -> object:
     operation = str(ctx.node_data.get("heymOperation", "")).strip()
     if not operation:
         raise ValueError("Heym node requires an operation")
+
+    if operation == CHAT_OPERATION:
+        # The turn can take minutes; do not hold a pooled connection while it runs.
+        with db_session.SessionLocal() as db:
+            user_id = _run_user_id(ctx, db, Workflow)
+        return _send_chat_message(ctx, user_id)
 
     with db_session.SessionLocal() as db:
         user_id = _run_user_id(ctx, db, Workflow)

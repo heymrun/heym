@@ -5367,13 +5367,13 @@ The credential requests the full `https://www.googleapis.com/auth/drive` scope, 
 ```
 
 ### 43. heym (Heym Platform Data)
-- **Purpose**: Read Heym workflows, execution history, and kanban boards, columns, and cards.
-- **Inputs**: 1 | **Outputs**: 1
-- **WHEN TO USE**: Meta-workflows that report on the Heym instance itself - inventories, health digests, execution summaries
+- **Purpose**: Read Heym workflows, execution history, and kanban boards, columns, and cards, or send a message to Heym Chat.
+- **Inputs**: 1 | **Outputs**: 1, or 2 (`output` and `question`) with `sendChatMessage` when `heymChatFireAndForget` and `heymChatNoHistory` are both `false`
+- **WHEN TO USE**: Meta-workflows that report on the Heym instance itself - inventories, health digests, execution summaries - and workflows that hand a task to Heym Chat (`sendChatMessage`)
 - **No credential required.** Results are scoped to the user the run belongs to, like credentials: the person who runs it from the editor, the API, Chat or MCP, and the workflow owner on Cron, portal, event and other triggered runs. Board reads use that user's ownership and direct or team shares on the board.
 - **Data fields**:
   - `label`: Node identifier (e.g., "heymData")
-  - `heymOperation`: One of `listWorkflows` (default in the editor), `getWorkflow`, `getExecutionHistory`, `getBoard`, `getBoardColumn`, `getBoardCardId`.
+  - `heymOperation`: One of `listWorkflows` (default in the editor), `getWorkflow`, `getExecutionHistory`, `getBoard`, `getBoardColumn`, `getBoardCardId`, `sendChatMessage`.
   - `heymWorkflowId`: Target workflow UUID. Required for `getWorkflow` and `getExecutionHistory`. Use `all` with `getExecutionHistory` to read the history of every workflow the run's user can reach. Expression-capable.
   - `heymLimit`: Maximum rows for `listWorkflows` and `getExecutionHistory`. **Empty or `0` returns everything** - that is the default. Expression-capable.
   - `heymStatus`: Optional status filter for `getExecutionHistory` (e.g. `success`, `error`). Expression-capable.
@@ -5383,6 +5383,12 @@ The credential requests the full `https://www.googleapis.com/auth/drive` scope, 
   - `heymBoardCardId` (**Card ID**): Required card UUID for `getBoardCardId`. Get it from `$column.cards[0].id` or the final segment of `/b/<board-id>/cards/<card-id>`.
   - All three board ID fields accept literal UUIDs and expressions. When this node is an Agent tool, put the selected operation's ID field in `agentProvidedFields` to let the agent supply it. The operation itself is fixed.
   - The editor's board, column, and card pickers write the selected UUID to the same field. For dynamic targets, write an expression in the ID field.
+  - `heymChatMessage` (**Message**): Required for `sendChatMessage`. The message sent to Heym Chat, the same assistant as the Chat tab, MCP `heym_chat` and A2A; it can answer, use its tools, run workflows and build (save, test and finish workflows, create skills). Max 20000 characters. Expression-capable; can be in `agentProvidedFields`.
+  - `heymChatNoHistory` (**Don't save chat history**): Boolean, default `false`. `false` saves the turn as a Chat conversation the user can open in the Chat tab. `true` runs it in a temporary conversation that is deleted when the turn ends, so it cannot be continued.
+  - `heymChatContinue` (**Continue a conversation**): Boolean, default `false`. `true` writes the message into the conversation in `heymChatConversationId`. Cannot be `true` together with `heymChatNoHistory`.
+  - `heymChatConversationId` (**Conversation ID**): Used only when `heymChatContinue` is `true`. A conversation UUID, usually `$<chatLabel>.conversation_id` from an earlier `sendChatMessage`. A deleted, missing or someone else's conversation FAILS the node; it never starts a new one. Expression-capable; can be in `agentProvidedFields`.
+  - `heymChatFireAndForget` (**Don't wait for the reply**): Boolean, default `false`. `true` returns right after the message is accepted and the workflow moves on; the turn finishes in the background.
+  - `sendChatMessage` runs as the user who ran the workflow (editor, MCP, API, execution token, Chat), with that user's Chat default model; on Cron and other triggered runs nobody ran it, so it runs as the workflow owner. The node has no model or credential field.
 - **Output fields available downstream**:
   - `listWorkflows` -> `$<label>.workflows` (array of `id`, `name`, `description`, `active`, `folder_id`, `updated_at`, `node_count`), `$<label>.total`
   - `getWorkflow` -> `$<label>.id`, `$<label>.name`, `$<label>.nodes` (array of `id`, `type`, `label`, `position`, `data` - the full node configuration), `$<label>.edges` (with `sourceHandle` / `targetHandle`), `$<label>.updated_at`. Use it to audit workflows, e.g. scanning `data` for hardcoded API keys or tokens.
@@ -5390,11 +5396,19 @@ The credential requests the full `https://www.googleapis.com/auth/drive` scope, 
   - `getBoard` returns `id`, `name`, `description`, `auto_advance`, and `columns` in display order. Each column has `id`, `board_id`, `name`, `position`, and `color`.
   - `getBoardColumn` returns the selected column's fields, `ai_instructions`, and `cards` in display order. Each card has `id`, `board_id`, `column_id`, `title`, `position`, `run_status`, and `path`.
   - `getBoardCardId` returns that card's fields plus `content`, `card_metadata`, `fields` (`assignee_user_id`, `priority`, `due_date`, `labels`), `created_at`, and `updated_at`. The relative `path` opens the card in Heym. The board ID is resolved from the card's parent board.
+  - `sendChatMessage` (waiting) -> `$<label>.conversation_id` (`null` without history), `$<label>.status` (`completed`, `canceled`, `input_required`, `auth_required`), `$<label>.reply` (the assistant's text), `$<label>.questions` (on `input_required`, the clarifying questions as objects with `id`, `question` and `type`, plus `options` when it offers choices; `[]` otherwise), `$<label>.tool_names`, `$<label>.verified` (a saved workflow's latest test run passed), `$<label>.workflow_links` and `$<label>.eval_suite_links` (`name`, `url`), `$<label>.credential_form_urls`.
+  - `sendChatMessage` with `heymChatFireAndForget` -> `$<label>.conversation_id` (`null` without history) and `$<label>.status` = `started`; the reply never reaches the workflow.
+- **Handles for `sendChatMessage`**: `completed` and `canceled` leave through `sourceHandle: "output"`. `input_required` (the assistant asked a clarifying question) and `auth_required` (it opened a credential form) leave through `sourceHandle: "question"`, and the run does not pause: connect the question branch to a node that asks a person (Slack, email), then answer in a later run with `heymChatContinue: true` and the same `conversation_id`. The `question` handle exists only when `heymChatFireAndForget` and `heymChatNoHistory` are both `false`; otherwise the node has only `output`, every status (`input_required` included) leaves through it, and an edge from `question` is invalid. Every other Heym operation has the single `output` handle.
 
 **Example node JSON:**
 ```json
 {"id": "n2", "type": "heym", "position": {"x": 400, "y": 100}, "data": {"label": "heymData", "heymOperation": "getExecutionHistory", "heymWorkflowId": "$platformEvents.events[0].workflow_id", "heymSinceDays": "7"}}
 ```
+
+```json
+{"id": "n3", "type": "heym", "position": {"x": 400, "y": 100}, "data": {"label": "askHeym", "heymOperation": "sendChatMessage", "heymChatMessage": "Summarize today's failed runs: $input.body.date", "heymChatNoHistory": false, "heymChatContinue": false, "heymChatConversationId": "", "heymChatFireAndForget": false}}
+```
+Edges: `{"source": "n3", "sourceHandle": "output", "target": "report"}` and `{"source": "n3", "sourceHandle": "question", "target": "askOnSlack"}`.
 
 ## Edge Connections
 

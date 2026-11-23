@@ -7,7 +7,7 @@ import { getLatestNodeResultForNode } from "@/lib/executionLog";
 import { googleTriggerProblems } from "@/lib/googleTriggerConfig";
 import { gmailTriggerProblems } from "@/lib/gmailTriggerConfig";
 import { outlookTriggerProblems } from "@/lib/outlookTriggerConfig";
-import { getHeymBoardOperation } from "@/lib/heymOperations";
+import { getHeymBoardOperation, isHeymChatOperation } from "@/lib/heymOperations";
 import { EMAIL_SEND_NODE_LABELS, isEmailSendNodeType } from "@/lib/emailSendNodes";
 import { getSentryOperationMetadata } from "@/lib/sentryExpressionFields";
 import { replaceNodeLabelRefs } from "@/lib/utils";
@@ -2986,7 +2986,28 @@ export const useWorkflowStore = defineStore("workflow", () => {
         }
       }
 
-      if (node.type === "heym") {
+      if (node.type === "heym" && isHeymChatOperation(node.data.heymOperation)) {
+        const isTool = edges.value.some(
+          (edge) => edge.source === node.id && edge.targetHandle === "tool-input",
+        );
+        const messageFromAgent = isTool && node.data.agentProvidedFields?.includes("heymChatMessage");
+        if (!node.data.heymChatMessage?.trim() && !messageFromAgent) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "Heym",
+            message: "Message is required",
+          });
+        }
+        if (node.data.heymChatNoHistory === true && node.data.heymChatContinue === true) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "Heym",
+            message: "Turn off either Don't save chat history or Continue a conversation",
+          });
+        }
+      } else if (node.type === "heym") {
         const operation = node.data.heymOperation || "listWorkflows";
         const boardField = getHeymBoardOperation(operation)?.field;
         const missingTarget = boardField

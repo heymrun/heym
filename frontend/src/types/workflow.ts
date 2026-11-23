@@ -606,6 +606,15 @@ export interface NodeData {
   heymLimit?: string;
   heymStatus?: string;
   heymSinceDays?: string;
+  /** heym sendChatMessage: the message sent to Heym Chat. */
+  heymChatMessage?: string;
+  /** heym sendChatMessage: run in a temporary conversation that is deleted afterwards. */
+  heymChatNoHistory?: boolean;
+  /** heym sendChatMessage: write into the conversation in heymChatConversationId. */
+  heymChatContinue?: boolean;
+  heymChatConversationId?: string;
+  /** heym sendChatMessage: return as soon as the message is accepted. */
+  heymChatFireAndForget?: boolean;
   ttlMinutes?: number;
   maxSizeMb?: number;
   allowedTypes?: string;

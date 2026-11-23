@@ -4,11 +4,18 @@ import ExpressionInput from "@/components/ui/ExpressionInput.vue";
 import Label from "@/components/ui/Label.vue";
 import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 import Select from "@/components/ui/Select.vue";
-import { getHeymBoardOperation, heymBoardOperations, type HeymBoardFieldKey } from "@/lib/heymOperations";
+import {
+  getHeymBoardOperation,
+  HEYM_CHAT_FIELD_KEYS,
+  heymBoardOperations,
+  isHeymChatOperation,
+  type HeymBoardFieldKey,
+} from "@/lib/heymOperations";
 import { heymWorkflowIdForOperation, heymWorkflowPickerOptions } from "../heymWorkflowPicker";
 import { heymOperationOptions } from "../operationOptions";
 import { usePropertiesPanelContext } from "../usePropertiesPanelController";
 import HeymBoardPicker from "./HeymBoardPicker.vue";
+import HeymChatFields from "./HeymChatFields.vue";
 
 const {
   workflowStore,
@@ -25,7 +32,10 @@ const {
 
 const operation = computed((): string => selectedNode.value?.data.heymOperation || "listWorkflows");
 const boardField = computed(() => getHeymBoardOperation(operation.value)?.field);
-const needsWorkflow = computed((): boolean => !boardField.value && operation.value !== "listWorkflows");
+const isChat = computed((): boolean => isHeymChatOperation(operation.value));
+const needsWorkflow = computed(
+  (): boolean => !boardField.value && !isChat.value && operation.value !== "listWorkflows",
+);
 const isHistory = computed((): boolean => operation.value === "getExecutionHistory");
 const hasLimit = computed((): boolean => operation.value === "listWorkflows" || isHistory.value);
 const workflowPickerOptions = computed(() =>
@@ -36,8 +46,10 @@ function onOperationChange(value: string | undefined): void {
   updateNodeData("heymOperation", value);
   const boardKey = getHeymBoardOperation(value)?.field.key;
   const supplied = selectedNode.value?.data.agentProvidedFields ?? [];
+  const chatKeys = isHeymChatOperation(value) ? [] : HEYM_CHAT_FIELD_KEYS;
   const nextSupplied = supplied.filter((key) =>
-    key === boardKey || !heymBoardOperations.some(({ field }) => field.key === key),
+    (key === boardKey || !heymBoardOperations.some(({ field }) => field.key === key))
+    && !chatKeys.includes(key),
   );
   if (nextSupplied.length !== supplied.length) updateNodeData("agentProvidedFields", nextSupplied);
   if (boardKey) return;
@@ -73,7 +85,13 @@ function selectBoardTarget(key: HeymBoardFieldKey, id: string): void {
         @update:model-value="onOperationChange"
       />
       <p
-        v-if="boardField"
+        v-if="isChat"
+        class="text-xs text-muted-foreground"
+      >
+        Sends the message to Heym Chat as the user running the workflow.
+      </p>
+      <p
+        v-else-if="boardField"
         class="text-xs text-muted-foreground"
       >
         Board access follows the user running the workflow.
@@ -86,6 +104,8 @@ function selectBoardTarget(key: HeymBoardFieldKey, id: string): void {
         with them.
       </p>
     </div>
+
+    <HeymChatFields v-if="isChat" />
 
     <HeymBoardPicker
       v-if="boardField"

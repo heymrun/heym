@@ -47,7 +47,7 @@ You can also start a conversation from the chat box on the [Workflows tab](./wor
 
 ## Using Chat from an MCP Client
 
-The Chat engine can also be reached from outside the browser. Turn on the **Heym Agent** in the [MCP / A2A tab](./mcp-tab.md) and MCP clients (Claude, Cursor, and anything else that speaks MCP) get a single `heym_chat` tool that runs this same engine with all of its capabilities. Tick **Enable A2A** as well and other agents can send it tasks over [A2A](../reference/a2a.md); those conversations show a network icon in the list.
+The Chat engine can also be reached from outside the browser. Turn on the **Heym Agent** in the [MCP / A2A tab](./mcp-tab.md) and MCP clients (Claude, Cursor, and anything else that speaks MCP) get a single `heym_chat` tool that runs this same engine with all of its capabilities. Tick **Enable A2A** as well and other agents can send it tasks over [A2A](../reference/a2a.md); those conversations show a network icon in the list. A workflow can send this engine a message too, through the [Heym node](../nodes/heym-node.md)'s **Send Chat Message** operation; those conversations show a workflow icon.
 
 Those conversations land in this tab's history, marked with a plug icon in the conversation list. Open one to read what the client asked, see the tool cards it triggered, and continue the thread yourself. Answering a clarification question works the same way whether the turn started here or from an MCP client.
 

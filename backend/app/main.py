@@ -93,6 +93,7 @@ from app.http_identity import HEYM_SERVER_AGENT
 from app.middleware.request_body_limit import RequestBodySizeLimitMiddleware
 from app.models.schemas import AppVersionResponse
 from app.observability.tracing import setup_tracing, shutdown_tracing
+from app.services.app_loop import set_app_loop
 from app.services.chat_stream_bus import chat_stream_bus
 from app.services.clickhouse_pool import close_all_clients as close_clickhouse_clients
 from app.services.clickhouse_pool import warm_up_pools as warm_up_clickhouse_pools
@@ -208,6 +209,8 @@ async def _reinstall_plugin_dependencies() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     install_url_redaction_filters()
+    # Heym node chat turns run here, submitted from executor threads.
+    set_app_loop(asyncio.get_running_loop())
     logger.info("Starting Heym AI Workflow Platform v%s", settings.resolved_version)
     # In cluster mode, only an instance compatible with the cluster may lead.
     lock_service.set_eligibility(cluster_registry.may_lead)
@@ -307,6 +310,7 @@ async def lifespan(app: FastAPI):
     close_clickhouse_clients()
     NotionService.close_shared_client()
     close_http_client()
+    set_app_loop(None)
 
 
 class WinstonLoggingMiddleware(BaseHTTPMiddleware):

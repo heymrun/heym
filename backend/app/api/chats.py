@@ -90,6 +90,7 @@ from app.services.heym_agent.links import (
     workflow_link,
 )
 from app.services.heym_agent.turn import AgentOutcome, AgentTurnResult, outcome_of
+from app.services.heym_chat_node import TEMPORARY_CONVERSATION_SOURCE
 from app.services.hitl_service import build_public_base_url
 from app.services.llm_trace import LLMTraceContext, record_llm_trace
 from app.services.mcp_elicitation import MCPClientChannel
@@ -1195,6 +1196,8 @@ async def list_conversations(
     result = await db.execute(
         select(DashboardConversation)
         .where(DashboardConversation.user_id == current_user.id)
+        # A Heym node's chat without history is deleted when its turn ends; never list it.
+        .where(DashboardConversation.source != TEMPORARY_CONVERSATION_SOURCE)
         .order_by(
             DashboardConversation.is_pinned.desc(),
             DashboardConversation.updated_at.desc(),

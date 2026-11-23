@@ -604,7 +604,7 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
   heym: {
     type: "heym",
     label: "Heym",
-    description: "Read Heym workflows, execution history, and boards",
+    description: "Read Heym workflows, execution history, and boards, or message Heym Chat",
     color: "node-heym",
     icon: "Heym",
     inputs: 1,
@@ -619,6 +619,11 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
       heymLimit: "",
       heymStatus: "",
       heymSinceDays: "",
+      heymChatMessage: "",
+      heymChatNoHistory: false,
+      heymChatContinue: false,
+      heymChatConversationId: "",
+      heymChatFireAndForget: false,
     },
   },
   sendEmail: {

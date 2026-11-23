@@ -36,6 +36,7 @@ import {
   isNoRegularInputNodeType,
   isTargetOnlyHandleId,
 } from "@/lib/canvasConnectionRules";
+import { hasHeymQuestionOutput } from "@/lib/heymOperations";
 import { buildWorkflowNodeFromNodeTemplate } from "@/lib/nodeFromTemplate";
 import { generateId, replaceInputRefs } from "@/lib/utils";
 import { isTypingTarget, shouldUseNativeTextClipboard } from "@/lib/keyboardTargets";
@@ -1843,6 +1844,28 @@ watch(
         outgoingEdges.forEach((edge) => {
           workflowStore.removeEdge(edge.id);
         });
+      }
+    });
+
+    updateNodeInternalsAfterDom(changedNodeIds);
+  },
+  { deep: true, flush: "post" },
+);
+
+watch(
+  () => workflowStore.nodes.map((n) => hasHeymQuestionOutput(n.type, n.data)),
+  (newVal, oldVal) => {
+    if (!oldVal || !newVal) return;
+
+    const changedNodeIds: string[] = [];
+    workflowStore.nodes.forEach((node, index) => {
+      if (node.type !== "heym" || oldVal[index] === newVal[index]) return;
+
+      changedNodeIds.push(node.id);
+      if (oldVal[index] && !newVal[index]) {
+        workflowStore.edges
+          .filter((edge) => edge.source === node.id && edge.sourceHandle === "question")
+          .forEach((edge) => workflowStore.removeEdge(edge.id));
       }
     });
 

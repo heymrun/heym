@@ -22,3 +22,54 @@ export type HeymBoardFieldKey = HeymBoardOperation["field"]["key"];
 export function getHeymBoardOperation(value: string | undefined): HeymBoardOperation | undefined {
   return heymBoardOperations.find((operation) => operation.value === value);
 }
+
+/** The Heym operation that sends a message to Heym Chat instead of reading. */
+export const HEYM_CHAT_OPERATION = "sendChatMessage";
+
+export const heymChatOperationOption = {
+  value: HEYM_CHAT_OPERATION,
+  label: "Send Chat Message",
+} as const;
+
+export const HEYM_CHAT_FIELD_KEYS: readonly string[] = ["heymChatMessage", "heymChatConversationId"];
+
+export type HeymChatFieldKey = "heymChatMessage" | "heymChatConversationId";
+
+export interface HeymChatField {
+  key: HeymChatFieldKey;
+  label: string;
+}
+
+interface HeymChatToggles {
+  heymChatContinue?: boolean;
+}
+
+interface HeymChatNodeData {
+  heymOperation?: string;
+  heymChatNoHistory?: boolean;
+  heymChatFireAndForget?: boolean;
+}
+
+export function isHeymChatOperation(operation: string | undefined): boolean {
+  return operation === HEYM_CHAT_OPERATION;
+}
+
+/**
+ * The Heym node gets a QUESTION output, like Codex, only while a question can reach it and
+ * be answered: it waits for the reply and keeps the conversation to continue.
+ */
+export function hasHeymQuestionOutput(type: string, data: HeymChatNodeData): boolean {
+  return type === "heym"
+    && isHeymChatOperation(data.heymOperation)
+    && data.heymChatFireAndForget !== true
+    && data.heymChatNoHistory !== true;
+}
+
+/** Expression fields in panel order; the conversation id appears only while continuing. */
+export function heymChatExpressionFields(data: HeymChatToggles): HeymChatField[] {
+  const fields: HeymChatField[] = [{ key: "heymChatMessage", label: "Message" }];
+  if (data.heymChatContinue === true) {
+    fields.push({ key: "heymChatConversationId", label: "Conversation ID" });
+  }
+  return fields;
+}

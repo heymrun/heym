@@ -14,6 +14,7 @@ import {
 import type { NodeData, NodeType } from "@/types/workflow";
 
 import PluginIcon from "@/components/Panels/PluginIcon.vue";
+import { hasHeymQuestionOutput } from "@/lib/heymOperations";
 import { isTileFillingIcon, nodeIconColorClass, nodeIcons } from "@/lib/nodeIcons";
 import { cn } from "@/lib/utils";
 
@@ -163,6 +164,14 @@ const hasHitlOutput = computed(
 const hasCodexQuestionOutput = computed(
   () => !isToolNode.value && !isSubAgentNode.value && props.type === "codex"
 );
+const hasHeymChatQuestionOutput = computed(
+  () => !isToolNode.value && !isSubAgentNode.value && hasHeymQuestionOutput(props.type, props.data)
+);
+/** Codex and the Heym node's chat operation leave through QUESTION when a person must answer. */
+const hasQuestionOutput = computed(() => hasCodexQuestionOutput.value || hasHeymChatQuestionOutput.value);
+const questionBadgeClass = computed((): string =>
+  hasHeymChatQuestionOutput.value ? "text-node-heym bg-node-heym/12" : "text-node-codex bg-node-codex/12",
+);
 const hasBatchStatusOutput = computed(
   () => !isToolNode.value && !isSubAgentNode.value && props.type === "llm" && props.data.batchModeEnabled === true,
 );
@@ -182,13 +191,13 @@ const hasErrorOutput = computed(() => {
   return props.data.onErrorEnabled === true;
 });
 const specialOutputCount = computed(
-  () => Number(hasHitlOutput.value) + Number(hasCodexQuestionOutput.value) + Number(hasBatchStatusOutput.value) + Number(hasErrorOutput.value),
+  () => Number(hasHitlOutput.value) + Number(hasQuestionOutput.value) + Number(hasBatchStatusOutput.value) + Number(hasErrorOutput.value),
 );
 const outputStackPaddingClass = computed(() => {
   if (specialOutputCount.value >= 3) return "pr-32";
   if (specialOutputCount.value === 2) return "pr-28";
   if (hasBatchStatusOutput.value) return "pr-28";
-  if (hasCodexQuestionOutput.value) return "pr-28";
+  if (hasQuestionOutput.value) return "pr-28";
   if (hasHitlOutput.value) return "pr-24";
   if (hasErrorOutput.value) return "pr-16";
   return "";
@@ -685,7 +694,7 @@ const hasThrowErrorWarning = computed(() => {
     </div>
 
     <div
-      v-if="hasOutput && !hasSecondOutput && !hasErrorOutput && !hasHitlOutput && !hasBatchStatusOutput && !hasCodexQuestionOutput"
+      v-if="hasOutput && !hasSecondOutput && !hasErrorOutput && !hasHitlOutput && !hasBatchStatusOutput && !hasQuestionOutput"
       class="absolute right-0 top-1/2 -translate-y-1/2"
     >
       <Handle
@@ -697,7 +706,7 @@ const hasThrowErrorWarning = computed(() => {
     </div>
 
     <div
-      v-if="hasOutput && !hasSecondOutput && (hasErrorOutput || hasHitlOutput || hasBatchStatusOutput || hasCodexQuestionOutput)"
+      v-if="hasOutput && !hasSecondOutput && (hasErrorOutput || hasHitlOutput || hasBatchStatusOutput || hasQuestionOutput)"
       class="absolute -right-1 top-1/2 -translate-y-1/2 flex flex-col items-end gap-2.5"
     >
       <div class="flex items-center">
@@ -734,10 +743,13 @@ const hasThrowErrorWarning = computed(() => {
         />
       </div>
       <div
-        v-if="hasCodexQuestionOutput"
+        v-if="hasQuestionOutput"
         class="flex items-center"
       >
-        <span class="text-[9px] uppercase tracking-[0.16em] text-node-codex font-semibold mr-1.5 px-1.5 py-0.5 rounded bg-node-codex/12">QUESTION</span>
+        <span
+          class="text-[9px] uppercase tracking-[0.16em] font-semibold mr-1.5 px-1.5 py-0.5 rounded"
+          :class="questionBadgeClass"
+        >QUESTION</span>
         <Handle
           id="question"
           type="source"
