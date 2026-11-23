@@ -25,6 +25,7 @@ from app.db.models import Credential, ExecutionHistory, Workflow
 from app.db.session import async_session_maker
 from app.services.cluster.dispatch import dispatch_workflow, log_offloaded_run
 from app.services.cluster.run_history import record_failed_dispatch
+from app.services.credential_config import config_int
 from app.services.distributed_lock import lock_service
 from app.services.encryption import decrypt_config
 from app.services.global_variables_service import get_global_variables_context
@@ -305,7 +306,7 @@ class RabbitMQConsumerManager:
 
             host = config.get("rabbitmq_host", "localhost")
             # The credential form's Port is optional ("default: 5672") and saves "" when cleared.
-            port = int(str(config.get("rabbitmq_port", "") or "").strip() or 5672)
+            port = config_int(config, "rabbitmq_port", 5672)
             username = config.get("rabbitmq_username", "guest")
             password = config.get("rabbitmq_password", "guest")
             vhost = config.get("rabbitmq_vhost", "/")

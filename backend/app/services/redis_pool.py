@@ -4,6 +4,8 @@ from typing import Optional
 
 import redis
 
+from app.services.credential_config import config_int
+
 POOL_SIZE = 8
 
 _pools: dict[str, redis.ConnectionPool] = {}
@@ -54,7 +56,7 @@ def warm_up_pools() -> int:
                 host = config.get("redis_host", "localhost")
                 port = int(config.get("redis_port", 6379))
                 password = config.get("redis_password", "") or None
-                db_index = int(config.get("redis_db", 0))
+                db_index = config_int(config, "redis_db", 0)
 
                 r = get_redis_connection(host=host, port=port, db=db_index, password=password)
                 r.ping()

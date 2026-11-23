@@ -3,6 +3,8 @@ from threading import Lock
 
 from qdrant_client import QdrantClient
 
+from app.services.credential_config import config_int
+
 _clients: dict[str, QdrantClient] = {}
 _lock = Lock()
 logger = logging.getLogger("qdrant_pool")
@@ -60,7 +62,7 @@ def warm_up_pools() -> int:
                 if cred.type == CredentialType.rag and config.get("db_type") != "qdrant":
                     continue
                 host = config.get("qdrant_host", "localhost")
-                port = int(config.get("qdrant_port", 6333))
+                port = config_int(config, "qdrant_port", 6333)
                 api_key = config.get("qdrant_api_key") or None
 
                 if host:
