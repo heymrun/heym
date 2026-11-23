@@ -362,7 +362,10 @@ class ClickHouseService:
         for column, value in data.items():
             col = _validate_identifier(column, "column")
             name = f"set_{col}"
-            set_parts.append(f"{col} = {{{name}:{_ch_param_type(value)}}}")
+            # As a String parameter, null reached ClickHouse as an empty string. As a
+            # Nullable(String) one it is NULL, and a non-Nullable column refuses it.
+            param_type = "Nullable(String)" if value is None else _ch_param_type(value)
+            set_parts.append(f"{col} = {{{name}:{param_type}}}")
             params[name] = value
         where, where_params = self._build_where(filters)
         params.update(where_params)

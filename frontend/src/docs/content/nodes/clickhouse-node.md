@@ -24,7 +24,7 @@ The **ClickHouse** node runs CRUD, count, and raw SQL operations against an exte
 | `clickhouseSort` | expression | Optional `column` or `column ASC\|DESC` for `find` |
 | `clickhouseRowId` | expression | Value matched against the table's `id` column for `getById` |
 | `clickhouseInputMode` | string | For `insert`/`upsert`: `raw` JSON array mode or `selective` key/value field mode |
-| `clickhouseData` | expression | JSON array of row objects for `insert`/`upsert`, or JSON object of column values for `update` |
+| `clickhouseData` | expression | JSON array of row objects for `insert`/`upsert`, or JSON object of column values for `update` (`null` sets the column to NULL; a non-Nullable column refuses it and the run fails) |
 | `clickhouseMappings` | array | `{key, value}` pairs used when `clickhouseInputMode` is `selective` |
 
 ## Credential Setup
