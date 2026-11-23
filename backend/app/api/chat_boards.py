@@ -824,8 +824,8 @@ _TOOLS: dict[str, tuple[type[_Args], str, str, Handler]] = {
     "get_board": (
         GetBoardArgs,
         "Read one board: its columns (id, name, position, workflow_count, card_count) and its "
-        "tasks, with optional filters. Use it to resolve a column or task by name before "
-        "changing anything.",
+        "tasks, with optional filters. Use column_id or column_name to read cards in a specific "
+        "column. Use it to resolve a column or task by name before changing anything.",
         "Reading board...",
         _get_board,
     ),

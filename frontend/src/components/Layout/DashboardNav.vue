@@ -59,6 +59,7 @@ const validQueryTabs = new Set<string>(
 );
 
 const activeTab = computed<DashboardTabId>(() => {
+  if (route.name === "board-card") return "board";
   if (route.path === "/evals") return "evals";
   if (route.path.startsWith("/chats")) return "chat";
 

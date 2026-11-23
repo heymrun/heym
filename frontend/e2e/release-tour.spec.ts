@@ -55,10 +55,20 @@ test("opens every shipped feature from the launcher", async ({ page }) => {
 for (const path of ["/", "/chats", "/docs", "/evals"]) {
   test(`keeps the header launcher in place while searching on ${path}`, async ({ page }) => {
     await prepareAuthenticatedPage(page);
+    if (path === "/docs") {
+      await page.route("https://api.github.com/repos/heymrun/heym", (route) => route.fulfill({
+        headers: { "access-control-allow-origin": "*" },
+        json: { stargazers_count: 1800 },
+      }));
+    }
     await page.goto(path);
 
     const launcher = page.getByRole("button", { name: "New in Heym — open the release tour" });
     await expect(launcher).toBeVisible();
+    if (path === "/docs") {
+      // The async star count changes the header width when it appears.
+      await expect(page.getByRole("link", { name: "Star Heym on GitHub, 1.8K stars" })).toBeVisible();
+    }
     await page.evaluate(async () => { await document.fonts.ready; });
     const initialBounds = await launcher.boundingBox();
     expect(initialBounds).not.toBeNull();

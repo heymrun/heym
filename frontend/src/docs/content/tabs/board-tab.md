@@ -33,6 +33,8 @@ and workflow runs.
 ## Card details
 
 Card details open in a wide dialog on desktop and fit the viewport on phones.
+Opening a card updates the address to `/b/<board-id>/cards/<card-id>`. Copy that URL to return to the card or share it with someone who has access to the board. The final segment is the UUID that the [Heym node](../nodes/heym-node.md#board-reads) takes in **Get Board Card by ID**.
+
 Use **Preview** beside **Description** to view Markdown formatting, including unsaved
 edits. Choose **Edit** to return to the source text, then **Save description** to keep
 your changes. Label chips use brighter text in dark mode; hover over a shortened label

@@ -54,7 +54,7 @@ See [Triggers](./triggers.md) for all entry points.
 | [Code](../nodes/code-node.md) | Run Python in a disposable, network-isolated sandbox with its own requirements.txt | 1 | 1 |
 | [Variable](../nodes/variable-node.md) | Set or get a variable (workflow-local or [global](./global-variables.md)) | 1 | 1 |
 | [Execute](../nodes/execute-node.md) | Call another workflow | 1 | 1 |
-| [Heym](../nodes/heym-node.md) | Read Heym workflows and execution history | 1 | 1 |
+| [Heym](../nodes/heym-node.md) | Read Heym workflows, execution history, and kanban boards | 1 | 1 |
 
 ## Integration Nodes
 

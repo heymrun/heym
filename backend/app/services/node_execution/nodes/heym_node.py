@@ -5,6 +5,13 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from fastapi import HTTPException
+from sqlalchemy import select
+from sqlalchemy.orm import Session, load_only
+
+from app.db.models import Board, BoardCard, BoardColumn
+from app.services.board_access import accessible_board_ids
+from app.services.board_card_fields import read_fields
 from app.services.node_execution.base import NodeExecutionContext
 
 # An empty limit, a zero, or anything unparseable means "every workflow". There is
@@ -14,6 +21,12 @@ NO_LIST_LIMIT = 0
 
 # `heymWorkflowId` value that reads the history of every workflow the run's user can reach.
 ALL_WORKFLOWS = "all"
+
+BOARD_OPERATIONS = {
+    "getBoard": ("heymBoardId", "Board", Board),
+    "getBoardColumn": ("heymBoardColumnId", "Board column", BoardColumn),
+    "getBoardCardId": ("heymBoardCardId", "Board card", BoardCard),
+}
 
 
 def _resolve(ctx: NodeExecutionContext, key: str) -> str:
@@ -112,8 +125,6 @@ def _run_user_id(ctx: NodeExecutionContext, db: Any, workflow_model: Any) -> uui
     which their entry points start as the owner. Only a run that carries no actor
     at all falls back to the owner of the workflow this node lives in.
     """
-    from sqlalchemy import select
-
     actor_user_id = ctx.executor.actor_user_id
     if actor_user_id is not None:
         return actor_user_id
@@ -160,9 +171,103 @@ def _require_workflow(ctx: NodeExecutionContext, db: Any, workflow_model: Any, a
     return workflow
 
 
+def _column_summary(column: BoardColumn) -> dict[str, Any]:
+    return {
+        "id": str(column.id),
+        "board_id": str(column.board_id),
+        "name": column.name,
+        "position": column.position,
+        "color": column.color,
+    }
+
+
+def _card_summary(card: BoardCard) -> dict[str, Any]:
+    return {
+        "id": str(card.id),
+        "board_id": str(card.board_id),
+        "column_id": str(card.column_id),
+        "title": card.title,
+        "position": card.position,
+        "run_status": card.run_status,
+        "path": f"/b/{card.board_id}/cards/{card.id}",
+    }
+
+
+def _read_board_data(
+    ctx: NodeExecutionContext, db: Session, user_id: uuid.UUID, operation: str
+) -> dict[str, Any]:
+    field, label, model = BOARD_OPERATIONS[operation]
+    raw_id = _resolve(ctx, field)
+    if not raw_id:
+        raise HTTPException(400, f"{label} ID is required")
+    not_found = f"{label} not found or not accessible"
+    try:
+        target_id = uuid.UUID(raw_id)
+    except ValueError:
+        raise HTTPException(404, not_found) from None
+
+    board_id = Board.id if model is Board else model.board_id
+    target = db.execute(
+        select(model).where(model.id == target_id, board_id.in_(accessible_board_ids(user_id)))
+    ).scalar_one_or_none()
+    if target is None:
+        raise HTTPException(404, not_found)
+
+    if isinstance(target, Board):
+        columns = db.scalars(
+            select(BoardColumn)
+            .where(BoardColumn.board_id == target.id)
+            .order_by(BoardColumn.position, BoardColumn.id)
+        )
+        return {
+            "id": str(target.id),
+            "name": target.name,
+            "description": target.description,
+            "auto_advance": target.auto_advance,
+            "columns": [_column_summary(column) for column in columns],
+        }
+
+    if isinstance(target, BoardColumn):
+        cards = db.scalars(
+            select(BoardCard)
+            .options(
+                load_only(
+                    BoardCard.id,
+                    BoardCard.board_id,
+                    BoardCard.column_id,
+                    BoardCard.title,
+                    BoardCard.position,
+                    BoardCard.run_status,
+                )
+            )
+            .where(BoardCard.board_id == target.board_id, BoardCard.column_id == target.id)
+            .order_by(BoardCard.position, BoardCard.id)
+        )
+        return {
+            **_column_summary(target),
+            "ai_instructions": target.ai_instructions,
+            "cards": [_card_summary(card) for card in cards],
+        }
+
+    fields = read_fields(target.card_metadata)
+    return {
+        **_card_summary(target),
+        "content": target.content,
+        "card_metadata": target.card_metadata or {},
+        "fields": {
+            "assignee_user_id": str(fields.assignee_user_id) if fields.assignee_user_id else None,
+            "priority": fields.priority,
+            "due_date": fields.due_date.isoformat() if fields.due_date else None,
+            "labels": list(fields.labels),
+        },
+        "created_at": target.created_at.isoformat(),
+        "updated_at": target.updated_at.isoformat(),
+    }
+
+
 def execute(ctx: NodeExecutionContext) -> object:
     """Execute the heym node."""
-    from sqlalchemy import func, select
+    from sqlalchemy import func
     from sqlalchemy.orm import defer
 
     from app.db import session as db_session
@@ -175,7 +280,11 @@ def execute(ctx: NodeExecutionContext) -> object:
         raise ValueError("Heym node requires an operation")
 
     with db_session.SessionLocal() as db:
-        access = workflow_access_clause(_run_user_id(ctx, db, Workflow))
+        user_id = _run_user_id(ctx, db, Workflow)
+        if operation in BOARD_OPERATIONS:
+            return _read_board_data(ctx, db, user_id, operation)
+
+        access = workflow_access_clause(user_id)
         limit = _parse_int(_resolve(ctx, "heymLimit"), NO_LIST_LIMIT)
 
         if operation == "listWorkflows":

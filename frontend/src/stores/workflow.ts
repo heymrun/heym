@@ -7,6 +7,7 @@ import { getLatestNodeResultForNode } from "@/lib/executionLog";
 import { googleTriggerProblems } from "@/lib/googleTriggerConfig";
 import { gmailTriggerProblems } from "@/lib/gmailTriggerConfig";
 import { outlookTriggerProblems } from "@/lib/outlookTriggerConfig";
+import { getHeymBoardOperation } from "@/lib/heymOperations";
 import { EMAIL_SEND_NODE_LABELS, isEmailSendNodeType } from "@/lib/emailSendNodes";
 import { getSentryOperationMetadata } from "@/lib/sentryExpressionFields";
 import { replaceNodeLabelRefs } from "@/lib/utils";
@@ -2987,12 +2988,19 @@ export const useWorkflowStore = defineStore("workflow", () => {
 
       if (node.type === "heym") {
         const operation = node.data.heymOperation || "listWorkflows";
-        if (operation !== "listWorkflows" && !node.data.heymWorkflowId) {
+        const boardField = getHeymBoardOperation(operation)?.field;
+        const missingTarget = boardField
+          ? !node.data[boardField.key]?.trim() && !(
+            node.data.agentProvidedFields?.includes(boardField.key) &&
+            edges.value.some((edge) => edge.source === node.id && edge.targetHandle === "tool-input")
+          )
+          : operation !== "listWorkflows" && !node.data.heymWorkflowId;
+        if (missingTarget) {
           errors.push({
             nodeId: node.id,
             nodeLabel: node.data.label,
             nodeType: "Heym",
-            message: "Workflow is not selected",
+            message: boardField ? `${boardField.label} is required` : "Workflow is not selected",
           });
         }
       }

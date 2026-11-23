@@ -79,7 +79,7 @@ When it is on, `heym_chat` appears in `tools/list` alongside your workflow tools
 - Explain where workflows fail and why they are slow: the workflows that ran most, failed most and are slowest, and the node types with the most time, errors and calls, over the last 1, 3 or 6 hours, 24 hours, 7 or 30 days, or all time
 - Report the run history of one workflow: how many times it ran, status counts, when it ran, and on request the inputs, outputs, and per-node errors of a single run
 - Report what is running right now: how many executions are active, their workflow names, how long each has been running, the node each is currently on, and a link to the live run
-- List boards, create cards, and read card detail on the [Board tab](./board-tab.md)
+- Read boards, columns, and card details directly with board tools, and create cards on request. See the [Board tab](./board-tab.md).
 - List your dashboards (Heym Work's pages) with the widgets on each, find which dashboard a workflow is on, add a new widget to a dashboard and build its workflow, put an existing workflow on a dashboard as a widget, rename or delete a widget, or tidy a dashboard's layout (see [Dashboard › From Chat and MCP](./dashboard-tab.md#from-chat-and-mcp))
 - Inspect data tables and rows, create tables, add or remove columns, insert, update or delete rows, and wire tables into workflows
 - List your knowledge bases ([vector stores](./vectorstores-tab.md)) and the documents in each, and answer questions from their content with the source documents: when a knowledge base's name or description fits a question, `heym_chat` searches it before running a workflow

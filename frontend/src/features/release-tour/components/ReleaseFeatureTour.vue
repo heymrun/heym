@@ -238,7 +238,8 @@ onUnmounted(() => {
           class="p-4"
         >
           <div
-            class="h-[208px] overflow-hidden rounded-lg border border-border bg-surface-elevated"
+            class="overflow-hidden rounded-lg border border-border bg-surface-elevated"
+            :class="{ 'h-[208px]': currentSlide.tourVisual !== 'heym-board-reads' }"
             data-testid="release-tour-visual"
           >
             <Transition

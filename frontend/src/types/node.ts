@@ -604,7 +604,7 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
   heym: {
     type: "heym",
     label: "Heym",
-    description: "Read Heym workflows and execution history",
+    description: "Read Heym workflows, execution history, and boards",
     color: "node-heym",
     icon: "Heym",
     inputs: 1,
@@ -613,6 +613,9 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
       label: "heym",
       heymOperation: "listWorkflows",
       heymWorkflowId: "",
+      heymBoardId: "",
+      heymBoardColumnId: "",
+      heymBoardCardId: "",
       heymLimit: "",
       heymStatus: "",
       heymSinceDays: "",

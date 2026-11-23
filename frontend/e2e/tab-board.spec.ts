@@ -172,6 +172,17 @@ async function waitForCard(
   return { column, status };
 }
 
+async function cancelBoardRun(
+  page: Page,
+  workflowId: string,
+  executionId: string,
+  boardCard: { boardId: string; cardId: string },
+): Promise<void> {
+  await page.request.post(`/api/workflows/${workflowId}/executions/${executionId}/cancel`);
+  const settled = await waitForCard(page, boardCard.boardId, boardCard.cardId);
+  expect(["success", "failed"]).toContain(settled.status);
+}
+
 async function createSetOutputWorkflow(page: Page): Promise<{ id: string }> {
   return createWorkflow(
     page,
@@ -230,6 +241,12 @@ test("creates and reopens a board with a Model Router and Auto model", async ({ 
   const decision = (await decisionResponse.json()) as { id: string };
   let routerId: string | undefined;
   try {
+    // The create response can arrive before the credential's transaction commits.
+    await expect.poll(async () => {
+      const response = await page.request.get("/api/credentials");
+      const credentials = await response.json() as Array<{ id: string }>;
+      return credentials.some(({ id }) => id === decision.id);
+    }).toBe(true);
     const routerResponse = await page.request.post("/api/credentials", {
       data: {
         name: "Board Model Router",
@@ -486,26 +503,86 @@ test("mobile Back closes card detail without leaving the board", async ({ page }
   const { boardId, cardId } = await createBoardWithCard(page, "Mobile detail");
   await page.goto(`/?tab=board&board=${boardId}`);
   const boardUrl = page.url();
+  const cardPath = `/b/${boardId}/cards/${cardId}`;
+  const dialog = page.getByRole("dialog", { name: "Mobile detail" });
 
   await page.getByTestId(`board-card-${cardId}`).click();
-  await expect(page.getByPlaceholder("Describe the job for this card")).toBeVisible();
-  await expect
-    .poll(() => page.evaluate(() => window.history.state?.heymDialog ?? null))
-    .not.toBeNull();
+  await expect(dialog).toBeVisible();
+  await expect(page).toHaveURL(cardPath);
 
-  await page.evaluate(() => window.history.back());
-  await expect(page.getByPlaceholder("Describe the job for this card")).not.toBeVisible();
-  expect(page.url()).toBe(boardUrl);
+  await page.goBack();
+  await expect(dialog).not.toBeVisible();
+  await expect(page).toHaveURL(boardUrl);
 
-  // A normal close consumes the synthetic entry too, so the next Back is never wasted.
-  await page.getByTestId(`board-card-${cardId}`).click();
-  await expect(page.getByPlaceholder("Describe the job for this card")).toBeVisible();
+  await page.goForward();
+  await expect(dialog).toBeVisible();
+  await expect(page).toHaveURL(cardPath);
+  await page.reload();
+  await expect(dialog).toBeVisible();
   await page.keyboard.press("Escape");
-  await expect(page.getByPlaceholder("Describe the job for this card")).not.toBeVisible();
-  await expect
-    .poll(() => page.evaluate(() => window.history.state?.heymDialog ?? null))
-    .toBeNull();
-  expect(page.url()).toBe(boardUrl);
+  await expect(dialog).not.toBeVisible();
+  await expect(page).toHaveURL(boardUrl);
+});
+
+test("opens a shared card URL directly and keeps the card scoped to its board", async ({ page }) => {
+  const { boardId, cardId } = await createBoardWithCard(page, "Linked card");
+  const other = await createBoardWithCard(page, "Card on another board");
+  await page.goto(`/b/${boardId}/cards/${cardId}`);
+  await expect(page.getByRole("dialog", { name: "Linked card" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page).toHaveURL(`/?tab=board&board=${boardId}`);
+
+  await page.goto(`/b/${boardId}/cards/${other.cardId}`);
+  await expect(page.getByRole("alert").filter({ hasText: "Card not found or not accessible." })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Card on another board" })).toHaveCount(0);
+});
+
+test("restores the board and target selectors after saving and reloading a Heym node", async ({ page }) => {
+  const { cardId, columns } = await createBoardWithCard(page, "Saved card");
+  const other = await page.request.post("/api/boards", { data: { name: "Other board" } });
+  expect(other.ok()).toBeTruthy();
+  const workflow = await createWorkflow(page, "Saved board targets", [
+    { id: "reader", type: "heym", position: { x: 0, y: 0 }, data: { label: "reader", heymOperation: "getBoardColumn" } },
+  ]);
+  const panel = page.locator(".properties-panel");
+  const board = panel.getByPlaceholder("Select a board…", { exact: true });
+  const node = page.locator('.vue-flow__node[data-id="reader"]');
+
+  async function openProperties(): Promise<void> {
+    await expect(node).toBeVisible();
+    await page.getByRole("button", { name: "Properties", exact: true }).click();
+    await node.click();
+  }
+
+  try {
+    await page.goto(`/workflows/${workflow.id}`);
+    await openProperties();
+    await board.click();
+    await page.getByRole("option", { name: "Test", exact: true }).click();
+
+    for (const target of [
+      { operation: "getBoardColumn", picker: "Select a column…", label: "Backlog", field: "heymBoardColumnId", id: columns[0].id },
+      { operation: "getBoardCardId", picker: "Select a card…", label: "Saved card", field: "heymBoardCardId", id: cardId },
+    ]) {
+      await panel.getByTestId("heym-operation").locator("select").selectOption(target.operation);
+      const picker = panel.getByPlaceholder(target.picker, { exact: true });
+      await picker.click();
+      await page.getByRole("option").filter({ hasText: target.label }).click();
+      const saved = page.waitForResponse((response) =>
+        response.request().method() === "PUT" && new URL(response.url()).pathname === `/api/workflows/${workflow.id}`,
+      );
+      await page.getByTestId("save-workflow-button").click();
+      expect((await saved).ok()).toBeTruthy();
+
+      await page.reload();
+      await openProperties();
+      await expect(board).toHaveValue("Test");
+      await expect(picker).toHaveValue(target.label);
+      await expect(panel.getByTestId(`heym-field-${target.field}`).locator("textarea")).toHaveValue(target.id);
+    }
+  } finally {
+    await deleteWorkflow(page, workflow.id);
+  }
 });
 
 test("drags a card between columns with touch and shows drop feedback", async ({ page }) => {
@@ -745,10 +822,12 @@ test("opens a running card workflow on the live canvas", async ({ page }) => {
   );
 
   let activeExecutionId = "";
+  let boardCard: { boardId: string; cardId: string } | undefined;
   let cardRunId = "";
   let liveInputText = "";
   try {
     const { boardId, cardId, columns } = await createBoardWithCard(page, "watch live");
+    boardCard = { boardId, cardId };
     const planning = columns.find((column) => column.name === "Planning")!;
     await page.request.patch(`/api/boards/${boardId}/columns/${planning.id}`, {
       data: { workflow_ids: [wf.id] },
@@ -795,10 +874,8 @@ test("opens a running card workflow on the live canvas", async ({ page }) => {
     );
     await expect(page.getByPlaceholder("Enter board...")).toHaveValue(liveInputText);
   } finally {
-    if (activeExecutionId) {
-      await page.request.post(
-        `/api/workflows/${wf.id}/executions/${activeExecutionId}/cancel`,
-      );
+    if (activeExecutionId && boardCard) {
+      await cancelBoardRun(page, wf.id, activeExecutionId, boardCard);
     }
     await deleteAllBoards(page);
     await deleteWorkflow(page, wf.id);
@@ -833,8 +910,10 @@ test("shows the live canvas action after starting a card from its dialog", async
   );
 
   let activeExecutionId = "";
+  let boardCard: { boardId: string; cardId: string } | undefined;
   try {
     const { boardId, cardId, columns } = await createBoardWithCard(page, "run live from dialog");
+    boardCard = { boardId, cardId };
     const backlog = columns.find((column) => column.name === "Backlog")!;
     await page.request.patch(`/api/boards/${boardId}/columns/${backlog.id}`, {
       data: { workflow_ids: [wf.id] },
@@ -862,8 +941,8 @@ test("shows the live canvas action after starting a card from its dialog", async
       .poll(() => new URL(page.url()).pathname)
       .toBe(`/workflows/${wf.id}/${activeExecutionId}`);
   } finally {
-    if (activeExecutionId) {
-      await page.request.post(`/api/workflows/${wf.id}/executions/${activeExecutionId}/cancel`);
+    if (activeExecutionId && boardCard) {
+      await cancelBoardRun(page, wf.id, activeExecutionId, boardCard);
     }
     await deleteAllBoards(page);
     await deleteWorkflow(page, wf.id);

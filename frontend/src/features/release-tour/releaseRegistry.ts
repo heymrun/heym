@@ -17,6 +17,33 @@ import type { ReleaseEntry } from "@/features/release-tour/releaseTour.types";
  */
 export const RELEASE_REGISTRY: ReleaseEntry[] = [
   {
+    releaseId: "2026.39",
+    publishedAt: new Date("2026-11-23T12:00:00Z"),
+    headline: "Board reads and card links",
+    releaseTour: {
+      label: "New in Heym",
+      introTitle: "New in this release",
+      introDescription: "Read boards from workflows, link to an open card, and ask Heym over MCP.",
+      tourEnabled: true,
+      sectionOrder: ["heym-board-reads"],
+    },
+    sections: [{
+      id: "heym-board-reads",
+      title: "Board reads and card links",
+      blocks: [
+        { type: "prose", markdown: "The **Heym** node can read a board, list a column's cards, and fetch a card by UUID. Choose a board, column, or card by name in the editor, or enter its ID as an expression. Open a card from the Board tab and copy its URL to return to it or share it with someone who can access the board." },
+        { type: "prose", markdown: "Chat, MCP and A2A answer questions about boards, columns and cards directly with the existing board tools." },
+      ],
+      tour: {
+        description: "Use board data in workflows and open a card from its own URL.",
+        useCases: ["Report which cards are in a column", "Link to a specific card from a workflow", "Ask Heym over MCP for a card's status"],
+        tourVisual: "heym-board-reads",
+        docTarget: { categoryId: "nodes", slug: "heym-node", title: "Heym" },
+      },
+    }],
+  },
+
+  {
     releaseId: "2026.38",
     publishedAt: new Date("2026-11-20T12:00:00Z"),
     headline: "Encrypted run history",
@@ -104,29 +131,6 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
         useCases: ["Turn every flagged email into a follow-up task", "Triage the Focused Inbox and mark each email read once it is handled", "Read invoice PDFs from a folder an Outlook rule fills and archive them"],
         tourVisual: "outlook-trigger",
         docTarget: { categoryId: "nodes", slug: "outlook-trigger-node", title: "Outlook Trigger" },
-      },
-    }],
-  },
-
-  {
-    releaseId: "2026.34",
-    publishedAt: new Date("2026-11-16T12:00:00Z"),
-    headline: "Gmail Trigger",
-    releaseTour: {
-      label: "New in Heym", introTitle: "New in this release",
-      introDescription: "Start workflows from Gmail by tab, label or alias, and tidy each email after its run.",
-      tourEnabled: true,
-      sectionOrder: ["gmail-trigger"],
-    },
-    sections: [{
-      id: "gmail-trigger", title: "Gmail Trigger",
-      publishedAt: new Date("2026-11-16T12:00:00Z"),
-      blocks: [{ type: "prose", markdown: "The new **Gmail Trigger** starts a run for each new email in a Gmail or Google Workspace account, connected with a **Gmail (OAuth2)** credential instead of an app password. Watch the inbox, one tab such as **Primary** or **Promotions**, Important, Starred, Sent, all received mail, or one of your labels. List addresses under **Only email sent to** to react only to a Send mail as alias, a plus address or a Workspace alias. Once the run starts, Heym can mark the email read, archive it or move it to Trash; the default leaves it alone. The output matches the IMAP Trigger, with the Gmail message id, thread id and labels added, and **Download attachments to Drive** works the same way." }],
-      tour: {
-        description: "Start a run for each new Gmail email, by tab, label or alias, then mark it read, archive it or move it to Trash.",
-        useCases: ["Triage the Primary tab and mark each email read once it is handled", "Read invoice PDFs from a Gmail label and archive them", "React only to mail sent to sales@ or a plus address"],
-        tourVisual: "gmail-trigger",
-        docTarget: { categoryId: "nodes", slug: "gmail-trigger-node", title: "Gmail Trigger" },
       },
     }],
   },

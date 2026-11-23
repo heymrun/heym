@@ -85,6 +85,22 @@ describe("board store", () => {
     store.stopPolling();
   });
 
+  it("keeps the most recently requested board when an earlier load finishes later", async () => {
+    let finishEarlier!: (state: BoardState) => void;
+    const earlier = new Promise<BoardState>((resolve) => { finishEarlier = resolve; });
+    vi.mocked(boardApi.getState).mockImplementation((id) =>
+      id === "b" ? earlier : Promise.resolve({ ...board([]), id }),
+    );
+    const store = useBoardStore();
+    const pending = store.openBoard("b");
+    await store.openBoard("recent");
+    finishEarlier(board([]));
+    await pending;
+
+    expect(store.activeBoard?.id).toBe("recent");
+    store.closeBoard();
+  });
+
   it("sends the slot among the other cards when a card moves down its own column", async () => {
     const cards = [
       card("a", "todo", 0, "2026-11-05T10:00:00Z"),

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { Plus, Settings, SquareKanban, Trash2 } from "lucide-vue-next";
 
@@ -22,16 +22,39 @@ const router = useRouter();
 const { showToast } = useToast();
 const createOpen = ref(false);
 const editOpen = ref(false);
-const openCardId = ref<string | null>(null);
 const settingsColumnId = ref<string | null>(null);
 const historyOpen = ref(false);
 const historyWorkflowId = ref<string | undefined>(undefined);
+const boardsLoaded = ref(false);
+const isCardRoute = computed((): boolean => route.name === "board-card");
+const requestedBoardId = computed((): string | null => {
+  const id = isCardRoute.value ? route.params.boardId : route.query.board;
+  return typeof id === "string" ? id : null;
+});
+const openCardId = computed((): string | null =>
+  isCardRoute.value && boardStore.activeBoard?.id === requestedBoardId.value &&
+    typeof route.params.cardId === "string" ? route.params.cardId : null,
+);
 
 async function openBoardWithUrl(boardId: string): Promise<void> {
-  await boardStore.openBoard(boardId);
-  if (route.query.board !== boardId) {
-    await router.replace({ query: { ...route.query, tab: "board", board: boardId } });
-  }
+  await router.replace({ name: "dashboard", query: { ...route.query, tab: "board", board: boardId } });
+}
+
+async function openCard(cardId: string): Promise<void> {
+  const boardId = boardStore.activeBoard?.id;
+  if (!boardId) return;
+  await router.push({
+    name: "board-card",
+    params: { boardId, cardId },
+    state: { boardCardOpener: route.fullPath },
+  });
+}
+
+async function closeCard(): Promise<void> {
+  if (!isCardRoute.value) return;
+  const { back, boardCardOpener } = router.options.history.state;
+  if (back && back === boardCardOpener) router.back();
+  else await router.replace({ name: "dashboard", query: { tab: "board", board: requestedBoardId.value } });
 }
 
 // The app's global Escape handler dispatches a dismiss-overlays event (and
@@ -43,22 +66,27 @@ onMounted(async () => {
   removeOverlayDismiss = onDismissOverlays(() => {
     createOpen.value = false;
     editOpen.value = false;
-    openCardId.value = null;
     settingsColumnId.value = null;
     historyOpen.value = false;
     historyWorkflowId.value = undefined;
   });
   await boardStore.fetchBoards();
-  const urlBoardId = typeof route.query.board === "string" ? route.query.board : null;
-  const target =
-    urlBoardId && boardStore.boards.some((b) => b.id === urlBoardId)
-      ? urlBoardId
-      : boardStore.boards[0]?.id;
-  if (target) await openBoardWithUrl(target);
+  boardsLoaded.value = true;
+});
+
+watch([boardsLoaded, requestedBoardId], async ([loaded, boardId]) => {
+  if (!loaded) return;
+  if (boardId && (isCardRoute.value || boardStore.boards.some((board) => board.id === boardId))) {
+    if (boardStore.activeBoard?.id !== boardId) await boardStore.openBoard(boardId);
+    return;
+  }
+  const first = boardStore.boards[0];
+  if (first) await openBoardWithUrl(first.id);
+  else boardStore.closeBoard();
 });
 
 onUnmounted(() => {
-  boardStore.stopPolling();
+  boardStore.closeBoard();
   removeOverlayDismiss?.();
 });
 
@@ -80,7 +108,7 @@ async function removeActiveBoard(): Promise<void> {
   } else {
     const query = { ...route.query };
     delete query.board;
-    await router.replace({ query });
+    await router.replace({ name: "dashboard", query });
   }
 }
 
@@ -102,7 +130,6 @@ async function openErrorHistory(cardId: string): Promise<void> {
       return;
     }
 
-    openCardId.value = null;
     historyOpen.value = false;
     historyWorkflowId.value = failedRun.workflow_id;
     historyOpen.value = true;
@@ -194,7 +221,22 @@ function closeErrorHistory(): void {
     </div>
 
     <div
-      v-if="!boardStore.loading && boardStore.boards.length === 0"
+      v-if="boardsLoaded && isCardRoute && !boardStore.loading && !boardStore.activeBoard"
+      class="flex flex-col items-center gap-3 px-4 pt-16 text-center"
+    >
+      <p
+        class="text-sm text-muted-foreground"
+        role="alert"
+      >
+        Board not found or not accessible.
+      </p>
+      <Button @click="router.replace({ name: 'dashboard', query: { tab: 'board' } })">
+        Back to boards
+      </Button>
+    </div>
+
+    <div
+      v-else-if="!boardStore.loading && !boardStore.activeBoard && boardStore.boards.length === 0"
       class="flex flex-1 flex-col items-center justify-start gap-3 px-4 pt-16 text-center"
     >
       <SquareKanban class="h-10 w-10 text-muted-foreground" />
@@ -212,7 +254,7 @@ function closeErrorHistory(): void {
 
     <BoardCanvas
       v-else-if="boardStore.activeBoard"
-      @open-card="openCardId = $event"
+      @open-card="openCard"
       @open-settings="settingsColumnId = $event"
       @open-error-history="openErrorHistory"
     />
@@ -229,7 +271,7 @@ function closeErrorHistory(): void {
     <BoardCardDetailDialog
       :open="openCardId !== null"
       :card-id="openCardId"
-      @close="openCardId = null"
+      @close="closeCard"
     />
     <BoardColumnSettingsDialog
       :open="settingsColumnId !== null"

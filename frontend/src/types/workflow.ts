@@ -600,6 +600,9 @@ export interface NodeData {
   /** heym: which Heym read to perform. */
   heymOperation?: string;
   heymWorkflowId?: string;
+  heymBoardId?: string;
+  heymBoardColumnId?: string;
+  heymBoardCardId?: string;
   heymLimit?: string;
   heymStatus?: string;
   heymSinceDays?: string;

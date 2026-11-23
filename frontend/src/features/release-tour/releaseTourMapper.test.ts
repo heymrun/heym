@@ -381,11 +381,11 @@ describe("shipped release registry", () => {
     const catalog = buildReleaseTourCatalog(RELEASE_REGISTRY);
 
     expect(catalog?.slides.map((slide) => slide.id)).toEqual([
+      "heym-board-reads",
       "run-history-encryption",
       "mail-send",
       "outlook-calendar",
       "outlook-trigger",
-      "gmail-trigger",
     ]);
   });
 
@@ -400,7 +400,7 @@ describe("shipped release registry", () => {
 
     expect(tours.map((tour) => tour.tourVisual)).toContain("mail-send");
     expect(tours.map((tour) => tour.tourVisual)).toContain("outlook-trigger");
-    expect(tours.map((tour) => tour.tourVisual)).toContain("gmail-trigger");
+    expect(tours.map((tour) => tour.tourVisual)).toContain("heym-board-reads");
     expect(tours.map((tour) => tour.tourVisual)).toContain("outlook-calendar");
     expect(tours.map((tour) => tour.tourVisual)).toContain("run-history-encryption");
     for (const tour of tours) {

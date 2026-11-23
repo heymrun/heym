@@ -48,6 +48,37 @@ class KanbanPgCase(unittest.IsolatedAsyncioTestCase):
             return card.id
 
 
+class BoardListTests(KanbanPgCase):
+    async def test_finds_parent_boards_by_column_or_card_with_board_permissions(self) -> None:
+        board, columns = await make_board(self.engine, self.owner)
+        another, _ = await make_board(self.engine, self.owner)
+        card_id = await self.card_in(board.id, columns[0].id, "Saved picker target")
+        reader = await make_user(self.engine, "reader")
+        outsider = await make_user(self.engine, "outsider")
+        self.users.extend([reader, outsider])
+        await share_board(self.engine, board, reader, "read")
+
+        async with self.session() as db:
+            unfiltered = await boards_api.list_boards(db=db, current_user=self.owner)
+            self.assertEqual({item.id for item in unfiltered}, {board.id, another.id})
+            for filters in ({"column_id": columns[0].id}, {"card_id": card_id}):
+                with self.subTest(filters=filters):
+                    owned = await boards_api.list_boards(db=db, current_user=self.owner, **filters)
+                    shared = await boards_api.list_boards(db=db, current_user=reader, **filters)
+                    hidden = await boards_api.list_boards(db=db, current_user=outsider, **filters)
+                    self.assertEqual(
+                        [(item.id, item.permission) for item in owned], [(board.id, "owner")]
+                    )
+                    self.assertEqual(
+                        [(item.id, item.permission) for item in shared], [(board.id, "read")]
+                    )
+                    self.assertEqual(hidden, [])
+            unknown = await boards_api.list_boards(
+                db=db, current_user=self.owner, card_id=uuid.uuid4()
+            )
+            self.assertEqual(unknown, [])
+
+
 class AutoAdvanceTests(KanbanPgCase):
     async def test_new_boards_advance_and_the_setting_round_trips(self) -> None:
         async with self.session() as db:
