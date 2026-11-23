@@ -977,7 +977,6 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
       gsUpdateRow: "1",
       gsMaxRows: "0",
       gsHasHeader: true,
-      gsRange: "A1:Z100",
       gsKeepHeader: false,
       gsAppendPlacement: "append",
       gsValuesInputMode: "raw",

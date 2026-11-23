@@ -2,7 +2,7 @@
 
 The prompt listed `gsRange` as a required readRange field and its example read
 `"gsRange": "A1:C100"`, but the node never reads `gsRange`: it reads the start row, max rows
-and header fields, so a builder following the prompt got row 1 as the header and 100 rows,
+and header fields, so a builder following the prompt got row 1 as the header and every row,
 whatever range it asked for.
 """
 
