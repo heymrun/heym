@@ -61,7 +61,7 @@ The node connects over the official `clickhouse-connect` HTTP client. Use **Test
 { "status": "active", "tenant_id": 42 }
 ```
 
-This compiles to `WHERE status = {…:String} AND tenant_id = {…:Int64}`. Only equality is supported in the filter builder — for ranges, joins, or aggregations, use the `query` operation with raw SQL.
+This compiles to `WHERE status = {…:String} AND tenant_id = {…:Int64}`. A `null` value matches rows where the column is NULL (`{"note": null}` compiles to `note IS NULL`). Only equality is supported in the filter builder — for ranges, joins, or aggregations, use the `query` operation with raw SQL.
 
 ## Input Modes (insert / upsert)
 

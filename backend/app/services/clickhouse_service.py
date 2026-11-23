@@ -215,6 +215,11 @@ class ClickHouseService:
         params: dict[str, Any] = {}
         for column, value in filters.items():
             col = _validate_identifier(column, "column")
+            if value is None:
+                # Bound as a String parameter, null reached ClickHouse as an empty string, so
+                # {"note": null} matched empty notes and left NULL ones out.
+                clauses.append(f"{col} IS NULL")
+                continue
             param_name = f"v_{col}"
             clauses.append(f"{col} = {{{param_name}:{_ch_param_type(value)}}}")
             params[param_name] = value
