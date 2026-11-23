@@ -33,6 +33,8 @@ from app.db.models import (
     User,
 )
 from app.models.board_schemas import (
+    NAME_MAX_LENGTH,
+    TITLE_MAX_LENGTH,
     BoardCreateRequest,
     BoardUpdateRequest,
     CardCreateRequest,
@@ -119,7 +121,7 @@ class GetTasksArgs(TaskFilterArgs):
 
 
 class CreateBoardArgs(_Args):
-    name: str = Field(min_length=1, max_length=255)
+    name: str = Field(min_length=1, max_length=NAME_MAX_LENGTH)
     description: str | None = None
     auto_advance: bool = Field(
         default=True,
@@ -128,7 +130,7 @@ class CreateBoardArgs(_Args):
 
 
 class UpdateBoardArgs(BoardArgs):
-    name: str | None = Field(default=None, min_length=1, max_length=255)
+    name: str | None = Field(default=None, min_length=1, max_length=NAME_MAX_LENGTH)
     description: str | None = None
     auto_advance: bool | None = None
     use_chat_model: bool = Field(
@@ -143,7 +145,7 @@ class DeleteBoardArgs(BoardArgs):
 
 
 class CreateColumnArgs(BoardArgs):
-    name: str = Field(min_length=1, max_length=255)
+    name: str = Field(min_length=1, max_length=NAME_MAX_LENGTH)
     color: str | None = Field(default=None, max_length=32)
     position: int | None = Field(default=None, ge=0, description="0 is the leftmost column.")
 
@@ -153,7 +155,7 @@ class ColumnArgs(BoardArgs):
 
 
 class UpdateColumnArgs(ColumnArgs):
-    name: str | None = Field(default=None, min_length=1, max_length=255)
+    name: str | None = Field(default=None, min_length=1, max_length=NAME_MAX_LENGTH)
     color: str | None = Field(default=None, max_length=32)
     position: int | None = Field(default=None, ge=0, description="0 is the leftmost column.")
 
@@ -174,7 +176,7 @@ class TaskFieldArgs(_Args):
 
 
 class CreateTaskArgs(TaskFieldArgs):
-    title: str = Field(min_length=1, max_length=500)
+    title: str = Field(min_length=1, max_length=TITLE_MAX_LENGTH)
     description: str | None = None
     board_id: uuid.UUID | None = Field(default=None, description="Omit when no board is named.")
     column_id: uuid.UUID | None = Field(default=None, description="Omit for the first column.")
@@ -187,7 +189,7 @@ class CardArgs(_Args):
 
 class UpdateTaskArgs(TaskFieldArgs):
     card_id: uuid.UUID
-    title: str | None = Field(default=None, min_length=1, max_length=500)
+    title: str | None = Field(default=None, min_length=1, max_length=TITLE_MAX_LENGTH)
     description: str | None = None
 
 

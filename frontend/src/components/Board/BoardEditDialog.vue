@@ -68,6 +68,7 @@ async function submit(): Promise<void> {
         <Input
           v-model="name"
           placeholder="Board name"
+          maxlength="255"
           data-testid="board-edit-name"
           @keydown.enter="submit"
         />

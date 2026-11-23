@@ -10,6 +10,11 @@ from app.services.board_card_fields import normalize_labels
 
 CardPriority = Literal["low", "medium", "high", "urgent"]
 
+# The database column sizes. Chat's board tools use the same limits; a longer value reached
+# PostgreSQL from the Board tab and failed as a 500.
+NAME_MAX_LENGTH = 255
+TITLE_MAX_LENGTH = 500
+
 
 class CardFieldsRequest(BaseModel):
     """Typed card fields; a field left out keeps its value, null clears it."""
@@ -105,7 +110,7 @@ class BoardStateResponse(BaseModel):
 
 
 class BoardCreateRequest(BaseModel):
-    name: str = "Board"
+    name: str = Field(default="Board", max_length=NAME_MAX_LENGTH)
     description: str | None = None
     mapper_model: str | None = None
     mapper_credential_id: uuid.UUID | None = None
@@ -113,7 +118,7 @@ class BoardCreateRequest(BaseModel):
 
 
 class BoardUpdateRequest(BaseModel):
-    name: str | None = None
+    name: str | None = Field(default=None, max_length=NAME_MAX_LENGTH)
     description: str | None = None
     mapper_model: str | None = None
     mapper_credential_id: uuid.UUID | None = None
@@ -121,13 +126,13 @@ class BoardUpdateRequest(BaseModel):
 
 
 class ColumnCreateRequest(BaseModel):
-    name: str
+    name: str = Field(max_length=NAME_MAX_LENGTH)
     position: int | None = None
     color: str | None = None
 
 
 class ColumnUpdateRequest(BaseModel):
-    name: str | None = None
+    name: str | None = Field(default=None, max_length=NAME_MAX_LENGTH)
     color: str | None = None
     position: int | None = None
     ai_instructions: str | None = None
@@ -135,14 +140,14 @@ class ColumnUpdateRequest(BaseModel):
 
 
 class CardCreateRequest(CardFieldsRequest):
-    title: str
+    title: str = Field(max_length=TITLE_MAX_LENGTH)
     content: str = ""
     column_id: uuid.UUID | None = None
     position: int | None = None
 
 
 class CardUpdateRequest(CardFieldsRequest):
-    title: str | None = None
+    title: str | None = Field(default=None, max_length=TITLE_MAX_LENGTH)
     content: str | None = None
     card_metadata: dict | None = None
     position: int | None = None
