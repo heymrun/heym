@@ -15,7 +15,7 @@ The **Discord** node sends a message to a Discord channel via an Incoming Webhoo
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `credentialId` | UUID | `discord` credential containing the incoming webhook URL |
-| `message` | expression | Outgoing message text. Supports [expressions](../reference/expression-dsl.md). |
+| `message` | expression | Outgoing message text. Supports [expressions](../reference/expression-dsl.md). Required: a blank message fails the node. |
 | `username` | expression | Optional display name override for this message |
 | `avatarUrl` | expression | Optional avatar URL override for this message |
 

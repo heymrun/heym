@@ -37,7 +37,7 @@ The **Slack** node posts to Slack and can wait for a person's answer there. With
 | `slackOperation` | string | One of the operations above (Slack Bot only, default `sendMessage`) |
 | `slackChannel` | expression | `#name`, a channel id (`C…`), or a person (user id `U…` or email) to post in their DMs |
 | `slackUser` | expression | The person for **Send DM** and **Find person** |
-| `message` | expression | Message text in Slack formatting. Supports [expressions](../reference/expression-dsl.md). |
+| `message` | expression | Message text in Slack formatting. Supports [expressions](../reference/expression-dsl.md). With a Webhook credential a blank message fails the node, as it does for the Bot operations that need a message. |
 | `slackThreadTs` | expression | The thread to post in, such as `$announce.threadTs` |
 | `slackMessageTs` | expression | The message to update, react to or delete, such as `$announce.ts` |
 | `slackButtons` | list | Up to five `{label, value, style}` buttons |

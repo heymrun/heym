@@ -16,7 +16,7 @@ The **Telegram** node sends a message through the Telegram Bot API. Use it for c
 |-----------|------|-------------|
 | `credentialId` | UUID | `telegram` credential containing the bot token |
 | `chatId` | expression | Destination chat, group, or channel ID |
-| `message` | expression | Outgoing message text. Supports [expressions](../reference/expression-dsl.md). |
+| `message` | expression | Outgoing message text. Supports [expressions](../reference/expression-dsl.md). Required: a blank message fails the node. |
 
 ## Setup
 

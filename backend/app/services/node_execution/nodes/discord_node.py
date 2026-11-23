@@ -14,7 +14,9 @@ def execute(ctx: NodeExecutionContext) -> object:
     node_data = ctx.node_data
 
     message_template = node_data.get("message", "$input.text")
-    message = self.evaluate_message_template(message_template, inputs, node_id)
+    # Blank stays blank, so the non-empty check below fires: evaluate_message_template renders
+    # a blank template as str(inputs), which posted every input of the run.
+    message = self.evaluate_nonempty_message_template(str(message_template), inputs, node_id)
     credential_id = node_data.get("credentialId")
     if not credential_id:
         raise ValueError("Discord node requires a credential")
