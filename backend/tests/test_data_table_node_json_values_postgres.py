@@ -195,6 +195,43 @@ class DataTableNodeJsonValuesPostgresTests(unittest.TestCase):
 
         self.assertEqual(len(found["rows"]), 3)
 
+    def test_a_row_id_that_is_not_a_uuid_matches_no_row(self) -> None:
+        # Sent as is, PostgreSQL refused the cast and the node failed with the SQL error.
+        found = self._run("getById", {"text": "TCK-42"}, dataTableRowId="$start.text")
+        self.assertEqual((found["found"], found["row"]), (False, None))
+
+        for operation in ("update", "remove"):
+            with self.subTest(operation=operation):
+                node = self._node(
+                    operation,
+                    {"text": "TCK-42"},
+                    dataTableRowId="$start.text",
+                    dataTableData='{"status": "x"}',
+                )
+                self.assertEqual(node["status"], "error")
+                self.assertEqual(node["error"], "Row not found: TCK-42")
+        self.assertEqual(len(self._stored()), 3)
+
+    def test_a_row_id_still_finds_updates_and_removes_its_row(self) -> None:
+        with SessionLocal() as db:
+            row_id = str(
+                db.execute(
+                    select(DataTableRow.id).where(
+                        DataTableRow.table_id == self.table_id,
+                        DataTableRow.data["name"].astext == "Ben",
+                    )
+                ).scalar_one()
+            )
+
+        found = self._run("getById", {"text": row_id}, dataTableRowId="$start.text")
+        self.assertEqual(found["row"]["data"]["name"], "Ben")
+        updated = self._run(
+            "update", {"text": row_id}, dataTableRowId="$start.text", dataTableData='{"age": 18}'
+        )
+        self.assertEqual(updated["row"]["data"]["age"], 18)
+        self._run("remove", {"text": row_id.upper()}, dataTableRowId="$start.text")
+        self.assertEqual(sorted(row["name"] for row in self._stored()), ["Ada", "Cy"])
+
 
 if __name__ == "__main__":
     unittest.main()
