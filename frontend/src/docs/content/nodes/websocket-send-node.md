@@ -21,7 +21,7 @@ The **WebSocket Send** node opens an outbound client connection to an external W
 
 ## Message Serialization Rules
 
-- If `websocketMessage` resolves to a **string**, Heym sends a text frame.
+- If `websocketMessage` resolves to a **string**, Heym sends a text frame. The message is required: a blank message fails the node.
 - If it resolves to an **object**, **array**, **number**, **boolean**, or `null`, Heym serializes it as JSON text.
 - If it resolves to **bytes**, Heym sends a binary frame.
 - Full expressions such as `$input` preserve native types before serialization.

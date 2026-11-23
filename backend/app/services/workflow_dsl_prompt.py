@@ -410,7 +410,7 @@ Then an Agent user message such as `"Extract vendor, total and due date from the
   - `websocketUrl`: External `ws://` or `wss://` URL to connect to
   - `websocketHeaders`: Optional JSON object string or full-expression object for handshake headers
   - `websocketSubprotocols`: Optional comma-separated list or JSON array of subprotocols
-  - `websocketMessage`: Message to send. Full expressions preserve objects/arrays which are serialized as JSON.
+  - `websocketMessage`: Message to send. Full expressions preserve objects/arrays which are serialized as JSON. Required: a blank message fails the node.
 - **Output fields available downstream**:
   - `$<label>.status` — `"sent"` on success
   - `$<label>.url` — resolved destination URL
