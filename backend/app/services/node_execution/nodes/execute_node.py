@@ -157,6 +157,7 @@ def execute(ctx: NodeExecutionContext) -> object:
                 trace_user_id=self.trace_user_id,
                 actor_user_id=self.actor_user_id,
                 sub_workflow_invocation_depth=self._sub_workflow_invocation_depth + 1,
+                chat_turn_depth=self.chat_turn_depth,
                 cancel_event=_exec_node_cancel_event,
                 invoked_by_agent=self._invoked_by_agent,
                 execution_id=str(_sub_exec_id),

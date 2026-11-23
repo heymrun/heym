@@ -1,14 +1,14 @@
 # Heym
 
-The **Heym** node reads workflows, execution history, and [kanban boards](../tabs/board-tab.md). Use it to build instance inventories, execution digests, or reports about cards on a board.
+The **Heym** node reads workflows, execution history, and [kanban boards](../tabs/board-tab.md), and sends messages to [Heym Chat](../tabs/chat-tab.md). Use it to build instance inventories, execution digests, or reports about cards on a board, or to hand a task to the Heym assistant from a workflow.
 
 ## Overview
 
 | Property | Value |
 |----------|-------|
 | Inputs | 1 |
-| Outputs | 1 |
-| Operations | `listWorkflows`, `getWorkflow`, `getExecutionHistory`, `getBoard`, `getBoardColumn`, `getBoardCardId` |
+| Outputs | 1, or 2 (OUT and QUESTION) with Send Chat Message |
+| Operations | `listWorkflows`, `getWorkflow`, `getExecutionHistory`, `getBoard`, `getBoardColumn`, `getBoardCardId`, `sendChatMessage` |
 | Credential | None required |
 
 ## Parameters
@@ -23,6 +23,11 @@ The **Heym** node reads workflows, execution history, and [kanban boards](../tab
 | `heymBoardId` | UUID | **Board ID** for `getBoard`. Use the board UUID from the Board tab URL. |
 | `heymBoardColumnId` | UUID | **Column ID** for `getBoardColumn`. Use a column UUID from `getBoard`. |
 | `heymBoardCardId` | UUID | **Card ID** for `getBoardCardId`. Use a card UUID from `getBoardColumn` or the last segment of the card URL. |
+| `heymChatMessage` | String | **Message** for `sendChatMessage`. Required, up to 20,000 characters. Expression-capable. |
+| `heymChatNoHistory` | Boolean | **Don't save chat history**. Off by default. |
+| `heymChatContinue` | Boolean | **Continue a conversation**. Off by default. Cannot be on together with **Don't save chat history**. |
+| `heymChatConversationId` | UUID | **Conversation ID** to continue. Shown when **Continue a conversation** is on. Expression-capable. |
+| `heymChatFireAndForget` | Boolean | **Don't wait for the reply**. Off by default. |
 
 The workflow picker is a searchable dropdown listing every workflow you can reach. For Get Execution History, its first item is **All workflows**.
 
@@ -49,6 +54,8 @@ The same workflow can therefore return different results depending on who runs i
 A workflow you cannot reach and a workflow that does not exist produce the same error message, so the node cannot be used to probe for workflow ids.
 
 Board operations use board permissions. The run's user can read boards they own or that are shared with them directly or through a team. Columns and cards inherit access from their parent board.
+
+**Send Chat Message** follows the same rule: the message goes to the Chat of the person who ran the workflow, and to the workflow owner's Chat on a Cron, portal, event or other triggered run. A collaborator who runs a shared workflow writes to their own Chat with their own default model, never to the owner's. Because a **Write** collaborator can put a trigger in front of the node, they can make the owner's Chat act, building workflows included, the same way triggered runs use the owner's credentials. Share **Read** with people who should not.
 
 ## Operations
 
@@ -136,6 +143,52 @@ For example, set **Board ID** to `$input.board_id` on a node labelled `board`. O
 
 Use `$board.columns[0].name` for the column name and `$column.cards[0].title` for the card's display name.
 
+### Send Chat Message
+
+Sends one message to [Heym Chat](../tabs/chat-tab.md), the same assistant as the Chat tab, MCP `heym_chat` and A2A. It can answer, use its tools, run workflows and build: save, test and finish workflows, and create skills. The turn uses the **Chat default model** of the user the run belongs to, so the node has no model or credential field. Pick that model in the Chat tab; without one the node fails and says so.
+
+| Switch | Off (default) | On |
+|--------|---------------|----|
+| **Don't save chat history** | The turn is saved as a conversation in the Chat tab, shown with a workflow icon | The turn runs in a temporary conversation that is never listed and is deleted when the turn ends |
+| **Continue a conversation** | A new conversation starts | The message is written into the conversation in **Conversation ID** |
+| **Don't wait for the reply** | The node waits for the reply | The node returns as soon as the message is accepted; the turn finishes in the background |
+
+**Don't save chat history** and **Continue a conversation** cannot both be on: a conversation that is continued is saved.
+
+With **Continue a conversation**, a conversation that was deleted, does not exist, or belongs to someone else fails the node with `Conversation not found or not accessible`. The node never starts a new conversation instead. A conversation that is still running fails the node too. With **Don't wait for the reply** these checks still happen before the node returns.
+
+**Outputs.** With this operation the node has two outputs:
+
+| The turn ends with | Output | `status` |
+|--------------------|--------|----------|
+| A reply | OUT | `completed` |
+| Stop in the Chat tab while the node waits | OUT | `canceled` |
+| A clarifying question | QUESTION | `input_required` |
+| A credential form to fill in | QUESTION | `auth_required` |
+| Don't wait for the reply | OUT | `started` |
+
+The QUESTION output does not pause the run. Connect it to a node that asks a person, for example Slack or email, and answer in a later run with **Continue a conversation** and the same `conversation_id`. A temporary conversation is deleted when its turn ends, so leave history on when the message may need a clarifying question. With **Don't wait for the reply**, only OUT fires.
+
+| Expression | Description |
+|------------|-------------|
+| `$nodeLabel.conversation_id` | The conversation the message went to, or `null` without history |
+| `$nodeLabel.status` | `completed`, `canceled`, `input_required`, `auth_required`, or `started` |
+| `$nodeLabel.reply` | The assistant's reply |
+| `$nodeLabel.questions` | On QUESTION, the clarifying questions it asked, each with `id`, `question` and `type`, plus `options` when it offers choices; `[]` otherwise |
+| `$nodeLabel.tool_names` | The tools the turn used |
+| `$nodeLabel.verified` | `true` when the turn saved a workflow whose latest test run passed |
+| `$nodeLabel.workflow_links` | `{ name, url }` for each workflow the turn saved |
+| `$nodeLabel.eval_suite_links` | `{ name, url }` for each eval suite the turn saved |
+| `$nodeLabel.credential_form_urls` | Credential forms to open in Heym, on `auth_required` |
+
+Without waiting, the output is only `conversation_id` and `status: "started"`.
+
+**Stopping and timeouts.** Stopping the run, or reaching the workflow timeout, while the node waits also stops the chat turn. A turn started with **Don't wait for the reply** keeps running after the workflow ends; stop it from the Chat tab.
+
+**Loops.** A chat turn can run a workflow that sends a chat message again. Each such hop, and each sub-workflow call, counts toward a limit of 5; the next message fails with `Max Heym Chat call depth exceeded`.
+
+**Clusters.** A workflow with this operation runs on the main instance.
+
 ## Example Workflow
 
 **Daily instance digest**
@@ -151,7 +204,7 @@ cron → heym (listWorkflows) → loop → heym (getExecutionHistory) → llm �
 
 ## Notes
 
-- No credential is needed; the node reads the same database Heym runs on.
+- No credential is needed; the node reads the same database Heym runs on. Send Chat Message uses the run user's Chat default model.
 - **Limit** is the same field for both list operations, and it means the same thing in both: empty or `0` returns everything.
 - The node takes a normal input and can be attached to an Agent node as a tool, so an agent can answer questions about your Heym instance — or audit it.
 - `getWorkflow` payloads grow with the workflow: long prompts and Python tool bodies all travel inside `data`.

@@ -83,6 +83,15 @@ class NodePlacementTests(unittest.TestCase):
             node = {"type": "imapTrigger", "data": data}
             self.assertEqual(node_placement(node), Placement.ANYWHERE)
 
+    def test_heym_chat_message_is_pinned_to_main(self) -> None:
+        node = {"type": "heym", "data": {"heymOperation": "sendChatMessage"}}
+        self.assertEqual(node_placement(node), Placement.MAIN_ONLY)
+
+    def test_heym_reads_run_anywhere(self) -> None:
+        for data in ({}, {"heymOperation": "listWorkflows"}, {"heymOperation": "getBoard"}):
+            node = {"type": "heym", "data": data}
+            self.assertEqual(node_placement(node), Placement.ANYWHERE)
+
     def test_unknown_node_type_is_pinned_to_main(self) -> None:
         self.assertEqual(node_placement({"type": "acmePlugin", "data": {}}), Placement.MAIN_ONLY)
 

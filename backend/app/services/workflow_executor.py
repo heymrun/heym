@@ -39,6 +39,7 @@ from app.http_identity import HEYM_USER_AGENT
 from app.observability import tracing
 from app.services import expression_syntax
 from app.services.agent_tool_policy import node_tools_for_agent
+from app.services.app_loop import chat_turn_depth as current_chat_turn_depth
 from app.services.cancellation_bridge import CancellationBridge
 from app.services.chart_payload import (
     build_chart_payload,  # noqa: F401 - public patch alias for node handlers
@@ -2010,6 +2011,7 @@ class WorkflowExecutor(WorkflowBranchRoutingMixin):
         llm_session_id: str | None = None,
         file_scope: RunFileScope | None = None,
         http_cookies: httpx.Cookies | None = None,
+        chat_turn_depth: int | None = None,
     ) -> None:
         self.nodes = {node["id"]: node for node in nodes}
         self._node_pool = node_pool or _SHARED_EXECUTOR
@@ -2044,6 +2046,12 @@ class WorkflowExecutor(WorkflowBranchRoutingMixin):
         self.actor_user_id = actor_user_id
         self.conversation_history = conversation_history
         self._sub_workflow_invocation_depth = sub_workflow_invocation_depth
+        # Heym node chat hops that led to this run. A run a chat turn starts is built in
+        # that turn's context, so the depth comes from the context unless a parent
+        # executor hands its own down; see app_loop.chat_turn_depth.
+        self.chat_turn_depth = (
+            chat_turn_depth if chat_turn_depth is not None else current_chat_turn_depth()
+        )
         # True when this executor is running a workflow that was invoked (directly or
         # transitively) by an agent's ``call_sub_workflow`` tool. Used to propagate the
         # "AI Agents" trigger_source tag down to Execute Workflow nodes inside the chain.
@@ -2650,6 +2658,10 @@ class WorkflowExecutor(WorkflowBranchRoutingMixin):
 
         source_node = self.nodes.get(edge.get("source"), {})
         if handle_id == "true" and source_node.get("type") == "condition" and not source_handle:
+            return True
+        # An edge saved without a source handle leaves the default output, so skipping
+        # "output" skips it too. A condition's unnamed handle is "true", handled above.
+        if handle_id == "output" and not source_handle and source_node.get("type") != "condition":
             return True
 
         return False
@@ -4041,6 +4053,7 @@ class WorkflowExecutor(WorkflowBranchRoutingMixin):
                 trace_user_id=self.trace_user_id,
                 actor_user_id=self.actor_user_id,
                 sub_workflow_invocation_depth=self._sub_workflow_invocation_depth + 1,
+                chat_turn_depth=self.chat_turn_depth,
                 cancel_event=sub_cancel_event,
                 invoked_by_agent=True,
                 execution_id=str(_sub_execution_id),

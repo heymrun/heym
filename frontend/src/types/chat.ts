@@ -73,8 +73,11 @@ export interface ContextUsage {
 export interface Conversation {
   id: string
   title: string
-  /** Where the conversation started: the Chat tab, the heym_chat MCP tool, or an A2A client. */
-  source: 'chat' | 'mcp' | 'a2a'
+  /**
+   * Where the conversation started: the Chat tab, the heym_chat MCP tool, an A2A client, or a
+   * workflow's Heym node (Send Chat Message). A Heym node's chat without history is never listed.
+   */
+  source: 'chat' | 'mcp' | 'a2a' | 'workflow'
   is_pinned: boolean
   is_running: boolean
   has_unread: boolean

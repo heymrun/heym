@@ -2386,7 +2386,8 @@ class DashboardConversation(Base):
     )
     title: Mapped[str] = mapped_column(String(255), nullable=False, default="New Chat")
     # Where the conversation originated: "chat" (the Chat tab), "mcp" (the heym_chat MCP
-    # tool) or "a2a" (an A2A client).
+    # tool), "a2a" (an A2A client), "workflow" (a Heym node's Send Chat Message) or
+    # "workflow_temp" (the same without chat history: never listed, deleted after its turn).
     source: Mapped[str] = mapped_column(String(20), nullable=False, default="chat")
     is_pinned: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_running: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

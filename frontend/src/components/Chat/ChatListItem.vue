@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { nextTick, ref } from "vue";
-import { Pin, PinOff, Pencil, Plug, Network, Trash2, Check, X } from "lucide-vue-next";
+import { Pin, PinOff, Pencil, Plug, Network, Trash2, Check, Workflow, X } from "lucide-vue-next";
 
 import type { Conversation } from "@/types/chat";
 import { cn } from "@/lib/utils";
@@ -115,6 +115,13 @@ function handleSelect(): void {
       class="w-3 h-3 shrink-0 text-primary opacity-70"
       aria-label="Started by an A2A agent"
       title="Started by an A2A agent"
+    />
+
+    <Workflow
+      v-if="conversation.source === 'workflow'"
+      class="w-3 h-3 shrink-0 text-primary opacity-70"
+      aria-label="Started by a workflow"
+      title="Started by a workflow"
     />
 
     <div class="flex-1 min-w-0">

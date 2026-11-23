@@ -35,7 +35,13 @@ import {
   type DecisionExpressionField,
 } from "@/lib/decisionExpressionFields";
 import { getGitHubExpressionFields, type GitHubExpressionFieldKey } from "@/lib/githubExpressionFields";
-import { getHeymBoardOperation, type HeymBoardFieldKey } from "@/lib/heymOperations";
+import {
+  getHeymBoardOperation,
+  heymChatExpressionFields,
+  isHeymChatOperation,
+  type HeymBoardFieldKey,
+  type HeymChatFieldKey,
+} from "@/lib/heymOperations";
 import { getJiraExpressionFields, type JiraExpressionFieldKey } from "@/lib/jiraExpressionFields";
 import { getLinearExpressionFields, type LinearExpressionFieldKey } from "@/lib/linearExpressionFields";
 import { getNotionExpressionFields, type NotionExpressionFieldKey } from "@/lib/notionExpressionFields";
@@ -628,7 +634,13 @@ export function usePropertiesPanelController() {
     new Map(),
   );
   const currentConverterExpressionFieldIndex = ref(0);
-  type HeymExpressionFieldKey = "heymWorkflowId" | "heymLimit" | "heymStatus" | "heymSinceDays" | HeymBoardFieldKey;
+  type HeymExpressionFieldKey =
+    | "heymWorkflowId"
+    | "heymLimit"
+    | "heymStatus"
+    | "heymSinceDays"
+    | HeymBoardFieldKey
+    | HeymChatFieldKey;
 
   interface HeymExpressionField {
     key: HeymExpressionFieldKey;
@@ -6020,6 +6032,7 @@ export function usePropertiesPanelController() {
       return [];
     }
     const operation = n.data.heymOperation || "listWorkflows";
+    if (isHeymChatOperation(operation)) return heymChatExpressionFields(n.data);
     const boardField = getHeymBoardOperation(operation)?.field;
     if (boardField) return [boardField];
     if (operation === "listWorkflows") {

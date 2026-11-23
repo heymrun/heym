@@ -149,6 +149,16 @@ def _outlook_placement(data: dict) -> Placement:
     return _MAIN if data.get("outlookDownloadAttachments") is True else _ANY
 
 
+def _heym_placement(data: dict) -> Placement:
+    """A Heym node pins the run only when it sends a Heym Chat message.
+
+    The chat turn runs in the main process's chat task map, so Chat tab Stop reaches it;
+    its tools read and write Heym Drive files; and its build tools call ``audit()``, which
+    must stay on the main instance. The read operations have none of that.
+    """
+    return _MAIN if data.get("heymOperation") == "sendChatMessage" else _ANY
+
+
 def _attachments_placement(data: dict) -> Placement:
     """Gmail Send and Outlook Send pin the run only when they attach Drive files.
 
@@ -169,6 +179,7 @@ _CONDITIONAL: dict[str, Callable[[dict], Placement]] = {
     "code": _code_placement,
     "gmailSend": _attachments_placement,
     "gmailTrigger": _gmail_placement,
+    "heym": _heym_placement,
     "imapTrigger": _imap_placement,
     "outlookSend": _attachments_placement,
     "outlookTrigger": _outlook_placement,

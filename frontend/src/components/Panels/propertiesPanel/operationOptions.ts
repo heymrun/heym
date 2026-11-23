@@ -1,4 +1,4 @@
-import { heymBoardOperations } from "@/lib/heymOperations";
+import { heymBoardOperations, heymChatOperationOption } from "@/lib/heymOperations";
 
 export interface OperationOption {
   value: string;
@@ -442,6 +442,7 @@ export const heymOperationOptions: OperationOption[] = [
   { value: "getWorkflow", label: "Get Workflow" },
   { value: "getExecutionHistory", label: "Get Execution History" },
   ...heymBoardOperations,
+  heymChatOperationOption,
 ];
 
 export const heymEventNameOptions: OperationOption[] = [
