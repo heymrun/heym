@@ -591,7 +591,8 @@ async def update_board(
     fields_set = request.model_fields_set
     if request.name is not None:
         board.name = request.name
-    if request.description is not None:
+    # A null description clears it: the edit dialog sends null once the text is deleted.
+    if "description" in fields_set:
         board.description = request.description
     if request.auto_advance is not None:
         board.auto_advance = request.auto_advance

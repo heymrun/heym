@@ -862,7 +862,8 @@ _TOOLS: dict[str, tuple[type[_Args], str, str, Handler]] = {
     "update_board": (
         UpdateBoardArgs,
         "Change a board's name, description or auto_advance, or with use_chat_model true give "
-        "a board without an agentic_kanban_model this chat's model. Owner only.",
+        "a board without an agentic_kanban_model this chat's model. Only the fields passed "
+        "change; null clears the description. Owner only.",
         "Updating board...",
         _update_board,
     ),
