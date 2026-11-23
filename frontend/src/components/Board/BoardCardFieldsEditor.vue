@@ -9,10 +9,14 @@ import Button from "@/components/ui/Button.vue";
 import Input from "@/components/ui/Input.vue";
 import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 import { useToast } from "@/composables/useToast";
-import { fieldChanges, formFromCard, PRIORITY_LABELS } from "@/lib/boardCardFields";
+import {
+  CHANGED_ELSEWHERE,
+  canResaveFields,
+  fieldChanges,
+  formFromCard,
+  PRIORITY_LABELS,
+} from "@/lib/boardCardFields";
 import { boardApi } from "@/services/api";
-
-const CHANGED_ELSEWHERE = "This card was changed by someone else. Showing the latest version.";
 
 const props = defineProps<{
   boardId: string;
@@ -24,9 +28,13 @@ const emit = defineEmits<{ (e: "saved", card: BoardCard): void }>();
 
 const { showToast } = useToast();
 const form = ref<CardFieldForm>(formFromCard(props.card));
+// The card the form was loaded from: changes are what the user edited against it, and the
+// save sends its version, so a reload that brings someone else's edit cannot turn the form's
+// older values into changes that overwrite theirs.
+const baseCard = ref<BoardCard>(props.card);
 const saving = ref(false);
 
-const changes = computed(() => fieldChanges(props.card, form.value));
+const changes = computed(() => fieldChanges(baseCard.value, form.value));
 // The searchable select clears to undefined; the form keeps "" for "not set".
 const assignee = computed({
   get: (): string => form.value.assigneeUserId,
@@ -42,11 +50,16 @@ const priority = computed({
 });
 const dirty = computed<boolean>(() => Object.keys(changes.value).length > 0);
 
+function loadForm(card: BoardCard): void {
+  form.value = formFromCard(card);
+  baseCard.value = card;
+}
+
 // A reload (the dialog polls while a run is active) must not wipe unsaved edits.
 watch(
   () => [props.card.id, props.card.edit_version] as const,
   ([id], [previousId]) => {
-    if (id !== previousId || !dirty.value) form.value = formFromCard(props.card);
+    if (id !== previousId || !dirty.value) loadForm(props.card);
   },
 );
 
@@ -79,26 +92,45 @@ function errorDetail(err: unknown): string {
   return "The details could not be saved.";
 }
 
+function conflictCard(err: unknown): BoardCard | null | undefined {
+  if (!axios.isAxiosError(err) || err.response?.status !== 409) return undefined;
+  return (err.response.data?.detail?.card as BoardCard | undefined) ?? null;
+}
+
 async function save(): Promise<void> {
   if (!dirty.value || saving.value) return;
   saving.value = true;
+  const base = baseCard.value;
+  const payload = { ...changes.value };
+  const send = (version: string): Promise<BoardCard> =>
+    boardApi.updateCard(props.boardId, props.card.id, { ...payload, expected_edit_version: version });
   try {
-    const card = await boardApi.updateCard(props.boardId, props.card.id, {
-      ...changes.value,
-      expected_edit_version: props.card.edit_version,
-    });
+    let card: BoardCard;
+    try {
+      card = await send(base.edit_version);
+    } catch (err: unknown) {
+      const latest = conflictCard(err);
+      // The card changed elsewhere, but not in the fields being saved (a description,
+      // another field): send the same changes over the latest version.
+      if (!latest || !canResaveFields(base, latest, payload)) throw err;
+      card = await send(latest.edit_version);
+    }
+    // Keep what the form holds now, edits made while the request ran included; only the
+    // card the changes are measured against moves to the saved one.
+    baseCard.value = card;
     showToast("Details saved", "success");
     emit("saved", card);
   } catch (err: unknown) {
-    if (axios.isAxiosError(err) && err.response?.status === 409) {
-      const latest = err.response.data?.detail?.card as BoardCard | undefined;
+    const latest = conflictCard(err);
+    if (latest === undefined) {
+      showToast(errorDetail(err), "error");
+    } else {
+      // A field being saved was changed elsewhere: show theirs instead of overwriting it.
       showToast(CHANGED_ELSEWHERE, "error");
       if (latest) {
-        form.value = formFromCard(latest);
+        loadForm(latest);
         emit("saved", latest);
       }
-    } else {
-      showToast(errorDetail(err), "error");
     }
   } finally {
     saving.value = false;
