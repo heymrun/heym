@@ -40,7 +40,8 @@ def execute(ctx: NodeExecutionContext) -> object:
         from app.services.rabbitmq_pool import publish_message_direct
 
         rabbitmq_host = rabbitmq_config.get("rabbitmq_host", "localhost")
-        rabbitmq_port = int(rabbitmq_config.get("rabbitmq_port", 5672))
+        # The credential form's Port is optional ("default: 5672") and saves "" when cleared.
+        rabbitmq_port = int(str(rabbitmq_config.get("rabbitmq_port", "") or "").strip() or 5672)
         rabbitmq_username = rabbitmq_config.get("rabbitmq_username", "guest")
         rabbitmq_password = rabbitmq_config.get("rabbitmq_password", "guest")
         rabbitmq_vhost = rabbitmq_config.get("rabbitmq_vhost", "/")

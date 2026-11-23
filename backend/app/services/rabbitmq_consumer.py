@@ -304,7 +304,8 @@ class RabbitMQConsumerManager:
                 return
 
             host = config.get("rabbitmq_host", "localhost")
-            port = int(config.get("rabbitmq_port", 5672))
+            # The credential form's Port is optional ("default: 5672") and saves "" when cleared.
+            port = int(str(config.get("rabbitmq_port", "") or "").strip() or 5672)
             username = config.get("rabbitmq_username", "guest")
             password = config.get("rabbitmq_password", "guest")
             vhost = config.get("rabbitmq_vhost", "/")
