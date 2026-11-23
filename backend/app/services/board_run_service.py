@@ -9,7 +9,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import select, update
-from sqlalchemy.exc import InvalidRequestError
 from sqlalchemy.orm.exc import ObjectDeletedError
 
 from app.api.analytics import upsert_workflow_analytics_snapshot
@@ -1002,10 +1001,7 @@ async def enqueue_card_chain(
     ).first()
     if locked is None:
         return ENQUEUE_BLOCKED
-    try:
-        await db.refresh(card)
-    except (InvalidRequestError, ObjectDeletedError):
-        return ENQUEUE_BLOCKED
+    await db.refresh(card)
     if await blocking_card_runs(db, card.id):
         return ENQUEUE_BLOCKED
     links = await _column_links(db, column.id)
@@ -1110,10 +1106,7 @@ async def _settle_card_if_idle(db, card: BoardCard) -> None:
     blocking = await blocking_card_runs(db, card.id)
     if blocking:
         return
-    try:
-        await db.refresh(card)
-    except (InvalidRequestError, ObjectDeletedError):
-        return
+    await db.refresh(card)
     if card.run_status == "running":
         card.run_status = "success"
         await db.commit()
@@ -1205,9 +1198,7 @@ async def _auto_advance(
                     )
                 ).scalar_one_or_none()
                 if target is None:
-                    if card is not None:
-                        await _settle_card_if_idle(db, card)
-                    return
+                    continue
                 try:
                     card = await db.get(
                         BoardCard, card_id, with_for_update=True, populate_existing=True

@@ -11,7 +11,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import boards as boards_api
-from app.db.models import Board, BoardCard, BoardColumn, BoardColumnWorkflow, Workflow
+from app.api import chat_boards
+from app.db.models import Board, BoardCard, BoardColumn, BoardColumnWorkflow, User, Workflow
 from app.models.board_schemas import (
     BoardCreateRequest,
     BoardUpdateRequest,
@@ -22,6 +23,8 @@ from app.models.board_schemas import (
 )
 from app.services import board_run_service
 from tests.board_pg_support import cleanup, connect_or_skip, make_board, make_user, share_board
+
+BASE = "http://heym.test"
 
 
 class KanbanPgCase(unittest.IsolatedAsyncioTestCase):
@@ -557,6 +560,7 @@ class AutoAdvanceTests(KanbanPgCase):
             board_id = board.id
             staging_id = columns[3].id
             qa_id = columns[4].id
+            done_id = columns[5].id
 
         paused_event = asyncio.Event()
         resume_event = asyncio.Event()
@@ -616,8 +620,8 @@ class AutoAdvanceTests(KanbanPgCase):
             final_card = await db.get(BoardCard, card_id)
             self.assertIsNotNone(final_card)
             assert final_card is not None
-            # Card safely stopped in Staging and settled to success
-            self.assertEqual(final_card.column_id, staging_id)
+            # Card safely skips deleted QA column and reaches Done
+            self.assertEqual(final_card.column_id, done_id)
             self.assertEqual(final_card.run_status, "success")
 
     async def test_mid_cascade_move_to_column_with_workflow_preserves_running_status(
@@ -1214,28 +1218,521 @@ class ColumnDeleteTests(KanbanPgCase):
         board, columns = await make_board(self.engine, self.owner, auto_advance=False)
         card_id = await self.card_in(board.id, columns[0].id, "Doomed Card")
 
-        original_place_card = boards_api._place_card
+        del_flushed = asyncio.Event()
+        resume_del = asyncio.Event()
 
-        async def hook_place_card(db, card, target_column_id, position):
-            async with self.session() as other_db:
-                c = await other_db.get(BoardCard, card_id)
+        async def run_del():
+            async with self.session() as del_db:
+                c = await del_db.get(BoardCard, card_id)
                 if c is not None:
-                    await other_db.delete(c)
-                    await other_db.commit()
-            return await original_place_card(db, card, target_column_id, position)
+                    await del_db.delete(c)
+                    await del_db.flush()
+                del_flushed.set()
+                await asyncio.wait_for(resume_del.wait(), timeout=5)
+                await del_db.commit()
 
-        with patch.object(boards_api, "_place_card", side_effect=hook_place_card):
-            async with self.session() as db:
-                with self.assertRaises(HTTPException) as ctx:
-                    await boards_api.move_card(
+        del_task = asyncio.create_task(run_del())
+        move_task = None
+        try:
+            await asyncio.wait_for(del_flushed.wait(), timeout=5)
+
+            async def run_move():
+                async with self.session() as db:
+                    return await boards_api.move_card(
                         board_id=board.id,
                         card_id=card_id,
                         request=CardMoveRequest(to_column_id=columns[1].id),
                         db=db,
                         current_user=self.owner,
                     )
-                self.assertEqual(ctx.exception.status_code, 404)
-                self.assertEqual(ctx.exception.detail, "Card not found")
+
+            move_task = asyncio.create_task(run_move())
+            await asyncio.sleep(0.05)
+            self.assertFalse(move_task.done())
+
+            resume_del.set()
+            await asyncio.wait_for(del_task, timeout=5)
+
+            with self.assertRaises(HTTPException) as ctx:
+                await asyncio.wait_for(move_task, timeout=5)
+            self.assertEqual(ctx.exception.status_code, 404)
+            self.assertEqual(ctx.exception.detail, "Card not found")
+        finally:
+            resume_del.set()
+            for t in (del_task, move_task):
+                if t and not t.done():
+                    t.cancel()
+                    try:
+                        await t
+                    except (asyncio.CancelledError, Exception):
+                        pass
+
+    async def test_flushed_move_concurrent_delete_column_does_not_pull_card(self) -> None:
+        """When move_card has flushed its database update moving a card out of a column,
+        a concurrent delete_column on the source column must wait for the move to commit
+        rather than reading a stale snapshot and pulling the card to move_cards_to_column_id."""
+        board, columns = await make_board(self.engine, self.owner, auto_advance=False)
+        backlog = columns[0]
+        planning = columns[1]
+        done = columns[3]
+
+        card_id = await self.card_in(board.id, backlog.id, "Moving Card")
+
+        move_flushed = asyncio.Event()
+        resume_move = asyncio.Event()
+
+        original_commit = AsyncSession.commit
+
+        async def hooked_commit(session_self):
+            move_flushed.set()
+            await asyncio.wait_for(resume_move.wait(), timeout=5)
+            return await original_commit(session_self)
+
+        async def run_move():
+            session = AsyncSession(self.engine, expire_on_commit=False)
+            session.commit = lambda: hooked_commit(session)
+            try:
+                return await boards_api.move_card(
+                    board_id=board.id,
+                    card_id=card_id,
+                    request=CardMoveRequest(to_column_id=planning.id),
+                    db=session,
+                    current_user=self.owner,
+                )
+            finally:
+                await session.close()
+
+        move_task = asyncio.create_task(run_move())
+        del_task = None
+        try:
+            await asyncio.wait_for(move_flushed.wait(), timeout=5)
+
+            async def run_delete():
+                async with self.session() as del_db:
+                    await boards_api.delete_column(
+                        board_id=board.id,
+                        column_id=backlog.id,
+                        move_cards_to_column_id=done.id,
+                        db=del_db,
+                        current_user=self.owner,
+                    )
+
+            del_task = asyncio.create_task(run_delete())
+            # With with_for_update(), del_task blocks on the locked card
+            await asyncio.sleep(0.05)
+            self.assertFalse(del_task.done())
+
+            resume_move.set()
+            await asyncio.wait_for(asyncio.gather(move_task, del_task), timeout=5)
+        finally:
+            resume_move.set()
+            for t in (move_task, del_task):
+                if t and not t.done():
+                    t.cancel()
+                    try:
+                        await t
+                    except (asyncio.CancelledError, Exception):
+                        pass
+
+        async with self.session() as db:
+            final_card = await db.get(BoardCard, card_id)
+            self.assertIsNotNone(final_card)
+            assert final_card is not None
+            # The card must be in Planning, NOT pulled into Done!
+            self.assertEqual(final_card.column_id, planning.id)
+            col = await db.get(BoardColumn, backlog.id)
+            self.assertIsNone(col)
+
+    async def test_concurrent_create_card_explicit_column_deleted_answers_404(self) -> None:
+        """When a column is deleted concurrently while a card is being created in it with an
+        explicit column_id, create_card must answer 404 (Column not found) instead of 500."""
+        board, columns = await make_board(self.engine, self.owner, auto_advance=False)
+        target_column_id = columns[1].id
+
+        delete_paused = asyncio.Event()
+        resume_delete = asyncio.Event()
+
+        original_execute = AsyncSession.execute
+
+        async def hook_execute(session_self, stmt, *args, **kwargs):
+            res = await original_execute(session_self, stmt, *args, **kwargs)
+            sql = str(stmt)
+            if "board_columns" in sql and "FOR UPDATE" in sql:
+                params = getattr(stmt.compile(), "params", {})
+                if target_column_id in params.values() or str(target_column_id) in sql:
+                    delete_paused.set()
+                    await asyncio.wait_for(resume_delete.wait(), timeout=5)
+            return res
+
+        async def run_delete():
+            session = AsyncSession(self.engine, expire_on_commit=False)
+            session.execute = lambda stmt, *a, **kw: hook_execute(session, stmt, *a, **kw)
+            try:
+                await boards_api.delete_column(
+                    board_id=board.id,
+                    column_id=target_column_id,
+                    move_cards_to_column_id=None,
+                    db=session,
+                    current_user=self.owner,
+                )
+            finally:
+                await session.close()
+
+        delete_task = asyncio.create_task(run_delete())
+        create_task = None
+        try:
+            await asyncio.wait_for(delete_paused.wait(), timeout=5)
+
+            async def run_create():
+                async with self.session() as create_db:
+                    return await boards_api.create_card(
+                        board_id=board.id,
+                        request=CardCreateRequest(title="Race Card", column_id=target_column_id),
+                        db=create_db,
+                        current_user=self.owner,
+                    )
+
+            create_task = asyncio.create_task(run_create())
+            await asyncio.sleep(0.05)
+            # create_task is blocked waiting for delete_column's FOR UPDATE lock on the column
+            self.assertFalse(create_task.done())
+
+            resume_delete.set()
+            await asyncio.wait_for(delete_task, timeout=5)
+
+            with self.assertRaises(HTTPException) as ctx:
+                await asyncio.wait_for(create_task, timeout=5)
+            self.assertEqual(ctx.exception.status_code, 404)
+            self.assertEqual(ctx.exception.detail, "Column not found")
+        finally:
+            resume_delete.set()
+            for t in (delete_task, create_task):
+                if t and not t.done():
+                    t.cancel()
+                    try:
+                        await t
+                    except (asyncio.CancelledError, Exception):
+                        pass
+
+        async with self.session() as db:
+            col = await db.get(BoardColumn, target_column_id)
+            self.assertIsNone(col)
+            cards = (
+                (await db.execute(select(BoardCard).where(BoardCard.board_id == board.id)))
+                .scalars()
+                .all()
+            )
+            self.assertEqual(len(cards), 0)
+
+    async def test_concurrent_create_card_default_column_deleted_answers_404(self) -> None:
+        """When the first column is deleted concurrently while a card is being created with
+        column_id=None (default first column), create_card answers 404 (Column not found)."""
+        col_id = uuid.uuid4()
+        async with self.session() as db:
+            board = Board(owner_id=self.owner.id, name="Single Col Board", auto_advance=False)
+            db.add(board)
+            await db.flush()
+            col = BoardColumn(id=col_id, board_id=board.id, name="Solo", position=0)
+            db.add(col)
+            await db.commit()
+
+        delete_paused = asyncio.Event()
+        resume_delete = asyncio.Event()
+
+        original_execute = AsyncSession.execute
+
+        async def hook_execute(session_self, stmt, *args, **kwargs):
+            res = await original_execute(session_self, stmt, *args, **kwargs)
+            sql = str(stmt)
+            if "board_columns" in sql and "FOR UPDATE" in sql:
+                params = getattr(stmt.compile(), "params", {})
+                if col_id in params.values() or str(col_id) in sql:
+                    delete_paused.set()
+                    await asyncio.wait_for(resume_delete.wait(), timeout=5)
+            return res
+
+        async def run_delete():
+            session = AsyncSession(self.engine, expire_on_commit=False)
+            session.execute = lambda stmt, *a, **kw: hook_execute(session, stmt, *a, **kw)
+            try:
+                await boards_api.delete_column(
+                    board_id=board.id,
+                    column_id=col_id,
+                    move_cards_to_column_id=None,
+                    db=session,
+                    current_user=self.owner,
+                )
+            finally:
+                await session.close()
+
+        delete_task = asyncio.create_task(run_delete())
+        create_task = None
+        try:
+            await asyncio.wait_for(delete_paused.wait(), timeout=5)
+
+            async def run_create():
+                async with self.session() as create_db:
+                    return await boards_api.create_card(
+                        board_id=board.id,
+                        request=CardCreateRequest(title="Default Col Race Card", column_id=None),
+                        db=create_db,
+                        current_user=self.owner,
+                    )
+
+            create_task = asyncio.create_task(run_create())
+            await asyncio.sleep(0.05)
+            # create_task is blocked waiting for delete_column's FOR UPDATE lock on the column
+            self.assertFalse(create_task.done())
+
+            resume_delete.set()
+            await asyncio.wait_for(delete_task, timeout=5)
+
+            with self.assertRaises(HTTPException) as ctx:
+                await asyncio.wait_for(create_task, timeout=5)
+            self.assertEqual(ctx.exception.status_code, 404)
+            self.assertEqual(ctx.exception.detail, "Column not found")
+        finally:
+            resume_delete.set()
+            for t in (delete_task, create_task):
+                if t and not t.done():
+                    t.cancel()
+                    try:
+                        await t
+                    except (asyncio.CancelledError, Exception):
+                        pass
+
+        async with self.session() as db:
+            col_check = await db.get(BoardColumn, col_id)
+            self.assertIsNone(col_check)
+            cards = (
+                (await db.execute(select(BoardCard).where(BoardCard.board_id == board.id)))
+                .scalars()
+                .all()
+            )
+            self.assertEqual(len(cards), 0)
+
+    async def test_create_card_commits_before_delete_column_causes_conflict(self) -> None:
+        """When create_card starts and locks the column with FOR KEY SHARE, concurrent delete_column
+        must wait. Once create commits, delete_column sees the card and returns 409 Conflict."""
+        board, columns = await make_board(self.engine, self.owner, auto_advance=False)
+        target_column_id = columns[1].id
+
+        create_flushed = asyncio.Event()
+        resume_create = asyncio.Event()
+
+        original_commit = AsyncSession.commit
+
+        async def hooked_commit(session_self):
+            create_flushed.set()
+            await asyncio.wait_for(resume_create.wait(), timeout=5)
+            return await original_commit(session_self)
+
+        async def run_create():
+            session = AsyncSession(self.engine, expire_on_commit=False)
+            session.commit = lambda: hooked_commit(session)
+            try:
+                return await boards_api.create_card(
+                    board_id=board.id,
+                    request=CardCreateRequest(title="Winning Card", column_id=target_column_id),
+                    db=session,
+                    current_user=self.owner,
+                )
+            finally:
+                await session.close()
+
+        create_task = asyncio.create_task(run_create())
+        del_task = None
+        try:
+            await asyncio.wait_for(create_flushed.wait(), timeout=5)
+
+            async def run_delete():
+                async with self.session() as del_db:
+                    await boards_api.delete_column(
+                        board_id=board.id,
+                        column_id=target_column_id,
+                        move_cards_to_column_id=None,
+                        db=del_db,
+                        current_user=self.owner,
+                    )
+
+            del_task = asyncio.create_task(run_delete())
+            await asyncio.sleep(0.05)
+            # del_task is blocked waiting for create_card's FOR KEY SHARE lock on target_column_id
+            self.assertFalse(del_task.done())
+
+            resume_create.set()
+            card = await asyncio.wait_for(create_task, timeout=5)
+
+            with self.assertRaises(HTTPException) as ctx:
+                await asyncio.wait_for(del_task, timeout=5)
+            self.assertEqual(ctx.exception.status_code, 409)
+            self.assertEqual(ctx.exception.detail, "Move or delete the cards in this column first")
+        finally:
+            resume_create.set()
+            for t in (create_task, del_task):
+                if t and not t.done():
+                    t.cancel()
+                    try:
+                        await t
+                    except (asyncio.CancelledError, Exception):
+                        pass
+
+        async with self.session() as db:
+            col = await db.get(BoardColumn, target_column_id)
+            self.assertIsNotNone(col)
+            persisted_card = await db.get(BoardCard, card.id)
+            self.assertIsNotNone(persisted_card)
+            assert persisted_card is not None
+            self.assertEqual(persisted_card.column_id, target_column_id)
+
+    async def test_concurrent_create_card_board_deleted_answers_board_not_found(self) -> None:
+        """When a board is deleted concurrently during create_card (including post-commit refresh),
+        create_card answers 404 (Board not found) rather than Column not found."""
+        board, columns = await make_board(self.engine, self.owner, auto_advance=False)
+        target_column_id = columns[1].id
+
+        create_committed = asyncio.Event()
+        resume_create = asyncio.Event()
+
+        original_refresh = AsyncSession.refresh
+
+        async def hooked_refresh(session_self, instance, *args, **kwargs):
+            if isinstance(instance, BoardCard):
+                create_committed.set()
+                await asyncio.wait_for(resume_create.wait(), timeout=5)
+            return await original_refresh(session_self, instance, *args, **kwargs)
+
+        async def run_create():
+            session = AsyncSession(self.engine, expire_on_commit=False)
+            session.refresh = lambda inst, *a, **kw: hooked_refresh(session, inst, *a, **kw)
+            try:
+                return await boards_api.create_card(
+                    board_id=board.id,
+                    request=CardCreateRequest(title="Doomed Card", column_id=target_column_id),
+                    db=session,
+                    current_user=self.owner,
+                )
+            finally:
+                session.expunge_all()
+                await session.close()
+
+        create_task = asyncio.create_task(run_create())
+        del_task = None
+        try:
+            await asyncio.wait_for(create_committed.wait(), timeout=5)
+
+            async def run_delete_board():
+                async with self.session() as db:
+                    await boards_api.delete_board(board_id=board.id, db=db, current_user=self.owner)
+
+            del_task = asyncio.create_task(run_delete_board())
+            await asyncio.wait_for(del_task, timeout=5)
+
+            resume_create.set()
+            with self.assertRaises(HTTPException) as ctx:
+                await asyncio.wait_for(create_task, timeout=5)
+            self.assertEqual(ctx.exception.status_code, 404)
+            self.assertEqual(ctx.exception.detail, "Board not found")
+        finally:
+            resume_create.set()
+            for t in (create_task, del_task):
+                if t and not t.done():
+                    t.cancel()
+                    try:
+                        await t
+                    except (asyncio.CancelledError, Exception):
+                        pass
+
+    async def test_concurrent_create_card_board_tool_session_usable(self) -> None:
+        """Running create_board_task during a column delete race returns error without
+        expiring the session user, so subsequent board tools in the same session succeed."""
+        board, columns = await make_board(self.engine, self.owner, auto_advance=False)
+        target_column_id = columns[1].id
+
+        async with self.session() as db:
+            await boards_api.delete_column(
+                board_id=board.id,
+                column_id=target_column_id,
+                move_cards_to_column_id=None,
+                db=db,
+                current_user=self.owner,
+            )
+
+        session = self.session()
+        try:
+            user = (
+                await session.execute(select(User).where(User.id == self.owner.id))
+            ).scalar_one()
+
+            result = await chat_boards.call_board_tool(
+                session,
+                user,
+                "create_board_task",
+                {
+                    "board_id": str(board.id),
+                    "title": "Task in deleted col",
+                    "column_id": str(target_column_id),
+                },
+                BASE,
+            )
+            self.assertEqual(result.get("error"), "Column not found")
+
+            next_result = await chat_boards.call_board_tool(
+                session,
+                user,
+                "list_boards",
+                {},
+                BASE,
+            )
+            self.assertIn("boards", next_result)
+        finally:
+            await session.close()
+
+    async def test_concurrent_move_card_board_tool_session_usable(self) -> None:
+        """Running move_board_task during a column delete race returns error without
+        expiring the session user, so subsequent board tools in the same session succeed."""
+        board, columns = await make_board(self.engine, self.owner, auto_advance=False)
+        card_id = await self.card_in(board.id, columns[0].id, "Move Tool Task")
+        target_column_id = columns[1].id
+
+        async with self.session() as db:
+            await boards_api.delete_column(
+                board_id=board.id,
+                column_id=target_column_id,
+                move_cards_to_column_id=None,
+                db=db,
+                current_user=self.owner,
+            )
+
+        session = self.session()
+        try:
+            user = (
+                await session.execute(select(User).where(User.id == self.owner.id))
+            ).scalar_one()
+
+            result = await chat_boards.call_board_tool(
+                session,
+                user,
+                "move_board_task",
+                {
+                    "board_id": str(board.id),
+                    "card_id": str(card_id),
+                    "to_column_id": str(target_column_id),
+                },
+                BASE,
+            )
+            self.assertEqual(result.get("error"), "Column not found")
+
+            next_result = await chat_boards.call_board_tool(
+                session,
+                user,
+                "list_boards",
+                {},
+                BASE,
+            )
+            self.assertIn("boards", next_result)
+        finally:
+            await session.close()
 
 
 class RevisionTests(KanbanPgCase):
