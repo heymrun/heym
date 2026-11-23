@@ -166,7 +166,7 @@ async def _get_board_card(
 ) -> BoardCard:
     stmt = select(BoardCard).where(BoardCard.id == card_id, BoardCard.board_id == board.id)
     if for_update:
-        stmt = stmt.with_for_update()
+        stmt = stmt.with_for_update().execution_options(populate_existing=True)
     result = await db.execute(stmt)
     card = result.scalar_one_or_none()
     if card is None:
@@ -867,7 +867,9 @@ async def create_card(
             ).scalar_one_or_none()
             if board_exists is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Board not found")
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Column not found")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Board has no columns"
+            )
     card = BoardCard(
         id=uuid.uuid4(),
         board_id=board.id,
@@ -1211,6 +1213,13 @@ async def move_card(
         if result == board_run_service.ENQUEUE_BLOCKED:
             # The move already committed and cannot be undone here; surface the skip
             # on the card's timeline instead of failing a request that already succeeded.
+            locked = (
+                await db.execute(
+                    select(BoardCard.id).where(BoardCard.id == card.id).with_for_update()
+                )
+            ).scalar_one_or_none()
+            if locked is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Card not found")
             db.add(
                 BoardCardActivity(
                     card_id=card.id,
