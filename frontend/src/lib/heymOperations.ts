@@ -44,13 +44,25 @@ interface HeymChatToggles {
   heymChatContinue?: boolean;
 }
 
+interface HeymChatNodeData {
+  heymOperation?: string;
+  heymChatNoHistory?: boolean;
+  heymChatFireAndForget?: boolean;
+}
+
 export function isHeymChatOperation(operation: string | undefined): boolean {
   return operation === HEYM_CHAT_OPERATION;
 }
 
-/** The Heym node gets a QUESTION output, like Codex, only while it sends chat messages. */
-export function hasHeymQuestionOutput(type: string, operation: string | undefined): boolean {
-  return type === "heym" && isHeymChatOperation(operation);
+/**
+ * The Heym node gets a QUESTION output, like Codex, only while a question can reach it and
+ * be answered: it waits for the reply and keeps the conversation to continue.
+ */
+export function hasHeymQuestionOutput(type: string, data: HeymChatNodeData): boolean {
+  return type === "heym"
+    && isHeymChatOperation(data.heymOperation)
+    && data.heymChatFireAndForget !== true
+    && data.heymChatNoHistory !== true;
 }
 
 /** Expression fields in panel order; the conversation id appears only while continuing. */

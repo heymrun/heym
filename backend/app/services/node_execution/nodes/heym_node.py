@@ -359,7 +359,11 @@ def _send_chat_message(ctx: NodeExecutionContext, user_id: uuid.UUID) -> dict:
         raise ValueError(f"Heym Chat is not available here: {exc}") from exc
     output = dict(_wait_for_chat(ctx, future))
 
-    waiting_on_person = not fire_and_forget and AgentOutcome(output["status"]) in QUESTION_OUTCOMES
+    # QUESTION exists only while a question can reach the node and be answered later: the
+    # node waits, and the conversation is kept. Otherwise everything leaves through OUT,
+    # `status` included, matching the handles the editor shows.
+    has_question_handle = not fire_and_forget and not temporary
+    waiting_on_person = has_question_handle and AgentOutcome(output["status"]) in QUESTION_OUTCOMES
     output["_skip_source_handles"] = ["output"] if waiting_on_person else ["question"]
     return output
 

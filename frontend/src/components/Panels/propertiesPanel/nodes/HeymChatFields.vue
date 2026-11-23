@@ -146,11 +146,5 @@ function expressionProps(key: HeymChatFieldKey, label: string): Record<string, u
         @update:model-value="updateNodeData('heymChatConversationId', $event)"
       />
     </div>
-
-    <p class="text-xs text-muted-foreground">
-      OUT fires with the reply. QUESTION fires when the assistant asks a clarifying question or
-      needs a credential; answer it later with Continue a conversation and the same
-      <code>conversation_id</code>.
-    </p>
   </template>
 </template>

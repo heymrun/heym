@@ -1853,7 +1853,7 @@ watch(
 );
 
 watch(
-  () => workflowStore.nodes.map((n) => hasHeymQuestionOutput(n.type, n.data.heymOperation)),
+  () => workflowStore.nodes.map((n) => hasHeymQuestionOutput(n.type, n.data)),
   (newVal, oldVal) => {
     if (!oldVal || !newVal) return;
 

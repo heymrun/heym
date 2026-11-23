@@ -5368,7 +5368,7 @@ The credential requests the full `https://www.googleapis.com/auth/drive` scope, 
 
 ### 43. heym (Heym Platform Data)
 - **Purpose**: Read Heym workflows, execution history, and kanban boards, columns, and cards, or send a message to Heym Chat.
-- **Inputs**: 1 | **Outputs**: 1, or 2 (`output` and `question`) with `sendChatMessage`
+- **Inputs**: 1 | **Outputs**: 1, or 2 (`output` and `question`) with `sendChatMessage` when `heymChatFireAndForget` and `heymChatNoHistory` are both `false`
 - **WHEN TO USE**: Meta-workflows that report on the Heym instance itself - inventories, health digests, execution summaries - and workflows that hand a task to Heym Chat (`sendChatMessage`)
 - **No credential required.** Results are scoped to the user the run belongs to, like credentials: the person who runs it from the editor, the API, Chat or MCP, and the workflow owner on Cron, portal, event and other triggered runs. Board reads use that user's ownership and direct or team shares on the board.
 - **Data fields**:
@@ -5398,7 +5398,7 @@ The credential requests the full `https://www.googleapis.com/auth/drive` scope, 
   - `getBoardCardId` returns that card's fields plus `content`, `card_metadata`, `fields` (`assignee_user_id`, `priority`, `due_date`, `labels`), `created_at`, and `updated_at`. The relative `path` opens the card in Heym. The board ID is resolved from the card's parent board.
   - `sendChatMessage` (waiting) -> `$<label>.conversation_id` (`null` without history), `$<label>.status` (`completed`, `canceled`, `input_required`, `auth_required`), `$<label>.reply` (the assistant's text), `$<label>.questions` (on `input_required`, the clarifying questions as objects with `id`, `question` and `type`, plus `options` when it offers choices; `[]` otherwise), `$<label>.tool_names`, `$<label>.verified` (a saved workflow's latest test run passed), `$<label>.workflow_links` and `$<label>.eval_suite_links` (`name`, `url`), `$<label>.credential_form_urls`.
   - `sendChatMessage` with `heymChatFireAndForget` -> `$<label>.conversation_id` (`null` without history) and `$<label>.status` = `started`; the reply never reaches the workflow.
-- **Handles for `sendChatMessage`**: `completed` and `canceled` leave through `sourceHandle: "output"`. `input_required` (the assistant asked a clarifying question) and `auth_required` (it opened a credential form) leave through `sourceHandle: "question"`, and the run does not pause: connect the question branch to a node that asks a person (Slack, email), then answer in a later run with `heymChatContinue: true` and the same `conversation_id`. With fire and forget only `output` fires. Every other Heym operation has the single `output` handle.
+- **Handles for `sendChatMessage`**: `completed` and `canceled` leave through `sourceHandle: "output"`. `input_required` (the assistant asked a clarifying question) and `auth_required` (it opened a credential form) leave through `sourceHandle: "question"`, and the run does not pause: connect the question branch to a node that asks a person (Slack, email), then answer in a later run with `heymChatContinue: true` and the same `conversation_id`. The `question` handle exists only when `heymChatFireAndForget` and `heymChatNoHistory` are both `false`; otherwise the node has only `output`, every status (`input_required` included) leaves through it, and an edge from `question` is invalid. Every other Heym operation has the single `output` handle.
 
 **Example node JSON:**
 ```json

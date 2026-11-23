@@ -18,7 +18,7 @@ history, boards); this adds one operation that acts.
 | Credential questions | `CredentialPromptMode.ASK_AND_LINK`, like MCP. Nobody is in the loop to fill the in-chat dialog, so credential forms come back as links. |
 | Whose chat | The person who ran the workflow (canvas, MCP, API, execution token, Chat). The workflow owner when nobody did (Cron and other triggers). |
 | Continue with a missing conversation | The node fails. It never starts a new conversation instead. |
-| Output handles | Two (OUT and QUESTION, like Codex) for this operation only. Other Heym operations keep one. |
+| Output handles | Two (OUT and QUESTION, like Codex) for this operation only, and only while the node waits and saves history. Other Heym operations keep one. |
 
 ## Node fields
 
@@ -89,12 +89,15 @@ hands the question and `conversation_id` to the next node, for example a Slack o
 that asks a person. A later run answers by sending the reply with **Continue a conversation**
 and that `conversation_id`.
 
-In fire and forget mode the reply never reaches the node, so the `question` handle never
-fires; it stays on the node so edges do not disappear when the toggle changes.
+In fire and forget mode the reply never reaches the node, and without history the
+conversation is deleted, so a question could not be answered later. In both modes the node
+has no `question` handle and every status leaves through `output` (review change,
+2026-11-23).
 
-Canvas: `BaseNode.vue` shows the QUESTION handle when `type === "heym"` and
-`heymOperation === "sendChatMessage"`. Switching to another operation removes edges that
-leave the `question` handle, so no edge points at a handle that is gone. The plan step checks
+Canvas: `BaseNode.vue` shows the QUESTION handle when `type === "heym"`,
+`heymOperation === "sendChatMessage"`, and neither `heymChatFireAndForget` nor
+`heymChatNoHistory` is on. Switching to another operation or turning either switch on removes
+edges that leave the `question` handle, so no edge points at a handle that is gone. The plan step checks
 that `_skip_source_handles: ["output"]` also skips edges saved with a `null` source handle,
 which existing single-output Heym nodes may have.
 

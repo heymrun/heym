@@ -165,7 +165,7 @@ const hasCodexQuestionOutput = computed(
   () => !isToolNode.value && !isSubAgentNode.value && props.type === "codex"
 );
 const hasHeymChatQuestionOutput = computed(
-  () => !isToolNode.value && !isSubAgentNode.value && hasHeymQuestionOutput(props.type, props.data.heymOperation)
+  () => !isToolNode.value && !isSubAgentNode.value && hasHeymQuestionOutput(props.type, props.data)
 );
 /** Codex and the Heym node's chat operation leave through QUESTION when a person must answer. */
 const hasQuestionOutput = computed(() => hasCodexQuestionOutput.value || hasHeymChatQuestionOutput.value);

@@ -7,7 +7,7 @@ The **Heym** node reads workflows, execution history, and [kanban boards](../tab
 | Property | Value |
 |----------|-------|
 | Inputs | 1 |
-| Outputs | 1, or 2 (OUT and QUESTION) with Send Chat Message |
+| Outputs | 1, or 2 (OUT and QUESTION) with Send Chat Message while it waits for the reply and saves chat history |
 | Operations | `listWorkflows`, `getWorkflow`, `getExecutionHistory`, `getBoard`, `getBoardColumn`, `getBoardCardId`, `sendChatMessage` |
 | Credential | None required |
 
@@ -157,7 +157,7 @@ Sends one message to [Heym Chat](../tabs/chat-tab.md), the same assistant as the
 
 With **Continue a conversation**, a conversation that was deleted, does not exist, or belongs to someone else fails the node with `Conversation not found or not accessible`. The node never starts a new conversation instead. A conversation that is still running fails the node too. With **Don't wait for the reply** these checks still happen before the node returns.
 
-**Outputs.** With this operation the node has two outputs:
+**Outputs.** While the node waits for the reply and saves chat history, it has two outputs:
 
 | The turn ends with | Output | `status` |
 |--------------------|--------|----------|
@@ -165,9 +165,10 @@ With **Continue a conversation**, a conversation that was deleted, does not exis
 | Stop in the Chat tab while the node waits | OUT | `canceled` |
 | A clarifying question | QUESTION | `input_required` |
 | A credential form to fill in | QUESTION | `auth_required` |
-| Don't wait for the reply | OUT | `started` |
 
-The QUESTION output does not pause the run. Connect it to a node that asks a person, for example Slack or email, and answer in a later run with **Continue a conversation** and the same `conversation_id`. A temporary conversation is deleted when its turn ends, so leave history on when the message may need a clarifying question. With **Don't wait for the reply**, only OUT fires.
+The QUESTION output does not pause the run. Connect it to a node that asks a person, for example Slack or email, and answer in a later run with **Continue a conversation** and the same `conversation_id`.
+
+With **Don't wait for the reply** the reply never reaches the node, and with **Don't save chat history** the conversation is deleted, so a question could not be answered later. In both cases the node has only OUT: it fires with `status: "started"` without waiting, and with every `status`, `input_required` included, without history. Turning either switch on removes the edges that left QUESTION.
 
 | Expression | Description |
 |------------|-------------|

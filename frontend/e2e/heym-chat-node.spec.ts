@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 import { createWorkflow, deleteWorkflow, prepareAuthenticatedPage } from "./support";
 
-test("Send Chat Message shows its switches and a QUESTION output that goes with the operation", async ({ page }) => {
+test("Send Chat Message shows its switches and a QUESTION output only while a question can be answered", async ({ page }) => {
   await prepareAuthenticatedPage(page);
   const workflow = await createWorkflow(page, "Heym chat message", [
     { id: "chat", type: "heym", position: { x: 0, y: 0 }, data: { label: "chat", heymOperation: "sendChatMessage", heymChatMessage: "Summarize today" } },
@@ -47,10 +47,21 @@ test("Send Chat Message shows its switches and a QUESTION output that goes with 
 
     await continueChat.uncheck();
     await expect(noHistory).toBeEnabled();
+
+    // Without history a question could not be answered later: no QUESTION output.
     await noHistory.check();
     await expect(continueChat).toBeDisabled();
+    await expect(node.getByText("QUESTION", { exact: true })).toHaveCount(0);
+    await expect(node.locator('.vue-flow__handle[data-handleid="question"]')).toHaveCount(0);
+    await expect(page.locator(".vue-flow__edge")).toHaveCount(1);
+    await noHistory.uncheck();
+    await expect(node.getByText("QUESTION", { exact: true })).toBeVisible();
+
+    // Without waiting the reply never reaches the node: no QUESTION output either.
     await fireAndForget.check();
-    await expect(fireAndForget).toBeChecked();
+    await expect(node.getByText("QUESTION", { exact: true })).toHaveCount(0);
+    await fireAndForget.uncheck();
+    await expect(node.getByText("QUESTION", { exact: true })).toBeVisible();
 
     await panel.getByTestId("heym-operation").locator("select").selectOption("listWorkflows");
     await expect(node.getByText("QUESTION", { exact: true })).toHaveCount(0);

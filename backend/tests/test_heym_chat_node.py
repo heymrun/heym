@@ -202,6 +202,15 @@ class ChatHandleRoutingTests(ChatHandlerTestBase):
             output = heym_node.execute(_chat_ctx({"heymChatMessage": "hi"}))
             self.assertEqual(output["_skip_source_handles"], ["output"])
 
+    def test_without_history_a_question_leaves_through_output(self) -> None:
+        """A temporary conversation is gone afterwards, so the node has no QUESTION output."""
+        for status in ("input_required", "auth_required"):
+            self.next_output = _wait_output(status, conversation_id=None)
+            ctx = _chat_ctx({"heymChatMessage": "hi", "heymChatNoHistory": True})
+            output = heym_node.execute(ctx)
+            self.assertEqual(output["_skip_source_handles"], ["question"])
+            self.assertEqual(output["status"], status)
+
 
 class ChatDepthTests(ChatHandlerTestBase):
     def test_chat_and_sub_workflow_hops_count_toward_one_limit(self) -> None:

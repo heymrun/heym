@@ -27,10 +27,17 @@ describe("Heym Send Chat Message operation", () => {
   });
 
   it("gives only a Heym node sending chat messages a QUESTION output", () => {
-    expect(hasHeymQuestionOutput("heym", "sendChatMessage")).toBe(true);
-    expect(hasHeymQuestionOutput("heym", "listWorkflows")).toBe(false);
-    expect(hasHeymQuestionOutput("heym", undefined)).toBe(false);
-    expect(hasHeymQuestionOutput("codex", "sendChatMessage")).toBe(false);
+    expect(hasHeymQuestionOutput("heym", { heymOperation: "sendChatMessage" })).toBe(true);
+    expect(hasHeymQuestionOutput("heym", { heymOperation: "listWorkflows" })).toBe(false);
+    expect(hasHeymQuestionOutput("heym", {})).toBe(false);
+    expect(hasHeymQuestionOutput("codex", { heymOperation: "sendChatMessage" })).toBe(false);
+  });
+
+  it("drops the QUESTION output when no question can reach the node or be answered", () => {
+    const chat = { heymOperation: "sendChatMessage" };
+    expect(hasHeymQuestionOutput("heym", { ...chat, heymChatFireAndForget: true })).toBe(false);
+    expect(hasHeymQuestionOutput("heym", { ...chat, heymChatNoHistory: true })).toBe(false);
+    expect(hasHeymQuestionOutput("heym", { ...chat, heymChatNoHistory: false })).toBe(true);
   });
 
   it("navigates the message, and the conversation id only while continuing", () => {
