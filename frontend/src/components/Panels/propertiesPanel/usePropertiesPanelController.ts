@@ -35,6 +35,7 @@ import {
   type DecisionExpressionField,
 } from "@/lib/decisionExpressionFields";
 import { getGitHubExpressionFields, type GitHubExpressionFieldKey } from "@/lib/githubExpressionFields";
+import { getHeymBoardOperation, type HeymBoardFieldKey } from "@/lib/heymOperations";
 import { getJiraExpressionFields, type JiraExpressionFieldKey } from "@/lib/jiraExpressionFields";
 import { getLinearExpressionFields, type LinearExpressionFieldKey } from "@/lib/linearExpressionFields";
 import { getNotionExpressionFields, type NotionExpressionFieldKey } from "@/lib/notionExpressionFields";
@@ -627,7 +628,7 @@ export function usePropertiesPanelController() {
     new Map(),
   );
   const currentConverterExpressionFieldIndex = ref(0);
-  type HeymExpressionFieldKey = "heymWorkflowId" | "heymLimit" | "heymStatus" | "heymSinceDays";
+  type HeymExpressionFieldKey = "heymWorkflowId" | "heymLimit" | "heymStatus" | "heymSinceDays" | HeymBoardFieldKey;
 
   interface HeymExpressionField {
     key: HeymExpressionFieldKey;
@@ -6019,6 +6020,8 @@ export function usePropertiesPanelController() {
       return [];
     }
     const operation = n.data.heymOperation || "listWorkflows";
+    const boardField = getHeymBoardOperation(operation)?.field;
+    if (boardField) return [boardField];
     if (operation === "listWorkflows") {
       return [{ key: "heymLimit", label: "Limit" }];
     }

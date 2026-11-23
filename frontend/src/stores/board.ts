@@ -25,6 +25,7 @@ export const useBoardStore = defineStore("board", () => {
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   let revisionTimer: ReturnType<typeof setInterval> | null = null;
   let lastRevision: string | null = null;
+  let boardLoad = 0;
 
   // The agentic model is mandatory: board actions stay disabled until it is chosen.
   const mapperConfigured = computed<boolean>(() =>
@@ -65,13 +66,22 @@ export const useBoardStore = defineStore("board", () => {
     }
   }
 
+  function closeBoard(): void {
+    boardLoad += 1;
+    stopPolling();
+    loading.value = false;
+    activeBoard.value = null;
+    members.value = [];
+  }
+
   /** Reload the open board when someone else changed it since the last check. */
   async function checkRevision(): Promise<void> {
     const board = activeBoard.value;
     if (!board) return;
+    const load = boardLoad;
     try {
       const revision = await boardApi.revision(board.id);
-      if (activeBoard.value?.id !== board.id || revision === lastRevision) return;
+      if (load !== boardLoad || revision === lastRevision) return;
       lastRevision = revision;
       await refreshActiveBoard();
     } catch {
@@ -112,29 +122,40 @@ export const useBoardStore = defineStore("board", () => {
   }
 
   async function openBoard(boardId: string): Promise<void> {
+    closeBoard();
+    const load = boardLoad;
     loading.value = true;
+    error.value = null;
     try {
       // Read the revision first: a change made after it is caught by the next check.
-      lastRevision = await boardApi.revision(boardId).catch(() => null);
-      activeBoard.value = await boardApi.getState(boardId);
-      members.value = await boardApi.members(boardId).catch(() => []);
-      error.value = null;
+      const revision = await boardApi.revision(boardId).catch(() => null);
+      const board = await boardApi.getState(boardId);
+      const boardMembers = await boardApi.members(boardId).catch(() => []);
+      if (load !== boardLoad) return;
+      lastRevision = revision;
+      activeBoard.value = board;
+      members.value = boardMembers;
       syncPolling();
       startRevisionPolling();
     } catch (err) {
-      error.value = err instanceof Error ? err.message : "Failed to load board";
+      if (load === boardLoad) {
+        error.value = err instanceof Error ? err.message : "Failed to load board";
+      }
     } finally {
-      loading.value = false;
+      if (load === boardLoad) loading.value = false;
     }
   }
 
   async function refreshActiveBoard(): Promise<void> {
     if (!activeBoard.value) return;
+    const load = boardLoad;
     try {
-      activeBoard.value = await boardApi.getState(activeBoard.value.id);
+      const board = await boardApi.getState(activeBoard.value.id);
+      if (load !== boardLoad) return;
+      activeBoard.value = board;
       syncPolling();
     } catch {
-      stopRunPolling();
+      if (load === boardLoad) stopRunPolling();
     }
   }
 
@@ -153,8 +174,7 @@ export const useBoardStore = defineStore("board", () => {
   async function deleteBoard(boardId: string): Promise<void> {
     await boardApi.remove(boardId);
     if (activeBoard.value?.id === boardId) {
-      activeBoard.value = null;
-      stopPolling();
+      closeBoard();
     }
     await fetchBoards();
   }
@@ -253,6 +273,7 @@ export const useBoardStore = defineStore("board", () => {
     isOwner,
     fetchBoards,
     openBoard,
+    closeBoard,
     refreshActiveBoard,
     checkRevision,
     createBoard,

@@ -37,6 +37,7 @@ const router = useRouter();
 const { showToast } = useToast();
 const detail = ref<CardDetail | null>(null);
 const loading = ref(false);
+const loadError = ref("");
 const comment = ref("");
 const editedContent = ref("");
 const savingContent = ref(false);
@@ -141,30 +142,46 @@ function syncPolling(): void {
 
 watch(
   () => [props.open, props.cardId] as const,
-  async ([open, cardId]) => {
-    if (!open || !cardId || !boardStore.activeBoard) {
-      stopPolling();
-      lastStatus.value = null;
-      return;
-    }
+  async ([open, cardId], _previous, onCleanup) => {
+    stopPolling();
+    lastStatus.value = null;
+    detail.value = null;
+    loading.value = false;
+    loadError.value = "";
+    comment.value = "";
+    const boardId = boardStore.activeBoard?.id;
+    if (!open || !cardId || !boardId) return;
+
+    let current = true;
+    onCleanup(() => { current = false; });
     loading.value = true;
     activityAtBottom.value = false;
     try {
-      const next = await boardApi.getCard(boardStore.activeBoard.id, cardId);
+      const next = await boardApi.getCard(boardId, cardId);
+      if (!current) return;
       detail.value = next;
       editedContent.value = next.card.content;
       lastStatus.value = next.card.run_status;
       syncPolling();
+    } catch (error) {
+      if (!current) return;
+      const status = axios.isAxiosError(error) ? error.response?.status : undefined;
+      loadError.value = status === 403 || status === 404 || status === 422
+        ? "Card not found or not accessible."
+        : "Failed to load card.";
     } finally {
-      loading.value = false;
+      if (current) loading.value = false;
     }
   },
   { immediate: true },
 );
 
 async function reload(): Promise<void> {
-  if (!props.cardId || !boardStore.activeBoard) return;
-  const next = await boardApi.getCard(boardStore.activeBoard.id, props.cardId);
+  const { open, cardId } = props;
+  const boardId = boardStore.activeBoard?.id;
+  if (!open || !cardId || !boardId) return;
+  const next = await boardApi.getCard(boardId, cardId);
+  if (!props.open || cardId !== props.cardId || boardId !== boardStore.activeBoard?.id) return;
   detail.value = next;
   announceStatus(next);
   syncPolling();
@@ -178,7 +195,7 @@ const activeBoardCardStatus = computed(
 // A card can start from the board while this dialog is already mounted. Refresh immediately
 // when the board observes that transition instead of waiting for the detail poll to discover it.
 watch(activeBoardCardStatus, (status) => {
-  if (!props.open || !props.cardId || !status || status === detail.value?.card.run_status) return;
+  if (!props.open || !detail.value || !status || status === detail.value.card.run_status) return;
   void reload();
 });
 
@@ -322,8 +339,6 @@ async function copyRun(run: CardRun): Promise<void> {
 async function openLiveRun(run: CardRun): Promise<void> {
   if (!run.workflow_id || !run.active_execution_id) return;
   // Replace the dialog history entry with the editor route so Back returns to the board.
-  // Dialog unmount must not history.back() after this — useDialogBackHistory skips rewind
-  // when the URL has already left the dialog entry.
   await router.replace({
     name: "editor",
     params: {
@@ -340,7 +355,6 @@ async function openLiveRun(run: CardRun): Promise<void> {
     :open="open"
     :title="detail?.card.title ?? 'Card'"
     size="4xl"
-    close-on-back
     @close="emit('close')"
   >
     <template
@@ -412,6 +426,13 @@ async function openLiveRun(run: CardRun): Promise<void> {
     >
       <Loader2 class="h-5 w-5 animate-spin text-muted-foreground" />
     </div>
+    <p
+      v-else-if="loadError"
+      class="p-4 text-sm text-muted-foreground"
+      role="alert"
+    >
+      {{ loadError }}
+    </p>
     <div
       v-else-if="detail"
       class="flex flex-col gap-3 p-1 text-sm"

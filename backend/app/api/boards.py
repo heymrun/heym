@@ -351,12 +351,22 @@ def _board_summary(
 async def list_boards(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    column_id: Annotated[
+        uuid.UUID | None, Query(description="Find the board containing this column.")
+    ] = None,
+    card_id: Annotated[
+        uuid.UUID | None, Query(description="Find the board containing this card.")
+    ] = None,
 ) -> list[BoardSummaryResponse]:
-    result = await db.execute(
-        select(Board)
-        .where(Board.id.in_(accessible_board_ids(current_user.id)))
-        .order_by(Board.created_at)
-    )
+    """List accessible boards, optionally scoped to the parent of a column or card."""
+    query = select(Board).where(Board.id.in_(accessible_board_ids(current_user.id)))
+    if column_id is not None:
+        query = query.where(
+            Board.id.in_(select(BoardColumn.board_id).where(BoardColumn.id == column_id))
+        )
+    if card_id is not None:
+        query = query.where(Board.id.in_(select(BoardCard.board_id).where(BoardCard.id == card_id)))
+    result = await db.execute(query.order_by(Board.created_at))
     boards = result.scalars().all()
     permissions = await board_permissions(db, boards, current_user.id)
     summaries: list[BoardSummaryResponse] = []

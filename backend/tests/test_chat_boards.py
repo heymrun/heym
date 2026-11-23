@@ -80,6 +80,14 @@ class RegistrationTests(unittest.TestCase):
         self.assertIn("assign, prioritize, schedule, move", profile.AGENT_CAPABILITIES)
         self.assertIn("comment on", profile.AGENT_CAPABILITIES)
 
+    def test_board_lookups_take_precedence_over_workflow_tools(self) -> None:
+        prompt = ai_assistant.DASHBOARD_CHAT_SYSTEM_PROMPT
+        board_rule = prompt.split("6b. Kanban boards:", 1)[1].split("6c.", 1)[0]
+        for tool in ("list_boards", "get_board", "get_board_tasks", "get_card_detail"):
+            self.assertIn(tool, board_rule)
+        self.assertIn("never create, edit, test or run a workflow, even in build mode", board_rule)
+        self.assertIn("Board, column and card lookups follow rule 6b.", prompt)
+
 
 class DispatchTests(unittest.IsolatedAsyncioTestCase):
     async def test_invalid_arguments_return_an_error_without_db(self) -> None:

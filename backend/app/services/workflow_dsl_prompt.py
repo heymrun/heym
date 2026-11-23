@@ -5367,21 +5367,29 @@ The credential requests the full `https://www.googleapis.com/auth/drive` scope, 
 ```
 
 ### 43. heym (Heym Platform Data)
-- **Purpose**: Read Heym's own data - the workflows the run's user can reach, one workflow's structure, and its execution history
+- **Purpose**: Read Heym workflows, execution history, and kanban boards, columns, and cards.
 - **Inputs**: 1 | **Outputs**: 1
 - **WHEN TO USE**: Meta-workflows that report on the Heym instance itself - inventories, health digests, execution summaries
-- **No credential required.** Results are scoped to the user the run belongs to, like credentials: the person who runs it from the editor, the API, Chat or MCP, and the workflow owner on Cron, portal, event and other triggered runs. That user sees the workflows they own plus workflows shared with them directly or through a team.
+- **No credential required.** Results are scoped to the user the run belongs to, like credentials: the person who runs it from the editor, the API, Chat or MCP, and the workflow owner on Cron, portal, event and other triggered runs. Board reads use that user's ownership and direct or team shares on the board.
 - **Data fields**:
   - `label`: Node identifier (e.g., "heymData")
-  - `heymOperation`: One of `listWorkflows`, `getWorkflow`, `getExecutionHistory`
+  - `heymOperation`: One of `listWorkflows` (default in the editor), `getWorkflow`, `getExecutionHistory`, `getBoard`, `getBoardColumn`, `getBoardCardId`.
   - `heymWorkflowId`: Target workflow UUID. Required for `getWorkflow` and `getExecutionHistory`. Use `all` with `getExecutionHistory` to read the history of every workflow the run's user can reach. Expression-capable.
   - `heymLimit`: Maximum rows for `listWorkflows` and `getExecutionHistory`. **Empty or `0` returns everything** - that is the default. Expression-capable.
   - `heymStatus`: Optional status filter for `getExecutionHistory` (e.g. `success`, `error`). Expression-capable.
   - `heymSinceDays`: Optional lookback in days for `getExecutionHistory`. Empty covers the full history. Expression-capable.
+  - `heymBoardId` (**Board ID**): Required board UUID for `getBoard`.
+  - `heymBoardColumnId` (**Column ID**): Required column UUID for `getBoardColumn`. Get it from `$board.columns[0].id`.
+  - `heymBoardCardId` (**Card ID**): Required card UUID for `getBoardCardId`. Get it from `$column.cards[0].id` or the final segment of `/b/<board-id>/cards/<card-id>`.
+  - All three board ID fields accept literal UUIDs and expressions. When this node is an Agent tool, put the selected operation's ID field in `agentProvidedFields` to let the agent supply it. The operation itself is fixed.
+  - The editor's board, column, and card pickers write the selected UUID to the same field. For dynamic targets, write an expression in the ID field.
 - **Output fields available downstream**:
   - `listWorkflows` -> `$<label>.workflows` (array of `id`, `name`, `description`, `active`, `folder_id`, `updated_at`, `node_count`), `$<label>.total`
   - `getWorkflow` -> `$<label>.id`, `$<label>.name`, `$<label>.nodes` (array of `id`, `type`, `label`, `position`, `data` - the full node configuration), `$<label>.edges` (with `sourceHandle` / `targetHandle`), `$<label>.updated_at`. Use it to audit workflows, e.g. scanning `data` for hardcoded API keys or tokens.
   - `getExecutionHistory` -> `$<label>.executions` (array of `id`, `status`, `started_at`, `execution_time_ms`, `trigger_source`, `recovered`, `inputs`, `outputs`), `$<label>.workflow_id`, `$<label>.workflow_name`, `$<label>.total`, `$<label>.by_status`, `$<label>.since`. `total` and `by_status` always describe the full history, even when `heymLimit` caps the returned entries. With `heymWorkflowId` set to `all`, `workflow_id` and `workflow_name` are `null` and every entry carries its own `workflow_id` and `workflow_name`.
+  - `getBoard` returns `id`, `name`, `description`, `auto_advance`, and `columns` in display order. Each column has `id`, `board_id`, `name`, `position`, and `color`.
+  - `getBoardColumn` returns the selected column's fields, `ai_instructions`, and `cards` in display order. Each card has `id`, `board_id`, `column_id`, `title`, `position`, `run_status`, and `path`.
+  - `getBoardCardId` returns that card's fields plus `content`, `card_metadata`, `fields` (`assignee_user_id`, `priority`, `due_date`, `labels`), `created_at`, and `updated_at`. The relative `path` opens the card in Heym. The board ID is resolved from the card's parent board.
 
 **Example node JSON:**
 ```json

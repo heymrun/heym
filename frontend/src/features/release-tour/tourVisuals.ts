@@ -1,7 +1,7 @@
 import type { Component } from "vue";
 
 import FallbackTourVisual from "@/features/release-tour/components/visuals/FallbackTourVisual.vue";
-import GmailTriggerTourVisual from "@/features/release-tour/components/visuals/GmailTriggerTourVisual.vue";
+import HeymBoardReadsTourVisual from "@/features/release-tour/components/visuals/HeymBoardReadsTourVisual.vue";
 import MailSendTourVisual from "@/features/release-tour/components/visuals/MailSendTourVisual.vue";
 import OutlookCalendarTourVisual from "@/features/release-tour/components/visuals/OutlookCalendarTourVisual.vue";
 import OutlookTriggerTourVisual from "@/features/release-tour/components/visuals/OutlookTriggerTourVisual.vue";
@@ -9,7 +9,7 @@ import RunHistoryEncryptionTourVisual from "@/features/release-tour/components/v
 
 /** Maps a section's `tourVisual` key to the mock UI that demonstrates it. */
 export const TOUR_VISUALS: Record<string, Component> = {
-  "gmail-trigger": GmailTriggerTourVisual,
+  "heym-board-reads": HeymBoardReadsTourVisual,
   "outlook-trigger": OutlookTriggerTourVisual,
   "outlook-calendar": OutlookCalendarTourVisual,
   "mail-send": MailSendTourVisual,

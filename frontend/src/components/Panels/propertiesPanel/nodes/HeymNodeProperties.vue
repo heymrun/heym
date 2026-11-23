@@ -4,9 +4,11 @@ import ExpressionInput from "@/components/ui/ExpressionInput.vue";
 import Label from "@/components/ui/Label.vue";
 import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 import Select from "@/components/ui/Select.vue";
+import { getHeymBoardOperation, heymBoardOperations, type HeymBoardFieldKey } from "@/lib/heymOperations";
 import { heymWorkflowIdForOperation, heymWorkflowPickerOptions } from "../heymWorkflowPicker";
 import { heymOperationOptions } from "../operationOptions";
 import { usePropertiesPanelContext } from "../usePropertiesPanelController";
+import HeymBoardPicker from "./HeymBoardPicker.vue";
 
 const {
   workflowStore,
@@ -22,19 +24,41 @@ const {
 } = usePropertiesPanelContext();
 
 const operation = computed((): string => selectedNode.value?.data.heymOperation || "listWorkflows");
-const needsWorkflow = computed((): boolean => operation.value !== "listWorkflows");
+const boardField = computed(() => getHeymBoardOperation(operation.value)?.field);
+const needsWorkflow = computed((): boolean => !boardField.value && operation.value !== "listWorkflows");
 const isHistory = computed((): boolean => operation.value === "getExecutionHistory");
-/** Only `getWorkflow` returns a single record, so it is the one operation without a limit. */
-const hasLimit = computed((): boolean => operation.value !== "getWorkflow");
+const hasLimit = computed((): boolean => operation.value === "listWorkflows" || isHistory.value);
 const workflowPickerOptions = computed(() =>
   heymWorkflowPickerOptions(operation.value, heymWorkflowOptions.value),
 );
 
 function onOperationChange(value: string | undefined): void {
   updateNodeData("heymOperation", value);
+  const boardKey = getHeymBoardOperation(value)?.field.key;
+  const supplied = selectedNode.value?.data.agentProvidedFields ?? [];
+  const nextSupplied = supplied.filter((key) =>
+    key === boardKey || !heymBoardOperations.some(({ field }) => field.key === key),
+  );
+  if (nextSupplied.length !== supplied.length) updateNodeData("agentProvidedFields", nextSupplied);
+  if (boardKey) return;
+
   const current = selectedNode.value?.data.heymWorkflowId || "";
   const next = heymWorkflowIdForOperation(value ?? "", current);
   if (next !== current) updateNodeData("heymWorkflowId", next);
+}
+
+function selectBoardTarget(key: HeymBoardFieldKey, id: string): void {
+  const node = selectedNode.value;
+  if (!node) return;
+  const supplied = node.data.agentProvidedFields ?? [];
+  if (supplied.includes(key)) {
+    workflowStore.updateNode(node.id, {
+      [key]: id,
+      agentProvidedFields: supplied.filter((field) => field !== key),
+    });
+  } else {
+    updateNodeData(key, id);
+  }
 }
 </script>
 
@@ -43,14 +67,55 @@ function onOperationChange(value: string | undefined): void {
     <div class="space-y-2">
       <Label>Operation</Label>
       <Select
+        data-testid="heym-operation"
         :model-value="operation"
         :options="heymOperationOptions"
         @update:model-value="onOperationChange"
       />
-      <p class="text-xs text-muted-foreground">
+      <p
+        v-if="boardField"
+        class="text-xs text-muted-foreground"
+      >
+        Board access follows the user running the workflow.
+      </p>
+      <p
+        v-else
+        class="text-xs text-muted-foreground"
+      >
         Reads are scoped to this workflow's owner: their own workflows plus anything shared
         with them.
       </p>
+    </div>
+
+    <HeymBoardPicker
+      v-if="boardField"
+      :key="selectedNode.id"
+      :field-key="boardField.key"
+      :model-value="selectedNode.data[boardField.key] || ''"
+      @select="selectBoardTarget(boardField.key, $event)"
+    />
+
+    <div
+      v-for="field in boardField ? [boardField] : []"
+      :key="field.key"
+      :data-testid="`heym-field-${field.key}`"
+      class="space-y-2"
+    >
+      <Label>{{ field.label }}</Label>
+      <ExpressionInput
+        :ref="(el: unknown) => setHeymExpressionInputRef(field.key, el)"
+        :model-value="selectedNode.data[field.key] || ''"
+        :placeholder="field.placeholder"
+        :rows="1"
+        :nodes="workflowStore.nodes"
+        :node-results="workflowStore.nodeResults"
+        :edges="workflowStore.edges"
+        :current-node-id="selectedNode.id"
+        :dialog-node-label="selectedNodeEvaluateDialogLabel"
+        :dialog-key-label="field.label"
+        :field-key="field.key"
+        @update:model-value="updateNodeData(field.key, $event)"
+      />
     </div>
 
     <div

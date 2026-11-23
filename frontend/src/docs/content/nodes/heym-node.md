@@ -1,6 +1,6 @@
 # Heym
 
-The **Heym** node reads Heym's own data: the workflows you can reach, one workflow's structure, and its execution history. It is how you build meta-workflows — instance inventories, execution digests, and health reports about Heym itself.
+The **Heym** node reads workflows, execution history, and [kanban boards](../tabs/board-tab.md). Use it to build instance inventories, execution digests, or reports about cards on a board.
 
 ## Overview
 
@@ -8,7 +8,7 @@ The **Heym** node reads Heym's own data: the workflows you can reach, one workfl
 |----------|-------|
 | Inputs | 1 |
 | Outputs | 1 |
-| Operations | `listWorkflows`, `getWorkflow`, `getExecutionHistory` |
+| Operations | `listWorkflows`, `getWorkflow`, `getExecutionHistory`, `getBoard`, `getBoardColumn`, `getBoardCardId` |
 | Credential | None required |
 
 ## Parameters
@@ -20,8 +20,13 @@ The **Heym** node reads Heym's own data: the workflows you can reach, one workfl
 | `heymLimit` | String | Maximum rows to return. **Leave it empty or enter `0` to return everything** — that is the default. Expression-capable. |
 | `heymStatus` | String | Optional status filter for `getExecutionHistory`. Expression-capable. |
 | `heymSinceDays` | String | Optional lookback in days for `getExecutionHistory`. Expression-capable. |
+| `heymBoardId` | UUID | **Board ID** for `getBoard`. Use the board UUID from the Board tab URL. |
+| `heymBoardColumnId` | UUID | **Column ID** for `getBoardColumn`. Use a column UUID from `getBoard`. |
+| `heymBoardCardId` | UUID | **Card ID** for `getBoardCardId`. Use a card UUID from `getBoardColumn` or the last segment of the card URL. |
 
 The workflow picker is a searchable dropdown listing every workflow you can reach. For Get Execution History, its first item is **All workflows**.
+
+Use the searchable picker to select an accessible board by name. For a column or card, select its board first, then choose the column by name or the card by title. The selection fills the corresponding ID field. You can also type a UUID or an expression directly into that field. When Heym is connected as an Agent tool, use the Agent icon beside the ID to let the agent supply it at runtime.
 
 ## Access Scope
 
@@ -42,6 +47,8 @@ The same workflow can therefore return different results depending on who runs i
 > **Write access reaches triggered runs.** Anyone with **Write** on a workflow can put a Cron or another trigger in front of a Heym node. That run belongs to the owner, so it reads with the owner's reach, and its output lands in the workflow's run history, which collaborators can open. Give **Read** to people who should not reach what you can, see [Sharing Workflows](../reference/workflow-organization.md#sharing-workflows). To keep a workflow's run data out of every Heym node, switch on [Encrypt run history](../reference/run-history-encryption.md): encrypted runs are counted but never listed. Keep secrets in credentials rather than pasting them into node fields, because **Get Workflow** returns node configuration as it was saved.
 
 A workflow you cannot reach and a workflow that does not exist produce the same error message, so the node cannot be used to probe for workflow ids.
+
+Board operations use board permissions. The run's user can read boards they own or that are shared with them directly or through a team. Columns and cards inherit access from their parent board.
 
 ## Operations
 
@@ -116,6 +123,18 @@ Entries carry both `inputs` and `outputs` - what the run received and what it an
 Leave **Since (days)** empty to cover everything, **Status filter** empty to include every status, and **Limit** empty or `0` to return every entry.
 
 **All workflows** covers the same set as [List Workflows](#list-workflows), and `total` and `by_status` then count runs across all of it. It answers instance-wide questions in a single node, such as how many runs failed in the last day, without looping over the workflow list first.
+
+### Board reads
+
+| Operation | Result |
+|-----------|--------|
+| **Get Board** (`getBoard`) | The board's `id`, `name`, `description`, `auto_advance`, and `columns` in board order. Each column has `id`, `board_id`, `name`, `position`, and `color`. |
+| **Get Board Column** (`getBoardColumn`) | The column's fields, `ai_instructions`, and `cards` in column order. Each card has `id`, `board_id`, `column_id`, `title`, `position`, `run_status`, and `path`. An empty column returns `cards: []`. |
+| **Get Board Card by ID** (`getBoardCardId`) | The card's fields plus `content`, `card_metadata`, `created_at`, and `updated_at`. The `fields` object contains `assignee_user_id`, `priority`, `due_date`, and `labels`. |
+
+For example, set **Board ID** to `$input.board_id` on a node labelled `board`. On the next Heym node, labelled `column`, set **Column ID** to `$board.columns[0].id`. If the column has cards, pass `$column.cards[0].id` to **Get Board Card by ID**. Use the returned `path` with your Heym address to link directly to the card.
+
+Use `$board.columns[0].name` for the column name and `$column.cards[0].title` for the card's display name.
 
 ## Example Workflow
 

@@ -2082,8 +2082,8 @@ export const dashboardApi = {
 };
 
 export const boardApi = {
-  list: async (): Promise<BoardSummary[]> => {
-    const response = await api.get<BoardSummary[]>("/boards");
+  list: async (target?: { column_id?: string; card_id?: string }): Promise<BoardSummary[]> => {
+    const response = await api.get<BoardSummary[]>("/boards", { params: target });
     return response.data;
   },
   create: async (payload: BoardCreatePayload): Promise<BoardSummary> => {

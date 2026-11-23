@@ -46,6 +46,8 @@ const dashboardTabAliasRoutes = Object.entries(DASHBOARD_TAB_ALIASES).map(([alia
   redirect: { path: "/", query: { tab } },
 }));
 
+const dashboardView = () => import("@/views/DashboardView.vue");
+
 const router = createRouter({
   history: createWebHistory(sanitizeRouterBase(import.meta.env.BASE_URL)),
   routes: [
@@ -74,7 +76,13 @@ const router = createRouter({
     {
       path: "/",
       name: "dashboard",
-      component: () => import("@/views/DashboardView.vue"),
+      component: dashboardView,
+      meta: { requiresAuth: true },
+    },
+    {
+      path: "/b/:boardId/cards/:cardId",
+      name: "board-card",
+      component: dashboardView,
       meta: { requiresAuth: true },
     },
     {
@@ -157,10 +165,10 @@ router.beforeEach(async (to, _from, next) => {
   }
 
   if (to.meta.requiresAuth && !authStore.isAuthenticated) {
-    // An MCP credential form is opened from another app: come back to it after sign-in.
+    const hasDeepLink = to.name === "credential-setup" || to.name === "board-card";
     next({
       name: "login",
-      query: to.name === "credential-setup" ? { redirect: to.fullPath } : {},
+      query: hasDeepLink ? { redirect: to.fullPath } : {},
     });
   } else if (to.meta.guest && authStore.isAuthenticated) {
     next({ name: "dashboard" });

@@ -112,7 +112,8 @@ const { addRecent } = useRecentWorkflows();
 const paletteAutoOpenId = ref<string | undefined>(undefined);
 const paletteAutoOpenKind = ref<"workflow" | "node" | undefined>(undefined);
 
-const tabParam = route.query.tab as string;
+const routeTabParam = computed(() => route.name === "board-card" ? "board" : route.query.tab);
+const tabParam = routeTabParam.value as string;
 if (tabParam === "chat") {
   void router.replace("/chats");
 }
@@ -176,15 +177,15 @@ function openCredentialsTab(): void {
 }
 
 watch(activeTab, (newTab) => {
-  const routeTab = Array.isArray(route.query.tab) ? route.query.tab[0] : route.query.tab;
+  const routeTab = Array.isArray(routeTabParam.value) ? routeTabParam.value[0] : routeTabParam.value;
   const isDataTableSubRoute =
     newTab === "datatable" && typeof routeTab === "string" && routeTab.startsWith("datatable/");
-  if (!isDataTableSubRoute) {
+  if (!isDataTableSubRoute && (newTab !== "board" || routeTab !== "board")) {
     const query: Record<string, string> = newTab === "workflows" ? {} : { tab: newTab };
     if (newTab === "traces" && typeof route.query.traceId === "string") {
       query.traceId = route.query.traceId;
     }
-    router.replace({ query });
+    router.replace({ path: "/", query });
   }
 
   if (newTab === "workflows") {
@@ -197,7 +198,7 @@ watch(activeTab, (newTab) => {
 });
 
 watch(
-  () => route.query.tab,
+  routeTabParam,
   (newTabParam) => {
     if (newTabParam === "chat") {
       void router.replace("/chats");
