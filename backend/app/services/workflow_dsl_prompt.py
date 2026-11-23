@@ -3180,13 +3180,13 @@ Each row object includes **`rowIndex`**: the 1-based sheet row number (useful fo
   - `credentialId`: UUID of the ClickHouse credential.
   - `clickhouseOperation`: `"query"` | `"find"` | `"getAll"` | `"count"` | `"getById"` | `"insert"` | `"update"` | `"remove"` | `"upsert"`.
   - `clickhouseTable`: Table name (simple identifier; supports expressions). Required for all ops except `query`.
-  - `clickhouseQuery`: Raw SQL for `query` (SELECT returns rows; other statements run as commands). Supports expressions.
-  - `clickhouseFilter`: JSON object of equality filters, e.g. `{"status":"active"}`. Used by `find`, `count`, `update`, `remove`. Values are parameterized.
+  - `clickhouseQuery`: Raw SQL for `query` (SELECT returns rows, also after leading `--`, `#` or `/* */` comments; other statements run as commands). Supports expressions.
+  - `clickhouseFilter`: JSON object of equality filters, e.g. `{"status":"active"}`. Used by `find`, `count`, `update`, `remove`. Values are parameterized; `null` matches NULL cells (`IS NULL`).
   - `clickhouseLimit`: Max rows for `find` / `getAll` (`"0"` = unlimited, no LIMIT clause). Default `100`.
   - `clickhouseSort`: Optional `column` or `column ASC|DESC` for `find`.
   - `clickhouseRowId`: Value matched against the `id` column for `getById`.
   - `clickhouseInputMode`: `"raw"` (JSON in `clickhouseData`) | `"selective"` (key/value `clickhouseMappings`) for `insert` / `upsert`.
-  - `clickhouseData`: JSON array of row objects for `insert`/`upsert`, or JSON object of column values for `update`. Supports expressions.
+  - `clickhouseData`: JSON array of row objects for `insert`/`upsert`, or JSON object of column values for `update` (`null` sets the column to NULL; a non-Nullable column refuses it and the run fails). Supports expressions.
   - `clickhouseMappings`: Array of `{key, value}` pairs used when `clickhouseInputMode` is `"selective"`; the editor auto-populates keys from discovered ClickHouse columns. Each value is read as its column type (`true`/`false` for Bool, numbers, Decimal, Date and DateTime from ISO text); an empty value is NULL in a Nullable column, and a DateTime without an offset is read in the column's time zone, or UTC when the column names none.
 - **Operation → required fields → output**:
 

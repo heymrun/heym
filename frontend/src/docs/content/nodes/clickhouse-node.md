@@ -18,13 +18,13 @@ The **ClickHouse** node runs CRUD, count, and raw SQL operations against an exte
 | `credentialId` | UUID | ClickHouse credential from [Credentials](../tabs/credentials-tab.md) |
 | `clickhouseOperation` | string | Operation: `query`, `find`, `getAll`, `count`, `getById`, `insert`, `update`, `remove`, or `upsert` |
 | `clickhouseTable` | expression | Simple table name. Required for every operation except `query`. |
-| `clickhouseQuery` | expression | Raw SQL for `query`. `SELECT`/`SHOW`/`DESCRIBE` return rows; other statements run as commands. |
+| `clickhouseQuery` | expression | Raw SQL for `query`. `SELECT`/`WITH`/`SHOW`/`DESCRIBE`/`EXPLAIN` return rows, also after leading comments; other statements run as commands. |
 | `clickhouseFilter` | expression | JSON object of equality filters, e.g. `{"status":"active"}`. Used by `find`, `count`, `update`, and `remove`. Values are parameterized. |
 | `clickhouseLimit` | string | Maximum rows for `find` / `getAll` (`0` = unlimited, no LIMIT clause). Default `100`. |
 | `clickhouseSort` | expression | Optional `column` or `column ASC\|DESC` for `find` |
 | `clickhouseRowId` | expression | Value matched against the table's `id` column for `getById` |
 | `clickhouseInputMode` | string | For `insert`/`upsert`: `raw` JSON array mode or `selective` key/value field mode |
-| `clickhouseData` | expression | JSON array of row objects for `insert`/`upsert`, or JSON object of column values for `update` |
+| `clickhouseData` | expression | JSON array of row objects for `insert`/`upsert`, or JSON object of column values for `update` (`null` sets the column to NULL; a non-Nullable column refuses it and the run fails) |
 | `clickhouseMappings` | array | `{key, value}` pairs used when `clickhouseInputMode` is `selective` |
 
 ## Credential Setup
@@ -61,7 +61,7 @@ The node connects over the official `clickhouse-connect` HTTP client. Use **Test
 { "status": "active", "tenant_id": 42 }
 ```
 
-This compiles to `WHERE status = {…:String} AND tenant_id = {…:Int64}`. Only equality is supported in the filter builder — for ranges, joins, or aggregations, use the `query` operation with raw SQL.
+This compiles to `WHERE status = {…:String} AND tenant_id = {…:Int64}`. A `null` value matches rows where the column is NULL (`{"note": null}` compiles to `note IS NULL`). Only equality is supported in the filter builder — for ranges, joins, or aggregations, use the `query` operation with raw SQL.
 
 ## Input Modes (insert / upsert)
 

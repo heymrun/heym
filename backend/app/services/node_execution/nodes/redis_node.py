@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.services.credential_config import config_int
 from app.services.node_execution.base import NodeExecutionContext
 
 
@@ -44,7 +45,8 @@ def execute(ctx: NodeExecutionContext) -> object:
 
     redis_port = int(redis_config.get("redis_port", 6379))
     redis_password = redis_config.get("redis_password", "") or None
-    redis_db = int(redis_config.get("redis_db", 0))
+    # The credential form's Database Index is optional ("default: 0") and saves "" when cleared.
+    redis_db = config_int(redis_config, "redis_db", 0)
 
     r = get_redis_connection(
         host=redis_host,

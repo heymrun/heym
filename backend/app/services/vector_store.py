@@ -22,6 +22,7 @@ from qdrant_client.http.models import (
     VectorParams,
 )
 
+from app.services.credential_config import config_int
 from app.services.embedding import (
     EmbeddingConfig,
     EmbeddingService,
@@ -813,7 +814,7 @@ def create_vector_store_service_for_credential(
     if type_str == "qdrant":
         return QdrantVectorStoreService(
             qdrant_host=config.get("qdrant_host", "localhost"),
-            qdrant_port=int(config.get("qdrant_port", 6333)),
+            qdrant_port=config_int(config, "qdrant_port", 6333),
             qdrant_api_key=config.get("qdrant_api_key"),
             openai_api_key=config["openai_api_key"],
         )
@@ -829,7 +830,7 @@ def create_vector_store_service_for_credential(
             return PgVectorStoreService(embedding_config=embedding_config)
         return QdrantVectorStoreService(
             qdrant_host=config.get("qdrant_host", "localhost"),
-            qdrant_port=int(config.get("qdrant_port", 6333)),
+            qdrant_port=config_int(config, "qdrant_port", 6333),
             qdrant_api_key=config.get("qdrant_api_key"),
             embedding_config=embedding_config,
         )

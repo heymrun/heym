@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from importlib import import_module
 
+from app.services.credential_config import config_int
 from app.services.node_execution.base import NodeExecutionContext
 from app.services.node_execution.json_fields import render_json_template
 
@@ -40,7 +41,8 @@ def execute(ctx: NodeExecutionContext) -> object:
         from app.services.rabbitmq_pool import publish_message_direct
 
         rabbitmq_host = rabbitmq_config.get("rabbitmq_host", "localhost")
-        rabbitmq_port = int(rabbitmq_config.get("rabbitmq_port", 5672))
+        # The credential form's Port is optional ("default: 5672") and saves "" when cleared.
+        rabbitmq_port = config_int(rabbitmq_config, "rabbitmq_port", 5672)
         rabbitmq_username = rabbitmq_config.get("rabbitmq_username", "guest")
         rabbitmq_password = rabbitmq_config.get("rabbitmq_password", "guest")
         rabbitmq_vhost = rabbitmq_config.get("rabbitmq_vhost", "/")

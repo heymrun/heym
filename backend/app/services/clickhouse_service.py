@@ -60,6 +60,33 @@ def _command_summary_result(summary: Any) -> Any:
     return result
 
 
+def _statement_start(sql: str) -> str:
+    """The SQL from its first keyword: whitespace, "(" and comments before it skipped.
+
+    ClickHouse reads `-- …` and `# …` to the end of the line and `/* … */` with nesting, so
+    `-- report\\nSELECT …` is a SELECT and must return its rows.
+    """
+    i, n = 0, len(sql)
+    while i < n:
+        if sql[i].isspace() or sql[i] == "(":
+            i += 1
+        elif sql.startswith("--", i) or sql[i] == "#":
+            end = sql.find("\n", i)
+            i = n if end < 0 else end + 1
+        elif sql.startswith("/*", i):
+            depth, i = 1, i + 2
+            while i < n and depth:
+                if sql.startswith("/*", i):
+                    depth, i = depth + 1, i + 2
+                elif sql.startswith("*/", i):
+                    depth, i = depth - 1, i + 2
+                else:
+                    i += 1
+        else:
+            break
+    return sql[i:]
+
+
 def _validate_identifier(value: str, kind: str) -> str:
     """Validate a table/column identifier; raise ValueError if unsafe."""
     normalized = str(value or "").strip()
@@ -215,13 +242,18 @@ class ClickHouseService:
         params: dict[str, Any] = {}
         for column, value in filters.items():
             col = _validate_identifier(column, "column")
+            if value is None:
+                # Bound as a String parameter, null reached ClickHouse as an empty string, so
+                # {"note": null} matched empty notes and left NULL ones out.
+                clauses.append(f"{col} IS NULL")
+                continue
             param_name = f"v_{col}"
             clauses.append(f"{col} = {{{param_name}:{_ch_param_type(value)}}}")
             params[param_name] = value
         return " WHERE " + " AND ".join(clauses), params
 
     def _is_read(self, sql: str) -> bool:
-        head = sql.strip().lstrip("(").upper()
+        head = _statement_start(sql).upper()
         return any(head.startswith(prefix) for prefix in _READ_PREFIXES)
 
     def query(self, sql: str, parameters: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -330,7 +362,10 @@ class ClickHouseService:
         for column, value in data.items():
             col = _validate_identifier(column, "column")
             name = f"set_{col}"
-            set_parts.append(f"{col} = {{{name}:{_ch_param_type(value)}}}")
+            # As a String parameter, null reached ClickHouse as an empty string. As a
+            # Nullable(String) one it is NULL, and a non-Nullable column refuses it.
+            param_type = "Nullable(String)" if value is None else _ch_param_type(value)
+            set_parts.append(f"{col} = {{{name}:{param_type}}}")
             params[name] = value
         where, where_params = self._build_where(filters)
         params.update(where_params)
