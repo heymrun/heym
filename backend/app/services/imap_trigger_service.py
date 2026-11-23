@@ -43,8 +43,10 @@ class ImapCursor:
 def mailbox_fingerprint(credential_id: str, credential_config: dict[str, Any]) -> str:
     """A 32-character digest of the mailbox identity: credential id, host, username and folder."""
     host = str(credential_config.get("imap_host", "")).strip().lower()
-    username = str(credential_config.get("imap_username", "")).strip()
+    username = str(credential_config.get("imap_username", "")).strip().lower()
     folder = str(credential_config.get("imap_mailbox", "INBOX")).strip() or "INBOX"
+    if folder.upper() == "INBOX":
+        folder = "INBOX"
     raw = f"{credential_id.strip()}:{host}:{username}:{folder}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
 

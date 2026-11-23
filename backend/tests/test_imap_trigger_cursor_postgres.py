@@ -342,3 +342,24 @@ class ImapCursorStorageTests(ConcurrencyPostgresCase):
         key_id = await self._stored_key_id()
         self.assertNotEqual(key_id, "imap")
         self.assertEqual(key_id, mailbox_fingerprint("c1", {}))
+
+    async def test_case_difference_in_username_or_inbox_does_not_take_new_baseline(self) -> None:
+        # Establish baseline on INBOX with uppercase username
+        await self._poll(
+            ImapTriggerManager(),
+            config={"imap_username": "User@Example.com", "imap_mailbox": "INBOX"},
+        )
+        self.assertEqual(await self._stored(), ImapCursor(uidvalidity="77", last_uid=103))
+
+        # Next poll: new email arrives, and credential was edited to lowercase username and inbox
+        await self._arrive_and_wait_interval()
+        with patch(f"{__name__}.MAILBOX", [100, 101, 102, 103, 104]):
+            fetch = await self._poll(
+                ImapTriggerManager(),
+                config={"imap_username": "user@example.com", "imap_mailbox": "inbox"},
+            )
+
+        # It must NOT take a new baseline; it must fetch new email 104
+        self.assertEqual(fetch.await_args.args[1], ImapCursor(uidvalidity="77", last_uid=103))
+        self.assertEqual(self.runs, Counter({"104": 1}))
+        self.assertEqual(await self._stored(), ImapCursor(uidvalidity="77", last_uid=104))

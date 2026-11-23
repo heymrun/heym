@@ -17,6 +17,7 @@ from app.services.imap_trigger_service import (
     ImapDispatchNotStartedError,
     ImapTriggerManager,
     _CursorClaim,
+    mailbox_fingerprint,
 )
 
 
@@ -546,6 +547,57 @@ class ForwardedEmailAttachmentTests(unittest.TestCase):
 
         self.assertEqual(payload["text"], "See attached.")
         self.assertEqual([(a.filename, a.content) for a in attachments], [("x.eml", b"")])
+
+
+class MailboxFingerprintTests(unittest.TestCase):
+    def test_mailbox_fingerprint_case_insensitivity_for_username_and_inbox(self) -> None:
+        cid = str(uuid.uuid4())
+        fp_upper = mailbox_fingerprint(
+            cid,
+            {
+                "imap_host": "IMAP.Example.COM",
+                "imap_username": "Alice@Example.COM",
+                "imap_mailbox": "INBOX",
+            },
+        )
+        fp_lower = mailbox_fingerprint(
+            cid,
+            {
+                "imap_host": "imap.example.com",
+                "imap_username": "alice@example.com",
+                "imap_mailbox": "inbox",
+            },
+        )
+        fp_mixed = mailbox_fingerprint(
+            cid,
+            {
+                "imap_host": "imap.example.com",
+                "imap_username": "aLiCe@example.com",
+                "imap_mailbox": "Inbox",
+            },
+        )
+        self.assertEqual(fp_upper, fp_lower)
+        self.assertEqual(fp_lower, fp_mixed)
+
+    def test_mailbox_fingerprint_non_inbox_folders_retain_case(self) -> None:
+        cid = str(uuid.uuid4())
+        fp_archive_upper = mailbox_fingerprint(
+            cid,
+            {
+                "imap_host": "imap.example.com",
+                "imap_username": "alice@example.com",
+                "imap_mailbox": "ARCHIVE",
+            },
+        )
+        fp_archive_title = mailbox_fingerprint(
+            cid,
+            {
+                "imap_host": "imap.example.com",
+                "imap_username": "alice@example.com",
+                "imap_mailbox": "Archive",
+            },
+        )
+        self.assertNotEqual(fp_archive_upper, fp_archive_title)
 
 
 if __name__ == "__main__":
