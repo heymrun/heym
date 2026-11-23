@@ -32,7 +32,7 @@ def build_data_table_filter_clauses(filter_dict: dict, columns: list) -> list:
     A schema column sharing a metadata name still resolves against the JSON blob.
     Unknown operators are ignored.
     """
-    from sqlalchemy import Numeric, String, case, cast
+    from sqlalchemy import Numeric, String, case, cast, or_
 
     from app.db.models import DataTableRow
 
@@ -53,6 +53,10 @@ def build_data_table_filter_clauses(filter_dict: dict, columns: list) -> list:
 
         is_boolean = schema_cols.get(col_name, {}).get("type") == "boolean"
 
+        def _equals(value: object) -> object:
+            # str(None) is "None": a null matched that text and none of the empty cells.
+            return field.is_(None) if value is None else field == _coerce(value)
+
         def _coerce(value: object) -> object:
             if not is_json:
                 return value
@@ -66,9 +70,11 @@ def build_data_table_filter_clauses(filter_dict: dict, columns: list) -> list:
         if isinstance(condition, dict):
             for op, raw_value in condition.items():
                 if op == "$eq":
-                    clauses.append(field == _coerce(raw_value))
+                    clauses.append(_equals(raw_value))
                 elif op == "$ne":
-                    clauses.append(field != _coerce(raw_value))
+                    clauses.append(
+                        field.is_not(None) if raw_value is None else field != _coerce(raw_value)
+                    )
                 elif op in ("$gt", "$gte", "$lt", "$lte"):
                     if is_number:
                         number = _as_number(raw_value)
@@ -88,9 +94,12 @@ def build_data_table_filter_clauses(filter_dict: dict, columns: list) -> list:
                     text = str(raw_value).replace("/", "//").replace("%", "/%").replace("_", "/_")
                     clauses.append(target.ilike(f"%{text}%", escape="/"))
                 elif op == "$in" and isinstance(raw_value, list):
-                    clauses.append(field.in_([_coerce(v) for v in raw_value]))
+                    in_clause = field.in_([_coerce(v) for v in raw_value if v is not None])
+                    if None in raw_value:
+                        in_clause = or_(in_clause, field.is_(None))
+                    clauses.append(in_clause)
                 # Unknown operators are ignored.
         else:
-            clauses.append(field == _coerce(condition))
+            clauses.append(_equals(condition))
 
     return clauses

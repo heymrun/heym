@@ -97,7 +97,7 @@ In a `find` or `count` filter, a plain value means equals; an object value appli
 | `$contains` | Case-insensitive substring match |
 | `$in` | Value is in the given array |
 
-Example combining several: `{"status": "active", "is_active": true, "age": {"$gte": 18}, "plan": {"$in": ["pro", "team"]}, "name": {"$contains": "jo"}}`. Boolean columns use unquoted JSON `true` and `false` values. Unknown operators are ignored. `upsert` uses the same type-aware exact-match values to locate an existing row (comparison operators are not supported for upsert).
+Example combining several: `{"status": "active", "is_active": true, "age": {"$gte": 18}, "plan": {"$in": ["pro", "team"]}, "name": {"$contains": "jo"}}`. Boolean columns use unquoted JSON `true` and `false` values. A `null` value matches cells that are null or missing, and `{"$ne": null}` matches the cells that hold a value. A cell cleared in the Data Tables grid holds an empty string, which `null` does not match: use `""` for it. In an `upsert` filter, `{"email": null}` finds a row whose email is null or missing and updates it, instead of inserting a new row. Unknown operators are ignored. `upsert` uses the same type-aware exact-match values to locate an existing row (comparison operators are not supported for upsert).
 
 You can also filter on row metadata — `id`, `table_id`, `created_at`, `updated_at`, `created_by`, `updated_by` — which are stored as real columns rather than inside your data. For dates, pass a full value for range comparisons (e.g. `{"created_at": {"$gt": "2026-06-04"}}`) or use `$contains` for a partial text match (e.g. `{"created_at": {"$contains": "2026-06-04"}}`). If one of your own columns is named the same as a metadata field, the data column takes precedence.
 
