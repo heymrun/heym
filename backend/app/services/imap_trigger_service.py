@@ -1,10 +1,11 @@
 import asyncio
+import hashlib
 import imaplib
 import logging
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from email import message_from_bytes, policy
 from email.header import decode_header, make_header
@@ -36,6 +37,18 @@ IMAP_TIMEOUT_SECONDS = 30
 class ImapCursor:
     uidvalidity: str | None = None
     last_uid: int = 0
+    mailbox_hash: str | None = field(default=None, compare=False)
+
+
+def mailbox_fingerprint(credential_id: str, credential_config: dict[str, Any]) -> str:
+    """A 32-character digest of the mailbox identity: credential id, host, username and folder."""
+    host = str(credential_config.get("imap_host", "")).strip().lower()
+    username = str(credential_config.get("imap_username", "")).strip().lower()
+    folder = str(credential_config.get("imap_mailbox", "INBOX")).strip() or "INBOX"
+    if folder.upper() == "INBOX":
+        folder = "INBOX"
+    raw = f"{credential_id.strip()}:{host}:{username}:{folder}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
 
 
 @dataclass(frozen=True)
@@ -302,9 +315,12 @@ def _open_mailbox(credential_config: dict[str, Any]) -> Iterator[tuple[Any, str 
 
 def fetch_imap_messages(
     credential_config: dict[str, Any],
-    cursor: ImapCursor,
+    cursor: ImapCursor | None,
 ) -> tuple[ImapCursor, list[dict[str, Any]]]:
-    """Fetch newly arrived emails using IMAP UIDs, baselining existing inbox contents on first poll."""
+    """Fetch newly arrived emails using IMAP UIDs, baselining existing inbox contents on first poll.
+
+    Pass ``cursor=None`` to establish a baseline without downloading any messages.
+    """
     mailbox = str(credential_config.get("imap_mailbox", "INBOX")).strip() or "INBOX"
     with _open_mailbox(credential_config) as (client, uidvalidity):
         search_status, search_data = client.uid("search", None, "ALL")
@@ -312,16 +328,23 @@ def fetch_imap_messages(
             raise ValueError("IMAP UID search failed")
 
         raw_uid_list = search_data[0].split() if search_data and search_data[0] else []
-        uid_list = [int(item) for item in raw_uid_list]
+        uid_list = sorted(int(item) for item in raw_uid_list)
         latest_uid = uid_list[-1] if uid_list else 0
-        next_cursor = ImapCursor(uidvalidity=uidvalidity, last_uid=latest_uid)
 
-        if cursor.uidvalidity and uidvalidity and cursor.uidvalidity != uidvalidity:
+        if (
+            cursor is not None
+            and cursor.uidvalidity
+            and uidvalidity
+            and cursor.uidvalidity != uidvalidity
+        ):
             logger.info("IMAP UIDVALIDITY changed for mailbox %s, resetting cursor", mailbox)
-            return next_cursor, []
+            return ImapCursor(uidvalidity=uidvalidity, last_uid=latest_uid), []
 
-        if cursor.last_uid == 0:
-            return next_cursor, []
+        if cursor is None:
+            return ImapCursor(uidvalidity=uidvalidity, last_uid=latest_uid), []
+
+        next_last_uid = max(cursor.last_uid, latest_uid)
+        next_cursor = ImapCursor(uidvalidity=uidvalidity, last_uid=next_last_uid)
 
         new_uids = [uid for uid in uid_list if uid > cursor.last_uid]
         emails: list[dict[str, Any]] = []
@@ -544,11 +567,38 @@ class ImapTriggerManager:
                 )
                 return
 
-            cursor = claim.cursor or ImapCursor()
-            next_cursor, emails = await self._fetch_node_messages(credential_config, cursor)
+            current_mailbox_hash = mailbox_fingerprint(credential_id, credential_config)
+
             if claim.cursor is None:
-                await self._insert_baseline(workflow.id, node_id, next_cursor, poll_minutes)
+                next_cursor, _ = await self._fetch_node_messages(credential_config, None)
+                baseline_cursor = ImapCursor(
+                    next_cursor.uidvalidity,
+                    next_cursor.last_uid,
+                    mailbox_hash=current_mailbox_hash,
+                )
+                await self._insert_baseline(workflow.id, node_id, baseline_cursor, poll_minutes)
                 return
+
+            stored_hash = claim.cursor.mailbox_hash
+            is_legacy = stored_hash in (None, "", "imap")
+            if not is_legacy and stored_hash != current_mailbox_hash:
+                logger.info(
+                    "IMAP mailbox changed for workflow %s node %s, establishing new baseline",
+                    workflow.id,
+                    node_id,
+                )
+                next_cursor, _ = await self._fetch_node_messages(credential_config, None)
+                new_baseline = ImapCursor(
+                    next_cursor.uidvalidity,
+                    next_cursor.last_uid,
+                    mailbox_hash=current_mailbox_hash,
+                )
+                await self._advance_cursor(workflow.id, node_id, claim.cursor, new_baseline)
+                return
+
+            next_cursor, emails = await self._fetch_node_messages(credential_config, claim.cursor)
+
+            cursor = claim.cursor
             if emails:
                 logger.info(
                     "IMAP trigger found %d new email(s) for workflow %s node %s",
@@ -565,7 +615,11 @@ class ImapTriggerManager:
                         node_id,
                     )
                     return
-                taken = ImapCursor(next_cursor.uidvalidity, int(email_payload["uid"]))
+                taken = ImapCursor(
+                    next_cursor.uidvalidity,
+                    int(email_payload["uid"]),
+                    mailbox_hash=current_mailbox_hash,
+                )
                 if not await self._advance_cursor(workflow.id, node_id, cursor, taken):
                     logger.info(
                         "IMAP trigger for workflow %s node %s: another process moved on, "
@@ -578,7 +632,12 @@ class ImapTriggerManager:
                 await self._process_email_with_retries(workflow, node_id, email_payload)
 
             # Also carries the UIDVALIDITY reset, and UIDs whose fetch failed.
-            await self._advance_cursor(workflow.id, node_id, cursor, next_cursor)
+            final_cursor = ImapCursor(
+                next_cursor.uidvalidity,
+                next_cursor.last_uid,
+                mailbox_hash=current_mailbox_hash,
+            )
+            await self._advance_cursor(workflow.id, node_id, cursor, final_cursor)
 
     async def _claim_cursor(
         self, workflow_id: uuid.UUID, node_id: str, poll_minutes: int
@@ -599,7 +658,11 @@ class ImapTriggerManager:
                         TriggerPollState.next_poll_at <= func.now(),
                     )
                     .values(next_poll_at=func.now() + timedelta(minutes=poll_minutes))
-                    .returning(TriggerPollState.scope_fingerprint, TriggerPollState.version)
+                    .returning(
+                        TriggerPollState.scope_fingerprint,
+                        TriggerPollState.version,
+                        TriggerPollState.key_id,
+                    )
                     .execution_options(synchronize_session=False)
                 )
             ).first()
@@ -617,7 +680,11 @@ class ImapTriggerManager:
             await db.commit()
         return _CursorClaim(
             due=True,
-            cursor=ImapCursor(uidvalidity=row.scope_fingerprint or None, last_uid=int(row.version)),
+            cursor=ImapCursor(
+                uidvalidity=row.scope_fingerprint or None,
+                last_uid=int(row.version),
+                mailbox_hash=row.key_id or None,
+            ),
         )
 
     async def _insert_baseline(
@@ -635,7 +702,7 @@ class ImapTriggerManager:
                     workflow_id=workflow_id,
                     node_id=node_id,
                     node_type=_CURSOR_NODE_TYPE,
-                    key_id="imap",
+                    key_id=(cursor.mailbox_hash or "imap")[:32],
                     scope_fingerprint=(cursor.uidvalidity or "")[:64],
                     version=cursor.last_uid,
                     next_poll_at=func.now() + timedelta(minutes=poll_minutes),
@@ -656,6 +723,14 @@ class ImapTriggerManager:
         False when another process has moved it, or the trigger was removed meanwhile.
         """
         async with async_session_maker() as db:
+            values: dict[str, Any] = {
+                "scope_fingerprint": (cursor.uidvalidity or "")[:64],
+                "version": cursor.last_uid,
+                "updated_at": func.now(),
+            }
+            mailbox_hash = cursor.mailbox_hash or expected.mailbox_hash
+            if mailbox_hash:
+                values["key_id"] = mailbox_hash[:32]
             moved = (
                 await db.execute(
                     update(TriggerPollState)
@@ -666,11 +741,7 @@ class ImapTriggerManager:
                         TriggerPollState.scope_fingerprint == (expected.uidvalidity or "")[:64],
                         TriggerPollState.version == expected.last_uid,
                     )
-                    .values(
-                        scope_fingerprint=(cursor.uidvalidity or "")[:64],
-                        version=cursor.last_uid,
-                        updated_at=func.now(),
-                    )
+                    .values(**values)
                     .returning(TriggerPollState.id)
                     .execution_options(synchronize_session=False)
                 )
@@ -742,7 +813,7 @@ class ImapTriggerManager:
     async def _fetch_node_messages(
         self,
         credential_config: dict[str, Any],
-        cursor: ImapCursor,
+        cursor: ImapCursor | None,
     ) -> tuple[ImapCursor, list[dict[str, Any]]]:
         return await asyncio.to_thread(fetch_imap_messages, credential_config, cursor)
 

@@ -17,6 +17,7 @@ from app.services.imap_trigger_service import (
     ImapDispatchNotStartedError,
     ImapTriggerManager,
     _CursorClaim,
+    mailbox_fingerprint,
 )
 
 
@@ -99,12 +100,41 @@ class ImapTriggerManagerPollingTests(unittest.IsolatedAsyncioTestCase):
         mocks = await self._poll(_CursorClaim(due=True), (ImapCursor("7", 55), []))
 
         mocks["_fetch_node_messages"].assert_awaited_once_with(
-            {"imap_host": "imap.example.com"}, ImapCursor()
+            {"imap_host": "imap.example.com"}, None
         )
         mocks["_insert_baseline"].assert_awaited_once_with(
             self.workflow.id, "imap-node", ImapCursor("7", 55), 5
         )
         mocks["_execute_workflow_for_email"].assert_not_awaited()
+
+    async def test_poll_workflow_node_with_cursor_zero_executes_new_emails(self) -> None:
+        emails = [
+            {"uid": "1", "subject": "First"},
+            {"uid": "2", "subject": "Second"},
+        ]
+        stored = ImapCursor(uidvalidity="1", last_uid=0)
+
+        mocks = await self._poll(
+            _CursorClaim(due=True, cursor=stored), (ImapCursor("1", 2), emails)
+        )
+
+        execute = mocks["_execute_workflow_for_email"]
+        self.assertEqual(
+            execute.await_args_list,
+            [
+                unittest.mock.call(self.workflow, "imap-node", emails[0]),
+                unittest.mock.call(self.workflow, "imap-node", emails[1]),
+            ],
+        )
+        wf, node = self.workflow.id, "imap-node"
+        self.assertEqual(
+            mocks["_advance_cursor"].await_args_list,
+            [
+                unittest.mock.call(wf, node, stored, ImapCursor("1", 1)),
+                unittest.mock.call(wf, node, ImapCursor("1", 1), ImapCursor("1", 2)),
+                unittest.mock.call(wf, node, ImapCursor("1", 2), ImapCursor("1", 2)),
+            ],
+        )
 
     async def test_poll_workflow_node_applies_cursor_on_empty_batch(self) -> None:
         stored = ImapCursor(uidvalidity="7", last_uid=50)
@@ -115,6 +145,51 @@ class ImapTriggerManagerPollingTests(unittest.IsolatedAsyncioTestCase):
             self.workflow.id, "imap-node", stored, ImapCursor("8", 3)
         )
         mocks["_execute_workflow_for_email"].assert_not_awaited()
+
+    async def test_poll_workflow_node_takes_baseline_when_mailbox_changes(self) -> None:
+        stored = ImapCursor(uidvalidity="1", last_uid=0, mailbox_hash="old_mailbox_hash")
+        mocks = {
+            "_claim_cursor": AsyncMock(return_value=_CursorClaim(due=True, cursor=stored)),
+            "_fetch_node_messages": AsyncMock(return_value=(ImapCursor("1", 50), [])),
+            "_execute_workflow_for_email": AsyncMock(),
+            "_insert_baseline": AsyncMock(),
+            "_advance_cursor": AsyncMock(return_value=True),
+        }
+        with patch.multiple(self.manager, **mocks):
+            await self.manager._poll_workflow_node(self.workflow, self.node)
+
+        # Baseline is fetched with None, and no emails are executed
+        mocks["_fetch_node_messages"].assert_awaited_once_with(
+            {"imap_host": "imap.example.com"}, None
+        )
+        mocks["_execute_workflow_for_email"].assert_not_awaited()
+        mocks["_advance_cursor"].assert_awaited_once_with(
+            self.workflow.id,
+            "imap-node",
+            stored,
+            ImapCursor("1", 50),
+        )
+
+    async def test_poll_workflow_node_legacy_cursor_does_not_reset(self) -> None:
+        stored = ImapCursor(uidvalidity="1", last_uid=100, mailbox_hash="imap")
+        emails = [{"uid": "101", "subject": "First"}]
+        mocks = {
+            "_claim_cursor": AsyncMock(return_value=_CursorClaim(due=True, cursor=stored)),
+            "_fetch_node_messages": AsyncMock(return_value=(ImapCursor("1", 101), emails)),
+            "_execute_workflow_for_email": AsyncMock(),
+            "_insert_baseline": AsyncMock(),
+            "_advance_cursor": AsyncMock(return_value=True),
+        }
+        with patch.multiple(self.manager, **mocks):
+            await self.manager._poll_workflow_node(self.workflow, self.node)
+
+        # Uses stored cursor directly without resetting or establishing baseline
+        mocks["_fetch_node_messages"].assert_awaited_once_with(
+            {"imap_host": "imap.example.com"}, stored
+        )
+        mocks["_execute_workflow_for_email"].assert_awaited_once_with(
+            self.workflow, "imap-node", emails[0]
+        )
 
     async def test_a_node_claimed_elsewhere_is_not_fetched(self) -> None:
         mocks = await self._poll(_CursorClaim(due=False), (ImapCursor(), []))
@@ -152,7 +227,7 @@ class ImapParallelPollCapTests(unittest.IsolatedAsyncioTestCase):
         release = asyncio.Event()
         fetching: list[str] = []
 
-        async def fetch(config: dict, _cursor: ImapCursor) -> tuple:
+        async def fetch(config: dict, _cursor: ImapCursor | None) -> tuple:
             fetching.append(config["name"])
             if config["name"] == "a":
                 await release.wait()
@@ -472,6 +547,57 @@ class ForwardedEmailAttachmentTests(unittest.TestCase):
 
         self.assertEqual(payload["text"], "See attached.")
         self.assertEqual([(a.filename, a.content) for a in attachments], [("x.eml", b"")])
+
+
+class MailboxFingerprintTests(unittest.TestCase):
+    def test_mailbox_fingerprint_case_insensitivity_for_username_and_inbox(self) -> None:
+        cid = str(uuid.uuid4())
+        fp_upper = mailbox_fingerprint(
+            cid,
+            {
+                "imap_host": "IMAP.Example.COM",
+                "imap_username": "Alice@Example.COM",
+                "imap_mailbox": "INBOX",
+            },
+        )
+        fp_lower = mailbox_fingerprint(
+            cid,
+            {
+                "imap_host": "imap.example.com",
+                "imap_username": "alice@example.com",
+                "imap_mailbox": "inbox",
+            },
+        )
+        fp_mixed = mailbox_fingerprint(
+            cid,
+            {
+                "imap_host": "imap.example.com",
+                "imap_username": "aLiCe@example.com",
+                "imap_mailbox": "Inbox",
+            },
+        )
+        self.assertEqual(fp_upper, fp_lower)
+        self.assertEqual(fp_lower, fp_mixed)
+
+    def test_mailbox_fingerprint_non_inbox_folders_retain_case(self) -> None:
+        cid = str(uuid.uuid4())
+        fp_archive_upper = mailbox_fingerprint(
+            cid,
+            {
+                "imap_host": "imap.example.com",
+                "imap_username": "alice@example.com",
+                "imap_mailbox": "ARCHIVE",
+            },
+        )
+        fp_archive_title = mailbox_fingerprint(
+            cid,
+            {
+                "imap_host": "imap.example.com",
+                "imap_username": "alice@example.com",
+                "imap_mailbox": "Archive",
+            },
+        )
+        self.assertNotEqual(fp_archive_upper, fp_archive_title)
 
 
 if __name__ == "__main__":

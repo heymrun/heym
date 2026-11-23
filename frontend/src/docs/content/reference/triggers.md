@@ -67,7 +67,7 @@ The cron scheduler runs every 60 seconds, finds workflows with active `cron` nod
 
 ### IMAP
 
-The IMAP trigger manager runs in the leader worker and checks active `imapTrigger` nodes on their configured `pollIntervalMinutes`. Each node stores an IMAP cursor (`UIDVALIDITY` + last seen UID). Input includes `email` (with its `uid` and `uidvalidity`), `triggered_by: "imap"`, `trigger_node_id`, and `triggered_at`. The input carries attachment metadata only, never file contents. With **Download attachments to Drive** on, the trigger node fetches the email again by UID during the run and saves its attachments to Heym Drive, so those runs stay on the [main instance](./cluster.md).
+The IMAP trigger manager runs in the leader worker and checks active `imapTrigger` nodes on their configured `pollIntervalMinutes`. Each node stores an IMAP cursor (`UIDVALIDITY` + last seen UID, and which mailbox it belongs to; pointing the node at another mailbox takes a new baseline). Input includes `email` (with its `uid` and `uidvalidity`), `triggered_by: "imap"`, `trigger_node_id`, and `triggered_at`. The input carries attachment metadata only, never file contents. With **Download attachments to Drive** on, the trigger node fetches the email again by UID during the run and saves its attachments to Heym Drive, so those runs stay on the [main instance](./cluster.md).
 
 ### Gmail
 

@@ -46,6 +46,7 @@ The **IMAP Trigger** node polls an email inbox on a fixed interval and starts a 
 - The first poll establishes a baseline of the current mailbox contents and does **not** replay older email.
 - Later polls trigger once per message whose IMAP UID is newer than the saved cursor.
 - If the mailbox `UIDVALIDITY` changes, Heym resets the cursor and baselines again to avoid duplicate processing.
+- Pointing the trigger at a different mailbox (credential, host, username, or folder) establishes a new baseline so existing messages in that mailbox are not run.
 - Each new email starts a separate workflow execution with `trigger_source = "imap"`.
 
 ## Output Fields
