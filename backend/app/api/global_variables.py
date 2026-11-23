@@ -6,6 +6,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.api.deps import get_current_user
 from app.db.models import (
@@ -346,6 +347,9 @@ async def update_global_variable(
         coerced = _coerce_value(data.value, value_type)
         variable.value = _stored_value(coerced)
         variable.value_type = value_type
+        # 1 == True and 0 == False, so the new JSON dict compares equal to the
+        # loaded one and SQLAlchemy leaves `value` out of the UPDATE.
+        flag_modified(variable, "value")
 
     if data.value_type is not None and data.value is None:
         variable.value_type = data.value_type
