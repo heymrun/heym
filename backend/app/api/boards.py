@@ -745,7 +745,7 @@ async def delete_column(
 ) -> None:
     """Delete a column. Its cards block the delete unless ``move_cards_to_column_id`` names
     another column of the board: they then move to its top, without running its chain."""
-    board, _ = await _get_board_for_user(db, board_id, current_user, write=True)
+    board, _ = await _get_board_for_user(db, board_id, current_user, write=True, for_key_share=True)
     column = await _get_board_column(db, board, column_id, for_update=True)
     cards = list(
         (

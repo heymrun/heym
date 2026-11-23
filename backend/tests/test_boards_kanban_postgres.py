@@ -2039,6 +2039,146 @@ class ColumnDeleteTests(KanbanPgCase):
             async with self.session() as db:
                 self.assertIsNone(await db.get(Board, board.id))
 
+    async def test_failed_move_board_task_releases_card_lock_allowing_immediate_move(self) -> None:
+        """When move_board_task fails on an unknown column inside an uncommitted chat session,
+        call_board_tool rolls back the savepoint so the card does not stay locked FOR UPDATE.
+        A move of the same card from another session succeeds immediately without waiting."""
+        board, columns = await make_board(self.engine, self.owner, auto_advance=False)
+        card_id = await self.card_in(board.id, columns[0].id, "Target Card")
+        unknown_column_id = uuid.uuid4()
+
+        chat_session = self.session()
+        try:
+            user = (
+                await chat_session.execute(select(User).where(User.id == self.owner.id))
+            ).scalar_one()
+
+            result = await chat_boards.call_board_tool(
+                chat_session,
+                user,
+                "move_board_task",
+                {
+                    "board_id": str(board.id),
+                    "card_id": str(card_id),
+                    "to_column_id": str(unknown_column_id),
+                },
+                BASE,
+            )
+            self.assertEqual(result.get("error"), "Column not found")
+
+            # The chat session is still open and uncommitted. Another session moves the same card.
+            async with self.session() as other_session:
+                moved = await asyncio.wait_for(
+                    boards_api.move_card(
+                        board_id=board.id,
+                        card_id=card_id,
+                        request=CardMoveRequest(to_column_id=columns[1].id),
+                        db=other_session,
+                        current_user=self.owner,
+                    ),
+                    timeout=1.0,
+                )
+                self.assertEqual(moved.column_id, columns[1].id)
+
+            # The chat session remains in a valid state and can run subsequent board tools.
+            list_res = await chat_boards.call_board_tool(
+                chat_session,
+                user,
+                "list_boards",
+                {},
+                BASE,
+            )
+            self.assertIn("boards", list_res)
+        finally:
+            await chat_session.close()
+
+    async def test_concurrent_delete_board_and_delete_column(self) -> None:
+        """When delete_board and delete_column run concurrently, both take the board row first
+        (delete_board FOR UPDATE, delete_column FOR KEY SHARE) so they serialize cleanly without deadlock."""
+        for _ in range(5):
+            board, columns = await make_board(self.engine, self.owner, auto_advance=False)
+            target_column = columns[1]
+
+            async def run_delete_board():
+                async with self.session() as del_board_db:
+                    return await boards_api.delete_board(
+                        board_id=board.id,
+                        db=del_board_db,
+                        current_user=self.owner,
+                    )
+
+            async def run_delete_column():
+                async with self.session() as del_col_db:
+                    return await boards_api.delete_column(
+                        board_id=board.id,
+                        column_id=target_column.id,
+                        move_cards_to_column_id=None,
+                        db=del_col_db,
+                        current_user=self.owner,
+                    )
+
+            results = await asyncio.gather(
+                run_delete_board(), run_delete_column(), return_exceptions=True
+            )
+            del_board_res, del_col_res = results
+
+            # delete_board must always succeed (returning None for 204 NO_CONTENT)
+            if isinstance(del_board_res, Exception):
+                raise del_board_res
+            self.assertIsNone(del_board_res)
+
+            # delete_column must either succeed (None for 204) or return 404 "Board not found"
+            if isinstance(del_col_res, Exception):
+                self.assertIsInstance(del_col_res, HTTPException)
+                self.assertEqual(del_col_res.status_code, 404)
+                self.assertEqual(del_col_res.detail, "Board not found")
+            else:
+                self.assertIsNone(del_col_res)
+
+            async with self.session() as db:
+                self.assertIsNone(await db.get(Board, board.id))
+
+    async def test_concurrent_delete_board_and_auto_advance(self) -> None:
+        """When delete_board and _auto_advance run concurrently, both take the board row first
+        so they serialize cleanly without deadlock."""
+        for _ in range(5):
+            board, columns = await make_board(self.engine, self.owner, auto_advance=True)
+            card_id = await self.card_in(board.id, columns[2].id, "Cascade Card")
+
+            async def run_delete_board():
+                async with self.session() as del_board_db:
+                    return await boards_api.delete_board(
+                        board_id=board.id,
+                        db=del_board_db,
+                        current_user=self.owner,
+                    )
+
+            async def run_auto_advance():
+                await board_run_service._auto_advance(
+                    card_id=card_id,
+                    board_id=board.id,
+                    from_column_id=columns[2].id,
+                    actor_user_id=self.owner.id,
+                    session_factory=self.session,
+                )
+
+            results = await asyncio.gather(
+                run_delete_board(), run_auto_advance(), return_exceptions=True
+            )
+            del_board_res, auto_res = results
+
+            # delete_board must always succeed (returning None for 204 NO_CONTENT)
+            if isinstance(del_board_res, Exception):
+                raise del_board_res
+            self.assertIsNone(del_board_res)
+
+            # _auto_advance never raises
+            if isinstance(auto_res, Exception):
+                raise auto_res
+
+            async with self.session() as db:
+                self.assertIsNone(await db.get(Board, board.id))
+
 
 class RevisionTests(KanbanPgCase):
     async def revision(self, board_id: uuid.UUID) -> str:
