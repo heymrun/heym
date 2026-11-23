@@ -1922,6 +1922,123 @@ class ColumnDeleteTests(KanbanPgCase):
             self.assertEqual(reloaded_card.column_id, columns[2].id)
             self.assertEqual(card.column_id, columns[2].id)
 
+    async def test_concurrent_move_card_when_delete_board_locks_first_answers_404(self) -> None:
+        """When delete_board locks the board FOR UPDATE first, concurrent move_card waits on
+        the board FOR KEY SHARE lock, unblocks when delete commits, and answers 404 Board not found."""
+        board, columns = await make_board(self.engine, self.owner, auto_advance=False)
+        card_id = await self.card_in(board.id, columns[0].id, "Target Card")
+        target_column_id = columns[1].id
+
+        delete_paused = asyncio.Event()
+        resume_delete = asyncio.Event()
+
+        original_execute = AsyncSession.execute
+
+        async def hook_execute(session_self, stmt, *args, **kwargs):
+            res = await original_execute(session_self, stmt, *args, **kwargs)
+            sql = str(stmt)
+            if "boards" in sql and "FOR UPDATE" in sql:
+                params = getattr(stmt.compile(), "params", {})
+                if board.id in params.values() or str(board.id) in sql:
+                    delete_paused.set()
+                    await asyncio.wait_for(resume_delete.wait(), timeout=5)
+            return res
+
+        async def run_delete():
+            session = AsyncSession(self.engine, expire_on_commit=False)
+            session.execute = lambda stmt, *a, **kw: hook_execute(session, stmt, *a, **kw)
+            try:
+                await boards_api.delete_board(
+                    board_id=board.id,
+                    db=session,
+                    current_user=self.owner,
+                )
+            finally:
+                await session.close()
+
+        delete_task = asyncio.create_task(run_delete())
+        move_task = None
+        try:
+            await asyncio.wait_for(delete_paused.wait(), timeout=5)
+
+            async def run_move():
+                async with self.session() as move_db:
+                    return await boards_api.move_card(
+                        board_id=board.id,
+                        card_id=card_id,
+                        request=CardMoveRequest(to_column_id=target_column_id),
+                        db=move_db,
+                        current_user=self.owner,
+                    )
+
+            move_task = asyncio.create_task(run_move())
+            await asyncio.sleep(0.05)
+            # move_task is blocked waiting for delete_board's FOR UPDATE lock on the board row
+            self.assertFalse(move_task.done())
+
+            resume_delete.set()
+            await asyncio.wait_for(delete_task, timeout=5)
+
+            with self.assertRaises(HTTPException) as ctx:
+                await asyncio.wait_for(move_task, timeout=5)
+            self.assertEqual(ctx.exception.status_code, 404)
+            self.assertEqual(ctx.exception.detail, "Board not found")
+        finally:
+            resume_delete.set()
+            for t in (delete_task, move_task):
+                if t and not t.done():
+                    t.cancel()
+                    try:
+                        await t
+                    except (asyncio.CancelledError, Exception):
+                        pass
+
+    async def test_concurrent_move_card_and_delete_board(self) -> None:
+        """When move_card and delete_board run concurrently, both take the board row first
+        so they serialize cleanly without deadlock: delete_board answers 204, and move_card
+        answers 404 (Board not found) or succeeds."""
+        for _ in range(5):
+            board, columns = await make_board(self.engine, self.owner, auto_advance=False)
+            card_id = await self.card_in(board.id, columns[0].id, "Race Card")
+            target_column_id = columns[1].id
+
+            async def run_delete():
+                async with self.session() as del_db:
+                    return await boards_api.delete_board(
+                        board_id=board.id,
+                        db=del_db,
+                        current_user=self.owner,
+                    )
+
+            async def run_move():
+                async with self.session() as move_db:
+                    return await boards_api.move_card(
+                        board_id=board.id,
+                        card_id=card_id,
+                        request=CardMoveRequest(to_column_id=target_column_id),
+                        db=move_db,
+                        current_user=self.owner,
+                    )
+
+            results = await asyncio.gather(run_delete(), run_move(), return_exceptions=True)
+            del_res, move_res = results
+
+            # delete_board must always succeed (returning None for 204 NO_CONTENT)
+            if isinstance(del_res, Exception):
+                raise del_res
+            self.assertIsNone(del_res)
+
+            # move_card must either succeed (BoardCardResponse) or return 404 "Board not found"
+            if isinstance(move_res, Exception):
+                self.assertIsInstance(move_res, HTTPException)
+                self.assertEqual(move_res.status_code, 404)
+                self.assertEqual(move_res.detail, "Board not found")
+            else:
+                self.assertEqual(move_res.id, card_id)
+
+            async with self.session() as db:
+                self.assertIsNone(await db.get(Board, board.id))
+
 
 class RevisionTests(KanbanPgCase):
     async def revision(self, board_id: uuid.UUID) -> str:

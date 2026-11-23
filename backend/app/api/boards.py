@@ -107,9 +107,14 @@ ACTIVE_RUN_STATUSES = ("running", "pending")
 MAX_BOARD_CARDS = 500
 
 
-async def _get_owned_board(db: AsyncSession, board_id: uuid.UUID, user: User) -> Board:
+async def _get_owned_board(
+    db: AsyncSession, board_id: uuid.UUID, user: User, *, for_update: bool = False
+) -> Board:
     """Owner-only access: board settings, sharing and deletion."""
-    result = await db.execute(select(Board).where(Board.id == board_id, Board.owner_id == user.id))
+    stmt = select(Board).where(Board.id == board_id, Board.owner_id == user.id)
+    if for_update:
+        stmt = stmt.with_for_update()
+    result = await db.execute(stmt)
     board = result.scalar_one_or_none()
     if board is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Board not found")
@@ -122,10 +127,21 @@ async def _board_permission(db: AsyncSession, board: Board, user: User) -> str |
 
 
 async def _get_board_for_user(
-    db: AsyncSession, board_id: uuid.UUID, user: User, *, write: bool
+    db: AsyncSession,
+    board_id: uuid.UUID,
+    user: User,
+    *,
+    write: bool,
+    for_update: bool = False,
+    for_key_share: bool = False,
 ) -> tuple[Board, str]:
     """A board the caller owns or has been given access to (directly or through a team)."""
-    board = (await db.execute(select(Board).where(Board.id == board_id))).scalar_one_or_none()
+    stmt = select(Board).where(Board.id == board_id)
+    if for_update:
+        stmt = stmt.with_for_update()
+    elif for_key_share:
+        stmt = stmt.with_for_update(read=True, key_share=True)
+    board = (await db.execute(stmt)).scalar_one_or_none()
     permission = await _board_permission(db, board, user) if board is not None else None
     if board is None or permission is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Board not found")
@@ -595,7 +611,7 @@ async def delete_board(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> None:
-    board = await _get_owned_board(db, board_id, current_user)
+    board = await _get_owned_board(db, board_id, current_user, for_update=True)
     audit(
         action="board.delete",
         actor=current_user,
@@ -849,7 +865,7 @@ async def create_card(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> BoardCardResponse:
-    board, _ = await _get_board_for_user(db, board_id, current_user, write=True)
+    board, _ = await _get_board_for_user(db, board_id, current_user, write=True, for_key_share=True)
     if request.column_id is not None:
         column = await _get_board_column(db, board, request.column_id, for_key_share=True)
     else:
@@ -1140,7 +1156,7 @@ async def move_card(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> BoardCardResponse:
-    board, _ = await _get_board_for_user(db, board_id, current_user, write=True)
+    board, _ = await _get_board_for_user(db, board_id, current_user, write=True, for_key_share=True)
     card = await _get_board_card(db, board, card_id, for_update=True)
     target = await _get_board_column(db, board, request.to_column_id, for_key_share=True)
     column_changed = card.column_id != target.id
@@ -1219,6 +1235,13 @@ async def move_card(
                 )
             ).scalar_one_or_none()
             if locked is None:
+                board_exists = (
+                    await db.execute(select(Board.id).where(Board.id == board.id))
+                ).scalar_one_or_none()
+                if board_exists is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND, detail="Board not found"
+                    )
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Card not found")
             db.add(
                 BoardCardActivity(
@@ -1244,6 +1267,11 @@ async def move_card(
     try:
         await db.refresh(card)
     except (InvalidRequestError, ObjectDeletedError):
+        board_exists = (
+            await db.execute(select(Board.id).where(Board.id == board.id))
+        ).scalar_one_or_none()
+        if board_exists is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Board not found")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Card not found")
     return _card_response(card)
 
