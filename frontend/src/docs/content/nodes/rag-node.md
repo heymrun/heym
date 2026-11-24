@@ -30,12 +30,12 @@ targets. See [Custom Embeddings](../reference/integrations.md#custom-embeddings-
 | `vectorStoreId` | UUID | Vector store from [Vectorstores](../tabs/vectorstores-tab.md) tab |
 | `ragOperation` | `"insert"` \| `"upsert"` \| `"delete"` \| `"search"` | Operation type (also `operation`) |
 | `documentContent` | expression | Document text to store (insert, upsert) |
-| `documentMetadata` | JSON string | Metadata for stored docs (insert, upsert); values support expressions |
+| `documentMetadata` | JSON string | Metadata for stored docs (insert, upsert); values support expressions, or the whole field can be one expression such as `$start.meta`. Text that is not valid JSON, or a value that is not an object, fails the node rather than storing the document without metadata |
 | `documentIdField` | string | Payload field holding the unique id (upsert, delete; default `doc_id`) |
 | `documentId` | expression | Value of the unique id (upsert, delete) |
 | `queryText` | expression | Search query (search only) |
 | `searchLimit` | number | Max results (default: 5) |
-| `metadataFilters` | JSON string | Metadata filters for search (values support expressions). Text that is not valid JSON, or a value that is not an object, fails the node rather than searching without a filter |
+| `metadataFilters` | JSON string | Metadata filters for search (values support expressions, or the whole field can be one expression such as `$start.filter`). Text that is not valid JSON, or a value that is not an object, fails the node rather than searching without a filter |
 | `hybridSearch` | boolean | Combine vector search with BM25 keyword search (search only; default: off) |
 | `enableReranker` | boolean | Rerank search results by relevance to the query |
 | `rerankerCredentialId` | UUID | Cohere or Decision Model credential that does the reranking |
@@ -79,6 +79,15 @@ whole expression keeps its resolved type — `{"count": "$start.count"}` stores 
 The same applies to `upsert`, and to search's `metadataFilters`: it is parsed first and its
 values resolved after, by the same rules. So a filter written as `{"count": "$start.count"}`
 matches the number an insert stored, rather than the string `"7"`.
+
+The whole field can also be one expression, such as `$start.meta`, to take the object from the
+run. It is resolved once: an object, or text holding a JSON object, is used as it is. Its values
+already come from the run, so a `$` inside them is kept as text, and numbers stay numbers.
+
+Blank, `{}` and `null` store no metadata of your own (and search without a filter). Anything
+else that is not a JSON object fails the node: text that is not valid JSON, an array or a
+value, and an expression that does not resolve to an object. Storing the document without its
+metadata would leave it out of every search filtered on that metadata.
 
 ### Which workflow stored a document
 
