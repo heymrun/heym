@@ -3186,7 +3186,7 @@ Each row object includes **`rowIndex`**: the 1-based sheet row number (useful fo
   - `clickhouseSort`: Optional `column` or `column ASC|DESC` for `find`.
   - `clickhouseRowId`: Value matched against the `id` column for `getById`.
   - `clickhouseInputMode`: `"raw"` (JSON in `clickhouseData`) | `"selective"` (key/value `clickhouseMappings`) for `insert` / `upsert`.
-  - `clickhouseData`: JSON array of row objects for `insert`/`upsert`, or JSON object of column values for `update` (`null` sets the column to NULL; a non-Nullable column refuses it and the run fails). Supports expressions.
+  - `clickhouseData`: JSON array of row objects for `insert`/`upsert` (a column that no row names is left out of the insert and gets its default; a key another row names but this row leaves out, or a `null`, is NULL, and a non-Nullable column refuses it and the run fails), or JSON object of column values for `update` (`null` sets the column to NULL; a non-Nullable column refuses it and the run fails). Supports expressions.
   - `clickhouseMappings`: Array of `{key, value}` pairs used when `clickhouseInputMode` is `"selective"`; the editor auto-populates keys from discovered ClickHouse columns. Each value is read as its column type (`true`/`false` for Bool, numbers, Decimal, Date and DateTime from ISO text); an empty value is NULL in a Nullable column, and a DateTime without an offset is read in the column's time zone, or UTC when the column names none.
 - **Operation → required fields → output**:
 
