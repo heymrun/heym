@@ -971,6 +971,12 @@ def _detail(detail: object) -> str:
     return str(detail)
 
 
+def _validation_message(exc: ValidationError) -> str:
+    return "; ".join(
+        f"{'.'.join(str(part) for part in error['loc'])}: {error['msg']}" for error in exc.errors()
+    )
+
+
 async def call_board_tool(
     db: AsyncSession,
     user: User,
@@ -988,12 +994,7 @@ async def call_board_tool(
     try:
         args = model.model_validate(arguments or {})
     except ValidationError as exc:
-        return {
-            "error": "; ".join(
-                f"{'.'.join(str(part) for part in error['loc'])}: {error['msg']}"
-                for error in exc.errors()
-            )
-        }
+        return {"error": _validation_message(exc)}
     savepoint = await db.begin_nested()
     try:
         if name == CREATE_BOARD_TOOL:
@@ -1009,6 +1010,12 @@ async def call_board_tool(
         if savepoint.is_active:
             await savepoint.rollback()
         return {"error": _detail(exc.detail)}
+    except ValidationError as exc:
+        # The board routes' own request checks (a label over 40 characters, for one) run
+        # after the tool's arguments pass; re-raised, they ended the whole chat turn.
+        if savepoint.is_active:
+            await savepoint.rollback()
+        return {"error": _validation_message(exc)}
     except Exception:
         if savepoint.is_active:
             await savepoint.rollback()

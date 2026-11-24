@@ -102,6 +102,20 @@ class ChatBoardToolTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual([t["title"] for t in by_column["tasks"]], ["NDA"])
 
+    async def test_a_field_the_board_refuses_is_a_tool_error_not_a_failed_turn(self) -> None:
+        # The routes' own checks raised ValidationError past the tool and ended the chat turn.
+        long_label = "Quarterly business review for ACME Corp EMEA region"
+        created = await self.add(self.owner, "QBR", labels=[long_label])
+        self.assertIn("at most 40 characters", created["error"])
+        kept = await self.add(self.owner, "Kickoff", labels=["ACME"])
+        updated = await self.call(
+            self.owner, "update_board_task", card_id=kept["task"]["id"], labels=[long_label]
+        )
+        self.assertIn("at most 40 characters", updated["error"])
+        listed = await self.call(self.owner, "get_board", board_id=str(self.board.id))
+        self.assertEqual([t["title"] for t in listed["tasks"]], ["Kickoff"])
+        self.assertEqual(listed["tasks"][0]["labels"], ["ACME"])
+
     async def test_waiting_for_review_filter(self) -> None:
         created = await self.add(self.owner, "NDA")
         await self.add(self.owner, "Other")

@@ -31,7 +31,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.workflows import get_workflow_for_user
 from app.db.models import Dashboard, DashboardWidget, User, Workflow
-from app.models.dashboard_schemas import DashboardCreateRequest, WidgetLayout
+from app.models.dashboard_schemas import (
+    WIDGET_TITLE_MAX_LENGTH,
+    DashboardCreateRequest,
+    WidgetLayout,
+)
 from app.services.audit_log import audit
 from app.services.dashboard_access import (
     PERMISSION_OWNER,
@@ -70,7 +74,7 @@ DASHBOARD_TOOL_NAMES = frozenset(
 
 WIDGET_KIND_CHART = "chart"
 WIDGET_KIND_RUN = "run"
-MAX_WIDGET_TITLE_LENGTH = 255
+MAX_WIDGET_TITLE_LENGTH = WIDGET_TITLE_MAX_LENGTH
 DEFAULT_EMPTY_CHART_TYPE = "bar"
 EMPTY_WIDGET_NEEDS_BUILD_ERROR = (
     "This chat cannot build a widget's workflow. Put an existing workflow on the dashboard "

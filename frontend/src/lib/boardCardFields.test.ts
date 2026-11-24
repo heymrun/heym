@@ -111,6 +111,20 @@ describe("fieldChanges", () => {
     form.labels = " Acme ";
     expect(fieldChanges(current, form)).toEqual({ assignee_user_id: null });
   });
+
+  it("leaves a label with a comma alone unless the labels are edited", () => {
+    // Chat or a workflow can store "Smith, John"; the comma-separated field would split it.
+    const current = card({ labels: ["Smith, John", "NDA"] });
+    const form = formFromCard(current);
+    expect(fieldChanges(current, form)).toEqual({});
+    form.priority = "high";
+    expect(fieldChanges(current, form)).toEqual({ priority: "high" });
+    form.labels = "Smith, John, NDA, Legal";
+    expect(fieldChanges(current, form)).toEqual({
+      priority: "high",
+      labels: ["Smith", "John", "NDA", "Legal"],
+    });
+  });
 });
 
 it("labels every priority, most urgent first", () => {

@@ -343,6 +343,29 @@ class ClarifyQuestionTests(unittest.TestCase):
         self.assertEqual(output["status"], "input_required")
 
 
+class ClarifyQuestionDocsTests(unittest.TestCase):
+    def test_the_documented_question_field_is_the_one_the_protocol_defines(self) -> None:
+        # The docs and the DSL said `question`; the model writes `text`, so
+        # `$chat.questions[0].question` was empty.
+        from pathlib import Path
+
+        from app.services.workflow_dsl_prompt import (
+            CLARIFY_PROTOCOL_PROMPT,
+            WORKFLOW_DSL_SYSTEM_PROMPT,
+        )
+
+        self.assertIn("Each question: `id` (short slug), `text`, `type`", CLARIFY_PROTOCOL_PROMPT)
+        docs = Path(__file__).resolve().parents[2] / "frontend/src/docs/content/nodes/heym-node.md"
+        for text, marker in (
+            (docs.read_text(), "`$nodeLabel.questions`"),
+            (WORKFLOW_DSL_SYSTEM_PROMPT, "`$<label>.questions`"),
+        ):
+            with self.subTest(marker=marker):
+                line = next(row for row in text.splitlines() if marker in row)
+                self.assertIn("`id`, `text`", line)
+                self.assertNotIn("`question`", line)
+
+
 class ChatDefaultModelTests(unittest.IsolatedAsyncioTestCase):
     async def test_a_user_without_a_chat_default_model_is_told_to_pick_one(self) -> None:
         from app.services import heym_chat_node
