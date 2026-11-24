@@ -175,7 +175,7 @@ With **Don't wait for the reply** the reply never reaches the node, and with **D
 | `$nodeLabel.conversation_id` | The conversation the message went to, or `null` without history |
 | `$nodeLabel.status` | `completed`, `canceled`, `input_required`, `auth_required`, or `started` |
 | `$nodeLabel.reply` | The assistant's reply |
-| `$nodeLabel.questions` | On QUESTION, the clarifying questions it asked, each with `id`, `question` and `type`, plus `options` when it offers choices; `[]` otherwise |
+| `$nodeLabel.questions` | On QUESTION, the clarifying questions it asked, each with `id`, `text` (the question itself) and `type`, plus `options` when it offers choices; `[]` otherwise |
 | `$nodeLabel.tool_names` | The tools the turn used |
 | `$nodeLabel.verified` | `true` when the turn saved a workflow whose latest test run passed |
 | `$nodeLabel.workflow_links` | `{ name, url }` for each workflow the turn saved |
