@@ -173,9 +173,9 @@ Choose **HTML** (`html`) for a card that no other chart type draws. Put the mark
 
 ### Action output
 
-HTML Chart Output has one **Action** connection on the right. Connect it to the first step that should run when someone interacts with the card. Other chart types have no outgoing connector.
+The initial HTML Chart Output has one **Action** connection on the right. Connect it to the first step that should run when someone interacts with the card. Chart Output nodes reached through that branch must use the HTML type and end their paths.
 
-For a card labelled `colorChanger`, wire **Action → HTTP → Chart Output (HTML)**. In the HTML template, send the event from your button's click handler.
+For a card labelled `colorChanger`, wire **Action → Switch**. Connect the `color_change` case to **HTTP → Chart Output (HTML)** and the `redraw` case directly to its own HTML Chart Output. In the HTML template, send the event from your button's click handler.
 
 ```html
 <button id="change">Change color</button>
@@ -192,9 +192,9 @@ For a card labelled `colorChanger`, wire **Action → HTTP → Chart Output (HTM
 </script>
 ```
 
-- `message` is text you choose, up to 1,024 characters. Read it as `$colorChanger.message` and use it in a **Switch** to handle several messages on the same connection.
+- `message` is text you choose, up to 1,024 characters. Put a **Switch** immediately after the Action connection and use `$colorChanger.message` to route messages such as `color_change` and `redraw` to their own paths.
 - `data` can be an object, array, string, number, boolean, or `null`. Read it as `$colorChanger.data`, or use `$colorChanger.data.color` for a property. Call `window.heym.action(null, data)` to send data alone. The server accepts up to 64 KiB of JSON data.
-- The [HTTP node](./http-node.md) runs the request on the server with the workflow's credentials. A second HTML Chart Output can show the HTTP response using `$request.body` if the HTTP node is named `request`. Include the button and its script in the new HTML to keep it interactive. A branch that returns no HTML leaves the card as it was.
+- The [HTTP node](./http-node.md) runs the request on the server with the workflow's credentials. An HTML Chart Output can show the response using `$request.body` if the HTTP node is named `request`. Buttons in the returned HTML send events back to the initial chart's Action connection. A branch that returns no HTML leaves the card as it was.
 
 In workflow JSON, set `sourceHandle` on the edge leaving the initial HTML node.
 
@@ -203,7 +203,7 @@ In workflow JSON, set `sourceHandle` on the edge leaving the initial HTML node.
   "id": "color-action",
   "source": "colorChanger",
   "sourceHandle": "action",
-  "target": "request"
+  "target": "typeSwitch"
 }
 ```
 

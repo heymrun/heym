@@ -127,6 +127,21 @@ class TestWidgetActionGraph(unittest.TestCase):
         self.assertEqual(graph.branch("card"), ([], []))
         self.assertEqual([node["id"] for node in graph.render()[0]], ["load", "card"])
 
+    def test_an_action_result_cannot_be_an_action_source_even_with_a_render_input(self) -> None:
+        graph = _graph()
+        graph.edges.extend(
+            [
+                {"source": "load", "target": "reply"},
+                {"source": "reply", "target": "nested", "sourceHandle": "action"},
+            ]
+        )
+        graph.nodes.append({"id": "nested", "type": "set", "data": {"label": "nested"}})
+        self.assertEqual(graph.sources(), {"card"})
+        self.assertEqual(graph.branch("reply"), ([], []))
+        self.assertEqual(
+            {node["id"] for node in graph.branch("card")[0]}, {"card", "handle", "reply"}
+        )
+
     def test_data_only_and_invalid_payload(self) -> None:
         self.assertIs(WidgetActionRequest(node_id="card", data=False).data, False)
         with self.assertRaises(ValidationError):
@@ -136,6 +151,31 @@ class TestWidgetActionGraph(unittest.TestCase):
 
 
 class TestWidgetActionRoute(unittest.IsolatedAsyncioTestCase):
+    async def test_table_result_is_rejected_before_executing(self) -> None:
+        graph = _graph()
+        graph.nodes[-1]["data"]["chartType"] = "table"
+        widget = SimpleNamespace(id=uuid.uuid4(), workflow_id=uuid.uuid4(), chart_type="html")
+        dashboard = SimpleNamespace(owner_id=uuid.uuid4())
+        with (
+            patch.object(
+                dashboards,
+                "_load_widget_for_user",
+                AsyncMock(return_value=(widget, dashboard, "read")),
+            ),
+            patch.object(dashboards, "get_workflow_for_user", AsyncMock(return_value=graph)),
+            patch.object(dashboards, "run_html_widget_action", AsyncMock()) as run,
+        ):
+            with self.assertRaises(HTTPException) as rejected:
+                await dashboards.widget_action(
+                    widget.id,
+                    WidgetActionRequest(node_id="card", message="click"),
+                    SimpleNamespace(),
+                    AsyncMock(),
+                )
+            self.assertEqual(rejected.exception.status_code, 422)
+            self.assertIn("HTML chart type", rejected.exception.detail)
+            run.assert_not_awaited()
+
     async def test_viewer_runs_as_owner_and_cannot_select_another_node(self) -> None:
         graph = _graph()
         owner = uuid.uuid4()

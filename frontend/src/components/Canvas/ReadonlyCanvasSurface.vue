@@ -12,7 +12,7 @@ import ReadonlyCanvasViewportFitter from "@/components/Canvas/ReadonlyCanvasView
 import StickyNoteNode from "@/components/Nodes/StickyNoteNode.vue";
 import { summarizeReadonlyAgentAttachments } from "@/components/Canvas/readonlyPreviewFields";
 import { buildSubAgentEdges, getSubAgentLabels } from "@/lib/agentCanvasLinks";
-import { resolveRenderedSourceHandle } from "@/lib/workflowEdges";
+import { getChartActionResultIds, resolveRenderedSourceHandle } from "@/lib/workflowEdges";
 
 import "@vue-flow/core/dist/style.css";
 import "@vue-flow/core/dist/theme-default.css";
@@ -65,6 +65,7 @@ const fitViewOptions = computed(() => ({
 const hasContainerSize = computed((): boolean => containerWidth.value > 0 && containerHeight.value > 0);
 const surfaceKey = computed((): string => `${props.flowKey}-${containerWidth.value}-${containerHeight.value}`);
 const subAgentLabels = computed(() => getSubAgentLabels(props.nodes));
+const chartActionResultIds = computed(() => getChartActionResultIds(props.nodes, props.edges));
 const vueFlowNodes = computed(() =>
   props.nodes.map((node) => {
     const isSubAgent =
@@ -179,6 +180,7 @@ onUnmounted(() => {
           :type="data.nodeType"
           :data="data"
           :selected="selectedNodeId === id"
+          :chart-action-result="chartActionResultIds.has(id)"
         />
       </template>
       <template #edge-insertable="edgeProps">

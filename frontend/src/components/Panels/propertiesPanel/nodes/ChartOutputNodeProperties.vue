@@ -2,11 +2,13 @@
 import { computed } from "vue";
 
 import type { ChartOutputExpressionFieldKey } from "@/lib/chartOutputExpressionFields";
+import Button from "@/components/ui/Button.vue";
 import ExpressionInput from "@/components/ui/ExpressionInput.vue";
 import Label from "@/components/ui/Label.vue";
 import Select from "@/components/ui/Select.vue";
 import { getChartOutputExpressionFields } from "@/lib/chartOutputExpressionFields";
 import { CHART_TYPE_EXAMPLES } from "@/lib/chartTypeExamples";
+import { CHART_ACTION_RESULT_OUTGOING_ERROR, CHART_ACTION_RESULT_TYPE_ERROR } from "@/lib/workflowEdges";
 import ChartOutputHitlFields from "./ChartOutputHitlFields.vue";
 import ChartOutputLinkFields from "./ChartOutputLinkFields.vue";
 import ChartOutputStatusFields from "./ChartOutputStatusFields.vue";
@@ -19,7 +21,13 @@ const {
   onChartOutputRegisterExpressionFieldIndex, updateNodeData,
 } = usePropertiesPanelContext();
 
-const options = CHART_TYPE_EXAMPLES.map(({ value, label }) => ({ value, label }));
+const isActionResult = computed(() => workflowStore.chartActionResultIds.has(selectedNode.value?.id ?? ""));
+const outgoingResultEdges = computed(() => isActionResult.value
+  ? workflowStore.edges.filter((edge) => edge.source === selectedNode.value?.id)
+  : []);
+const options = computed(() => CHART_TYPE_EXAMPLES.map(({ value, label }) => ({
+  value, label, disabled: isActionResult.value && value !== "html",
+})));
 const fields = computed(() => selectedNode.value?.data.chartType === "hitl" ? [] :
   getChartOutputExpressionFields(selectedNode.value?.data.chartType)
     .filter(({ key }) => !["statusColumn", "linkColumn", "linkLabel"].includes(key)));
@@ -56,6 +64,10 @@ function fieldValue(key: ChartOutputExpressionFieldKey): string {
   if (selectedNode.value?.data.chartType === "gauge" && key === "max") return "100";
   return key === "min" ? "0" : "";
 }
+
+function removeOutgoingResultEdges(): void {
+  for (const edge of outgoingResultEdges.value) workflowStore.removeEdge(edge.id);
+}
 </script>
 
 <template>
@@ -63,10 +75,37 @@ function fieldValue(key: ChartOutputExpressionFieldKey): string {
     <div class="space-y-2">
       <Label>Chart type</Label>
       <Select
+        data-testid="chart-output-type"
         :model-value="selectedNode.data.chartType || 'bar'"
         :options="options"
         @update:model-value="updateNodeData('chartType', $event)"
       />
+      <p
+        v-if="isActionResult && selectedNode.data.chartType !== 'html'"
+        role="alert"
+        class="text-xs text-destructive"
+      >
+        {{ CHART_ACTION_RESULT_TYPE_ERROR }}
+      </p>
+      <div
+        v-if="outgoingResultEdges.length"
+        class="space-y-1.5"
+      >
+        <p
+          role="alert"
+          class="text-xs text-destructive"
+        >
+          {{ CHART_ACTION_RESULT_OUTGOING_ERROR }}
+        </p>
+        <Button
+          variant="outline"
+          size="sm"
+          :disabled="workflowStore.isReadOnly"
+          @click="removeOutgoingResultEdges"
+        >
+          Remove outgoing connections
+        </Button>
+      </div>
     </div>
     <div
       v-if="selectedNode.data.chartType === 'bar'"
@@ -132,8 +171,8 @@ function fieldValue(key: ChartOutputExpressionFieldKey): string {
         v-if="field.key === 'html'"
         class="text-xs text-muted-foreground"
       >
-        Runs in a sandboxed frame. Call <code>heym.action(message, data)</code> to send an event through the
-        Action connection. Leave empty and set a Value field to show HTML built upstream.
+        Runs in a sandboxed frame. Call <code>heym.action(message, data)</code> to send an event to the
+        widget's Action branch. Leave empty and set a Value field to show HTML built upstream.
       </p>
       <p
         v-if="field.key === 'dataPath'"

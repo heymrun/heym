@@ -65,6 +65,9 @@ class WidgetActionGraph:
     def _regular_edges(self) -> list[dict]:
         return [edge for edge in self.edges if edge.get("sourceHandle") != ACTION_HANDLE]
 
+    def _branch_edges(self, charts: set[str]) -> list[dict]:
+        return [edge for edge in self._regular_edges() if _endpoints(edge)[0] not in charts]
+
     def _select(self, ids: set[str], edges: list[dict]) -> tuple[list[dict], list[dict]]:
         return (
             [node for node in self.nodes if node["id"] in ids],
@@ -94,13 +97,23 @@ class WidgetActionGraph:
         for edge in self.edges:
             if edge.get("sourceHandle") == ACTION_HANDLE:
                 targets[edge["source"]].append(edge)
+        if not targets:
+            return set()
+        charts = {node["id"] for node in self.nodes if node.get("type") == "chartOutput"}
+        action_results = (
+            _reachable(
+                self._branch_edges(charts),
+                {edge["target"] for source in charts for edge in targets.get(source, [])},
+            )
+            & charts
+        )
         sources = set()
         for node in render_nodes:
             if not _html_chart(node) or (node.get("data") or {}).get("active") is False:
                 continue
             node_id = node["id"]
             connections = targets[node_id]
-            if len(connections) != 1:
+            if node_id in action_results or len(connections) != 1:
                 continue
             edge = connections[0]
             if (
@@ -128,11 +141,7 @@ class WidgetActionGraph:
         if source not in self.sources():
             return [], []
         charts = {node["id"] for node in self.nodes if node.get("type") == "chartOutput"}
-        regular = [
-            edge
-            for edge in self._regular_edges()
-            if _endpoints(edge)[0] not in charts and edge["target"] != source
-        ]
+        regular = [edge for edge in self._branch_edges(charts) if edge["target"] != source]
         action_edge = next(
             edge
             for edge in self.edges

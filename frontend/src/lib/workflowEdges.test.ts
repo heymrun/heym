@@ -2,9 +2,34 @@ import { describe, expect, it } from "vitest";
 
 import type { WorkflowEdge, WorkflowNode } from "@/types/workflow";
 
-import { resolveRenderedSourceHandle } from "./workflowEdges";
+import { chartActionValidationError, getChartActionResultIds, resolveRenderedSourceHandle } from "./workflowEdges";
 
 describe("workflowEdges", () => {
+  it("finds HTML action results through every switch case and treats them as terminal", () => {
+    const chart = (id: string, chartType: "html" | "table"): WorkflowNode => ({
+      id, type: "chartOutput", position: { x: 0, y: 0 }, data: { label: id, chartType },
+    });
+    const nodes: WorkflowNode[] = [
+      chart("card", "html"),
+      { id: "choose", type: "switch", position: { x: 0, y: 0 }, data: { label: "choose" } },
+      chart("reply", "html"),
+      chart("redraw", "html"),
+      chart("table", "table"),
+    ];
+    const edges: WorkflowEdge[] = [
+      { id: "action", source: "card", target: "choose", sourceHandle: "action" },
+      { id: "first", source: "choose", target: "reply", sourceHandle: "case-0" },
+      { id: "second", source: "choose", target: "redraw", sourceHandle: "case-1" },
+    ];
+    expect(getChartActionResultIds(nodes, edges)).toEqual(new Set(["reply", "redraw"]));
+    expect(chartActionValidationError(nodes, edges)).toBeNull();
+    expect(chartActionValidationError(nodes, [
+      ...edges, { id: "table", source: "choose", target: "table", sourceHandle: "default" },
+    ])).toBe("Action results must use the HTML chart type.");
+    expect(chartActionValidationError(nodes, [
+      ...edges, { id: "nested", source: "reply", target: "redraw", sourceHandle: "action" },
+    ])).toContain("Action results end the branch.");
+  });
   describe("resolveRenderedSourceHandle with unknown source node types", () => {
     it("does not throw when source node type is unknown and no sourceHandle is provided", () => {
       const nodes: WorkflowNode[] = [

@@ -4080,7 +4080,7 @@ Access the saved file downstream: `$saveAudio.id`, `$saveAudio.download_url`
 
 ### 34. chartOutput (Dashboard Widget Chart) - TERMINAL NODE FOR DASHBOARD WIDGETS
 - **Purpose**: Terminal node that turns upstream rows into a chart for a dashboard widget.
-- **Inputs**: 1 | **Outputs**: one `action` handle for `chartType: "html"`. Other types end the flow.
+- **Inputs**: 1 | **Outputs**: one `action` handle on the initial HTML Chart Output. All other Chart Output nodes end their paths.
 - **WHEN TO USE**: Only in dashboard-widget workflows. The node before it must produce a graph object for `erDiagram`, or an array of
   row objects for other data-driven charts (e.g. a `set`/`variable`/`http`/`bigquery` node yielding rows like
   `[{"month": "Jan", "revenue": 120}, ...]`).
@@ -4267,8 +4267,9 @@ The message is arbitrary text. Data may be any JSON value. Use `heym.action(null
 Connect exactly one edge with `sourceHandle: "action"` from the initial HTML chart to the first action step.
 The Action branch starts only when the dashboard receives the event. Read `$colorChanger.message` and
 `$colorChanger.data.color` when the chart label is `colorChanger`. Use an HTTP node in the branch to make
-requests. To update the card in place, end the branch at a second `chartOutput` of type `html`.
-Include the button and click handler in the returned HTML if the viewer should be able to click again.
+requests. For multiple message variants, connect the Action handle to a `switch` on `$colorChanger.message`.
+Any `chartOutput` reached from Action must have `chartType: "html"` and no outgoing edges.
+Buttons in any returned HTML send messages back to the initial chart's Action connection.
 
 **HITL inbox (`chartType: "hitl"`):** a dashboard carousel of the signed-in user's pending human
 reviews. It needs no upstream rows and no `dataPath`. The header shows `1/n pending`. The workflow
@@ -5433,8 +5434,8 @@ For nodes with single input/output, DO NOT specify sourceHandle or targetHandle:
 ```
 
 ### HTML Chart Output Actions
-Use `{"source": "colorChanger", "sourceHandle": "action", "target": "request"}` for the one Action
-connection. Other Chart Output types have no outgoing handle.
+Use `{"source": "colorChanger", "sourceHandle": "action", "target": "typeSwitch"}` for the one Action
+connection. Each Action path that updates the widget ends at a terminal HTML Chart Output.
 
 ### Condition Node Outputs
 Condition nodes have TWO outputs. You MUST specify sourceHandle:
@@ -5947,7 +5948,8 @@ DASHBOARD_WIDGET_PROMPT_HINT = (
     "\n\n## Dashboard Widget Context\n"
     "This workflow is a DASHBOARD WIDGET. It has no trigger or input node — it starts by "
     "producing data and MUST end its initial render at a chartOutput node. Only HTML widgets "
-    "can have an Action branch, which can return updated HTML through a second chartOutput. "
+    "can have an Action branch. Route different messages through one switch after the initial "
+    "chart. Each chartOutput reached from that Action is HTML and terminal. "
     "Build nodes that fetch or compute "
     "an array of row objects and feed them into chartOutput (see the chartOutput chart-type "
     "examples above for the expected row shapes). Do NOT add triggers, textInput, output, "

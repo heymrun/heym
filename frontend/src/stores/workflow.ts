@@ -12,7 +12,13 @@ import { EMAIL_SEND_NODE_LABELS, isEmailSendNodeType } from "@/lib/emailSendNode
 import { getSentryOperationMetadata } from "@/lib/sentryExpressionFields";
 import { replaceNodeLabelRefs } from "@/lib/utils";
 import { workflowRunNodeIds } from "@/lib/workflowRunScope";
-import { CHART_ACTION_HANDLE, normalizeWorkflowEdges } from "@/lib/workflowEdges";
+import {
+  CHART_ACTION_HANDLE,
+  CHART_ACTION_RESULT_TYPE_ERROR,
+  chartActionValidationError,
+  getChartActionResultIds,
+  normalizeWorkflowEdges,
+} from "@/lib/workflowEdges";
 import { EncryptedRunLockedError, lastWrittenWorkflowRevision, workflowApi } from "@/services/api";
 import { isRevisionAfter, pickPreferredRevision } from "@/lib/workflowRevision";
 import { useToast } from "@/composables/useToast";
@@ -67,6 +73,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
   const currentWorkflow = ref<Workflow | null>(null);
   const nodes = ref<WorkflowNode[]>([]);
   const edges = ref<WorkflowEdge[]>([]);
+  const chartActionResultIds = computed(() => getChartActionResultIds(nodes.value, edges.value));
   const selectedNodeId = ref<string | null>(null);
   const selectedNodeIds = ref<Set<string>>(new Set());
   const executionResult = ref<ExecutionResult | null>(null);
@@ -783,7 +790,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
     );
   }
 
-  /** Returns false when a concurrent edit blocked the save and the dialog was opened. */
+  /** Returns false when graph validation or a concurrent edit blocks the save. */
   async function saveWorkflow(): Promise<boolean> {
     const wf = currentWorkflow.value;
     if (!wf || isReadOnly.value) return false;
@@ -801,6 +808,12 @@ export const useWorkflowStore = defineStore("workflow", () => {
   ): Promise<boolean> {
     const wf = currentWorkflow.value;
     if (!wf) return false;
+
+    const actionError = chartActionValidationError(nodes.value, edges.value);
+    if (actionError) {
+      showToast(actionError, "error");
+      return false;
+    }
 
     isSaving.value = true;
     try {
@@ -1028,6 +1041,10 @@ export const useWorkflowStore = defineStore("workflow", () => {
   function updateNode(id: string, data: Partial<WorkflowNode["data"]>): void {
     const node = nodes.value.find((n) => n.id === id);
     if (node) {
+      if (data.chartType !== undefined && data.chartType !== "html" && chartActionResultIds.value.has(id)) {
+        showToast(CHART_ACTION_RESULT_TYPE_ERROR, "error");
+        return;
+      }
       saveToHistory();
       node.data = { ...node.data, ...data };
       hasUnsavedChanges.value = true;
@@ -1152,6 +1169,11 @@ export const useWorkflowStore = defineStore("workflow", () => {
       (e) => e.source === edge.source && e.target === edge.target,
     );
     if (!exists) {
+      const actionError = chartActionValidationError(nodes.value, [...edges.value, edge]);
+      if (actionError) {
+        showToast(actionError, "error");
+        return;
+      }
       saveToHistory();
       edges.value.push(edge);
       hasUnsavedChanges.value = true;
@@ -4133,6 +4155,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
     currentWorkflow,
     nodes,
     edges,
+    chartActionResultIds,
     graphLoadSeq,
     currentExecutionId,
     setCollabHooks,

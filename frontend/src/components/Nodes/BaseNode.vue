@@ -24,6 +24,7 @@ interface Props {
   type: NodeType;
   data: NodeData;
   selected?: boolean;
+  chartActionResult?: boolean;
 }
 
 const props = defineProps<Props>();
@@ -157,7 +158,9 @@ const hasOutput = computed(() => {
     && props.type !== "chartOutput"
   );
 });
-const hasChartAction = computed(() => props.type === "chartOutput" && props.data.chartType === "html");
+const hasChartAction = computed(() =>
+  props.type === "chartOutput" && props.data.chartType === "html" && !props.chartActionResult && !isToolNode.value,
+);
 const chartActionConnected = computed(() =>
   getEdges.value.some((edge) => edge.source === props.id && edge.sourceHandle === CHART_ACTION_HANDLE),
 );
@@ -455,7 +458,7 @@ const hasThrowErrorWarning = computed(() => {
       </div>
     </template>
 
-    <template v-if="isToolNode">
+    <template v-if="isToolNode && !chartActionResult">
       <Handle
         id="tool-output"
         type="source"
@@ -562,6 +565,10 @@ const hasThrowErrorWarning = computed(() => {
             v-if="type === 'agent' && data.isSubAgent && !isInactive"
             class="text-[10px] text-muted-foreground font-medium px-1.5 py-0.5 bg-muted/50 rounded border border-dashed border-muted-foreground/40"
           >sub-agent</span>
+          <span
+            v-if="hasChartAction"
+            class="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.16em] text-muted-foreground"
+          >Action</span>
         </div>
         <div
           v-if="type === 'llm' && data.model"
@@ -703,15 +710,14 @@ const hasThrowErrorWarning = computed(() => {
 
     <div
       v-if="hasChartAction"
-      class="absolute -right-1 top-1/2 flex -translate-y-1/2 items-center"
+      class="absolute right-0 top-1/2 -translate-y-1/2"
     >
-      <span class="mr-1.5 rounded bg-muted/60 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Action</span>
       <Handle
         :id="CHART_ACTION_HANDLE"
         type="source"
         :position="Position.Right"
         :connectable="!chartActionConnected"
-        class="!relative !right-0 !top-0 !h-3.5 !w-3.5 !transform-none"
+        class="!h-3.5 !w-3.5"
       />
     </div>
 

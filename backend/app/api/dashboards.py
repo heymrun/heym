@@ -162,8 +162,9 @@ _AI_WIDGET_SUFFIX = (
     "to the row key that holds it. The widget runs the HTML in a sandboxed frame without "
     "network access. For an interactive card, put heym.action(message, data) in the button's "
     "click handler, connect one edge with sourceHandle action, and handle message/data under "
-    "the card node's label. Use an HTTP node on that branch for requests. End the branch with "
-    "a second HTML chartOutput to replace the card, including its controls for repeat actions. "
+    "the card node's label. Use a switch on message to route different events and an HTTP node "
+    "for requests. Every chartOutput reached from Action must be HTML and terminal. Its HTML "
+    "can include controls that send more events to the initial chart's Action branch. "
     "For markdown checklists / task lists, use chartType text and put GFM task list lines "
     "(- [ ] / - [x]) directly in chartOutput text (not only in upstream rows). "
     "For numbered markdown lines (especially descending lists), prefix each line with the "
@@ -1176,8 +1177,14 @@ async def widget_action(
         raise HTTPException(status_code=404, detail="HTML widget action not found")
     if blocked := dashboard_widget_blocked_nodes_error(workflow.nodes):
         raise HTTPException(status_code=422, detail=blocked)
-    if body.node_id not in WidgetActionGraph(workflow.nodes or [], workflow.edges or []).sources():
+    nodes, _ = WidgetActionGraph(workflow.nodes or [], workflow.edges or []).branch(body.node_id)
+    if not nodes:
         raise HTTPException(status_code=404, detail="HTML widget action not found")
+    if any(
+        node.get("type") == "chartOutput" and (node.get("data") or {}).get("chartType") != "html"
+        for node in nodes
+    ):
+        raise HTTPException(status_code=422, detail="Action results must use the HTML chart type.")
     return await run_html_widget_action(
         db,
         widget,

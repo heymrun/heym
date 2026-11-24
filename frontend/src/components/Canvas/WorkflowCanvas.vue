@@ -1967,6 +1967,7 @@ watch(
           :type="data.nodeType"
           :data="data"
           :selected="selected"
+          :chart-action-result="workflowStore.chartActionResultIds.has(id)"
           @open-agent-memory="handleOpenAgentMemory"
         />
         <CanvasNodeRunButton
