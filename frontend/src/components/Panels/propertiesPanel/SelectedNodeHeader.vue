@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { BookOpen, Power, Trash2 } from "lucide-vue-next";
+import type { NodeType } from "@/types/workflow";
 import Button from "@/components/ui/Button.vue";
 import { usePropertiesPanelContext } from "./usePropertiesPanelController";
 import { isTileFillingIcon } from "@/lib/nodeIcons";
@@ -18,19 +19,22 @@ const {
 // Some node colours are picked for their icon tile, where they sit on a tinted
 // background. As small text on the panel they fall below a comfortable contrast
 // ratio, so those types get a dedicated readability-tuned token.
-const HEADER_FOREGROUND_TOKENS: Partial<Record<string, string>> = {
+const HEADER_FOREGROUND_TOKENS: Partial<Record<NodeType, string>> = {
   agent: "--node-agent-header-foreground",
+  chartOutput: "--node-output-header-foreground",
   code: "--node-code-header-foreground",
   llm: "--node-llm-header-foreground",
+  loop: "--node-loop-header-foreground",
   rag: "--node-rag-header-foreground",
+  set: "--node-set-header-foreground",
 };
 
-function typeLabelColor(nodeType: string): string {
+function typeLabelColor(nodeType: NodeType): string {
   const token = HEADER_FOREGROUND_TOKENS[nodeType];
   if (token) {
     return `hsl(var(${token}))`;
   }
-  return `hsl(var(--${nodeColorMap[nodeType as keyof typeof nodeColorMap]}) / 0.8)`;
+  return `hsl(var(--${nodeColorMap[nodeType]}) / 0.8)`;
 }
 </script>
 
