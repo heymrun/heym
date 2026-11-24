@@ -23,6 +23,7 @@ from app.services.heym_event_service import (
     publish_event,
     workflow_event_payload,
 )
+from app.services.widget_actions import WidgetActionGraph
 
 PublishEvent = Callable[..., Awaitable[Any]]
 
@@ -106,7 +107,7 @@ async def sync_dashboard_widget(
     """Carry a save of a widget's workflow onto its dashboard widget.
 
     The widget's title and description follow a renamed or redescribed workflow, and a graph
-    change sets its chart type from the last chartOutput node and drops its cached chart.
+    change sets its chart type from the render graph and drops its cached chart.
     """
     if getattr(workflow, "kind", None) != "dashboard_widget":
         return
@@ -122,13 +123,9 @@ async def sync_dashboard_widget(
     if described:
         widget.description = workflow.description
     if graph_changed:
-        chart_nodes = [
-            node
-            for node in (workflow.nodes or [])
-            if isinstance(node, dict) and node.get("type") == "chartOutput"
-        ]
-        if chart_nodes:
-            widget.chart_type = chart_nodes[-1].get("data", {}).get("chartType", widget.chart_type)
+        chart = WidgetActionGraph(workflow.nodes or [], workflow.edges or []).render_chart()
+        if chart is not None:
+            widget.chart_type = chart.get("data", {}).get("chartType", widget.chart_type)
         widget.cached_payload = None
         widget.cached_at = None
         widget.cached_workflow_version = None

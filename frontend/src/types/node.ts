@@ -1361,7 +1361,7 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
   chartOutput: {
     type: "chartOutput",
     label: "Chart Output",
-    description: "Terminal node that turns upstream rows into a dashboard chart",
+    description: "Draws a dashboard chart. HTML widgets can start an Action branch.",
     color: "node-output",
     icon: "BarChart3",
     inputs: 1,

@@ -4080,7 +4080,7 @@ Access the saved file downstream: `$saveAudio.id`, `$saveAudio.download_url`
 
 ### 34. chartOutput (Dashboard Widget Chart) - TERMINAL NODE FOR DASHBOARD WIDGETS
 - **Purpose**: Terminal node that turns upstream rows into a chart for a dashboard widget.
-- **Inputs**: 1 | **Outputs**: 0 (it is the LAST node in a dashboard-widget workflow)
+- **Inputs**: 1 | **Outputs**: one `action` handle on the initial HTML Chart Output. All other Chart Output nodes end their paths.
 - **WHEN TO USE**: Only in dashboard-widget workflows. The node before it must produce a graph object for `erDiagram`, or an array of
   row objects for other data-driven charts (e.g. a `set`/`variable`/`http`/`bigquery` node yielding rows like
   `[{"month": "Jan", "revenue": 120}, ...]`).
@@ -4261,6 +4261,15 @@ HTML (a custom card the other types do not draw; values come from upstream expre
 ```json
 {"type": "chartOutput", "data": {"label": "summaryCard", "chartType": "html", "html": "<style>body{font-family:system-ui;margin:0;padding:12px}.n{font-size:32px;font-weight:600}</style><div class=\"n\">$stats.open</div><div>open tickets</div>", "title": "Summary"}}
 ```
+
+**HTML widget actions:** In a button click handler, call `heym.action("color_change", {color: "blue"})`.
+The message is arbitrary text. Data may be any JSON value. Use `heym.action(null, data)` to send just data.
+Connect exactly one edge with `sourceHandle: "action"` from the initial HTML chart to the first action step.
+The Action branch starts only when the dashboard receives the event. Read `$colorChanger.message` and
+`$colorChanger.data.color` when the chart label is `colorChanger`. Use an HTTP node in the branch to make
+requests. For multiple message variants, connect the Action handle to a `switch` on `$colorChanger.message`.
+Any `chartOutput` reached from Action must have `chartType: "html"` and no outgoing edges.
+Buttons in any returned HTML send messages back to the initial chart's Action connection.
 
 **HITL inbox (`chartType: "hitl"`):** a dashboard carousel of the signed-in user's pending human
 reviews. It needs no upstream rows and no `dataPath`. The header shows `1/n pending`. The workflow
@@ -5424,6 +5433,10 @@ For nodes with single input/output, DO NOT specify sourceHandle or targetHandle:
 }
 ```
 
+### HTML Chart Output Actions
+Use `{"source": "colorChanger", "sourceHandle": "action", "target": "typeSwitch"}` for the one Action
+connection. Each Action path that updates the widget ends at a terminal HTML Chart Output.
+
 ### Condition Node Outputs
 Condition nodes have TWO outputs. You MUST specify sourceHandle:
 - `"true"` = condition is true
@@ -5530,7 +5543,7 @@ Always include:
 4. Node labels MUST be camelCase (no spaces!) and unique within a workflow. **NEVER use reserved names as labels** (see "Label Naming Convention" section above).
 5. For LLM nodes, the credentialId will be provided by the user or system
 6. Use descriptive camelCase labels (e.g., "processUserInput", "generateResponse", "formatOutput")
-7. For simple edges, omit sourceHandle/targetHandle. Only specify them for condition/switch/merge nodes.
+7. For simple edges, omit sourceHandle/targetHandle. Specify handles for branches, including `action` from an HTML Chart Output.
 8. **NEVER USE $input** - Always reference nodes by their label name: `$nodeName.field`. NEVER use `$input`, `$input.text`, or array indices.
 9. For timestamps, use `$now` instead of JavaScript Date functions.
 10. **USE `set` NODE FOR TRANSFORMATIONS** - uppercase, lowercase, substring, concatenation, etc. The `execute` node is ONLY for calling other workflows!
@@ -5934,7 +5947,10 @@ Rules:
 DASHBOARD_WIDGET_PROMPT_HINT = (
     "\n\n## Dashboard Widget Context\n"
     "This workflow is a DASHBOARD WIDGET. It has no trigger or input node — it starts by "
-    "producing data and MUST end in a single chartOutput node. Build nodes that fetch or compute "
+    "producing data and MUST end its initial render at a chartOutput node. Only HTML widgets "
+    "can have an Action branch. Route different messages through one switch after the initial "
+    "chart. Each chartOutput reached from that Action is HTML and terminal. "
+    "Build nodes that fetch or compute "
     "an array of row objects and feed them into chartOutput (see the chartOutput chart-type "
     "examples above for the expected row shapes). Do NOT add triggers, textInput, output, "
     "jsonOutputMapper, rabbitmq, or portal/webhook concerns."

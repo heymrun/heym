@@ -23,6 +23,7 @@ from app.services.highlight.highlight_builder import build_highlight_payload
 from app.services.hitl_widget_filter import filter_payload, hitl_widget_filter
 from app.services.node_analytics_rollup import pending_on_first_write
 from app.services.page_params import page_inputs
+from app.services.widget_actions import WidgetAction, WidgetActionGraph
 from app.services.workflow_executor import (
     ExecutionResult,
     WorkflowCancelledError,
@@ -404,9 +405,13 @@ async def compute_widget_data(
     # Pending reviews belong to whoever is signed in, and the widget cache is shared
     # with every dashboard viewer. Return only the chart marker. The inbox is loaded
     # separately and never written into cached_payload.
-    if _is_hitl_chart_workflow(workflow.nodes):
+    nodes = workflow.nodes or []
+    edges = workflow.edges or []
+    graph = WidgetActionGraph(nodes, edges)
+    render_nodes, _ = graph.render()
+    if _is_hitl_chart_workflow(render_nodes):
         hitl_payload: dict[str, Any] = {"type": "hitl"}
-        review_filter = hitl_widget_filter(workflow.nodes)
+        review_filter = hitl_widget_filter(render_nodes)
         if review_filter is not None:
             hitl_payload["filter"] = filter_payload(review_filter)
         return WidgetDataResponse(
@@ -440,8 +445,6 @@ async def compute_widget_data(
             computed_at=cached_at,
         )
 
-    nodes = workflow.nodes or []
-    edges = workflow.edges or []
     inputs = page_inputs(record)
 
     try:
@@ -515,11 +518,48 @@ async def compute_widget_data(
     )
 
 
+async def run_html_widget_action(
+    db: AsyncSession,
+    widget: DashboardWidget,
+    workflow: Workflow,
+    owner_id: uuid.UUID,
+    action: WidgetAction,
+    record: str | None,
+) -> WidgetDataResponse:
+    """Run one click and return its HTML to the caller without writing the shared chart cache."""
+    result, _ = await run_widget_workflow(
+        db,
+        workflow,
+        owner_id,
+        {**page_inputs(record), **action.inputs()},
+        return_on_chart_output=True,
+    )
+    payload = next(
+        (
+            output
+            for output in result.outputs.values()
+            if isinstance(output, dict)
+            and output.get("type") == "html"
+            and output.get("html_action_node_id") == action.node_id
+        ),
+        None,
+    )
+    return WidgetDataResponse(
+        widget_id=widget.id,
+        payload=payload,
+        cached=False,
+        computed_at=datetime.now(timezone.utc),
+        error=None if result.status == "success" else no_chart_error(result),
+    )
+
+
 async def run_widget_workflow(
     db: AsyncSession,
     workflow: Workflow,
     run_as_user_id: uuid.UUID,
     inputs: dict[str, Any],
+    *,
+    return_on_chart_output: bool = False,
 ) -> tuple[Any, ExecutionHistory | None]:
     """Track a dashboard run from execution through history persistence."""
     execution_id = uuid.uuid4()
@@ -532,7 +572,13 @@ async def run_widget_workflow(
     )
     try:
         return await _run_widget_workflow(
-            db, workflow, run_as_user_id, inputs, execution_id, cancel_event
+            db,
+            workflow,
+            run_as_user_id,
+            inputs,
+            execution_id,
+            cancel_event,
+            return_on_chart_output=return_on_chart_output,
         )
     finally:
         clear_execution(execution_id, handle=getattr(cancel_event, "_execution_handle", None))
@@ -545,6 +591,8 @@ async def _run_widget_workflow(
     inputs: dict[str, Any],
     execution_id: uuid.UUID,
     cancel_event: threading.Event,
+    *,
+    return_on_chart_output: bool,
 ) -> tuple[Any, ExecutionHistory | None]:
     """Run an ordinary workflow from a run widget, as the dashboard owner, and record the run.
 
@@ -575,6 +623,7 @@ async def _run_widget_workflow(
             global_variables_context=global_variables_context,
             trace_user_id=run_as_user_id,
             actor_user_id=run_as_user_id,
+            return_on_chart_output=return_on_chart_output,
             timeout_seconds=getattr(workflow, "workflow_timeout_seconds", None),
             concurrency_limit=workflow.concurrency_limit,
         )

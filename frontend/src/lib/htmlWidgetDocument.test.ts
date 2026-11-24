@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildHtmlWidgetDocument,
+  HTML_WIDGET_ACTION_MESSAGE,
   HTML_WIDGET_CSP,
   HTML_WIDGET_LINK_MESSAGE,
   HTML_WIDGET_SANDBOX,
+  htmlWidgetAction,
   htmlWidgetLink,
 } from "@/lib/htmlWidgetDocument";
 
@@ -42,6 +44,28 @@ describe("buildHtmlWidgetDocument", () => {
   it("follows the dashboard's theme", () => {
     expect(buildHtmlWidgetDocument("", true)).toContain("color-scheme:dark");
     expect(buildHtmlWidgetDocument("", false)).toContain("color-scheme:light");
+  });
+
+  it("installs the action bridge on request while keeping the network policy", () => {
+    expect(buildHtmlWidgetDocument("", false)).not.toContain("window.heym");
+    expect(buildHtmlWidgetDocument("", false, "channel")).toContain("window.heym");
+    expect(buildHtmlWidgetDocument("", false, "channel")).toContain("connect-src 'none'");
+  });
+});
+
+describe("htmlWidgetAction", () => {
+  it("accepts messages with JSON and data-only events", () => {
+    const action = (json: string): ReturnType<typeof htmlWidgetAction> =>
+      htmlWidgetAction({ type: HTML_WIDGET_ACTION_MESSAGE, channel: "channel", id: 1, json }, "channel");
+    expect(action('{"message":"color_change","data":{"color":"blue","count":1}}')).toEqual({
+      id: 1, event: { message: "color_change", data: { color: "blue", count: 1 } },
+    });
+    expect(action('{"data":false}')).toEqual({ id: 1, event: { message: null, data: false } });
+    expect(action('{"message":47}')).toEqual({ id: 1, event: null });
+    expect(action('{"data":')).toEqual({ id: 1, event: null });
+    expect(htmlWidgetAction({
+      type: HTML_WIDGET_ACTION_MESSAGE, channel: "previous", id: 1, json: '{"message":"old"}',
+    }, "channel")).toBeNull();
   });
 });
 

@@ -11,6 +11,8 @@ def execute(ctx: NodeExecutionContext) -> object:
     _workflow_executor = import_module("app.services.workflow_executor")
     build_chart_payload = _workflow_executor.build_chart_payload
     self = ctx.executor
+    if self.widget_action is not None and self.widget_action.node_id == ctx.node_id:
+        return self.widget_action.output()
     inputs = ctx.inputs
     node_data = ctx.node_data
 
@@ -28,4 +30,9 @@ def execute(ctx: NodeExecutionContext) -> object:
     if node_data.get("chartType") == "html":
         node_data = {**node_data, "html": render_html_template(ctx)}
     output = build_chart_payload(node_data, source_data)
+    if output.get("type") == "html":
+        if self.widget_action is not None:
+            output["html_action_node_id"] = self.widget_action.node_id
+        elif ctx.node_id in self.widget_action_sources:
+            output["html_action_node_id"] = ctx.node_id
     return output

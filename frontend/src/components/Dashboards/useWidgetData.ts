@@ -1,6 +1,6 @@
 import { ref, type Ref } from "vue";
 
-import type { ChartPayload, FileRunPayload } from "@/types/dashboard";
+import type { ChartPayload, FileRunPayload, RunWidgetAction, WidgetActionEvent } from "@/types/dashboard";
 import { toggleTaskItemLocal, updateOrRemoveTaskItemLocal } from "@/lib/markdownTaskList";
 import { dashboardApi, getErrorDetail } from "@/services/api";
 
@@ -10,6 +10,7 @@ export interface WidgetData {
   error: Ref<string | null>;
   markdownTaskSaving: Ref<boolean>;
   loadData: (force?: boolean) => Promise<void>;
+  runHtmlAction: RunWidgetAction;
   toggleMarkdownTask: (lineIndex: number) => Promise<void>;
   updateMarkdownTask: (update: { lineIndex: number; text: string }) => Promise<void>;
 }
@@ -26,8 +27,10 @@ export function useWidgetData(
   const loading = ref(true);
   const error = ref<string | null>(null);
   const markdownTaskSaving = ref(false);
+  let loadVersion = 0;
 
   async function loadData(force = false): Promise<void> {
+    loadVersion += 1;
     loading.value = true;
     error.value = null;
     try {
@@ -39,6 +42,22 @@ export function useWidgetData(
       error.value = getErrorDetail(e, "Failed to load widget");
     } finally {
       loading.value = false;
+    }
+  }
+
+  async function runHtmlAction(nodeId: string, event: WidgetActionEvent): Promise<void> {
+    const version = loadVersion;
+    const id = widgetId();
+    const page = record();
+    try {
+      const response = await dashboardApi.runHtmlWidgetAction(id, nodeId, event, page);
+      if (response.error) throw new Error(response.error);
+      if (response.payload?.type === "html" && version === loadVersion &&
+          id === widgetId() && page === record()) {
+        payload.value = response.payload;
+      }
+    } catch (cause) {
+      throw new Error(getErrorDetail(cause, cause instanceof Error ? cause.message : "Widget action failed"));
     }
   }
 
@@ -98,6 +117,7 @@ export function useWidgetData(
     error,
     markdownTaskSaving,
     loadData,
+    runHtmlAction,
     toggleMarkdownTask,
     updateMarkdownTask,
   };

@@ -83,6 +83,7 @@ from app.services.trigger_inputs import receives_initial_inputs
 from app.services.websocket_utils import (
     send_websocket_message,  # noqa: F401 - public patch alias for node handlers
 )
+from app.services.widget_actions import WidgetAction, WidgetActionGraph
 from app.services.workflow_branch_routing import WorkflowBranchRoutingMixin
 
 logger = logging.getLogger(__name__)
@@ -2012,7 +2013,12 @@ class WorkflowExecutor(WorkflowBranchRoutingMixin):
         file_scope: RunFileScope | None = None,
         http_cookies: httpx.Cookies | None = None,
         chat_turn_depth: int | None = None,
+        widget_action: WidgetAction | None = None,
     ) -> None:
+        action_graph = WidgetActionGraph(nodes, edges)
+        self.widget_action_sources = action_graph.sources() if return_on_chart_output else set()
+        nodes, edges = action_graph.render()
+        self.widget_action = widget_action
         self.nodes = {node["id"]: node for node in nodes}
         self._node_pool = node_pool or _SHARED_EXECUTOR
         self.agent_progress_queue = agent_progress_queue
@@ -2508,7 +2514,7 @@ class WorkflowExecutor(WorkflowBranchRoutingMixin):
         node = self.nodes.get(node_id, {})
         node_type = node.get("type")
         if node_type == "chartOutput" and self.return_on_chart_output:
-            return True
+            return self.widget_action is None or node_id != self.widget_action.node_id
         if node_type == "output" and node.get("data", {}).get("allowDownstream"):
             return True
         return False
@@ -7647,13 +7653,9 @@ class WorkflowExecutor(WorkflowBranchRoutingMixin):
         pending_lock = Lock()
         early_return_output = None
 
-        output_nodes_with_downstream = set()
-        for node_id in active_nodes:
-            node = self.nodes.get(node_id, {})
-            if (node.get("type") == "output" and node.get("data", {}).get("allowDownstream")) or (
-                self.return_on_chart_output and node.get("type") == "chartOutput"
-            ):
-                output_nodes_with_downstream.add(node_id)
+        output_nodes_with_downstream = {
+            node_id for node_id in active_nodes if self._is_early_return_node(node_id)
+        }
         self._downstream_global_node_ids = frozenset()
         pending_loop_reexecutions: dict[str, tuple[str, list[dict]]] = {}
 
@@ -8183,6 +8185,13 @@ def execute_workflow(
     llm_session_id: str | None = None,
     file_scope: RunFileScope | None = None,
 ) -> ExecutionResult:
+    widget_action = WidgetAction.from_inputs(inputs) if return_on_chart_output else None
+    if widget_action is not None:
+        nodes, edges = WidgetActionGraph(nodes, edges).branch(widget_action.node_id)
+        if not nodes:
+            return ExecutionResult(
+                workflow_id, "error", {"error": "HTML widget action is no longer available"}, 0.0
+            )
     if refused := refused_run_result(workflow_id, credentials_context, nodes, workflow_cache):
         return refused
     executor = WorkflowExecutor(
@@ -8205,6 +8214,7 @@ def execute_workflow(
         execution_id=execution_id,
         llm_session_id=llm_session_id,
         file_scope=file_scope,
+        widget_action=widget_action,
     )
     try:
         result = executor.execute(workflow_id, inputs)

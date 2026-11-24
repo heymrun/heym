@@ -57,6 +57,7 @@ from app.models.dashboard_schemas import (
     HitlWidgetFilterModel,
     MarkdownTaskToggleRequest,
     MarkdownTaskUpdateRequest,
+    WidgetActionRequest,
     WidgetCreateRequest,
     WidgetDataResponse,
     WidgetExampleResponse,
@@ -77,7 +78,11 @@ from app.services.dashboard_access import (
     reachable_dashboard_ids,
     shared_dashboard_permissions,
 )
-from app.services.dashboard_data import compute_widget_data, run_widget_workflow
+from app.services.dashboard_data import (
+    compute_widget_data,
+    run_html_widget_action,
+    run_widget_workflow,
+)
 from app.services.dashboard_data_context import (
     TableContext,
     TableUnavailableError,
@@ -117,6 +122,7 @@ from app.services.page_params import (
 )
 from app.services.result_stream import stream_result
 from app.services.user_lookup import find_user_by_email
+from app.services.widget_actions import WidgetAction, WidgetActionGraph
 from app.services.widget_page_record import (
     detail_page_context,
     example_record,
@@ -136,7 +142,7 @@ DEFAULT_DASHBOARD_NAME = "Dashboard"
 TABLE_WIDGET_ROW_LIMIT = 500
 
 _AI_WIDGET_SUFFIX = (
-    " The workflow MUST end with a single chartOutput node that produces the chart. "
+    " The initial render MUST end with a chartOutput node that produces the chart. "
     "Choose an appropriate chartType (pie, bar, line, area, table, numeric, gauge, scatter, "
     "proportion, barGauge, gantt, erDiagram, text, html, or hitl) and set "
     "labelField/valueField (or series for multi-series line/area, or xField/yField for scatter, "
@@ -154,8 +160,11 @@ _AI_WIDGET_SUFFIX = (
     "<style> and <script>; its $nodeLabel.field expressions are filled in as in an "
     "htmlOutputMapper node. To show HTML built upstream, leave html empty and set valueField "
     "to the row key that holds it. The widget runs the HTML in a sandboxed frame without "
-    "network access: no fetch, no forms and no calls to the Heym API, so the template itself "
-    "must carry every value it shows. "
+    "network access. For an interactive card, put heym.action(message, data) in the button's "
+    "click handler, connect one edge with sourceHandle action, and handle message/data under "
+    "the card node's label. Use a switch on message to route different events and an HTTP node "
+    "for requests. Every chartOutput reached from Action must be HTML and terminal. Its HTML "
+    "can include controls that send more events to the initial chart's Action branch. "
     "For markdown checklists / task lists, use chartType text and put GFM task list lines "
     "(- [ ] / - [x]) directly in chartOutput text (not only in upstream rows). "
     "For numbered markdown lines (especially descending lists), prefix each line with the "
@@ -1152,6 +1161,40 @@ async def get_widget_data(
     return _widget_data_for(response, permission)
 
 
+@router.post("/widgets/{widget_id}/action", response_model=WidgetDataResponse)
+async def widget_action(
+    widget_id: uuid.UUID,
+    body: WidgetActionRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> WidgetDataResponse:
+    """Run a saved HTML widget's Action branch with the viewer's message and JSON data."""
+    widget, dashboard, _ = await _load_widget_for_user(db, widget_id, current_user, write=False)
+    if body.record is not None and not is_valid_record(body.record, dashboard.record_format):
+        raise HTTPException(status_code=422, detail="This page does not accept that record")
+    workflow = await get_workflow_for_user(db, widget.workflow_id, dashboard.owner_id)
+    if workflow is None or widget.chart_type == FILE_RUN_WIDGET_TYPE:
+        raise HTTPException(status_code=404, detail="HTML widget action not found")
+    if blocked := dashboard_widget_blocked_nodes_error(workflow.nodes):
+        raise HTTPException(status_code=422, detail=blocked)
+    nodes, _ = WidgetActionGraph(workflow.nodes or [], workflow.edges or []).branch(body.node_id)
+    if not nodes:
+        raise HTTPException(status_code=404, detail="HTML widget action not found")
+    if any(
+        node.get("type") == "chartOutput" and (node.get("data") or {}).get("chartType") != "html"
+        for node in nodes
+    ):
+        raise HTTPException(status_code=422, detail="Action results must use the HTML chart type.")
+    return await run_html_widget_action(
+        db,
+        widget,
+        workflow,
+        dashboard.owner_id,
+        WidgetAction(body.node_id, body.message, body.data),
+        body.record,
+    )
+
+
 @router.post("/widgets/{widget_id}/run", response_model=WidgetRunResponse)
 async def run_widget(
     widget_id: uuid.UUID,
@@ -1427,7 +1470,7 @@ async def widget_create_prompt(
 
 
 async def checked_widget_chart(
-    db: AsyncSession, user: User, old_nodes: list[Any], nodes: list[Any]
+    db: AsyncSession, user: User, old_nodes: list[Any], nodes: list[Any], edges: list[Any]
 ) -> dict[str, Any]:
     """The chartOutput node of a generated widget graph, once the graph may be saved.
 
@@ -1440,14 +1483,14 @@ async def checked_widget_chart(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=blocked_error,
         )
-    chart_nodes = [n for n in nodes if isinstance(n, dict) and n.get("type") == "chartOutput"]
-    if not chart_nodes:
+    chart = WidgetActionGraph(nodes, edges).render_chart()
+    if chart is None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="AI did not produce a chartOutput node",
         )
     await ensure_saved_filter_allowed(db, user.id, old_nodes, nodes, detail=AI_FILTER_ERROR)
-    return chart_nodes[-1]
+    return chart
 
 
 async def save_generated_widget(
@@ -1467,7 +1510,7 @@ async def save_generated_widget(
     """
     nodes = dsl.get("nodes", [])
     edges = dsl.get("edges", [])
-    chart_node = await checked_widget_chart(db, user, [], nodes)
+    chart_node = await checked_widget_chart(db, user, [], nodes, edges)
     chart_type = (chart_node.get("data") or {}).get("chartType", "bar")
     name = widget_title(title, dsl.get("name"), prompt)
     description = dsl.get("description") or None
@@ -1610,7 +1653,7 @@ async def apply_refined_widget(
     """
     nodes = dsl.get("nodes", [])
     edges = dsl.get("edges", [])
-    chart_node = await checked_widget_chart(db, user, workflow.nodes or [], nodes)
+    chart_node = await checked_widget_chart(db, user, workflow.nodes or [], nodes, edges)
 
     previous_version: int | None = None
     if snapshot:
@@ -1722,13 +1765,13 @@ async def revert_widget(
     blocked_error = dashboard_widget_blocked_nodes_error(nodes)
     if blocked_error is not None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=blocked_error)
-    chart_nodes = [n for n in nodes if isinstance(n, dict) and n.get("type") == "chartOutput"]
+    chart = WidgetActionGraph(nodes, edges).render_chart()
 
     await add_workflow_version(db, workflow, WorkflowSnapshot.capture(workflow), current_user.id)
     workflow.nodes = nodes
     workflow.edges = edges
-    if chart_nodes:
-        widget.chart_type = (chart_nodes[-1].get("data") or {}).get("chartType", widget.chart_type)
+    if chart is not None:
+        widget.chart_type = (chart.get("data") or {}).get("chartType", widget.chart_type)
     widget.cached_payload = None
     widget.cached_at = None
     widget.cached_workflow_version = None

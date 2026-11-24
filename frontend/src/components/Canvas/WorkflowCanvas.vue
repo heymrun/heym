@@ -41,7 +41,7 @@ import { buildWorkflowNodeFromNodeTemplate } from "@/lib/nodeFromTemplate";
 import { generateId, replaceInputRefs } from "@/lib/utils";
 import { isTypingTarget, shouldUseNativeTextClipboard } from "@/lib/keyboardTargets";
 import { buildMeasuredNodeSizeMap, getWorkflowNodeLayoutSize } from "@/lib/workflowLayout";
-import { normalizeWorkflowEdges, resolveRenderedSourceHandle } from "@/lib/workflowEdges";
+import { CHART_ACTION_HANDLE, normalizeWorkflowEdges, resolveRenderedSourceHandle } from "@/lib/workflowEdges";
 import { evalsApi, templatesApi } from "@/services/api";
 import { useToast } from "@/composables/useToast";
 import { useWorkflowStore } from "@/stores/workflow";
@@ -281,6 +281,7 @@ onConnect((connection) => {
   if (!connection.source || !connection.target) return;
 
   if (connection.targetHandle === TOOL_INPUT_HANDLE) {
+    if (connection.sourceHandle === CHART_ACTION_HANDLE) return;
     addToolEdge(connection.source, connection.target);
     return;
   }
@@ -1966,6 +1967,7 @@ watch(
           :type="data.nodeType"
           :data="data"
           :selected="selected"
+          :chart-action-result="workflowStore.chartActionResultIds.has(id)"
           @open-agent-memory="handleOpenAgentMemory"
         />
         <CanvasNodeRunButton

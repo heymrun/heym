@@ -171,6 +171,44 @@ Choose **HTML** (`html`) for a card that no other chart type draws. Put the mark
 }
 ```
 
+### Action output
+
+The initial HTML Chart Output has one **Action** connection on the right. Connect it to the first step that should run when someone interacts with the card. Chart Output nodes reached through that branch must use the HTML type and end their paths.
+
+For a card labelled `colorChanger`, wire **Action → Switch**. Connect the `color_change` case to **HTTP → Chart Output (HTML)** and the `redraw` case directly to its own HTML Chart Output. In the HTML template, send the event from your button's click handler.
+
+```html
+<button id="change">Change color</button>
+<script>
+  const button = document.getElementById("change");
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    try {
+      await window.heym.action("color_change", { color: "blue", request: 1 });
+    } finally {
+      button.disabled = false;
+    }
+  });
+</script>
+```
+
+- `message` is text you choose, up to 1,024 characters. Put a **Switch** immediately after the Action connection and use `$colorChanger.message` to route messages such as `color_change` and `redraw` to their own paths.
+- `data` can be an object, array, string, number, boolean, or `null`. Read it as `$colorChanger.data`, or use `$colorChanger.data.color` for a property. Call `window.heym.action(null, data)` to send data alone. The server accepts up to 64 KiB of JSON data.
+- The [HTTP node](./http-node.md) runs the request on the server with the workflow's credentials. An HTML Chart Output can show the response using `$request.body` if the HTTP node is named `request`. Buttons in the returned HTML send events back to the initial chart's Action connection. A branch that returns no HTML leaves the card as it was.
+
+In workflow JSON, set `sourceHandle` on the edge leaving the initial HTML node.
+
+```json
+{
+  "id": "color-action",
+  "source": "colorChanger",
+  "sourceHandle": "action",
+  "target": "typeSwitch"
+}
+```
+
+The Action branch only starts on an action. Opening or refreshing the dashboard runs the initial render. Each action starts a new run using the dashboard owner's workflow access. The action response is shown to the viewer who sent it. On a detail page, the branch also gets `$page.record`. Treat the message and data as viewer input.
+
 ### Sandbox
 
 The dashboard shows the HTML in an `<iframe sandbox="allow-scripts">` with its own Content Security Policy. Widget content can come from data someone else controls, such as a table row, an HTTP response or an LLM answer, so the frame keeps it away from the person viewing the dashboard:
@@ -182,7 +220,7 @@ The dashboard shows the HTML in an `<iframe sandbox="allow-scripts">` with its o
 | Links, which open in a new tab (http(s) URLs and paths inside Heym only) | Forms, popups, dialogs, downloads and navigating the Heym tab |
 | Animations and timers | Nested frames, workers, plugins and `<base>` |
 
-Because the frame cannot make requests, put every value the widget shows into the template with expressions, as the example does with `$stats.open`. The frame follows the dashboard's light or dark theme through `color-scheme`, has a transparent background and scrolls when the content is taller than the widget. The same rules apply on [Heym Work](../reference/heym-work.md) pages.
+The frame gets its initial values through expressions such as `$stats.open`. An [Action branch](#action-output) can supply updated HTML after an interaction on the Heym dashboard. The frame follows the dashboard's light or dark theme through `color-scheme`, has a transparent background and scrolls when the content is taller than the widget. The same sandbox rules apply on [Heym Work](../reference/heym-work.md) pages.
 
 ## Status chips
 

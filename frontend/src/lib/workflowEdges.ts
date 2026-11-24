@@ -9,7 +9,56 @@ const PRIMARY_OUTPUT_EXCLUDED_TYPES = new Set<NodeType>([
   "throwError",
   "jsonOutputMapper",
   "htmlOutputMapper",
+  "chartOutput",
 ]);
+
+export const CHART_ACTION_HANDLE = "action";
+export const CHART_ACTION_RESULT_TYPE_ERROR = "Action results must use the HTML chart type.";
+export const CHART_ACTION_RESULT_OUTGOING_ERROR =
+  "Action results end the branch. Route messages with a Switch after the first HTML chart.";
+
+export function getChartActionResultIds(
+  nodes: readonly Pick<WorkflowNode, "id" | "type">[],
+  edges: readonly WorkflowEdge[],
+): Set<string> {
+  const actionEdges = edges.filter((edge) => edge.sourceHandle === CHART_ACTION_HANDLE);
+  if (!actionEdges.length) return new Set();
+
+  const chartIds = new Set(nodes.filter((node) => node.type === "chartOutput").map((node) => node.id));
+  const children = new Map<string, string[]>();
+  for (const edge of edges) {
+    if (chartIds.has(edge.source) || edge.targetHandle === "tool-input" ||
+        edge.sourceHandle === CHART_ACTION_HANDLE) continue;
+    const targets = children.get(edge.source) ?? [];
+    targets.push(edge.target);
+    children.set(edge.source, targets);
+  }
+
+  const pending = actionEdges.filter((edge) => chartIds.has(edge.source)).map((edge) => edge.target);
+  const visited = new Set<string>();
+  const results = new Set<string>();
+  for (const id of pending) {
+    if (visited.has(id)) continue;
+    visited.add(id);
+    if (chartIds.has(id)) results.add(id);
+    else pending.push(...(children.get(id) ?? []));
+  }
+  return results;
+}
+
+export function chartActionValidationError(
+  nodes: readonly WorkflowNode[],
+  edges: readonly WorkflowEdge[],
+): string | null {
+  const results = getChartActionResultIds(nodes, edges);
+  if (nodes.some((node) => results.has(node.id) && node.data.chartType !== "html")) {
+    return CHART_ACTION_RESULT_TYPE_ERROR;
+  }
+  if (edges.some((edge) => results.has(edge.source))) {
+    return CHART_ACTION_RESULT_OUTGOING_ERROR;
+  }
+  return null;
+}
 
 function stringValue(value: unknown): string | null {
   if (typeof value === "string" && value.trim().length > 0) {

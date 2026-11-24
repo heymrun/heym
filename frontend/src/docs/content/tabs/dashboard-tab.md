@@ -30,7 +30,7 @@ A widget is a single chart on the grid. Supported chart types:
 - **Entity relationships (DB)** (tables, fields, PK/FK keys and connections)
 - **Bar gauge** (one horizontal gauge per row with a red→green gradient and a value, e.g. free disk space)
 - **Text** (a markdown message, e.g. a status note like "Last execution at 19:47"; supports [interactive checkboxes](../nodes/chart-output-node.md#interactive-task-lists) when the markdown is static, and [explicit numbered lists](../nodes/chart-output-node.md#numbered-lists) for custom or descending numbering)
-- **HTML** (your own HTML, CSS and JavaScript, filled in like the [HTML output mapper](../nodes/html-output-mapper-node.md) node. It runs in a sandboxed frame without network access or your Heym session; see [HTML widgets](#html-widgets))
+- **HTML** (your own HTML, CSS and JavaScript in a sandboxed frame. Use the [Action output](../nodes/chart-output-node.md#action-output) to send a button click and JSON data to the workflow and update the card with the result.)
 - **HITL** (your pending human reviews. The header shows `1/n pending`. The workflow name opens that run on the canvas. **Approve**, **Request changes**, and **Reject** resolve it. The history icon beside the widget title opens that run in the history dialog on this page. The widget does not use upstream rows, and each person sees their own queue. It can show one workflow's reviews instead, for everyone who can open that workflow; see [HITL widgets](#hitl-widgets))
 
 Besides charts, a **Run a workflow** widget runs one of your workflows from the dashboard: on a dropped file, with its input fields, or with a Run button; see [Run widgets](#run-widgets).
