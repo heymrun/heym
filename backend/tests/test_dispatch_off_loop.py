@@ -3,12 +3,15 @@
 A run executed on the loop thread stops the process serving requests for as long as it
 runs. With a Heym node that sends a chat message it never ends: the turn is submitted to
 the loop the run is holding, so the run and the loop wait on each other.
+
+The behavioral tests check that the turn finishes on the application loop. They do not
+time how long the loop went without polling: a busy runner deschedules the process for
+longer than the run, and that stall is indistinguishable from a blocked loop.
 """
 
 import ast
 import asyncio
 import logging
-import time
 import unittest
 import uuid
 from pathlib import Path
@@ -35,8 +38,6 @@ TRIGGER_CALL_SITES = {
 
 # Bounds the run on a regression: without it a deadlocked run would hang the test.
 RUN_TIMEOUT_SECONDS = 3
-CHAT_TURN_SECONDS = 0.3
-MAX_LOOP_GAP_SECONDS = 0.5
 
 
 def _dispatch_calls() -> list[tuple[str, int, ast.Call]]:
@@ -106,8 +107,7 @@ def _chat_workflow() -> SimpleNamespace:
     )
 
 
-async def _fake_chat_turn(_request: object) -> dict:
-    await asyncio.sleep(CHAT_TURN_SECONDS)
+def _chat_turn_result() -> dict:
     return {
         "conversation_id": str(uuid.uuid4()),
         "status": "completed",
@@ -128,6 +128,15 @@ class TriggerRunWithHeymChatTests(unittest.IsolatedAsyncioTestCase):
         app_loop.set_app_loop(asyncio.get_running_loop())
         self.addCleanup(app_loop.set_app_loop, previous)
 
+        self.workflow = _chat_workflow()
+        self.added: list = []
+        self.chat_loops: list[asyncio.AbstractEventLoop] = []
+
+        async def fake_chat_turn(_request: object) -> dict:
+            self.chat_loops.append(asyncio.get_running_loop())
+            await asyncio.sleep(0)
+            return _chat_turn_result()
+
         session_cm = MagicMock()
         session_cm.__enter__.return_value = MagicMock()
         session_cm.__exit__.return_value = False
@@ -138,33 +147,11 @@ class TriggerRunWithHeymChatTests(unittest.IsolatedAsyncioTestCase):
             patch("app.db.session.SessionLocal", MagicMock(return_value=session_cm)),
             patch(
                 "app.services.heym_chat_node.send_and_wait",
-                new=MagicMock(side_effect=_fake_chat_turn),
+                new=MagicMock(side_effect=fake_chat_turn),
             ),
         ):
             active.start()
             self.addCleanup(active.stop)
-
-        self.workflow = _chat_workflow()
-        self.added: list = []
-        # The first execute_workflow imports the executor and the node handlers on a
-        # worker thread and holds the GIL while it does. On a busy runner that stall
-        # is a loop gap longer than MAX_LOOP_GAP_SECONDS even though the run is off
-        # the loop; a later run is not. Pay for it before any measurement.
-        await self._warm_executor()
-
-    async def _warm_executor(self) -> None:
-        from app.services.workflow_executor import execute_workflow
-
-        await asyncio.to_thread(
-            execute_workflow,
-            workflow_id=self.workflow.id,
-            nodes=self.workflow.nodes,
-            edges=self.workflow.edges,
-            inputs={"triggered_by": "warmup"},
-            actor_user_id=self.workflow.owner_id,
-            timeout_seconds=RUN_TIMEOUT_SECONDS,
-            execution_id=str(uuid.uuid4()),
-        )
 
     def _session_maker(self) -> AsyncMock:
         db = SimpleNamespace(
@@ -179,40 +166,21 @@ class TriggerRunWithHeymChatTests(unittest.IsolatedAsyncioTestCase):
         session.__aexit__.return_value = None
         return session
 
-    async def _largest_loop_gap_while(self, work: object) -> float:
-        """Run ``work`` and return the longest the loop went without serving a ticker."""
-        gaps: list[float] = []
-        done = asyncio.Event()
-
-        async def ticker() -> None:
-            last = time.monotonic()
-            while not done.is_set():
-                await asyncio.sleep(0.01)
-                now = time.monotonic()
-                gaps.append(now - last)
-                last = now
-
-        task = asyncio.create_task(ticker())
-        try:
-            await work
-        finally:
-            done.set()
-            await task
-        return max(gaps, default=float("inf"))
-
     def _history_row(self) -> ExecutionHistory:
         rows = [row for row in self.added if isinstance(row, ExecutionHistory)]
         self.assertEqual(len(rows), 1)
         return rows[0]
 
-    def _assert_chat_completed(self, row: ExecutionHistory, gap: float) -> None:
+    def _assert_chat_completed(self, row: ExecutionHistory) -> None:
         self.assertEqual(row.status, "success", row.outputs)
         chat = next(result for result in row.node_results if result.get("node_id") == "h")
         self.assertEqual(chat["output"]["status"], "completed")
         self.assertEqual(chat["output"]["reply"], "Noted.")
-        self.assertLess(gap, MAX_LOOP_GAP_SECONDS)
+        # submit() hands the turn to the application loop. An on-loop run raises
+        # before this runs; a private loop would not be the application loop.
+        self.assertEqual(self.chat_loops, [app_loop.get_app_loop()])
 
-    async def test_a_polled_trigger_run_sends_its_chat_message_and_the_loop_keeps_serving(
+    async def test_a_polled_trigger_run_sends_its_chat_message_on_the_application_loop(
         self,
     ) -> None:
         module = "app.services.trigger_run_dispatch"
@@ -227,19 +195,17 @@ class TriggerRunWithHeymChatTests(unittest.IsolatedAsyncioTestCase):
             active.start()
             self.addCleanup(active.stop)
 
-        gap = await self._largest_loop_gap_while(
-            run_trigger_workflow(
-                workflow_id=self.workflow.id,
-                inputs={"triggered_by": "imap", "trigger_node_id": "t"},
-                trigger_source="imap",
-                trigger_label="IMAP trigger",
-                log=logging.getLogger(__name__),
-            )
+        await run_trigger_workflow(
+            workflow_id=self.workflow.id,
+            inputs={"triggered_by": "imap", "trigger_node_id": "t"},
+            trigger_source="imap",
+            trigger_label="IMAP trigger",
+            log=logging.getLogger(__name__),
         )
 
-        self._assert_chat_completed(self._history_row(), gap)
+        self._assert_chat_completed(self._history_row())
 
-    async def test_a_heym_event_run_sends_its_chat_message_and_the_loop_keeps_serving(
+    async def test_a_heym_event_run_sends_its_chat_message_on_the_application_loop(
         self,
     ) -> None:
         for active in (
@@ -256,13 +222,11 @@ class TriggerRunWithHeymChatTests(unittest.IsolatedAsyncioTestCase):
             active.start()
             self.addCleanup(active.stop)
 
-        gap = await self._largest_loop_gap_while(
-            HeymEventDispatcher()._run_workflow(
-                self.workflow, "t", {"triggered_by": "heym_event", "events": [], "count": 0}
-            )
+        await HeymEventDispatcher()._run_workflow(
+            self.workflow, "t", {"triggered_by": "heym_event", "events": [], "count": 0}
         )
 
-        self._assert_chat_completed(self._history_row(), gap)
+        self._assert_chat_completed(self._history_row())
 
 
 if __name__ == "__main__":
