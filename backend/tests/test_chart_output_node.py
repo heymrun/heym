@@ -141,3 +141,69 @@ class TestChartOutputNode(unittest.TestCase):
             side_gate.set()
             result.join_allow_downstream()
         self.assertTrue(any(nr["node_id"] == "side" for nr in result.node_results))
+
+
+class TestChartOutputExpressionFields(unittest.TestCase):
+    """The fields the panel offers as expressions are filled in at run time, as html is."""
+
+    def _payload(self, chart: dict, body: dict) -> dict:
+        nodes = [
+            {"id": "src", "type": "textInput", "data": {"label": "cfg"}},
+            {"id": "chart", "type": "chartOutput", "data": {"label": "Chart", **chart}},
+        ]
+        result = execute_workflow(
+            workflow_id=uuid.uuid4(),
+            nodes=nodes,
+            edges=[{"id": "e1", "source": "src", "target": "chart"}],
+            inputs={"headers": {}, "query": {}, "body": body},
+            test_run=True,
+        )
+        return _chart_output_node_result(result)
+
+    def test_fields_resolve_from_the_run(self) -> None:
+        body = {
+            "rows": [{"month": "Jan", "revenue": 120}, {"month": "Feb", "revenue": 150}],
+            "path": "rows",
+            "label": "month",
+            "field": "revenue",
+            "name": "ACME",
+            "site": "https://example.com/acme",
+        }
+        payload = self._payload(
+            {
+                "chartType": "bar",
+                "dataPath": "$cfg.body.path",
+                "labelField": "$cfg.body.label",
+                "valueField": "$cfg.body.field",
+                "title": "Revenue for $cfg.body.name",
+                "url": "$cfg.body.site",
+            },
+            body,
+        )
+        self.assertEqual(payload["title"], "Revenue for ACME")
+        self.assertEqual(payload["labels"], ["Jan", "Feb"])
+        self.assertEqual(payload["series"][0]["data"], [120, 150])
+        self.assertEqual(payload["url"], "https://example.com/acme")
+
+    def test_gauge_range_stays_numeric_and_text_that_is_not_a_reference_stays(self) -> None:
+        payload = self._payload(
+            {
+                "chartType": "gauge",
+                "dataPath": "rows",
+                "valueField": "v",
+                "min": "$cfg.body.low",
+                "max": "$cfg.body.high",
+                "unit": "$PATH",
+                "title": "Costs $5 each",
+            },
+            {"rows": [{"v": 40}], "low": 10, "high": 250},
+        )
+        self.assertEqual((payload["min"], payload["max"]), (10, 250))
+        self.assertEqual(payload["unit"], "$PATH")
+        self.assertEqual(payload["title"], "Costs $5 each")
+
+    def test_text_stays_static(self) -> None:
+        payload = self._payload(
+            {"chartType": "text", "text": "Hello $cfg.body.name"}, {"name": "ACME"}
+        )
+        self.assertEqual(payload["text"], "Hello $cfg.body.name")

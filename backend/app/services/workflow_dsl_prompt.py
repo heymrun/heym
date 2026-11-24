@@ -4123,6 +4123,7 @@ Access the saved file downstream: `$saveAudio.id`, `$saveAudio.download_url`
   - `xField` / `yField`: row keys for the X and Y numeric axes (scatter)
   - `min` / `max`: numeric range for `gauge` (default `0` / `100`)
   - `unit`: optional unit string for `numeric`/`gauge`
+  - Expressions: `title`, `url`, `dataPath`, `labelField`, `valueField`, `xField`, `yField`, `min`, `max`, `unit`, `statusColumn`, `linkColumn` and `linkLabel` accept `$` references, filled in at run time like `html` (e.g. `"title": "Revenue for $start.body.region"`); text that is not a reference, such as `$5`, stays as written. `text` is a static markdown message: it takes no expressions (use `valueField` for a message built upstream)
   - `text`: markdown string for the `text` chart type (a static message; supports markdown). For a
     dynamic message, leave `text` empty and set `valueField` to a row key holding the string.
   - `html`: HTML template for the `html` chart type, filled in exactly like an `htmlOutputMapper`

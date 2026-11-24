@@ -6,6 +6,7 @@ import Button from "@/components/ui/Button.vue";
 import ExpressionInput from "@/components/ui/ExpressionInput.vue";
 import Label from "@/components/ui/Label.vue";
 import Select from "@/components/ui/Select.vue";
+import Textarea from "@/components/ui/Textarea.vue";
 import { getChartOutputExpressionFields } from "@/lib/chartOutputExpressionFields";
 import { CHART_TYPE_EXAMPLES } from "@/lib/chartTypeExamples";
 import { CHART_ACTION_RESULT_OUTGOING_ERROR, CHART_ACTION_RESULT_TYPE_ERROR } from "@/lib/workflowEdges";
@@ -41,13 +42,12 @@ const structuredHint = computed((): string => {
   return "";
 });
 
-const multiLine = new Set<ChartOutputExpressionFieldKey>(["text", "html"]);
+const multiLine = new Set<ChartOutputExpressionFieldKey>(["html"]);
 
 const placeholders: Partial<Record<ChartOutputExpressionFieldKey, string>> = {
   dataPath: "e.g. rows, tasks or graph",
   labelField: "row key used as category label",
   valueField: "row key holding the value",
-  text: "e.g. **Last execution** at `19:47`",
   html: "e.g. <h2>$stats.open</h2><p>open tickets</p>",
   xField: "row key for the X axis (numeric)",
   yField: "row key for the Y axis (numeric)",
@@ -136,6 +136,23 @@ function removeOutgoingResultEdges(): void {
       <ChartOutputLinkFields />
     </template>
     <div
+      v-if="selectedNode.data.chartType === 'text'"
+      class="space-y-2"
+    >
+      <Label for="chart-output-text">Text (markdown)</Label>
+      <Textarea
+        id="chart-output-text"
+        :model-value="String(selectedNode.data.text ?? '')"
+        placeholder="e.g. **Last execution** at `19:47`"
+        :rows="5"
+        @update:model-value="updateNodeData('text', $event)"
+      />
+      <p class="text-xs text-muted-foreground">
+        A static markdown message: expressions are not filled in, and the widget's checkboxes edit it.
+        Leave it empty and set a Value field to show a message from upstream data.
+      </p>
+    </div>
+    <div
       v-for="field in fields"
       :key="field.key"
       class="space-y-2"
@@ -145,7 +162,7 @@ function removeOutgoingResultEdges(): void {
         :ref="(el: unknown) => setChartOutputExpressionInputRef(field.key, el)"
         :model-value="fieldValue(field.key)"
         :placeholder="placeholders[field.key]"
-        :rows="field.key === 'html' ? 8 : field.key === 'text' ? 5 : undefined"
+        :rows="field.key === 'html' ? 8 : undefined"
         :single-line="!multiLine.has(field.key)"
         :nodes="workflowStore.nodes"
         :node-results="workflowStore.nodeResults"
@@ -161,12 +178,6 @@ function removeOutgoingResultEdges(): void {
         @register-field-index="onChartOutputRegisterExpressionFieldIndex"
         @update:model-value="updateNodeData(field.key, $event)"
       />
-      <p
-        v-if="field.key === 'text'"
-        class="text-xs text-muted-foreground"
-      >
-        Markdown is supported. Leave empty and set a Value field to pull the message from upstream data.
-      </p>
       <p
         v-if="field.key === 'html'"
         class="text-xs text-muted-foreground"
