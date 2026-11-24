@@ -20,6 +20,11 @@ def _clean_dashboard_name(value: str) -> str:
 
 DashboardName = Annotated[str, Field(max_length=255), AfterValidator(_clean_dashboard_name)]
 
+# Column sizes of dashboard_widgets: a longer title or a larger TTL reached PostgreSQL and
+# answered 500 instead of 422.
+WIDGET_TITLE_MAX_LENGTH = 255
+CACHE_TTL_MAX_SECONDS = 2_147_483_647
+
 
 class WidgetLayout(BaseModel):
     x: int = 0
@@ -112,11 +117,11 @@ class DashboardTeamShareResponse(BaseModel):
 
 
 class WidgetCreateRequest(BaseModel):
-    title: str = "Untitled"
+    title: str = Field(default="Untitled", max_length=WIDGET_TITLE_MAX_LENGTH)
     description: str | None = None
     chart_type: str = "bar"
     layout: WidgetLayout = Field(default_factory=WidgetLayout)
-    cache_ttl_seconds: int = 300
+    cache_ttl_seconds: int = Field(default=300, le=CACHE_TTL_MAX_SECONDS)
     workflow_id: uuid.UUID | None = Field(
         default=None,
         description="For a fileRun widget: the workflow with a File Upload trigger it runs.",
@@ -154,11 +159,11 @@ class WidgetCreateRequest(BaseModel):
 
 
 class WidgetUpdateRequest(BaseModel):
-    title: str | None = None
+    title: str | None = Field(default=None, max_length=WIDGET_TITLE_MAX_LENGTH)
     description: str | None = None
     chart_type: str | None = None
     layout: WidgetLayout | None = None
-    cache_ttl_seconds: int | None = None
+    cache_ttl_seconds: int | None = Field(default=None, le=CACHE_TTL_MAX_SECONDS)
     link_dashboard_id: uuid.UUID | None = Field(
         default=None,
         description=(

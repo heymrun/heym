@@ -216,6 +216,7 @@ onMounted(() => {
       <input
         v-if="editingTitle"
         v-model="titleDraft"
+        maxlength="255"
         class="w-full min-w-0 bg-transparent text-sm font-medium outline-none"
         autofocus
         @blur="commitTitle"

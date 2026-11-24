@@ -97,7 +97,10 @@ function submit(): void {
         <div class="space-y-3">
           <div class="space-y-1">
             <label class="text-sm font-medium">Title</label>
-            <Input v-model="title" />
+            <Input
+              v-model="title"
+              maxlength="255"
+            />
           </div>
           <div class="space-y-1">
             <label class="text-sm font-medium">Description</label>
