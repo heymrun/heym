@@ -17,6 +17,8 @@ const props = defineProps<{
   canWrite: boolean;
   /** The detail page's record, passed to every widget. */
   record: string | null;
+  /** Widgets mounted now load past the cache (the toolbar Refresh). */
+  forceRefresh?: boolean;
   /** Widgets whose last AI change can be undone. */
   revertibleIds?: readonly string[];
   revertingId?: string | null;
@@ -84,6 +86,7 @@ function emitItemLayout(id: string): void {
         :cloning="cloningWidgetId === item.i"
         :can-write="canWrite"
         :record="record"
+        :force-refresh="forceRefresh"
         :revertible="revertibleIds?.includes(item.i) ?? false"
         :reverting="revertingId === item.i"
         :class="editMode ? 'widget-drag-handle cursor-move' : ''"

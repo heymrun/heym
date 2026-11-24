@@ -33,6 +33,8 @@ const props = defineProps<{
   cloning: boolean;
   canWrite: boolean;
   record?: string | null;
+  /** Load past the cache when mounted (the toolbar Refresh). */
+  forceRefresh?: boolean;
   /** The widget's last AI change, from Chat or a fine-tune, can be undone. */
   revertible?: boolean;
   /** Its revert is on the way. */
@@ -206,7 +208,7 @@ watch(
 );
 
 onMounted(() => {
-  void loadData();
+  void loadData(props.forceRefresh === true);
 });
 </script>
 

@@ -16,7 +16,8 @@ const emit = defineEmits<{
   (e: "select", dashboardId: string): void;
   (e: "create"): void;
   (e: "settings"): void;
-  (e: "refresh"): void;
+  /** `force` is the toolbar Refresh, which bypasses the cache; auto-refresh does not. */
+  (e: "refresh", force: boolean): void;
   (e: "tidy"): void;
   (e: "toggle-edit"): void;
   (e: "ai"): void;
@@ -122,7 +123,7 @@ function onSelect(dashboardId: string | undefined): void {
     <div class="flex flex-wrap items-center gap-1 sm:gap-2">
       <DashboardAutoRefreshControl
         class="shrink-0"
-        @refresh="emit('refresh')"
+        @refresh="emit('refresh', false)"
       />
       <Button
         variant="ghost"
@@ -130,7 +131,7 @@ function onSelect(dashboardId: string | undefined): void {
         class="h-11 w-11 shrink-0 justify-center px-0 sm:h-auto sm:w-auto sm:px-3"
         title="Refresh dashboard"
         aria-label="Refresh dashboard"
-        @click="emit('refresh')"
+        @click="emit('refresh', true)"
       >
         <RefreshCw class="h-4 w-4 sm:mr-1" />
         <span class="hidden sm:inline">Refresh</span>

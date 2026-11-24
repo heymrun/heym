@@ -158,3 +158,131 @@ test("a record outside the page's format never reaches a widget", async ({ page 
     await deleteDashboard(page, detailId);
   }
 });
+
+test("the toolbar Refresh recomputes widgets instead of serving the cache", async ({ page }) => {
+  const stamp = Date.now();
+  const name = `refresh_note_${stamp}`;
+  const created = await page.request.post("/api/global-variables", {
+    data: { name, value: "first value" },
+  });
+  await expectOk(created);
+  const variableId = ((await created.json()) as { id: string }).id;
+  const dashboardId = await createDashboard(page, `Refresh ${stamp}`);
+
+  try {
+    await createWidget(
+      page,
+      dashboardId,
+      "Note",
+      "text",
+      [
+        {
+          id: "note",
+          type: "set",
+          position: { x: 0, y: 0 },
+          data: { label: "note", mappings: [{ key: "text", value: `$global.${name}` }] },
+        },
+        {
+          id: "chart",
+          type: "chartOutput",
+          position: { x: 300, y: 0 },
+          data: { label: "notes", chartType: "text", valueField: "text" },
+        },
+      ],
+      [{ id: "e1", source: "note", target: "chart" }],
+    );
+
+    await page.goto(`/?tab=dashboard&dashboard=${dashboardId}`);
+    await expect(page.getByText("first value")).toBeVisible({ timeout: 20_000 });
+
+    await expectOk(
+      await page.request.patch(`/api/global-variables/${variableId}`, {
+        data: { value: "second value" },
+      }),
+    );
+    // The widget's result is cached for 300 s; the toolbar Refresh bypasses it, as the
+    // widget's own Refresh does.
+    await page.getByRole("button", { name: "Refresh dashboard" }).click();
+    await expect(page.getByText("second value")).toBeVisible({ timeout: 20_000 });
+  } finally {
+    await deleteDashboard(page, dashboardId);
+    await page.request.delete(`/api/global-variables/${variableId}`);
+  }
+});
+
+test("auto-refresh keeps serving the cache, before and after a toolbar Refresh", async ({ page }) => {
+  await page.clock.install();
+  const stamp = Date.now();
+  const name = `auto_note_${stamp}`;
+  const created = await page.request.post("/api/global-variables", {
+    data: { name, value: "first value" },
+  });
+  await expectOk(created);
+  const variableId = ((await created.json()) as { id: string }).id;
+  const setValue = async (value: string): Promise<void> => {
+    await expectOk(
+      await page.request.patch(`/api/global-variables/${variableId}`, { data: { value } }),
+    );
+  };
+  const dashboardId = await createDashboard(page, `Auto refresh ${stamp}`);
+
+  try {
+    const widget = await createWidget(
+      page,
+      dashboardId,
+      "Note",
+      "text",
+      [
+        {
+          id: "note",
+          type: "set",
+          position: { x: 0, y: 0 },
+          data: { label: "note", mappings: [{ key: "text", value: `$global.${name}` }] },
+        },
+        {
+          id: "chart",
+          type: "chartOutput",
+          position: { x: 300, y: 0 },
+          data: { label: "notes", chartType: "text", valueField: "text" },
+        },
+      ],
+      [{ id: "e1", source: "note", target: "chart" }],
+    );
+    const dataLoad = (force: boolean) =>
+      page.waitForResponse(
+        (response) =>
+          response.url().includes(`/api/dashboards/widgets/${widget.id}/data`) &&
+          new URL(response.url()).searchParams.get("force") === String(force),
+      );
+
+    await page.goto(`/?tab=dashboard&dashboard=${dashboardId}`);
+    await expect(page.getByText("first value")).toBeVisible({ timeout: 20_000 });
+
+    // Auto-refresh every 60 s.
+    await page.locator("div.w-28").getByRole("combobox").click();
+    await page.getByRole("option", { name: "60s", exact: true }).click();
+
+    // A timer refresh reloads the widget from its cache (TTL 300 s).
+    await setValue("second value");
+    let load = dataLoad(false);
+    await page.clock.fastForward(61_000);
+    await load;
+    await expect(page.getByText("first value")).toBeVisible();
+
+    // The toolbar Refresh skips the cache.
+    load = dataLoad(true);
+    await page.getByRole("button", { name: "Refresh dashboard" }).click();
+    await load;
+    await expect(page.getByText("second value")).toBeVisible();
+
+    // The next timer refresh is back to the cache, so the forced load did not stick.
+    await setValue("third value");
+    load = dataLoad(false);
+    await page.clock.fastForward(61_000);
+    await load;
+    await expect(page.getByText("second value")).toBeVisible();
+  } finally {
+    await deleteDashboard(page, dashboardId);
+    await page.request.delete(`/api/global-variables/${variableId}`);
+  }
+});
