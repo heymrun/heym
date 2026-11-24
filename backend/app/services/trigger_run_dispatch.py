@@ -95,6 +95,7 @@ async def run_trigger_workflow(
                 cancel_event=cancel_event,
                 timeout_seconds=getattr(fresh_workflow, "workflow_timeout_seconds", None),
                 concurrency_limit=fresh_workflow.concurrency_limit,
+                run_in_thread=True,
             )
         finally:
             clear_execution(execution_id, handle=getattr(cancel_event, "_execution_handle", None))

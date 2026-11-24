@@ -166,6 +166,7 @@ async def _execute_workflow_background(
                     cancel_event=cancel_event,
                     timeout_seconds=getattr(fresh_workflow, "workflow_timeout_seconds", None),
                     concurrency_limit=fresh_workflow.concurrency_limit,
+                    run_in_thread=True,
                 )
             finally:
                 clear_execution(
