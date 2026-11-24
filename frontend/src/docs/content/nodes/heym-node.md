@@ -184,7 +184,7 @@ With **Don't wait for the reply** the reply never reaches the node, and with **D
 
 Without waiting, the output is only `conversation_id` and `status: "started"`.
 
-**Stopping and timeouts.** Stopping the run, or reaching the workflow timeout, while the node waits also stops the chat turn. A turn started with **Don't wait for the reply** keeps running after the workflow ends; stop it from the Chat tab.
+**Stopping and timeouts.** Stopping the run, or reaching the workflow timeout, while the node waits also stops the chat turn. A turn started with **Don't wait for the reply** keeps running after the workflow ends. With chat history saved, stop it from the Chat tab, where its conversation appears. With **Don't save chat history** also on, the conversation is never listed, so the turn runs to its end.
 
 **Loops.** A chat turn can run a workflow that sends a chat message again. Each such hop, and each sub-workflow call, counts toward a limit of 5; the next message fails with `Max Heym Chat call depth exceeded`.
 

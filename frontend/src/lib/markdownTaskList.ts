@@ -39,14 +39,23 @@ export type MarkdownBlock =
   | { type: "html"; content: string }
   | { type: "taskList"; items: TaskListItem[] };
 
+/**
+ * Lines as the server counts them: split on "\n", with a Windows "\r" left off for matching.
+ * The server keeps the "\r" and its regex still matches; `.` in TASK_ITEM_RE does not match
+ * "\r" here, so a CRLF task item was read as plain text and lost its checkbox.
+ */
+function taskLines(markdown: string): string[] {
+  return markdown.split("\n").map((line) => (line.endsWith("\r") ? line.slice(0, -1) : line));
+}
+
 export function hasTaskItems(markdown: string): boolean {
-  const lines = markdown.split("\n");
+  const lines = taskLines(markdown);
   const code = codeFenceLines(lines);
   return lines.some((line, index) => !code.has(index) && TASK_ITEM_RE.test(line));
 }
 
 export function parseMarkdownBlocks(markdown: string): MarkdownBlock[] {
-  const lines = markdown.split("\n");
+  const lines = taskLines(markdown);
   const code = codeFenceLines(lines);
   const blocks: MarkdownBlock[] = [];
   let htmlLines: string[] = [];
@@ -98,7 +107,9 @@ export function toggleTaskItemLocal(markdown: string, lineIndex: number): string
   if (line === undefined) {
     throw new Error(`Invalid line_index: ${lineIndex}`);
   }
-  const match = TASK_ITEM_RE.exec(line);
+  // Keeps a Windows "\r", as the server's toggle does.
+  const cr = line.endsWith("\r") ? "\r" : "";
+  const match = TASK_ITEM_RE.exec(cr ? line.slice(0, -1) : line);
   if (!match) {
     throw new Error(`Line ${lineIndex} is not a task list item`);
   }
@@ -107,7 +118,7 @@ export function toggleTaskItemLocal(markdown: string, lineIndex: number): string
   const check = match[3] ?? " ";
   const rest = match[4] ?? "";
   const newCheck = check.toLowerCase() === "x" ? " " : "x";
-  lines[lineIndex] = `${indent}${bullet} [${newCheck}] ${rest}`;
+  lines[lineIndex] = `${indent}${bullet} [${newCheck}] ${rest}${cr}`;
   return lines.join("\n");
 }
 
@@ -117,7 +128,8 @@ export function updateTaskItemLocal(markdown: string, lineIndex: number, text: s
   if (line === undefined) {
     throw new Error(`Invalid line_index: ${lineIndex}`);
   }
-  const match = TASK_ITEM_RE.exec(line);
+  // The new label replaces the rest of the line, its "\r" included, as on the server.
+  const match = TASK_ITEM_RE.exec(line.endsWith("\r") ? line.slice(0, -1) : line);
   if (!match) {
     throw new Error(`Line ${lineIndex} is not a task list item`);
   }
@@ -134,7 +146,7 @@ export function removeTaskItemLocal(markdown: string, lineIndex: number): string
   if (line === undefined) {
     throw new Error(`Invalid line_index: ${lineIndex}`);
   }
-  if (!TASK_ITEM_RE.test(line)) {
+  if (!TASK_ITEM_RE.test(line.endsWith("\r") ? line.slice(0, -1) : line)) {
     throw new Error(`Line ${lineIndex} is not a task list item`);
   }
   lines.splice(lineIndex, 1);

@@ -5,6 +5,7 @@ import { GridItem, GridLayout } from "grid-layout-plus";
 import DashboardWidgetCard from "@/components/Dashboards/DashboardWidgetCard.vue";
 import type { DashboardPage } from "@/components/Dashboards/dashboardRoute";
 import type { DashboardWidget, WidgetLayout } from "@/types/dashboard";
+import { movedLayouts } from "@/lib/dashboardTidy";
 
 interface GridLayoutItem extends WidgetLayout {
   i: string;
@@ -17,6 +18,8 @@ const props = defineProps<{
   canWrite: boolean;
   /** The detail page's record, passed to every widget. */
   record: string | null;
+  /** Widgets mounted now load past the cache (the toolbar Refresh). */
+  forceRefresh?: boolean;
   /** Widgets whose last AI change can be undone. */
   revertibleIds?: readonly string[];
   revertingId?: string | null;
@@ -30,7 +33,8 @@ const emit = defineEmits<{
   (e: "revert", widgetId: string): void;
   (e: "settings", widget: DashboardWidget): void;
   (e: "title-change", payload: { id: string; title: string }): void;
-  (e: "layout-change", payload: { id: string; layout: WidgetLayout }): void;
+  /** Every widget the grid moved: the one dragged or resized and those it pushed aside. */
+  (e: "layout-change", updates: { id: string; layout: WidgetLayout }[]): void;
   (e: "open-record", dashboardId: string, page: DashboardPage): void;
 }>();
 
@@ -48,10 +52,9 @@ const widgetById = computed((): Record<string, DashboardWidget> => {
   return Object.fromEntries(props.widgets.map((w) => [w.id, w]));
 });
 
-function emitItemLayout(id: string): void {
-  const item = layout.value.find((l) => l.i === id);
-  if (!item) return;
-  emit("layout-change", { id, layout: { x: item.x, y: item.y, w: item.w, h: item.h } });
+function emitMovedLayouts(): void {
+  const updates = movedLayouts(layout.value, props.widgets);
+  if (updates.length > 0) emit("layout-change", updates);
 }
 </script>
 
@@ -74,8 +77,8 @@ function emitItemLayout(id: string): void {
       :h="item.h"
       :i="item.i"
       drag-allow-from=".widget-drag-handle"
-      @moved="emitItemLayout(item.i)"
-      @resized="emitItemLayout(item.i)"
+      @moved="emitMovedLayouts"
+      @resized="emitMovedLayouts"
     >
       <DashboardWidgetCard
         v-if="widgetById[item.i]"
@@ -84,6 +87,7 @@ function emitItemLayout(id: string): void {
         :cloning="cloningWidgetId === item.i"
         :can-write="canWrite"
         :record="record"
+        :force-refresh="forceRefresh"
         :revertible="revertibleIds?.includes(item.i) ?? false"
         :reverting="revertingId === item.i"
         :class="editMode ? 'widget-drag-handle cursor-move' : ''"

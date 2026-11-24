@@ -13,6 +13,7 @@ import DashboardRecordBar from "@/components/Dashboards/DashboardRecordBar.vue";
 import DashboardSettingsDialog from "@/components/Dashboards/DashboardSettingsDialog.vue";
 import WidgetSettingsDialog from "@/components/Dashboards/WidgetSettingsDialog.vue";
 import type { DashboardPage } from "@/components/Dashboards/dashboardRoute";
+import { useDashboardRefresh } from "@/components/Dashboards/useDashboardRefresh";
 import { useDashboardRoute } from "@/components/Dashboards/useDashboardRoute";
 import { useWidgetRevert } from "@/components/Dashboards/useWidgetRevert";
 import Button from "@/components/ui/Button.vue";
@@ -39,7 +40,7 @@ const showCreate = ref(false);
 const showSettings = ref(false);
 const refineWidget = ref<DashboardWidget | null>(null);
 const settingsWidget = ref<DashboardWidget | null>(null);
-const reloadKey = ref(0);
+const { reloadKey, forceRefresh, refreshWidgets } = useDashboardRefresh();
 const cloningWidgetId = ref<string | null>(null);
 const cloneError = ref<string | null>(null);
 
@@ -147,9 +148,9 @@ async function handleTitleChange(payload: { id: string; title: string }): Promis
   );
 }
 
-async function handleLayoutChange(payload: { id: string; layout: WidgetLayout }): Promise<void> {
-  await dashboardApi.updateWidget(payload.id, { layout: payload.layout });
-  dashboardStore.applyLayouts({ [payload.id]: payload.layout });
+async function handleLayoutChange(updates: { id: string; layout: WidgetLayout }[]): Promise<void> {
+  dashboardStore.applyLayouts(Object.fromEntries(updates.map((u) => [u.id, u.layout])));
+  await Promise.all(updates.map((u) => dashboardApi.updateWidget(u.id, { layout: u.layout })));
 }
 
 async function tidyUp(): Promise<void> {
@@ -179,7 +180,7 @@ onMounted(() => {
       @select="openDashboardWithUrl"
       @create="showCreate = true"
       @settings="showSettings = true"
-      @refresh="reloadKey += 1"
+      @refresh="refreshWidgets"
       @tidy="tidyUp"
       @toggle-edit="editMode = !editMode"
       @ai="showAi = true"
@@ -245,6 +246,7 @@ onMounted(() => {
         :cloning-widget-id="cloningWidgetId"
         :can-write="dashboardStore.canWrite"
         :record="page?.record ?? null"
+        :force-refresh="forceRefresh"
         :revertible-ids="revertibleIds"
         :reverting-id="revertingId"
         @open-record="onOpenRecord"
