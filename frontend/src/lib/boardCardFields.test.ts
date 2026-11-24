@@ -3,7 +3,11 @@ import { describe, expect, it } from "vitest";
 import type { BoardCard, CardFields } from "@/types/board";
 import {
   cardBadgeModel,
+  canResaveDescription,
+  canResaveFields,
   cardMatches,
+  descriptionDraftAfterReload,
+  draftFromCard,
   dueState,
   emptyCardFields,
   fieldChanges,
@@ -154,4 +158,48 @@ describe("cardBadgeModel", () => {
 
 it("formats a due date without a time zone shift", () => {
   expect(formatDueDate("2026-01-01")).toBe("Jan 1");
+});
+
+describe("description drafts", () => {
+  const v1 = { content: "Draft v1", edit_version: "v1" };
+
+  it("follows a reload while nobody edits it", () => {
+    // Kept as it was, the stale draft looked edited and "Save description" wrote it back.
+    const next = descriptionDraftAfterReload(draftFromCard(v1), {
+      content: "Teammate: v2",
+      edit_version: "v2",
+    });
+    expect(next).toEqual({ text: "Teammate: v2", baseContent: "Teammate: v2", baseVersion: "v2" });
+  });
+
+  it("keeps an edit and the version it started from across reloads", () => {
+    // A comment, an attachment or run polling reloads the card; the save must still be
+    // checked against the version the draft started from.
+    const editing = { ...draftFromCard(v1), text: "Draft v1 plus my line" };
+    const next = descriptionDraftAfterReload(editing, { content: "Teammate: v2", edit_version: "v2" });
+    expect(next).toEqual(editing);
+  });
+
+  it("can be saved again when only other fields changed", () => {
+    const editing = { ...draftFromCard(v1), text: "Draft v1 plus my line" };
+    expect(canResaveDescription(editing, { content: "Draft v1" })).toBe(true);
+    expect(canResaveDescription(editing, { content: "Teammate: v2" })).toBe(false);
+  });
+});
+
+describe("canResaveFields", () => {
+  const base = card({ priority: null, labels: ["NDA"] });
+
+  it("re-sends changes when only other fields moved", () => {
+    const latest = card({ priority: "high", labels: ["NDA"] });
+    expect(canResaveFields(base, latest, { labels: ["NDA", "Acme"] })).toBe(true);
+  });
+
+  it("does not when a field being saved moved", () => {
+    const latest = card({ priority: "high", labels: ["NDA"] });
+    expect(canResaveFields(base, latest, { priority: "low" })).toBe(false);
+    expect(canResaveFields(base, card({ labels: ["Legal"] }), { labels: ["NDA", "Acme"] })).toBe(
+      false,
+    );
+  });
 });

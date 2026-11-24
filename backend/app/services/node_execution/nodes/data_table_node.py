@@ -27,6 +27,18 @@ def _json_field(
         ) from exc
 
 
+def _row_uuid(row_id: str) -> uuid.UUID | None:
+    """The Row ID as a UUID, or None when it is not one.
+
+    Row ids are UUIDs, so such a Row ID matches no row. Sent as is, PostgreSQL refused the
+    cast and the node failed with the raw SQL error instead of "not found".
+    """
+    try:
+        return uuid.UUID(row_id)
+    except ValueError:
+        return None
+
+
 def _build_data_table_sort_clauses(sort_str: str, columns: list) -> list:
     """Build SQLAlchemy order_by clauses for a DataTable sort string.
 
@@ -267,13 +279,16 @@ def execute(ctx: NodeExecutionContext) -> object:
             row_id = self.evaluate_nonempty_message_template(row_id_template, inputs, node_id)
             if not row_id:
                 raise ValueError("DataTable getById requires a row ID")
+            row_uuid = _row_uuid(row_id)
             row = (
                 db.query(DataTableRow)
                 .filter(
-                    DataTableRow.id == row_id,
+                    DataTableRow.id == row_uuid,
                     DataTableRow.table_id == data_table_id,
                 )
                 .first()
+                if row_uuid
+                else None
             )
             output = {
                 "success": True,
@@ -332,13 +347,16 @@ def execute(ctx: NodeExecutionContext) -> object:
                 self, data_template, inputs, node_id, operation="update", field="row data"
             )
 
+            row_uuid = _row_uuid(row_id)
             row = (
                 db.query(DataTableRow)
                 .filter(
-                    DataTableRow.id == row_id,
+                    DataTableRow.id == row_uuid,
                     DataTableRow.table_id == data_table_id,
                 )
                 .first()
+                if row_uuid
+                else None
             )
             if not row:
                 raise ValueError(f"Row not found: {row_id}")
@@ -370,13 +388,16 @@ def execute(ctx: NodeExecutionContext) -> object:
             if not row_id:
                 raise ValueError("DataTable remove requires a row ID")
 
+            row_uuid = _row_uuid(row_id)
             row = (
                 db.query(DataTableRow)
                 .filter(
-                    DataTableRow.id == row_id,
+                    DataTableRow.id == row_uuid,
                     DataTableRow.table_id == data_table_id,
                 )
                 .first()
+                if row_uuid
+                else None
             )
             if not row:
                 raise ValueError(f"Row not found: {row_id}")

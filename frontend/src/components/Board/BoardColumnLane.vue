@@ -263,6 +263,7 @@ async function emptyColumn(): Promise<void> {
       <input
         v-model="newCardTitle"
         type="text"
+        maxlength="500"
         :disabled="!canAct"
         :placeholder="canAct ? 'Add a card' : 'Set the Agentic Kanban Model in board settings first'"
         :title="canAct ? '' : 'Pick a credential and model above to use the board'"

@@ -93,6 +93,7 @@ async function addColumn(): Promise<void> {
         <input
           v-model="newColumnName"
           type="text"
+          maxlength="255"
           placeholder="Column name"
           class="w-full bg-transparent text-sm outline-none"
           @keydown.enter="addColumn"

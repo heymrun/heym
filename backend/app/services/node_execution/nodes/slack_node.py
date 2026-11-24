@@ -32,7 +32,11 @@ def execute(ctx: NodeExecutionContext) -> object:
         return run_bot_operation(ctx, str(credential_id), config)
 
     message_template = node_data.get("message", "$input.text")
-    message = self.evaluate_message_template(message_template, inputs, node_id)
+    # Blank stays blank: evaluate_message_template renders a blank template as str(inputs),
+    # which posted every input of the run. A Bot credential refuses it the same way.
+    message = self.evaluate_nonempty_message_template(str(message_template), inputs, node_id)
+    if not message.strip():
+        raise ValueError("Slack message is required for this operation")
     from app.services.slack_service import to_slack_mrkdwn
 
     message = to_slack_mrkdwn(str(message))

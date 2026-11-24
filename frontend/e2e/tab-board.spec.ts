@@ -765,6 +765,183 @@ test("refuses to overwrite a card someone else changed", async ({ page }) => {
   await expect(page.locator("#card-field-priority")).toHaveValue("High");
 });
 
+test("refuses to overwrite a description someone else changed", async ({ page }) => {
+  const mapperCredentialId = await setUpMapperCredential(page);
+  const { boardId, cardId } = await createBoardWithCard(page, "Shared description", {
+    mapperCredentialId,
+  });
+  await page.goto(`/?tab=board&board=${boardId}`);
+  await page.getByTestId(`board-card-${cardId}`).click();
+  const editor = page.getByPlaceholder("Describe the job for this card");
+  await editor.fill("My draft");
+
+  // Someone else writes the description while the dialog is open.
+  const other = await page.request.patch(`/api/boards/${boardId}/cards/${cardId}`, {
+    data: { content: "Their version" },
+  });
+  expect(other.ok()).toBeTruthy();
+
+  await page.getByTestId("card-description-save").click();
+  await expect(page.getByText("This card was changed by someone else.")).toBeVisible();
+  await expect(editor).toHaveValue("Their version");
+  const saved = await page.request.get(`/api/boards/${boardId}/cards/${cardId}`);
+  expect((await saved.json()).card.content).toBe("Their version");
+});
+
+test("keeps a description draft when someone else changed another field", async ({ page }) => {
+  const mapperCredentialId = await setUpMapperCredential(page);
+  const { boardId, cardId } = await createBoardWithCard(page, "Draft and priority", {
+    mapperCredentialId,
+  });
+  await page.goto(`/?tab=board&board=${boardId}`);
+  await page.getByTestId(`board-card-${cardId}`).click();
+  const editor = page.getByPlaceholder("Describe the job for this card");
+  await editor.fill("My draft");
+
+  // Someone else changes only the priority while the description is being edited.
+  const other = await page.request.patch(`/api/boards/${boardId}/cards/${cardId}`, {
+    data: { priority: "high" },
+  });
+  expect(other.ok()).toBeTruthy();
+
+  await page.getByTestId("card-description-save").click();
+  await expect(page.getByTestId("card-description-saved")).toBeVisible();
+  await expect(page.getByText("This card was changed by someone else.")).toHaveCount(0);
+  await expect(editor).toHaveValue("My draft");
+  const saved = (await (await page.request.get(`/api/boards/${boardId}/cards/${cardId}`)).json()).card;
+  expect(saved.content).toBe("My draft");
+  expect(saved.fields.priority).toBe("high");
+});
+
+test("refuses a description saved elsewhere after the card reloaded", async ({ page }) => {
+  const mapperCredentialId = await setUpMapperCredential(page);
+  const { boardId, cardId } = await createBoardWithCard(page, "Draft across a reload", {
+    mapperCredentialId,
+  });
+  await page.goto(`/?tab=board&board=${boardId}`);
+  await page.getByTestId(`board-card-${cardId}`).click();
+  const editor = page.getByPlaceholder("Describe the job for this card");
+  await editor.fill("My draft");
+
+  const other = await page.request.patch(`/api/boards/${boardId}/cards/${cardId}`, {
+    data: { content: "Their version" },
+  });
+  expect(other.ok()).toBeTruthy();
+  // A comment reloads the card; the draft is kept and must still be checked against the
+  // version it started from.
+  await page.getByTestId("card-comment-input").fill("Looking at it");
+  await page.getByTestId("card-comment-submit").click();
+  await expect(page.getByText("Looking at it")).toBeVisible();
+  await expect(editor).toHaveValue("My draft");
+
+  await page.getByTestId("card-description-save").click();
+  await expect(page.getByText("This card was changed by someone else.")).toBeVisible();
+  await expect(editor).toHaveValue("Their version");
+  const saved = await page.request.get(`/api/boards/${boardId}/cards/${cardId}`);
+  expect((await saved.json()).card.content).toBe("Their version");
+});
+
+test("keeps someone else's priority when the details form was loaded before it", async ({
+  page,
+}) => {
+  const mapperCredentialId = await setUpMapperCredential(page);
+  const { boardId, cardId } = await createBoardWithCard(page, "Details across a reload", {
+    mapperCredentialId,
+  });
+  await page.goto(`/?tab=board&board=${boardId}`);
+  await page.getByTestId(`board-card-${cardId}`).click();
+  await page.getByTestId("card-field-labels").fill("Acme");
+
+  const other = await page.request.patch(`/api/boards/${boardId}/cards/${cardId}`, {
+    data: { priority: "high" },
+  });
+  expect(other.ok()).toBeTruthy();
+  await page.getByTestId("card-comment-input").fill("Looking at it");
+  await page.getByTestId("card-comment-submit").click();
+  await expect(page.getByText("Looking at it")).toBeVisible();
+
+  // Only the labels are saved; the priority someone else set stays.
+  await page.getByTestId("card-fields-save").click();
+  await expect(page.getByText("Details saved")).toBeVisible();
+  await expect(page.getByText("This card was changed by someone else.")).toHaveCount(0);
+  const saved = (await (await page.request.get(`/api/boards/${boardId}/cards/${cardId}`)).json()).card;
+  expect(saved.fields.labels).toEqual(["Acme"]);
+  expect(saved.fields.priority).toBe("high");
+});
+
+test("refuses details when someone else changed the same field", async ({ page }) => {
+  const mapperCredentialId = await setUpMapperCredential(page);
+  const { boardId, cardId } = await createBoardWithCard(page, "Same field elsewhere", {
+    mapperCredentialId,
+  });
+  await page.goto(`/?tab=board&board=${boardId}`);
+  await page.getByTestId(`board-card-${cardId}`).click();
+  await page.getByTestId("card-field-labels").fill("Acme");
+
+  const other = await page.request.patch(`/api/boards/${boardId}/cards/${cardId}`, {
+    data: { labels: ["Globex"] },
+  });
+  expect(other.ok()).toBeTruthy();
+
+  await page.getByTestId("card-fields-save").click();
+  await expect(page.getByText("This card was changed by someone else.")).toBeVisible();
+  await expect(page.getByTestId("card-field-labels")).toHaveValue("Globex");
+  const saved = (await (await page.request.get(`/api/boards/${boardId}/cards/${cardId}`)).json()).card;
+  expect(saved.fields.labels).toEqual(["Globex"]);
+});
+
+test("saves the description and then the details in the same dialog", async ({ page }) => {
+  const mapperCredentialId = await setUpMapperCredential(page);
+  const { boardId, cardId } = await createBoardWithCard(page, "Both editors", {
+    mapperCredentialId,
+  });
+  await page.goto(`/?tab=board&board=${boardId}`);
+  await page.getByTestId(`board-card-${cardId}`).click();
+  await page.locator("#card-field-priority").click();
+  await page.getByRole("option", { name: "High", exact: true }).click();
+  await page.getByPlaceholder("Describe the job for this card").fill("Scope and dates");
+
+  await page.getByTestId("card-description-save").click();
+  await expect(page.getByTestId("card-description-saved")).toBeVisible();
+  await page.getByTestId("card-fields-save").click();
+  await expect(page.getByText("Details saved")).toBeVisible();
+  await expect(page.getByText("This card was changed by someone else.")).toHaveCount(0);
+  await expect(page.locator("#card-field-priority")).toHaveValue("High");
+  const saved = (await (await page.request.get(`/api/boards/${boardId}/cards/${cardId}`)).json()).card;
+  expect(saved.content).toBe("Scope and dates");
+  expect(saved.fields.priority).toBe("high");
+});
+
+test("keeps description text typed while the save is on the way", async ({ page }) => {
+  const mapperCredentialId = await setUpMapperCredential(page);
+  const { boardId, cardId } = await createBoardWithCard(page, "Typing during a save", {
+    mapperCredentialId,
+  });
+  await page.goto(`/?tab=board&board=${boardId}`);
+  await page.getByTestId(`board-card-${cardId}`).click();
+  const editor = page.getByPlaceholder("Describe the job for this card");
+  await editor.fill("First line");
+
+  // Hold the save until more text has been typed.
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route(`**/api/boards/${boardId}/cards/${cardId}`, async (route) => {
+    if (route.request().method() === "PATCH") await held;
+    await route.continue();
+  });
+  await page.getByTestId("card-description-save").click();
+  await editor.fill("First line and a second one");
+  release();
+  await expect(page.getByTestId("card-description-saved")).toBeVisible();
+
+  await expect(editor).toHaveValue("First line and a second one");
+  await expect(page.getByTestId("card-description-save")).toBeVisible();
+  const saved = await page.request.get(`/api/boards/${boardId}/cards/${cardId}`);
+  expect((await saved.json()).card.content).toBe("First line");
+});
+
 test("runs a column workflow chain to completion when a card enters", async ({ page }) => {
   const wf = await createSetOutputWorkflow(page);
   try {

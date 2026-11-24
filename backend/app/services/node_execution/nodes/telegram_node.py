@@ -23,7 +23,11 @@ def execute(ctx: NodeExecutionContext) -> object:
         # Blank stays blank so the chatId check below fires (evaluate_message_template("")
         # returns str(inputs)).
         chat_id = self.evaluate_nonempty_message_template(str(chat_id_template), inputs, node_id)
-    message = self.evaluate_message_template(message_template, inputs, node_id)
+    # Blank stays blank: evaluate_message_template renders a blank template as str(inputs),
+    # which sent every input of the run to the chat.
+    message = self.evaluate_nonempty_message_template(str(message_template), inputs, node_id)
+    if not message.strip():
+        raise ValueError("Telegram node requires a non-empty message")
 
     credential_id = node_data.get("credentialId")
     if not credential_id:

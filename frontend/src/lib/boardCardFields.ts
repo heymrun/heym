@@ -24,6 +24,60 @@ export const PRIORITY_LABELS: Record<CardPriority, string> = {
 /** Days, counting today, that "due this week" covers. */
 export const DUE_WINDOW_DAYS = 7;
 
+/** Shown when a save is refused because the card changed since it was opened. */
+export const CHANGED_ELSEWHERE = "This card was changed by someone else. Showing the latest version.";
+
+/**
+ * A card description being edited, with the card it started from. Saving sends that card's
+ * `edit_version`, so a description someone else saved in the meantime is refused (409)
+ * instead of overwritten, however often the card reloads while the draft is open.
+ */
+export interface DescriptionDraft {
+  text: string;
+  baseContent: string;
+  baseVersion: string;
+}
+
+export function draftFromCard(card: Pick<BoardCard, "content" | "edit_version">): DescriptionDraft {
+  return { text: card.content, baseContent: card.content, baseVersion: card.edit_version };
+}
+
+/** A draft nobody edited follows the reloaded card; one being edited keeps its base. */
+export function descriptionDraftAfterReload(
+  draft: DescriptionDraft,
+  latest: Pick<BoardCard, "content" | "edit_version">,
+): DescriptionDraft {
+  return draft.text === draft.baseContent ? draftFromCard(latest) : draft;
+}
+
+/**
+ * After a 409: when the description is still the one the draft started from, someone else
+ * changed only other fields, and the draft can be saved over the latest version.
+ */
+export function canResaveDescription(
+  draft: DescriptionDraft,
+  latest: Pick<BoardCard, "content">,
+): boolean {
+  return latest.content === draft.baseContent;
+}
+
+/**
+ * After a 409 on "Save details": when every field being changed still has the value the
+ * form was loaded with, someone else changed only other parts of the card (its description,
+ * another field), and the same changes can be sent again over the latest version.
+ */
+export function canResaveFields(
+  base: Pick<BoardCard, "fields">,
+  latest: Pick<BoardCard, "fields">,
+  changes: CardFieldsPayload,
+): boolean {
+  return (Object.keys(changes) as (keyof CardFieldsPayload)[]).every((key) => {
+    const before = base.fields[key];
+    const now = latest.fields[key];
+    return Array.isArray(before) && Array.isArray(now) ? sameList(before, now) : before === now;
+  });
+}
+
 export type DueState = "overdue" | "today" | "soon" | "later";
 
 export interface CardFilter {

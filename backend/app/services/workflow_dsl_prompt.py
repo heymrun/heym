@@ -1919,7 +1919,7 @@ Notes:
   - `slackOperation` (slack_bot only, default `sendMessage`): `sendMessage` | `sendDirectMessage` | `sendForm` | `sendButtons` | `requestApproval` | `replyInThread` | `updateMessage` | `postOutcome` | `addReaction` | `deleteMessage` | `getMessages` | `findUser` | `downloadFile` | `sendFile`
   - `slackChannel`: `#name`, channel id (`C…`), or a person (user id `U…` or email) to post in their DM; supports expressions such as `$slackEvent.event.channel`
   - `slackUser`: person for `sendDirectMessage` / `findUser`: user id or email
-  - `message`: message text in Slack mrkdwn (`*bold*`, `_italic_`, `<url|text>`), supports expressions. Markdown from a model (`**bold**`, `## Title`, `[text](url)`, `- item`) is converted to mrkdwn before posting, so `$draft.text` can go in as it is.
+  - `message`: message text in Slack mrkdwn (`*bold*`, `_italic_`, `<url|text>`), supports expressions. Markdown from a model (`**bold**`, `## Title`, `[text](url)`, `- item`) is converted to mrkdwn before posting, so `$draft.text` can go in as it is. With a `slack` (webhook) credential a blank message fails the node, as it does for the `slack_bot` operations that need a message.
   - `slackThreadTs`: thread to post in (`replyInThread` requires it; optional for `sendMessage`, `sendForm`, `sendButtons`, `requestApproval`, `postOutcome`, `getMessages`), e.g. `$announce.threadTs`
   - `slackMessageTs`: message to change for `updateMessage`, `addReaction`, `deleteMessage`, e.g. `$announce.ts`
   - `slackBroadcast` (bool, `replyInThread`): also show the reply in the channel
@@ -1961,7 +1961,7 @@ Notes:
 - **Data fields**:
   - `label`: Node identifier
   - `credentialId`: UUID of the Discord credential (webhook URL stored in credential)
-  - `message`: Message text to send, supports expressions (e.g., `$previousNodeLabel.text`)
+  - `message`: Message text to send, supports expressions (e.g., `$previousNodeLabel.text`). Required: a blank message fails the node
   - `username`: Optional webhook display name override, supports expressions
   - `avatarUrl`: Optional webhook avatar URL override, supports expressions
 
@@ -1974,7 +1974,7 @@ Notes:
   - `label`: Node identifier
   - `credentialId`: UUID of the Telegram credential (bot token stored in credential)
   - `chatId`: Target Telegram chat ID or username, supports expressions (e.g., `$telegramEvent.message.chat.id`)
-  - `message`: Message text to send, supports expressions
+  - `message`: Message text to send, supports expressions. Required: a blank message fails the node
 
 **SETUP**: Requires a `telegram` credential with a bot token. Use [BotFather](https://t.me/BotFather) to create a bot and obtain the token.
 

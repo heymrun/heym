@@ -165,6 +165,7 @@ async function removeColumn(): Promise<void> {
         <Input
           v-model="name"
           placeholder="Column name"
+          maxlength="255"
         />
       </div>
       <div>

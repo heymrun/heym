@@ -26,6 +26,13 @@ import { boardApi } from "@/services/api";
 import { useBoardStore } from "@/stores/board";
 import { playSuccessSound } from "@/utils/audio";
 import { useToast } from "@/composables/useToast";
+import {
+  CHANGED_ELSEWHERE,
+  canResaveDescription,
+  descriptionDraftAfterReload,
+  draftFromCard,
+  type DescriptionDraft,
+} from "@/lib/boardCardFields";
 import BoardCardDescription from "./BoardCardDescription.vue";
 import BoardCardFieldsEditor from "./BoardCardFieldsEditor.vue";
 
@@ -39,7 +46,7 @@ const detail = ref<CardDetail | null>(null);
 const loading = ref(false);
 const loadError = ref("");
 const comment = ref("");
-const editedContent = ref("");
+const draft = ref<DescriptionDraft>({ text: "", baseContent: "", baseVersion: "" });
 const savingContent = ref(false);
 const activityScroll = ref<HTMLElement | null>(null);
 const activityAtBottom = ref(false);
@@ -160,7 +167,7 @@ watch(
       const next = await boardApi.getCard(boardId, cardId);
       if (!current) return;
       detail.value = next;
-      editedContent.value = next.card.content;
+      draft.value = draftFromCard(next.card);
       lastStatus.value = next.card.run_status;
       syncPolling();
     } catch (error) {
@@ -183,6 +190,7 @@ async function reload(): Promise<void> {
   const next = await boardApi.getCard(boardId, cardId);
   if (!props.open || cardId !== props.cardId || boardId !== boardStore.activeBoard?.id) return;
   detail.value = next;
+  draft.value = descriptionDraftAfterReload(draft.value, next.card);
   announceStatus(next);
   syncPolling();
 }
@@ -207,17 +215,38 @@ async function onFieldsSaved(card: BoardCard): Promise<void> {
 }
 
 const descriptionDirty = computed<boolean>(
-  () => detail.value !== null && editedContent.value !== detail.value.card.content,
+  () => detail.value !== null && draft.value.text !== draft.value.baseContent,
 );
 const descriptionSaved = ref(false);
+
+function conflictCard(error: unknown): BoardCard | null | undefined {
+  if (!axios.isAxiosError(error) || error.response?.status !== 409) return undefined;
+  return (error.response.data?.detail?.card as BoardCard | undefined) ?? null;
+}
 
 async function saveContent(): Promise<void> {
   if (!detail.value || !boardStore.activeBoard || savingContent.value) return;
   savingContent.value = true;
+  const boardId = boardStore.activeBoard.id;
+  const cardId = detail.value.card.id;
+  const editing = draft.value;
+  const send = (version: string): Promise<BoardCard> =>
+    boardApi.updateCard(boardId, cardId, { content: editing.text, expected_edit_version: version });
   try {
-    await boardApi.updateCard(boardStore.activeBoard.id, detail.value.card.id, {
-      content: editedContent.value,
-    });
+    // The version the draft started from: a description saved elsewhere since then is
+    // refused (409) instead of overwritten, however often the card reloaded meanwhile.
+    let saved: BoardCard;
+    try {
+      saved = await send(editing.baseVersion);
+    } catch (error) {
+      const latest = conflictCard(error);
+      // Only other fields changed (priority, labels, a title): keep the draft and save it
+      // over the latest version.
+      if (!latest || !canResaveDescription(editing, latest)) throw error;
+      saved = await send(latest.edit_version);
+    }
+    // Keep the text as it is now, typing during the request included; only the base moves.
+    draft.value = { ...draft.value, baseContent: saved.content, baseVersion: saved.edit_version };
     await reload();
     // The board card shows the description snippet, so refresh it too.
     await boardStore.refreshActiveBoard();
@@ -225,6 +254,15 @@ async function saveContent(): Promise<void> {
     setTimeout(() => {
       descriptionSaved.value = false;
     }, 2500);
+  } catch (error) {
+    const latest = conflictCard(error);
+    if (latest === undefined) throw error;
+    // The description itself changed: show theirs instead of overwriting it.
+    showToast(CHANGED_ELSEWHERE, "error");
+    if (latest && detail.value) {
+      detail.value = { ...detail.value, card: latest };
+      draft.value = draftFromCard(latest);
+    }
   } finally {
     savingContent.value = false;
   }
@@ -453,7 +491,7 @@ async function openLiveRun(run: CardRun): Promise<void> {
 
       <BoardCardDescription
         :key="detail.card.id"
-        v-model="editedContent"
+        v-model="draft.text"
       >
         <div class="mt-2 flex items-center justify-end gap-2">
           <span

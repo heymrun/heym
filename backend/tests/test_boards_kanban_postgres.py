@@ -103,6 +103,47 @@ class AutoAdvanceTests(KanbanPgCase):
             )
             self.assertTrue(state.auto_advance)
 
+    async def test_a_null_description_clears_it_and_a_missing_one_keeps_it(self) -> None:
+        async with self.session() as db:
+            created = await boards_api.create_board(
+                request=BoardCreateRequest(name="Launch", description="Q3 launch tasks"),
+                db=db,
+                current_user=self.owner,
+            )
+            kept = await boards_api.update_board(
+                board_id=created.id,
+                request=BoardUpdateRequest(auto_advance=False),
+                db=db,
+                current_user=self.owner,
+            )
+            self.assertEqual(kept.description, "Q3 launch tasks")
+            # What the edit dialog sends once the description is deleted.
+            cleared = await boards_api.update_board(
+                board_id=created.id,
+                request=BoardUpdateRequest(name="Launch", description=None, auto_advance=True),
+                db=db,
+                current_user=self.owner,
+            )
+            self.assertIsNone(cleared.description)
+        async with self.session() as db:
+            await boards_api.update_board(
+                board_id=created.id,
+                request=BoardUpdateRequest(description="Q4 launch tasks"),
+                db=db,
+                current_user=self.owner,
+            )
+            answer = await chat_boards.call_board_tool(
+                db,
+                self.owner,
+                "update_board",
+                {"board_id": str(created.id), "description": None},
+                BASE,
+            )
+            self.assertTrue(answer["updated"])
+            self.assertIsNone((await db.get(Board, created.id)).description)
+        # The model learns it from the tool description, as update_board_task says it.
+        self.assertIn("null clears the description", chat_boards._TOOLS["update_board"][1])
+
     async def test_without_auto_advance_a_card_stays_in_an_empty_column(self) -> None:
         board, columns = await make_board(self.engine, self.owner, auto_advance=False)
         card_id = await self.card_in(board.id, columns[0].id, "Contract review")
