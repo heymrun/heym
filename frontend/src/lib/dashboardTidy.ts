@@ -41,3 +41,24 @@ export function tidyLayouts(
   }
   return updates;
 }
+
+/**
+ * The widgets whose grid position differs from the saved one. A drag or a resize moves the
+ * widget the user holds and pushes others aside; saving only the held widget left the others
+ * at their old place, so the saved layouts overlapped and the drag was undone on reload.
+ */
+export function movedLayouts(
+  items: readonly (WidgetLayout & { i: string })[],
+  widgets: readonly Pick<DashboardWidget, "id" | "layout">[],
+): { id: string; layout: WidgetLayout }[] {
+  const saved = new Map(widgets.map((widget) => [widget.id, widget.layout]));
+  return items
+    .filter((item) => {
+      const before = saved.get(item.i);
+      return (
+        before !== undefined &&
+        (before.x !== item.x || before.y !== item.y || before.w !== item.w || before.h !== item.h)
+      );
+    })
+    .map((item) => ({ id: item.i, layout: { x: item.x, y: item.y, w: item.w, h: item.h } }));
+}

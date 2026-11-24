@@ -148,9 +148,9 @@ async function handleTitleChange(payload: { id: string; title: string }): Promis
   );
 }
 
-async function handleLayoutChange(payload: { id: string; layout: WidgetLayout }): Promise<void> {
-  await dashboardApi.updateWidget(payload.id, { layout: payload.layout });
-  dashboardStore.applyLayouts({ [payload.id]: payload.layout });
+async function handleLayoutChange(updates: { id: string; layout: WidgetLayout }[]): Promise<void> {
+  dashboardStore.applyLayouts(Object.fromEntries(updates.map((u) => [u.id, u.layout])));
+  await Promise.all(updates.map((u) => dashboardApi.updateWidget(u.id, { layout: u.layout })));
 }
 
 async function tidyUp(): Promise<void> {

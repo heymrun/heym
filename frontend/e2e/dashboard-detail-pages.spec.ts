@@ -286,3 +286,74 @@ test("auto-refresh keeps serving the cache, before and after a toolbar Refresh",
     await page.request.delete(`/api/global-variables/${variableId}`);
   }
 });
+
+test("dragging a widget saves the widgets it pushed aside", async ({ page }) => {
+  const stamp = Date.now();
+  const dashboardId = await createDashboard(page, `Layout ${stamp}`);
+  const textWidget = async (title: string, layout: Record<string, number>): Promise<string> => {
+    const widget = await createWidget(
+      page,
+      dashboardId,
+      title,
+      "text",
+      [
+        {
+          id: "chart",
+          type: "chartOutput",
+          position: { x: 0, y: 0 },
+          data: { label: "notes", chartType: "text", text: `${title} body` },
+        },
+      ],
+      [],
+    );
+    await expectOk(await page.request.patch(`/api/dashboards/widgets/${widget.id}`, { data: { layout } }));
+    return widget.id;
+  };
+
+  try {
+    const alpha = await textWidget("Alpha", { x: 0, y: 0, w: 6, h: 4 });
+    const beta = await textWidget("Beta", { x: 6, y: 0, w: 6, h: 4 });
+    const gamma = await textWidget("Gamma", { x: 0, y: 4, w: 12, h: 4 });
+
+    await page.goto(`/?tab=dashboard&dashboard=${dashboardId}`);
+    await expect(page.getByText("Gamma body")).toBeVisible({ timeout: 20_000 });
+    await page.getByRole("button", { name: "Edit dashboard" }).click();
+
+    // Drag Gamma above Alpha and Beta; the grid pushes both down.
+    // The three PATCHes go out together: Gamma, and Alpha and Beta that it pushed down.
+    const saves = Promise.all(
+      [alpha, beta, gamma].map((id) =>
+        page.waitForResponse(
+          (response) =>
+            response.request().method() === "PATCH" &&
+            response.url().endsWith(`/api/dashboards/widgets/${id}`),
+        ),
+      ),
+    );
+    const box = (await page.getByText("Gamma body").boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2, box.y - 260, { steps: 12 });
+    await page.mouse.move(box.x + box.width / 2, box.y - 320, { steps: 12 });
+    await page.mouse.up();
+    await saves;
+
+    const state = (await (await page.request.get(`/api/dashboards/${dashboardId}`)).json()) as {
+      widgets: { id: string; layout: { x: number; y: number; w: number; h: number } }[];
+    };
+    const saved = Object.fromEntries(state.widgets.map((w) => [w.id, w.layout]));
+    expect(saved[gamma].y).toBe(0);
+    for (const id of [alpha, beta]) {
+      // Each pushed widget is saved below Gamma, so nothing overlaps after a reload.
+      expect(saved[id].y).toBeGreaterThanOrEqual(saved[gamma].y + saved[gamma].h);
+    }
+
+    await page.reload();
+    await expect(page.getByText("Gamma body")).toBeVisible({ timeout: 20_000 });
+    const gammaTop = (await page.getByText("Gamma body").boundingBox())!.y;
+    const alphaTop = (await page.getByText("Alpha body").boundingBox())!.y;
+    expect(gammaTop).toBeLessThan(alphaTop);
+  } finally {
+    await deleteDashboard(page, dashboardId);
+  }
+});
