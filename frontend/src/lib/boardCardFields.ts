@@ -187,8 +187,11 @@ export function fieldChanges(card: BoardCard, form: CardFieldForm): CardFieldsPa
   }
   if (form.priority !== before.priority) changes.priority = form.priority || null;
   if (form.dueDate !== before.dueDate) changes.due_date = form.dueDate || null;
+  // Compared as shown, not with the card's list: a label set elsewhere can hold a comma
+  // ("Smith, John"), which the comma-separated field would split. It is written back only
+  // when the labels themselves are edited.
   const labels = parseLabels(form.labels);
-  if (!sameList(labels, card.fields.labels)) changes.labels = labels;
+  if (!sameList(labels, parseLabels(before.labels))) changes.labels = labels;
   return changes;
 }
 
