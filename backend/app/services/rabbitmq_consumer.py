@@ -537,6 +537,7 @@ class RabbitMQConsumerManager:
                         cancel_event=cancel_event,
                         timeout_seconds=getattr(workflow, "workflow_timeout_seconds", None),
                         concurrency_limit=workflow.concurrency_limit,
+                        run_in_thread=True,
                     )
                 finally:
                     clear_execution(

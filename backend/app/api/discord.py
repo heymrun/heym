@@ -288,6 +288,7 @@ async def _execute_workflow_background(
                     timeout_seconds=getattr(fresh_workflow, "workflow_timeout_seconds", None),
                     concurrency_limit=fresh_workflow.concurrency_limit,
                     secret_input_paths=(_TOKEN_INPUT_PATH,),
+                    run_in_thread=True,
                 )
             finally:
                 clear_execution(

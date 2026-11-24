@@ -430,8 +430,9 @@ async def dispatch_workflow(
         )
         if cancel_event is not None:
             call_kwargs.setdefault("cancel_event", cancel_event)
-        # Each call site keeps the blocking behaviour it already had: cron
-        # deliberately runs off the event loop, the webhook triggers do not.
+        # Every caller in app/ passes run_in_thread=True. A run on the loop thread
+        # stops this process serving requests, and deadlocks it when a node waits
+        # on the loop (Heym Chat). tests/test_dispatch_off_loop.py enforces it.
         try:
             if run_in_thread:
                 result = await asyncio.to_thread(execute_workflow, **call_kwargs)
