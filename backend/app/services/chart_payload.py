@@ -4,6 +4,7 @@ Shared by the chartOutput executor node and (indirectly) the dashboard data API.
 Keep this side-effect free so it stays trivially unit-testable.
 """
 
+import math
 from typing import Any
 
 from app.services.diagram_payload import build_diagram_data
@@ -119,12 +120,19 @@ def _coerce_number(value: Any) -> Any:
         return value
     if isinstance(value, (int, float)):
         return value
+    if not isinstance(value, str) or value.strip() == "":
+        return value
     try:
-        if isinstance(value, str) and value.strip() != "":
-            return float(value) if "." in value else int(value)
-    except (ValueError, TypeError):
+        return int(value)
+    except ValueError:
         pass
-    return value
+    # A float, with or without a dot: "1e3" is 1000.0 as "2.5e3" is 2500.0. "nan" and "inf"
+    # stay text, as JSON cannot carry them.
+    try:
+        number = float(value)
+    except ValueError:
+        return value
+    return number if math.isfinite(number) else value
 
 
 def build_chart_payload(config: dict, data: Any) -> dict:

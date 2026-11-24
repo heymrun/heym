@@ -142,6 +142,27 @@ class TestBuildChartPayload(unittest.TestCase):
         self.assertEqual(payload["min"], 10)
         self.assertEqual(payload["max"], 50)
 
+    def test_numbers_written_with_an_exponent_are_numbers(self) -> None:
+        # "1e3" has no dot, so it was tried as an int only and stayed text (a gauge showed 0).
+        config = {"chartType": "gauge", "valueField": "v"}
+        for raw, expected in (("1e3", 1000.0), ("-2E2", -200.0), ("2.5e3", 2500.0), ("42", 42)):
+            with self.subTest(raw=raw):
+                value = build_chart_payload(config, [{"v": raw}])["value"]
+                self.assertEqual(value, expected)
+                self.assertIs(type(value), type(expected))
+        series = build_chart_payload(
+            {"chartType": "bar", "labelField": "m", "valueField": "v"},
+            [{"m": "Jan", "v": "1e3"}, {"m": "Feb", "v": "7"}],
+        )["series"][0]["data"]
+        self.assertEqual(series, [1000.0, 7])
+
+    def test_text_that_is_not_a_finite_number_stays_text(self) -> None:
+        config = {"chartType": "gauge", "valueField": "v"}
+        # "1.5e400" overflows to infinity: it answered 500 before, as JSON cannot carry it.
+        for raw in ("nan", "inf", "-Infinity", "1.5e400", "1,234", "abc", " "):
+            with self.subTest(raw=raw):
+                self.assertEqual(build_chart_payload(config, [{"v": raw}])["value"], raw)
+
     def test_scatter_builds_xy_points(self):
         config = {"chartType": "scatter", "xField": "x", "yField": "y"}
         data = {"data": [{"x": 5, "y": 12}, {"x": 8, "y": 20}]}
