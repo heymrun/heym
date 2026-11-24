@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 
+import { contrastRatio } from "./color-contrast";
 import {
   createWorkflow,
   deleteAllBoards,
@@ -95,31 +96,6 @@ async function createBoardWithCard(
   expect(cardResponse.ok()).toBeTruthy();
   const card = (await cardResponse.json()) as { id: string };
   return { boardId: board.id, cardId: card.id, columns };
-}
-
-async function contrastRatio(locator: Locator): Promise<number> {
-  return locator.evaluate((element) => {
-    const rgba = (value: string): number[] => value.match(/[\d.]+/g)!.map(Number);
-    const luminance = (rgb: number[]): number => {
-      const linear = rgb.map((channel) => {
-        const value = channel / 255;
-        return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
-      });
-      return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722;
-    };
-    const backgrounds: number[][] = [];
-    for (let node: Element | null = element; node; node = node.parentElement) {
-      backgrounds.unshift(rgba(getComputedStyle(node).backgroundColor));
-    }
-    const background = backgrounds.reduce((base, color) => {
-      const alpha = color[3] ?? 1;
-      return base.map((channel, index) => color[index] * alpha + channel * (1 - alpha));
-    }, [255, 255, 255]);
-    const foreground = rgba(getComputedStyle(element).color).slice(0, 3);
-    const light = luminance(foreground);
-    const dark = luminance(background);
-    return (Math.max(light, dark) + 0.05) / (Math.min(light, dark) + 0.05);
-  });
 }
 
 async function dispatchSingleTouch(
