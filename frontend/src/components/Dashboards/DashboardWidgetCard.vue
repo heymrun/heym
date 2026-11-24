@@ -58,6 +58,7 @@ const {
   error,
   markdownTaskSaving,
   loadData,
+  runHtmlAction,
   toggleMarkdownTask,
   updateMarkdownTask,
 } = useWidgetData(
@@ -280,6 +281,7 @@ onMounted(() => {
         :payload="displayPayload"
         :markdown-task-saving="markdownTaskSaving"
         :row-link="rowLink"
+        :run-html-action="runHtmlAction"
         @row-open="onRowOpen"
         @markdown-task-toggle="toggleMarkdownTask"
         @markdown-task-update="updateMarkdownTask"

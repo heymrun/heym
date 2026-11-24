@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, watch } from "vue";
 import { Handle, Position, useVueFlow } from "@vue-flow/core";
 import {
   AlertCircle,
@@ -17,6 +17,7 @@ import PluginIcon from "@/components/Panels/PluginIcon.vue";
 import { hasHeymQuestionOutput } from "@/lib/heymOperations";
 import { isTileFillingIcon, nodeIconColorClass, nodeIcons } from "@/lib/nodeIcons";
 import { cn } from "@/lib/utils";
+import { CHART_ACTION_HANDLE } from "@/lib/workflowEdges";
 
 interface Props {
   id: string;
@@ -113,7 +114,7 @@ const previewAttachments = computed((): string => {
   return typeof value === "string" ? value.trim() : "";
 });
 
-const { getEdges } = useVueFlow();
+const { getEdges, updateNodeInternals } = useVueFlow();
 const isToolNode = computed(
   () => getEdges.value.some((e) => e.source === props.id && e.targetHandle === "tool-input"),
 );
@@ -153,8 +154,14 @@ const hasOutput = computed(() => {
     && props.type !== "throwError"
     && props.type !== "jsonOutputMapper"
     && props.type !== "htmlOutputMapper"
+    && props.type !== "chartOutput"
   );
 });
+const hasChartAction = computed(() => props.type === "chartOutput" && props.data.chartType === "html");
+const chartActionConnected = computed(() =>
+  getEdges.value.some((edge) => edge.source === props.id && edge.sourceHandle === CHART_ACTION_HANDLE),
+);
+watch(hasChartAction, () => updateNodeInternals([props.id]), { flush: "post" });
 const hasSecondOutput = computed(() => props.type === "condition");
 const hasLoopOutput = computed(() => props.type === "loop");
 const hasMultiOutput = computed(() => props.type === "switch");
@@ -186,6 +193,7 @@ const hasErrorOutput = computed(() => {
     "output",
     "throwError",
     "telegramTrigger",
+    "chartOutput",
   ];
   if (excludedTypes.includes(props.type)) return false;
   return props.data.onErrorEnabled === true;
@@ -691,6 +699,20 @@ const hasThrowErrorWarning = computed(() => {
           +{{ executeTargetInfo.fieldCount - 4 }}
         </span>
       </div>
+    </div>
+
+    <div
+      v-if="hasChartAction"
+      class="absolute -right-1 top-1/2 flex -translate-y-1/2 items-center"
+    >
+      <span class="mr-1.5 rounded bg-muted/60 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Action</span>
+      <Handle
+        :id="CHART_ACTION_HANDLE"
+        type="source"
+        :position="Position.Right"
+        :connectable="!chartActionConnected"
+        class="!relative !right-0 !top-0 !h-3.5 !w-3.5 !transform-none"
+      />
     </div>
 
     <div

@@ -12,7 +12,7 @@ import { EMAIL_SEND_NODE_LABELS, isEmailSendNodeType } from "@/lib/emailSendNode
 import { getSentryOperationMetadata } from "@/lib/sentryExpressionFields";
 import { replaceNodeLabelRefs } from "@/lib/utils";
 import { workflowRunNodeIds } from "@/lib/workflowRunScope";
-import { normalizeWorkflowEdges } from "@/lib/workflowEdges";
+import { CHART_ACTION_HANDLE, normalizeWorkflowEdges } from "@/lib/workflowEdges";
 import { EncryptedRunLockedError, lastWrittenWorkflowRevision, workflowApi } from "@/services/api";
 import { isRevisionAfter, pickPreferredRevision } from "@/lib/workflowRevision";
 import { useToast } from "@/composables/useToast";
@@ -1009,6 +1009,13 @@ export const useWorkflowStore = defineStore("workflow", () => {
     const sourceNode = nodes.value.find((n) => n.id === edge.source);
     const targetNode = nodes.value.find((n) => n.id === edge.target);
     if (!sourceNode || !targetNode) return true;
+
+    if (edge.sourceHandle === CHART_ACTION_HANDLE) {
+      return sourceNode.type === "chartOutput" && sourceNode.data.chartType === "html" &&
+        edge.source !== edge.target && edge.targetHandle !== "tool-input" &&
+        !edges.value.some((existing) => existing.id !== edge.id &&
+          existing.source === edge.source && existing.sourceHandle === CHART_ACTION_HANDLE);
+    }
 
     const isAgentToAgent = sourceNode.type === "agent" && targetNode.type === "agent";
     if (isAgentToAgent && !isAgentOrchestrator(sourceNode.id)) {

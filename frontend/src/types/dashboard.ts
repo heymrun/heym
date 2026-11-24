@@ -103,6 +103,7 @@ export interface ChartPayload {
   text_interactive?: boolean;
   // Author HTML for the `html` chart type, rendered in a sandboxed frame (htmlWidgetDocument.ts).
   html?: string;
+  html_action_node_id?: string;
   unit?: string;
   decimals?: number;
   min?: number;
@@ -147,6 +148,16 @@ export interface WidgetRunResult {
 
 /** Every widget is a chart, except the file-run widget that runs a workflow on a file. */
 export type WidgetType = ChartPayload["type"] | "fileRun";
+
+export type WidgetActionData = null | boolean | number | string
+  | WidgetActionData[] | { [key: string]: WidgetActionData };
+
+export interface WidgetActionEvent {
+  message: string | null;
+  data: WidgetActionData;
+}
+
+export type RunWidgetAction = (nodeId: string, event: WidgetActionEvent) => Promise<void>;
 
 /** A single-use upload link for one drop on a file-run widget. */
 export interface FileRunSlot {

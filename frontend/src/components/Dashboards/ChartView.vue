@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 
-import type { ChartPayload } from "@/types/dashboard";
+import type { ChartPayload, RunWidgetAction } from "@/types/dashboard";
 import ChartHtml from "@/components/Dashboards/ChartHtml.vue";
 import ChartMarkdown from "@/components/Dashboards/ChartMarkdown.vue";
 import ChartTable from "@/components/Dashboards/ChartTable.vue";
@@ -29,6 +29,7 @@ const props = defineProps<{
   dark: boolean;
   /** Table rows open this detail page when set (see chartTable.ts). */
   rowLink?: TableRowLink | null;
+  runHtmlAction?: RunWidgetAction;
 }>();
 
 const emit = defineEmits<{
@@ -158,6 +159,8 @@ const apexOptions = computed(() =>
       :html="chartPayload.html || ''"
       :dark="dark"
       :title="chartPayload.title"
+      :action-node-id="chartPayload.html_action_node_id"
+      :run-action="runHtmlAction"
     />
 
     <div

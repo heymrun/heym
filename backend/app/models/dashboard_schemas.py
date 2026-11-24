@@ -1,8 +1,9 @@
+import json
 import uuid
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import AfterValidator, BaseModel, Field, StringConstraints
+from pydantic import AfterValidator, BaseModel, Field, JsonValue, StringConstraints, model_validator
 
 from app.models.schemas import HighlightPayloadSchema
 from app.services.diagram_payload import Entity, EntityRelation, GanttTask
@@ -198,6 +199,24 @@ class WidgetRunRequest(BaseModel):
     inputs: dict[str, Annotated[str, StringConstraints(max_length=20_000)]] = Field(
         default_factory=dict, max_length=50
     )
+
+
+class WidgetActionRequest(BaseModel):
+    """The message and JSON data sent from an HTML widget's Action connection."""
+
+    node_id: str = Field(min_length=1, max_length=255)
+    record: str | None = Field(default=None, max_length=128)
+    message: str | None = Field(default=None, min_length=1, max_length=1024)
+    data: JsonValue = None
+
+    @model_validator(mode="after")
+    def validate_event(self) -> "WidgetActionRequest":
+        """Require a message or data, and bound the JSON forwarded to the workflow."""
+        if self.message is None and self.data is None:
+            raise ValueError("Send a message or JSON data")
+        if len(json.dumps(self.data, allow_nan=False)) > 65_536:
+            raise ValueError("Action data exceeds 64 KiB")
+        return self
 
 
 class FileRunSlotRequest(BaseModel):

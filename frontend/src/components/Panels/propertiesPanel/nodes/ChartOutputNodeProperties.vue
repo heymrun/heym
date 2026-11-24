@@ -132,8 +132,8 @@ function fieldValue(key: ChartOutputExpressionFieldKey): string {
         v-if="field.key === 'html'"
         class="text-xs text-muted-foreground"
       >
-        Filled in like the HTML output node. The widget runs it in a sandboxed frame: scripts and styles work,
-        but it has no network access, cookies or Heym session. Leave empty and set a Value field to show HTML built upstream.
+        Runs in a sandboxed frame. Call <code>heym.action(message, data)</code> to send an event through the
+        Action connection. Leave empty and set a Value field to show HTML built upstream.
       </p>
       <p
         v-if="field.key === 'dataPath'"

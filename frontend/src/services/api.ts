@@ -175,6 +175,7 @@ import type {
   RecordFormat,
   WidgetRunResult,
   WidgetCreateRequest,
+  WidgetActionEvent,
   WidgetDataResponse,
   WidgetUpdateRequest,
 } from "@/types/dashboard";
@@ -1948,6 +1949,18 @@ export const dashboardApi = {
   ): Promise<WidgetDataResponse> => {
     const response = await api.get<WidgetDataResponse>(`/dashboards/widgets/${id}/data`, {
       params: record === null ? { force } : { force, record },
+    });
+    return response.data;
+  },
+
+  runHtmlWidgetAction: async (
+    id: string,
+    nodeId: string,
+    event: WidgetActionEvent,
+    record: string | null,
+  ): Promise<WidgetDataResponse> => {
+    const response = await api.post<WidgetDataResponse>(`/dashboards/widgets/${id}/action`, {
+      node_id: nodeId, record, ...event,
     });
     return response.data;
   },

@@ -9,7 +9,10 @@ const PRIMARY_OUTPUT_EXCLUDED_TYPES = new Set<NodeType>([
   "throwError",
   "jsonOutputMapper",
   "htmlOutputMapper",
+  "chartOutput",
 ]);
+
+export const CHART_ACTION_HANDLE = "action";
 
 function stringValue(value: unknown): string | null {
   if (typeof value === "string" && value.trim().length > 0) {
