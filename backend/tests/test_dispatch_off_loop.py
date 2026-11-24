@@ -146,6 +146,25 @@ class TriggerRunWithHeymChatTests(unittest.IsolatedAsyncioTestCase):
 
         self.workflow = _chat_workflow()
         self.added: list = []
+        # The first execute_workflow imports the executor and the node handlers on a
+        # worker thread and holds the GIL while it does. On a busy runner that stall
+        # is a loop gap longer than MAX_LOOP_GAP_SECONDS even though the run is off
+        # the loop; a later run is not. Pay for it before any measurement.
+        await self._warm_executor()
+
+    async def _warm_executor(self) -> None:
+        from app.services.workflow_executor import execute_workflow
+
+        await asyncio.to_thread(
+            execute_workflow,
+            workflow_id=self.workflow.id,
+            nodes=self.workflow.nodes,
+            edges=self.workflow.edges,
+            inputs={"triggered_by": "warmup"},
+            actor_user_id=self.workflow.owner_id,
+            timeout_seconds=RUN_TIMEOUT_SECONDS,
+            execution_id=str(uuid.uuid4()),
+        )
 
     def _session_maker(self) -> AsyncMock:
         db = SimpleNamespace(
