@@ -59,6 +59,10 @@ def execute(ctx: NodeExecutionContext) -> object:
         resolved_subprotocols = []
 
     message_template = node_data.get("websocketMessage", "$input")
+    # Required, as the editor says: evaluate_message_template renders a blank template as
+    # str(inputs), which sent every input of the run to the server.
+    if isinstance(message_template, str) and not message_template.strip():
+        raise ValueError("WebSocket Send node requires a message")
     if isinstance(message_template, str) and _is_single_dollar_expression(message_template.strip()):
         resolved_message = self.resolve_expression(
             message_template.strip(),

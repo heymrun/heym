@@ -126,6 +126,20 @@ def _rerank_with_decision_model(
     return results, _recorded_trace_id()
 
 
+def _required_template(
+    executor, node_data: dict, key: str, inputs: dict, node_id: str, message: str
+) -> str:
+    """Resolve a required text field; a blank one is an error.
+
+    evaluate_message_template renders a blank template as str(inputs), so a blank Document
+    Content or Query embedded every input of the run, request headers included.
+    """
+    template = str(node_data.get(key, "") or "")
+    if not template.strip():
+        raise ValueError(message)
+    return executor.evaluate_message_template(template, inputs, node_id)
+
+
 def execute(ctx: NodeExecutionContext) -> object:
     """Execute the rag node."""
     self = ctx.executor
@@ -167,8 +181,14 @@ def execute(ctx: NodeExecutionContext) -> object:
     service = create_vector_store_service_for_credential(credential_type, vector_store_config)
 
     if operation == "insert":
-        document_content = node_data.get("documentContent", "")
-        document_content = self.evaluate_message_template(document_content, inputs, node_id)
+        document_content = _required_template(
+            self,
+            node_data,
+            "documentContent",
+            inputs,
+            node_id,
+            "RAG insert operation requires document content",
+        )
 
         metadata = _metadata_from_node_data(self, node_data, inputs, node_id)
 
@@ -194,8 +214,14 @@ def execute(ctx: NodeExecutionContext) -> object:
             raise ValueError(f"RAG {operation} operation requires a document ID")
 
         if operation == "upsert":
-            document_content = node_data.get("documentContent", "")
-            document_content = self.evaluate_message_template(document_content, inputs, node_id)
+            document_content = _required_template(
+                self,
+                node_data,
+                "documentContent",
+                inputs,
+                node_id,
+                "RAG upsert operation requires document content",
+            )
             metadata = _metadata_from_node_data(self, node_data, inputs, node_id)
 
             point_id, replaced = service.upsert_by_field(
@@ -226,8 +252,9 @@ def execute(ctx: NodeExecutionContext) -> object:
             }
 
     elif operation == "search":
-        query_text = node_data.get("queryText", "")
-        query_text = self.evaluate_message_template(query_text, inputs, node_id)
+        query_text = _required_template(
+            self, node_data, "queryText", inputs, node_id, "RAG search operation requires a query"
+        )
 
         search_limit = int(node_data.get("searchLimit", 5))
 

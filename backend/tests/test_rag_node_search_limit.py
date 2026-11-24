@@ -29,7 +29,12 @@ def _run(node_data: dict, reranker_credential: MagicMock | None) -> tuple[dict, 
         start_time=0.0,
         node={},
         node_type="rag",
-        node_data={"vectorStoreId": "vs-1", "ragOperation": "search", **node_data},
+        node_data={
+            "vectorStoreId": "vs-1",
+            "ragOperation": "search",
+            "queryText": "q",
+            **node_data,
+        },
         node_label="rag",
     )
     with (

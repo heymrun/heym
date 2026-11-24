@@ -410,7 +410,7 @@ Then an Agent user message such as `"Extract vendor, total and due date from the
   - `websocketUrl`: External `ws://` or `wss://` URL to connect to
   - `websocketHeaders`: Optional JSON object string or full-expression object for handshake headers
   - `websocketSubprotocols`: Optional comma-separated list or JSON array of subprotocols
-  - `websocketMessage`: Message to send. Full expressions preserve objects/arrays which are serialized as JSON.
+  - `websocketMessage`: Message to send. Full expressions preserve objects/arrays which are serialized as JSON. Required: a blank message fails the node.
 - **Output fields available downstream**:
   - `$<label>.status` — `"sent"` on success
   - `$<label>.url` — resolved destination URL
@@ -3186,7 +3186,7 @@ Each row object includes **`rowIndex`**: the 1-based sheet row number (useful fo
   - `clickhouseSort`: Optional `column` or `column ASC|DESC` for `find`.
   - `clickhouseRowId`: Value matched against the `id` column for `getById`.
   - `clickhouseInputMode`: `"raw"` (JSON in `clickhouseData`) | `"selective"` (key/value `clickhouseMappings`) for `insert` / `upsert`.
-  - `clickhouseData`: JSON array of row objects for `insert`/`upsert`, or JSON object of column values for `update` (`null` sets the column to NULL; a non-Nullable column refuses it and the run fails). Supports expressions.
+  - `clickhouseData`: JSON array of row objects for `insert`/`upsert` (a column that no row names is left out of the insert and gets its default; a key another row names but this row leaves out, or a `null`, is NULL, and a non-Nullable column refuses it and the run fails), or JSON object of column values for `update` (`null` sets the column to NULL; a non-Nullable column refuses it and the run fails). Supports expressions.
   - `clickhouseMappings`: Array of `{key, value}` pairs used when `clickhouseInputMode` is `"selective"`; the editor auto-populates keys from discovered ClickHouse columns. Each value is read as its column type (`true`/`false` for Bool, numbers, Decimal, Date and DateTime from ISO text); an empty value is NULL in a Nullable column, and a DateTime without an offset is read in the column's time zone, or UTC when the column names none.
 - **Operation → required fields → output**:
 
@@ -3310,7 +3310,7 @@ accepts at most two nested levels of block children per request.
   - `label`: Node identifier
   - `dataTableId`: UUID of the DataTable to operate on (required)
   - `dataTableOperation`: Operation type - "find" | "getAll" | "count" | "getById" | "insert" | "update" | "remove" | "upsert"
-  - `dataTableFilter`: JSON object for filtering (for find, upsert, count). Boolean columns use unquoted JSON `true` and `false` values (e.g. `{"is_active": true}`). `find` and `count` support comparison operators via object values: {"age": {"$gt": 18}} — supported operators: $eq $ne $gt $gte $lt $lte $contains (case-insensitive substring) $in (array). A plain value still means equals. Numeric comparisons apply to columns typed as "number". You can also filter on row metadata (`id`, `table_id`, `created_at`, `updated_at`, `created_by`, `updated_by`) which are real columns outside the JSON data blob — use a full date for range comparisons (e.g. {"created_at": {"$gt": "2026-06-04"}}) or $contains for partial date text matches. `upsert` uses the same type-aware exact-match {"column_name": "value"} filtering to locate an existing row (comparison operators are not supported for upsert).
+  - `dataTableFilter`: JSON object for filtering (for find, upsert, count). Boolean columns use unquoted JSON `true` and `false` values (e.g. `{"is_active": true}`). `find` and `count` support comparison operators via object values: {"age": {"$gt": 18}} — supported operators: $eq $ne $gt $gte $lt $lte $contains (case-insensitive substring) $in (array). A plain value still means equals. A `null` value matches cells that are null or missing (not "", which a cell cleared in the grid holds: match it with ""), and {"$ne": null} the cells that hold a value. In an `upsert` filter, null finds a row whose cell is null or missing and updates it. Numeric comparisons apply to columns typed as "number". You can also filter on row metadata (`id`, `table_id`, `created_at`, `updated_at`, `created_by`, `updated_by`) which are real columns outside the JSON data blob — use a full date for range comparisons (e.g. {"created_at": {"$gt": "2026-06-04"}}) or $contains for partial date text matches. `upsert` uses the same type-aware exact-match {"column_name": "value"} filtering to locate an existing row (comparison operators are not supported for upsert).
   - `dataTableData`: JSON object mapping column names to values (for insert, update, upsert)
   - `dataTableRowId`: Row UUID for single-row operations (for getById, update, remove)
   - `dataTableLimit`: Maximum rows to return (for find, getAll). Omitted or 0 returns every matching row

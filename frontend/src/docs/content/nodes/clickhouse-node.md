@@ -24,7 +24,7 @@ The **ClickHouse** node runs CRUD, count, and raw SQL operations against an exte
 | `clickhouseSort` | expression | Optional `column` or `column ASC\|DESC` for `find` |
 | `clickhouseRowId` | expression | Value matched against the table's `id` column for `getById` |
 | `clickhouseInputMode` | string | For `insert`/`upsert`: `raw` JSON array mode or `selective` key/value field mode |
-| `clickhouseData` | expression | JSON array of row objects for `insert`/`upsert`, or JSON object of column values for `update` (`null` sets the column to NULL; a non-Nullable column refuses it and the run fails) |
+| `clickhouseData` | expression | JSON array of row objects for `insert`/`upsert` (a column that no row names is left out of the insert and gets its default; a key another row names but this row leaves out, or a `null`, is NULL, and a non-Nullable column refuses it and the run fails), or JSON object of column values for `update` (`null` sets the column to NULL; a non-Nullable column refuses it and the run fails) |
 | `clickhouseMappings` | array | `{key, value}` pairs used when `clickhouseInputMode` is `selective` |
 
 ## Credential Setup
@@ -65,7 +65,7 @@ This compiles to `WHERE status = {…:String} AND tenant_id = {…:Int64}`. A `n
 
 ## Input Modes (insert / upsert)
 
-- **JSON array** (`raw`): provide a JSON array of row objects in `clickhouseData`. Keys that are missing from a given row are inserted as `NULL`. The column set is the union of keys across all rows.
+- **JSON array** (`raw`): provide a JSON array of row objects in `clickhouseData`. The column set is the union of keys across all rows. A column that no row names is left out of the insert and gets its default. A key that another row names but a given row leaves out is inserted as `NULL` in that row, as is a `null` value; a non-Nullable column refuses it and the run fails, with no row of the batch inserted, as with `update`.
 - **Key-value** (`selective`): after you select a credential and table, the editor discovers the table columns and creates one value field per column. One row is inserted per execution; each value supports expressions. Each value is read as its column's type: `true`/`false` for Bool, numbers, Decimal, Date and DateTime from ISO text, and an empty value is NULL in a Nullable column. A DateTime without an offset is read in the column's time zone (`DateTime('Asia/Tokyo')`), or UTC when the column names none.
 
 ## Mutations and ClickHouse Semantics

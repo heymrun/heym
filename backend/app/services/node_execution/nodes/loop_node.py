@@ -26,6 +26,10 @@ def execute(ctx: NodeExecutionContext) -> object:
 
     if node_id not in self.loop_states or not is_loop_back:
         array_expression = node_data.get("arrayExpression", "$input")
+        if not str(array_expression or "").strip():
+            # evaluate_message_template renders a blank template as the inputs' text, so a
+            # cleared field looped once over str(inputs), request headers included.
+            raise ValueError("Loop node requires an array expression")
 
         if array_expression.startswith("$"):
             array_value = self.resolve_expression(
