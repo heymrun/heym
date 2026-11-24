@@ -357,3 +357,51 @@ test("dragging a widget saves the widgets it pushed aside", async ({ page }) => 
     await deleteDashboard(page, dashboardId);
   }
 });
+
+test("a task list with Windows line endings shows and toggles every checkbox", async ({ page }) => {
+  const stamp = Date.now();
+  const dashboardId = await createDashboard(page, `Checklist ${stamp}`);
+
+  try {
+    // Markdown from upstream with CRLF line endings, as a Windows file or some APIs send it.
+    const widget = await createWidget(
+      page,
+      dashboardId,
+      "Checklist",
+      "text",
+      [
+        {
+          id: "note",
+          type: "set",
+          position: { x: 0, y: 0 },
+          data: {
+            label: "note",
+            mappings: [{ key: "text", value: "Release\r\n- [ ] Tag\r\n- [x] Notes\r\n- [ ] Ship" }],
+          },
+        },
+        {
+          id: "chart",
+          type: "chartOutput",
+          position: { x: 300, y: 0 },
+          data: { label: "notes", chartType: "text", valueField: "text" },
+        },
+      ],
+      [{ id: "e1", source: "note", target: "chart" }],
+    );
+
+    await page.goto(`/?tab=dashboard&dashboard=${dashboardId}`);
+    const boxes = page.getByRole("checkbox");
+    await expect(boxes).toHaveCount(3, { timeout: 20_000 });
+    await expect(boxes.nth(0)).toHaveAttribute("aria-checked", "false");
+    await expect(boxes.nth(1)).toHaveAttribute("aria-checked", "true");
+
+    const saved = page.waitForResponse((response) =>
+      response.url().includes(`/api/dashboards/widgets/${widget.id}/markdown-task-toggle`),
+    );
+    await boxes.nth(0).click();
+    expect((await saved).ok()).toBeTruthy();
+    await expect(boxes.nth(0)).toHaveAttribute("aria-checked", "true");
+  } finally {
+    await deleteDashboard(page, dashboardId);
+  }
+});

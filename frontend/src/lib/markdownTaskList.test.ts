@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { codeFenceLines, hasTaskItems, parseMarkdownBlocks } from "./markdownTaskList";
+import {
+  codeFenceLines,
+  hasTaskItems,
+  parseMarkdownBlocks,
+  removeTaskItemLocal,
+  toggleTaskItemLocal,
+  updateTaskItemLocal,
+} from "./markdownTaskList";
 
 describe("markdown task lists and fenced code", () => {
   it("does not treat task syntax in a code block as checkboxes", () => {
@@ -23,5 +30,38 @@ describe("markdown task lists and fenced code", () => {
 
   it("still finds plain task items", () => {
     expect(hasTaskItems("- [ ] todo\n* [x] done")).toBe(true);
+  });
+});
+
+describe("Windows line endings", () => {
+  // The server (`markdown_task_list.py`) reads these lines as task items and edits them by
+  // index; the expected strings below are what its toggle, update and remove return.
+  const crlf = "Release\r\n- [ ] Tag\r\n- [x] Notes";
+
+  it("finds task items on CRLF lines at the server's line indexes", () => {
+    expect(hasTaskItems("- [ ] Tag\r\n- [x] Notes")).toBe(true);
+    const items = parseMarkdownBlocks(crlf).flatMap((block) =>
+      block.type === "taskList" ? block.items : [],
+    );
+    expect(items.map((item) => [item.lineIndex, item.text, item.checked])).toEqual([
+      [1, "Tag", false],
+      [2, "Notes", true],
+    ]);
+  });
+
+  it("keeps a task line inside a CRLF code fence as text", () => {
+    // FENCE_RE did not match a fence line ending in "\r"; matching without it keeps the
+    // fenced line out of the checkboxes.
+    const fenced = "```\r\n- [ ] not a task\r\n```\r\n- [ ] Ship";
+    const items = parseMarkdownBlocks(fenced).flatMap((block) =>
+      block.type === "taskList" ? block.items : [],
+    );
+    expect(items.map((item) => [item.lineIndex, item.text])).toEqual([[3, "Ship"]]);
+  });
+
+  it("edits them as the server does", () => {
+    expect(toggleTaskItemLocal(crlf, 1)).toBe("Release\r\n- [x] Tag\r\n- [x] Notes");
+    expect(updateTaskItemLocal(crlf, 1, "Tag v2")).toBe("Release\r\n- [ ] Tag v2\n- [x] Notes");
+    expect(removeTaskItemLocal(crlf, 1)).toBe("Release\r\n- [x] Notes");
   });
 });
