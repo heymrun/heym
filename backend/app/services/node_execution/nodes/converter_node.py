@@ -107,7 +107,7 @@ def _csv_to_json(text: object, delimiter: str, has_header: bool, trim_values: bo
     text = text.lstrip("\ufeff")
     if text.strip() == "":
         return []
-    reader = csv.reader(io.StringIO(text), delimiter=delimiter)
+    reader = csv.reader(io.StringIO(text, newline=""), delimiter=delimiter)
     # A blank line is no row (csv.DictReader skips it too); padding it would add an empty
     # record, and a blank first line would become the header.
     rows = [row for row in reader if row]
