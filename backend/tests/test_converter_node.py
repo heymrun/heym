@@ -82,6 +82,13 @@ class CsvToJsonTests(unittest.TestCase):
 
         self.assertEqual(output["result"], [{"name": "Ada", "note": "line1\nline2"}])
 
+    def test_crlf_is_preserved_in_quoted_field(self) -> None:
+        output = converter_node.execute(
+            _ctx({"conversion": "csvToJson"}, 'name,note\r\nAda,"line1\r\nline2"\r\n')
+        )
+
+        self.assertEqual(output["result"], [{"name": "Ada", "note": "line1\r\nline2"}])
+
     def test_carriage_return_separates_records_and_is_preserved_in_quotes(self) -> None:
         output = converter_node.execute(
             _ctx({"conversion": "csvToJson"}, 'name,note\rAda,"line1\rline2"\rGrace,hi\r')
