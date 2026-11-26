@@ -40,11 +40,17 @@ When you only have example/sample data (no real source), produce these rows with
 | `xField` / `yField` | string | Row keys for the X and Y numeric axes (scatter) |
 | `min` / `max` | number | Numeric range for `gauge` (default `0` / `100`) |
 | `unit` | string | Optional unit shown next to a `numeric` or `gauge` value |
-| `text` | string | Markdown message for the `text` chart type. Leave empty and set `valueField` to render a dynamic message pulled from upstream data. |
+| `text` | string | Static markdown message for the `text` chart type (no expressions). Leave empty and set `valueField` to render a dynamic message pulled from upstream data. |
 | `html` | string | HTML template for the `html` chart type. `$nodeLabel.field` expressions are filled in as in the [HTML output mapper](./html-output-mapper-node.md). Leave empty and set `valueField` to show HTML produced upstream. |
 | `title` | string | Optional chart title |
 | `hitlWorkflowId` | string | `hitl` only. Show only the reviews of this workflow. Left empty, the widget shows every review. |
 | `hitlNodeId` | string | `hitl` only. Narrow `hitlWorkflowId` to one step: an Agent with human review, or a Slack approval, buttons or form step. |
+
+### Expressions in the settings
+
+`title`, `url`, `dataPath`, `labelField`, `valueField`, `xField`, `yField`, `min`, `max`, `unit`, `statusColumn`, `linkColumn` and `linkLabel` accept `$` references, filled in when the widget runs, as `html` is. For example `"title": "Orders for $page.record"` on a detail page, or a gauge `max` of `$stats.target` from an upstream Set node named `stats`, which is still read as a number. Text that is not a reference, such as `$5` or `$PATH`, stays as written.
+
+`text` is the exception: it is a static markdown message and takes no expressions, because a text widget's checkboxes edit it. To show a message built upstream, leave `text` empty and set `valueField`.
 
 ## Chart types
 

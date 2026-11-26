@@ -1,7 +1,6 @@
 import type { NodeData } from "@/types/workflow";
 
 export type ChartOutputExpressionFieldKey =
-  | "text"
   | "html"
   | "valueField"
   | "dataPath"
@@ -29,8 +28,10 @@ export function getChartOutputExpressionFields(
   const type = chartType || "bar";
   const fields: ChartOutputExpressionField[] = [];
 
+  // `text` is a static markdown message, edited in its own field: the run does not resolve
+  // expressions in it, and a text widget's checkboxes edit it.
   if (type === "text") {
-    fields.push({ key: "text", label: "Text (markdown)" }, { key: "valueField", label: "Value field" });
+    fields.push({ key: "valueField", label: "Value field" });
   }
 
   if (type === "html") {

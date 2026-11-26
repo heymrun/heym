@@ -29,7 +29,10 @@ describe("getChartOutputExpressionFields", () => {
 
   it("keeps the fields of the other chart types", () => {
     expect(keys(undefined)).toEqual(["dataPath", "labelField", "valueField", "title", "url"]);
-    expect(keys("text")).toEqual(["text", "valueField", "dataPath", "title", "url"]);
     expect(keys("gauge")).toEqual(["dataPath", "valueField", "min", "max", "unit", "title", "url"]);
+  });
+
+  it("leaves the static text of a text widget out of the expression fields", () => {
+    expect(keys("text")).toEqual(["valueField", "dataPath", "title", "url"]);
   });
 });

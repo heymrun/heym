@@ -5,6 +5,7 @@ import uuid
 from unittest.mock import patch
 
 from app.services.node_execution import registry as node_registry
+from app.services.page_params import page_inputs
 from app.services.workflow_executor import execute_workflow
 
 
@@ -141,3 +142,92 @@ class TestChartOutputNode(unittest.TestCase):
             side_gate.set()
             result.join_allow_downstream()
         self.assertTrue(any(nr["node_id"] == "side" for nr in result.node_results))
+
+
+class TestChartOutputExpressionFields(unittest.TestCase):
+    """The fields the panel offers as expressions are filled in at run time, as html is.
+
+    The runs are shaped like a widget's: no trigger, an upstream Set node, and the detail
+    page's record as ``$page.record``.
+    """
+
+    def _payload(self, chart: dict, values: dict, record: str | None = None) -> dict:
+        nodes = [
+            {
+                "id": "src",
+                "type": "set",
+                "data": {
+                    "label": "cfg",
+                    "mappings": [{"key": key, "value": value} for key, value in values.items()],
+                },
+            },
+            {"id": "chart", "type": "chartOutput", "data": {"label": "Chart", **chart}},
+        ]
+        result = execute_workflow(
+            workflow_id=uuid.uuid4(),
+            nodes=nodes,
+            edges=[{"id": "e1", "source": "src", "target": "chart"}],
+            inputs=page_inputs(record),
+            test_run=True,
+        )
+        return _chart_output_node_result(result)
+
+    def test_fields_resolve_from_the_run(self) -> None:
+        values = {
+            "rows": '$array(dict(month="Jan", revenue=120), dict(month="Feb", revenue=150))',
+            "path": "rows",
+            "label": "month",
+            "field": "revenue",
+            "site": "https://example.com/acme",
+        }
+        payload = self._payload(
+            {
+                "chartType": "bar",
+                "dataPath": "$cfg.path",
+                "labelField": "$cfg.label",
+                "valueField": "$cfg.field",
+                "title": "Orders for $page.record",
+                "url": "$cfg.site",
+            },
+            values,
+            record="ACME-1",
+        )
+        self.assertEqual(payload["title"], "Orders for ACME-1")
+        self.assertEqual(payload["labels"], ["Jan", "Feb"])
+        self.assertEqual(payload["series"][0]["data"], [120, 150])
+        self.assertEqual(payload["url"], "https://example.com/acme")
+
+    def test_gauge_range_stays_numeric(self) -> None:
+        payload = self._payload(
+            {
+                "chartType": "gauge",
+                "dataPath": "$cfg.path",
+                "valueField": "v",
+                "min": "$cfg.low",
+                "max": "$cfg.high",
+            },
+            {"rows": "$array(dict(v=40))", "path": "rows", "low": "10", "high": "250"},
+        )
+        self.assertEqual((payload["min"], payload["max"]), (10, 250))
+
+    def test_text_that_is_not_a_reference_stays(self) -> None:
+        for unit in ("$", "US$", "$PATH"):
+            with self.subTest(unit=unit):
+                payload = self._payload(
+                    {
+                        "chartType": "numeric",
+                        "dataPath": "rows",
+                        "valueField": "v",
+                        "unit": unit,
+                        "title": "Costs $5 each",
+                    },
+                    {"rows": "$array(dict(v=40))"},
+                )
+                self.assertEqual(payload["unit"], unit)
+                self.assertEqual(payload["title"], "Costs $5 each")
+
+    def test_text_stays_static(self) -> None:
+        payload = self._payload(
+            {"chartType": "text", "text": "Hello $page.record"}, {}, record="ACME-1"
+        )
+        self.assertEqual(payload["text"], "Hello $page.record")
