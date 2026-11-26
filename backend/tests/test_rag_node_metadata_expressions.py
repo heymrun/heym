@@ -3,8 +3,8 @@
 import unittest
 
 from app.services.node_execution.nodes.rag_node import (
+    _json_object_field,
     _metadata_from_node_data,
-    _resolve_filter_expressions,
 )
 from app.services.workflow_executor import WorkflowExecutor
 
@@ -72,9 +72,32 @@ class TestRagMetadataExpressions(unittest.TestCase):
             {"source": "crm", "n": 3, "ok": True, "none": None},
         )
 
-    def test_empty_or_invalid_metadata_stays_empty(self) -> None:
-        self.assertEqual(self._resolve(""), {})
-        self.assertEqual(self._resolve("{"), {})
+    def test_blank_empty_or_null_metadata_stays_empty(self) -> None:
+        for blank in ("", "  ", "{}", "null"):
+            with self.subTest(value=blank):
+                self.assertEqual(self._resolve(blank), {})
+
+    def test_metadata_that_is_not_a_json_object_fails(self) -> None:
+        # It was stored as {}, so a search filtered on that metadata never found it.
+        with self.assertRaisesRegex(ValueError, "documentMetadata is not valid JSON"):
+            self._resolve('{"source": "crm",}')
+        for value in ('["crm"]', "3", '"crm"', "$start.count", "$start.tags"):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, "documentMetadata must be a JSON object"):
+                    self._resolve(value)
+
+    def test_one_whole_expression_is_resolved_once_and_used_as_it_is(self) -> None:
+        self.inputs["start"]["meta"] = {"source": "crm", "n": 5, "note": "$start.url"}
+        self.inputs["start"]["meta_text"] = '{"source": "crm", "n": 5}'
+        self.assertEqual(
+            self._resolve("$start.meta"), {"source": "crm", "n": 5, "note": "$start.url"}
+        )
+        resolved = self._resolve("$start.meta_text")
+        self.assertEqual(resolved, {"source": "crm", "n": 5})
+        self.assertIs(type(resolved["n"]), int)
+        with self.assertRaisesRegex(ValueError, "documentMetadata is not valid JSON"):
+            self.inputs["start"]["bad"] = "{not json"
+            self._resolve("$start.bad")
 
 
 class TestRagSearchFilterExpressions(unittest.TestCase):
@@ -91,7 +114,7 @@ class TestRagSearchFilterExpressions(unittest.TestCase):
         }
 
     def _resolve(self, parsed: object) -> dict | None:
-        return _resolve_filter_expressions(self.executor, parsed, self.inputs, "rag_1")
+        return _json_object_field(self.executor, parsed, self.inputs, "rag_1", "metadataFilters")
 
     def test_resolves_a_plain_reference(self) -> None:
         self.assertEqual(
@@ -115,8 +138,15 @@ class TestRagSearchFilterExpressions(unittest.TestCase):
     def test_an_empty_filter_stays_empty(self) -> None:
         self.assertEqual(self._resolve({}), {})
 
-    def test_a_non_object_filter_becomes_none(self) -> None:
-        self.assertIsNone(self._resolve(["faq"]))
+    def test_a_non_object_filter_fails(self) -> None:
+        with self.assertRaisesRegex(ValueError, "metadataFilters must be a JSON object"):
+            self._resolve(["faq"])
+
+    def test_a_whole_expression_filter_comes_from_the_run(self) -> None:
+        self.inputs["start"]["filter"] = {"count": 7, "label": "$start.url"}
+        resolved = self._resolve("$start.filter")
+        self.assertEqual(resolved, {"count": 7, "label": "$start.url"})
+        self.assertIs(type(resolved["count"]), int)
 
 
 class TestRagMetadataWorkflowSource(unittest.TestCase):

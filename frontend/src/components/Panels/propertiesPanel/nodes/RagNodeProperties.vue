@@ -193,7 +193,8 @@ const {
         />
         <p class="text-xs text-muted-foreground">
           JSON metadata to store with the document. Values support expressions, so
-          <code>{ "url": "$start.url" }</code> stores the resolved value.
+          <code>{ "url": "$start.url" }</code> stores the resolved value. The whole field can
+          also be one expression that gives an object, such as <code>$start.meta</code>.
         </p>
       </div>
     </template>
@@ -263,7 +264,8 @@ const {
         />
         <p class="text-xs text-muted-foreground">
           Filter results by metadata (exact match). Values support expressions, so
-          <code>{ "url": "$start.url" }</code> filters on the resolved value.
+          <code>{ "url": "$start.url" }</code> filters on the resolved value. The whole field
+          can also be one expression that gives an object, such as <code>$start.filter</code>.
         </p>
       </div>
 

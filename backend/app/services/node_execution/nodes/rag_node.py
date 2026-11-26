@@ -5,16 +5,6 @@ import json
 from app.services.node_execution.base import NodeExecutionContext
 
 
-def _parse_metadata(raw: object) -> dict:
-    """Metadata JSON as configured on the node, tolerating an empty or invalid value."""
-    try:
-        if isinstance(raw, str):
-            return json.loads(raw) if raw.strip() else {}
-        return dict(raw) if raw else {}
-    except Exception:
-        return {}
-
-
 def _resolve_metadata_expressions(executor, value: object, inputs: dict, node_id: str) -> object:
     """Resolve ``$`` expressions in every string inside parsed metadata JSON.
 
@@ -37,18 +27,49 @@ def _resolve_metadata_expressions(executor, value: object, inputs: dict, node_id
     return executor._resolve_value_with_dollar_refs(value, inputs, node_id)
 
 
-def _resolve_filter_expressions(
-    executor, parsed: object, inputs: dict, node_id: str
+def _json_object_field(
+    executor, raw: object, inputs: dict, node_id: str, field: str
 ) -> dict | None:
-    """Search filter JSON with ``$`` expressions resolved, using the document metadata rules.
+    """A JSON object field of the node (``documentMetadata``, ``metadataFilters``), resolved.
 
-    Sharing the resolver keeps a whole-string expression's type, so a numeric filter value
-    stays a number and still matches the number stored by an insert.
+    - One whole expression such as ``$start.meta`` is resolved once: an object, or text
+      holding a JSON object, is used as it is. Its values come from the run, so ``$`` inside
+      them is not resolved again, and numbers stay numbers.
+    - Written JSON is parsed first, then the ``$`` expressions in its values are resolved.
+    - Blank and ``null`` give ``None``. Anything else fails the node: text that is not JSON,
+      or a value or an expression result that is not an object. Ignoring it would store a
+      document without its metadata, or search without the filter.
     """
-    resolved = executor._unwrap_value(
-        _resolve_metadata_expressions(executor, parsed, inputs, node_id)
-    )
-    return resolved if isinstance(resolved, dict) else None
+    if raw is None:
+        return None
+    if isinstance(raw, dict):
+        return executor._unwrap_value(_resolve_metadata_expressions(executor, raw, inputs, node_id))
+    if not isinstance(raw, str):
+        raise ValueError(f"{field} must be a JSON object")
+    text = raw.strip()
+    if not text:
+        return None
+    if text.startswith("$") and executor._is_single_dollar_expression(text):
+        value = executor._unwrap_value(
+            executor.resolve_expression(text, inputs, node_id, preserve_type=True)
+        )
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"{field} is not valid JSON: {exc}") from exc
+        if not isinstance(value, dict):
+            raise ValueError(f"{field} must be a JSON object")
+        return value
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{field} is not valid JSON: {exc}") from exc
+    if parsed is None:
+        return None
+    if not isinstance(parsed, dict):
+        raise ValueError(f"{field} must be a JSON object")
+    return executor._unwrap_value(_resolve_metadata_expressions(executor, parsed, inputs, node_id))
 
 
 def _with_workflow_source(executor, metadata: dict) -> dict:
@@ -65,13 +86,11 @@ def _with_workflow_source(executor, metadata: dict) -> dict:
 
 
 def _metadata_from_node_data(executor, node_data: dict, inputs: dict, node_id: str) -> dict:
-    """Node metadata JSON with expressions resolved and Dot* values made serializable."""
-    metadata = _parse_metadata(node_data.get("documentMetadata", "{}"))
-    resolved = _resolve_metadata_expressions(executor, metadata, inputs, node_id)
-    unwrapped = executor._unwrap_value(resolved)
-    if not isinstance(unwrapped, dict):
-        return {}
-    return _with_workflow_source(executor, unwrapped)
+    """The document's metadata, resolved by `_json_object_field`, with the workflow source."""
+    metadata = _json_object_field(
+        executor, node_data.get("documentMetadata", "{}"), inputs, node_id, "documentMetadata"
+    )
+    return _with_workflow_source(executor, metadata or {})
 
 
 def _rerank_with_decision_model(
@@ -258,21 +277,11 @@ def execute(ctx: NodeExecutionContext) -> object:
 
         search_limit = int(node_data.get("searchLimit", 5))
 
-        metadata_filter_json = node_data.get("metadataFilters", "{}")
-        if isinstance(metadata_filter_json, str):
-            filter_text = metadata_filter_json.strip()
-            try:
-                metadata_filter = json.loads(filter_text) if filter_text else None
-            except json.JSONDecodeError as exc:
-                # Searching without the filter would return documents it is there to exclude.
-                raise ValueError(f"metadataFilters is not valid JSON: {exc}") from exc
-        else:
-            metadata_filter = metadata_filter_json or None
-        if metadata_filter is not None and not isinstance(metadata_filter, dict):
-            # A list or a value would search the whole collection as well.
-            raise ValueError("metadataFilters must be a JSON object")
-        if metadata_filter is not None:
-            metadata_filter = _resolve_filter_expressions(self, metadata_filter, inputs, node_id)
+        # The same rules as the document metadata: a filter that is not an object fails, as
+        # searching without it would return documents it is there to exclude.
+        metadata_filter = _json_object_field(
+            self, node_data.get("metadataFilters", "{}"), inputs, node_id, "metadataFilters"
+        )
 
         enable_reranker = node_data.get("enableReranker", False)
         reranker_credential_id = node_data.get("rerankerCredentialId")
