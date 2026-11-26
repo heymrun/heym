@@ -5,6 +5,7 @@ import uuid
 from unittest.mock import patch
 
 from app.services.node_execution import registry as node_registry
+from app.services.page_params import page_inputs
 from app.services.workflow_executor import execute_workflow
 
 
@@ -144,66 +145,89 @@ class TestChartOutputNode(unittest.TestCase):
 
 
 class TestChartOutputExpressionFields(unittest.TestCase):
-    """The fields the panel offers as expressions are filled in at run time, as html is."""
+    """The fields the panel offers as expressions are filled in at run time, as html is.
 
-    def _payload(self, chart: dict, body: dict) -> dict:
+    The runs are shaped like a widget's: no trigger, an upstream Set node, and the detail
+    page's record as ``$page.record``.
+    """
+
+    def _payload(self, chart: dict, values: dict, record: str | None = None) -> dict:
         nodes = [
-            {"id": "src", "type": "textInput", "data": {"label": "cfg"}},
+            {
+                "id": "src",
+                "type": "set",
+                "data": {
+                    "label": "cfg",
+                    "mappings": [{"key": key, "value": value} for key, value in values.items()],
+                },
+            },
             {"id": "chart", "type": "chartOutput", "data": {"label": "Chart", **chart}},
         ]
         result = execute_workflow(
             workflow_id=uuid.uuid4(),
             nodes=nodes,
             edges=[{"id": "e1", "source": "src", "target": "chart"}],
-            inputs={"headers": {}, "query": {}, "body": body},
+            inputs=page_inputs(record),
             test_run=True,
         )
         return _chart_output_node_result(result)
 
     def test_fields_resolve_from_the_run(self) -> None:
-        body = {
-            "rows": [{"month": "Jan", "revenue": 120}, {"month": "Feb", "revenue": 150}],
+        values = {
+            "rows": '$array(dict(month="Jan", revenue=120), dict(month="Feb", revenue=150))',
             "path": "rows",
             "label": "month",
             "field": "revenue",
-            "name": "ACME",
             "site": "https://example.com/acme",
         }
         payload = self._payload(
             {
                 "chartType": "bar",
-                "dataPath": "$cfg.body.path",
-                "labelField": "$cfg.body.label",
-                "valueField": "$cfg.body.field",
-                "title": "Revenue for $cfg.body.name",
-                "url": "$cfg.body.site",
+                "dataPath": "$cfg.path",
+                "labelField": "$cfg.label",
+                "valueField": "$cfg.field",
+                "title": "Orders for $page.record",
+                "url": "$cfg.site",
             },
-            body,
+            values,
+            record="ACME-1",
         )
-        self.assertEqual(payload["title"], "Revenue for ACME")
+        self.assertEqual(payload["title"], "Orders for ACME-1")
         self.assertEqual(payload["labels"], ["Jan", "Feb"])
         self.assertEqual(payload["series"][0]["data"], [120, 150])
         self.assertEqual(payload["url"], "https://example.com/acme")
 
-    def test_gauge_range_stays_numeric_and_text_that_is_not_a_reference_stays(self) -> None:
+    def test_gauge_range_stays_numeric(self) -> None:
         payload = self._payload(
             {
                 "chartType": "gauge",
-                "dataPath": "rows",
+                "dataPath": "$cfg.path",
                 "valueField": "v",
-                "min": "$cfg.body.low",
-                "max": "$cfg.body.high",
-                "unit": "$PATH",
-                "title": "Costs $5 each",
+                "min": "$cfg.low",
+                "max": "$cfg.high",
             },
-            {"rows": [{"v": 40}], "low": 10, "high": 250},
+            {"rows": "$array(dict(v=40))", "path": "rows", "low": "10", "high": "250"},
         )
         self.assertEqual((payload["min"], payload["max"]), (10, 250))
-        self.assertEqual(payload["unit"], "$PATH")
-        self.assertEqual(payload["title"], "Costs $5 each")
+
+    def test_text_that_is_not_a_reference_stays(self) -> None:
+        for unit in ("$", "US$", "$PATH"):
+            with self.subTest(unit=unit):
+                payload = self._payload(
+                    {
+                        "chartType": "numeric",
+                        "dataPath": "rows",
+                        "valueField": "v",
+                        "unit": unit,
+                        "title": "Costs $5 each",
+                    },
+                    {"rows": "$array(dict(v=40))"},
+                )
+                self.assertEqual(payload["unit"], unit)
+                self.assertEqual(payload["title"], "Costs $5 each")
 
     def test_text_stays_static(self) -> None:
         payload = self._payload(
-            {"chartType": "text", "text": "Hello $cfg.body.name"}, {"name": "ACME"}
+            {"chartType": "text", "text": "Hello $page.record"}, {}, record="ACME-1"
         )
-        self.assertEqual(payload["text"], "Hello $cfg.body.name")
+        self.assertEqual(payload["text"], "Hello $page.record")

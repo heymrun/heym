@@ -48,7 +48,7 @@ When you only have example/sample data (no real source), produce these rows with
 
 ### Expressions in the settings
 
-`title`, `url`, `dataPath`, `labelField`, `valueField`, `xField`, `yField`, `min`, `max`, `unit`, `statusColumn`, `linkColumn` and `linkLabel` accept `$` references, filled in when the widget runs, as `html` is. For example `"title": "Revenue for $start.body.region"`, or a gauge `max` of `$stats.target`, which is still read as a number. Text that is not a reference, such as `$5` or `$PATH`, stays as written.
+`title`, `url`, `dataPath`, `labelField`, `valueField`, `xField`, `yField`, `min`, `max`, `unit`, `statusColumn`, `linkColumn` and `linkLabel` accept `$` references, filled in when the widget runs, as `html` is. For example `"title": "Orders for $page.record"` on a detail page, or a gauge `max` of `$stats.target` from an upstream Set node named `stats`, which is still read as a number. Text that is not a reference, such as `$5` or `$PATH`, stays as written.
 
 `text` is the exception: it is a static markdown message and takes no expressions, because a text widget's checkboxes edit it. To show a message built upstream, leave `text` empty and set `valueField`.
 
