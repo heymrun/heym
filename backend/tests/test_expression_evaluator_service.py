@@ -2707,6 +2707,30 @@ class TestOutputNodeTemplatesRenderJson(unittest.TestCase):
         'Customer Alice meta={"plan": "pro"}',
     )
 
+    def test_output_message_arithmetic_preserves_list(self) -> None:
+        message = "$userInput.body.items + [3]"
+        body = {"items": [1, 2]}
+        nodes = [
+            {"id": "in", "type": "textInput", "data": {"label": "userInput"}},
+            {"id": "out", "type": "output", "data": {"label": "reply", "message": message}},
+        ]
+        edges = [{"id": "e", "source": "in", "target": "out"}]
+        result = execute_workflow(
+            workflow_id=uuid.uuid4(),
+            nodes=nodes,
+            edges=edges,
+            inputs={"body": body},
+            test_run=True,
+        )
+        output = next(node for node in result.node_results if node["node_id"] == "out")
+        preview = ExpressionEvaluatorService(workflow_nodes=nodes, workflow_edges=edges).evaluate(
+            message, {"userInput": {"body": body}}, current_node_id="out"
+        )
+
+        self.assertEqual(preview.result, [1, 2, 3])
+        self.assertEqual(output["status"], "success")
+        self.assertEqual(output["output"]["result"], preview.result)
+
     def test_output_fields_and_message_match_the_set_node_and_the_dialog(self) -> None:
         nodes = [
             {"id": "in", "type": "textInput", "data": {"label": "userInput"}},

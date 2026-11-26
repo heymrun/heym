@@ -44,7 +44,9 @@ def execute(ctx: NodeExecutionContext) -> object:
         message_template = node_data.get("message", "")
         if message_template:
             if self._has_arithmetic(message_template):
-                result_value = self.resolve_arithmetic_expression(message_template, inputs, node_id)
+                result_value = self.resolve_arithmetic_expression(
+                    message_template, inputs, node_id, preserve_type=True
+                )
             elif self._is_single_dollar_expression(message_template):
                 result_value = self.resolve_expression(
                     message_template.strip(),
