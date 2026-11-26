@@ -16,14 +16,19 @@ _INPUTS = {
         "meta": {"source": "crm", "account": 42, "note": "$start.text"},
         "meta_text": '{"source": "crm", "account": 42}',
         "filter": {"account": 42},
+        "plain": {"account": 42},
         "count": 7,
         "text": "hi",
     }
 }
 
 
+_WORKFLOW = "Notes sync"
+_STAMP = {"source": f"workflow:{_WORKFLOW}"}
+
+
 def _run(node_data: dict) -> tuple[object, MagicMock]:
-    executor = WorkflowExecutor(nodes=[], edges=[])
+    executor = WorkflowExecutor(nodes=[], edges=[], workflow_name=_WORKFLOW)
     store = MagicMock(collection_name="col1", credential_id="cred-1")
     executor._get_accessible_vector_store = MagicMock(return_value=store)
     executor._get_vector_store_backing_credential = MagicMock(return_value=MagicMock(type="rag"))
@@ -85,11 +90,22 @@ class RagDocumentMetadataTests(unittest.TestCase):
         _, service = _insert("$start.meta_text")
         self.assertEqual(service.insert.call_args.args[2], {"source": "crm", "account": 42})
 
-    def test_blank_empty_and_null_still_store_an_empty_object(self) -> None:
+    def test_one_expression_without_a_source_gets_the_workflow_stamp(self) -> None:
+        _, service = _insert("$start.plain")
+
+        self.assertEqual(service.insert.call_args.args[2], {"account": 42, **_STAMP})
+
+    def test_one_expression_with_its_own_source_keeps_it(self) -> None:
+        _, service = _insert("$start.meta")
+
+        self.assertEqual(service.insert.call_args.args[2]["source"], "crm")
+
+    def test_blank_empty_and_null_store_only_the_workflow_stamp(self) -> None:
+        # main stored {} with no stamp for "null", so the document could not be traced back.
         for metadata in ("", "{}", "null", None):
             with self.subTest(metadata=metadata):
                 _, service = _insert(metadata)
-                self.assertEqual(service.insert.call_args.args[2], {})
+                self.assertEqual(service.insert.call_args.args[2], _STAMP)
 
 
 class RagMetadataFilterExpressionTests(unittest.TestCase):
