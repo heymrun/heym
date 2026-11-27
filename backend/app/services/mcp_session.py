@@ -130,20 +130,17 @@ class MCPSessionStore:
             if iat is None or not isinstance(iat, (int, float)):
                 return None
 
-            source = payload.get("source") or payload.get("src") or payload.get("auth_source")
+            source = payload.get("source")
             if source not in ("oauth", "api_key"):
                 return None
 
-            key_version = (
-                payload.get("key_version")
-                or payload.get("key_generation")
-                or payload.get("kgid")
-                or payload.get("ckv")
-            )
+            key_version = payload.get("key_version")
 
             if source == "api_key":
                 if not key_version or not isinstance(key_version, str):
                     return None
+            elif key_version is not None and not isinstance(key_version, str):
+                return None
 
             return MCPSessionClaims(
                 user_id=user_id,

@@ -3,9 +3,10 @@
 import unittest
 import uuid
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 from app.api import mcp, mcp_servers
@@ -19,10 +20,20 @@ class McpNotificationStatusTests(unittest.TestCase):
         app = FastAPI()
         app.include_router(mcp.router, prefix="/api/mcp")
         app.include_router(mcp_servers.router, prefix="/api/mcp/servers")
-        app.dependency_overrides[mcp.get_mcp_user_for_sse] = lambda: USER
-        app.dependency_overrides[mcp_servers._get_named_server_context_for_sse] = lambda: (
-            USER,
-            SERVER,
+
+        def _get_user_for_sse(request: Request) -> Any:
+            request.state.mcp_auth_source = "oauth"
+            request.state.mcp_key_version = None
+            return USER
+
+        def _get_named_context_for_sse(request: Request) -> Any:
+            request.state.mcp_auth_source = "oauth"
+            request.state.mcp_key_version = None
+            return (USER, SERVER)
+
+        app.dependency_overrides[mcp.get_mcp_user_for_sse] = _get_user_for_sse
+        app.dependency_overrides[mcp_servers._get_named_server_context_for_sse] = (
+            _get_named_context_for_sse
         )
         self.client = TestClient(app)
 

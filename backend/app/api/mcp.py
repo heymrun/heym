@@ -10,7 +10,7 @@ from typing import Any, Awaitable, Callable, TypeVar
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from fastapi.responses import JSONResponse, Response, StreamingResponse
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.analytics import upsert_workflow_analytics_snapshot
@@ -425,8 +425,7 @@ async def session_user_active(
         if auth_source == "oauth":
             if issued_at is None:
                 return False
-            ts = issued_at / 1000.0 if issued_at > 1e11 else float(issued_at)
-            token_time = datetime.fromtimestamp(ts, tz=timezone.utc)
+            token_time = datetime.fromtimestamp(float(issued_at), tz=timezone.utc)
             query = query.where(
                 or_(
                     User.sessions_revoked_at.is_(None),
@@ -668,13 +667,24 @@ async def get_mcp_user(
             detail="Invalid MCP API key",
         )
 
-    if not getattr(user, "mcp_api_key_version", None):
-        user.mcp_api_key_version = secrets.token_hex(16)
+    key_version = getattr(user, "mcp_api_key_version", None)
+    if not key_version and hasattr(user, "id"):
+        new_version = secrets.token_hex(16)
+        stmt = (
+            update(User)
+            .where(User.id == user.id)
+            .values(mcp_api_key_version=func.coalesce(User.mcp_api_key_version, new_version))
+            .returning(User.mcp_api_key_version)
+        )
+        res = await db.execute(stmt)
+        returned = res.scalar_one_or_none()
+        key_version = returned if isinstance(returned, str) else new_version
+        user.mcp_api_key_version = key_version
         await db.flush()
 
     if hasattr(request, "state"):
         request.state.mcp_auth_source = "api_key"
-        request.state.mcp_key_version = getattr(user, "mcp_api_key_version", None)
+        request.state.mcp_key_version = key_version
     return user
 
 
@@ -1926,7 +1936,13 @@ async def mcp_sse_endpoint(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many active MCP SSE sessions. Try again shortly.",
         )
-    auth_source = getattr(request.state, "mcp_auth_source", "oauth")
+    auth_source = getattr(request.state, "mcp_auth_source", None)
+    if not auth_source or auth_source not in ("oauth", "api_key"):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing authentication source",
+            headers={"WWW-Authenticate": 'Bearer realm="heym-mcp"'},
+        )
     key_version = getattr(request.state, "mcp_key_version", None)
     session_token = mcp_session_store.create(
         str(mcp_user.id),

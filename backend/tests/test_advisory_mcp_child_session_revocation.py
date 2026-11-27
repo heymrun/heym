@@ -12,6 +12,7 @@ Ensures:
 
 from __future__ import annotations
 
+import re
 import secrets
 import time
 import unittest
@@ -20,7 +21,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import jwt
@@ -58,16 +59,32 @@ class _BaseMCPChildSessionCase(unittest.IsolatedAsyncioTestCase):
         self.client_ids: list[str] = []
         self.transport = httpx.ASGITransport(app=app)
         self.http_client = httpx.AsyncClient(transport=self.transport, base_url="http://test")
+        self._disconnect_patch = patch(
+            "starlette.requests.Request.is_disconnected", AsyncMock(return_value=True)
+        )
+        self._disconnect_patch.start()
 
     @asynccontextmanager
     async def _stream_sse(
         self, path: str, headers: dict[str, str] | None = None
     ) -> AsyncIterator[httpx.Response]:
-        with patch("starlette.requests.Request.is_disconnected", AsyncMock(return_value=True)):
-            async with self.http_client.stream("GET", path, headers=headers or {}) as res:
-                yield res
+        async with self.http_client.stream("GET", path, headers=headers or {}) as res:
+            yield res
+
+    async def _handshake_sse(self, path: str, headers: dict[str, str] | None = None) -> str:
+        """Establish a real /sse handshake and extract the child session token from the endpoint event."""
+        async with self.http_client.stream("GET", path, headers=headers or {}) as res:
+            self.assertEqual(res.status_code, 200)
+            body = await res.aread()
+            text = body.decode()
+            match = re.search(r"session=([A-Za-z0-9_.-]+)", text)
+            assert match is not None, f"Could not find session token in SSE response: {text}"
+            token = match.group(1)
+            mcp_sse_channels.register(token)
+            return token
 
     async def asyncTearDown(self) -> None:
+        self._disconnect_patch.stop()
         await self.http_client.aclose()
         async with async_session_maker() as session:
             if self.server_ids:
@@ -154,10 +171,19 @@ class TestOAuthRevocation(_BaseMCPChildSessionCase):
 
     async def test_default_server_sign_out_others_revokes_child_session(self) -> None:
         user = await self._create_user()
-        child_token = mcp_session_store.create(str(user.id), auth_source="oauth")
-        mcp_sse_channels.register(child_token)
+        tokens = await self._create_oauth_tokens(user)
+        access_token = tokens["access_token"]
 
-        # 1. Child session initially works
+        # 1. Establish child session from real /sse handshake with OAuth bearer.
+        # Patch time during handshake so token iat is in the past, ensuring deterministic revocation.
+        past_time = time.time() - 30.0
+        with patch("time.time", return_value=past_time):
+            child_token = await self._handshake_sse(
+                "/api/mcp/sse",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+
+        # Verify child session initially works
         res = await self.http_client.post(
             f"/api/mcp/message?session={child_token}",
             json=PING_PAYLOAD,
@@ -165,7 +191,6 @@ class TestOAuthRevocation(_BaseMCPChildSessionCase):
         self.assertEqual(res.status_code, 202)
 
         # 2. User signs out other sessions
-        time.sleep(0.005)  # Ensure revocation timestamp is strictly after token iat
         async with async_session_maker() as session:
             db_user = await session.get(User, user.id)
             assert db_user is not None
@@ -188,8 +213,12 @@ class TestOAuthRevocation(_BaseMCPChildSessionCase):
     async def test_named_server_sign_out_others_revokes_child_session(self) -> None:
         user = await self._create_user()
         server = await self._create_named_server(user)
+        # Deterministic setup: token minted with issued_at in past
         child_token = mcp_session_store.create(
-            str(user.id), server_id=str(server.id), auth_source="oauth"
+            str(user.id),
+            server_id=str(server.id),
+            auth_source="oauth",
+            issued_at=time.time() - 30.0,
         )
         mcp_sse_channels.register(child_token)
 
@@ -201,7 +230,6 @@ class TestOAuthRevocation(_BaseMCPChildSessionCase):
         self.assertEqual(res.status_code, 202)
 
         # 2. User signs out other sessions
-        time.sleep(0.005)
         async with async_session_maker() as session:
             db_user = await session.get(User, user.id)
             assert db_user is not None
@@ -223,7 +251,10 @@ class TestOAuthRevocation(_BaseMCPChildSessionCase):
 
     async def test_default_server_password_change_revokes_child_session(self) -> None:
         user = await self._create_user()
-        child_token = mcp_session_store.create(str(user.id), auth_source="oauth")
+        # Deterministic setup: token minted with issued_at in past
+        child_token = mcp_session_store.create(
+            str(user.id), auth_source="oauth", issued_at=time.time() - 30.0
+        )
         mcp_sse_channels.register(child_token)
 
         res = await self.http_client.post(
@@ -233,7 +264,6 @@ class TestOAuthRevocation(_BaseMCPChildSessionCase):
         self.assertEqual(res.status_code, 202)
 
         # Password change
-        time.sleep(0.005)
         async with async_session_maker() as session:
             db_user = await session.get(User, user.id)
             assert db_user is not None
@@ -259,8 +289,12 @@ class TestOAuthRevocation(_BaseMCPChildSessionCase):
     async def test_named_server_password_change_revokes_child_session(self) -> None:
         user = await self._create_user()
         server = await self._create_named_server(user)
+        # Deterministic setup: token minted with issued_at in past
         child_token = mcp_session_store.create(
-            str(user.id), server_id=str(server.id), auth_source="oauth"
+            str(user.id),
+            server_id=str(server.id),
+            auth_source="oauth",
+            issued_at=time.time() - 30.0,
         )
         mcp_sse_channels.register(child_token)
 
@@ -271,7 +305,6 @@ class TestOAuthRevocation(_BaseMCPChildSessionCase):
         self.assertEqual(res.status_code, 202)
 
         # Password change
-        time.sleep(0.005)
         async with async_session_maker() as session:
             db_user = await session.get(User, user.id)
             assert db_user is not None
@@ -296,7 +329,10 @@ class TestOAuthRevocation(_BaseMCPChildSessionCase):
     async def test_default_server_admin_sign_out_revokes_child_session(self) -> None:
         user = await self._create_user()
         admin = await self._create_admin()
-        child_token = mcp_session_store.create(str(user.id), auth_source="oauth")
+        # Deterministic setup: token minted with issued_at in past
+        child_token = mcp_session_store.create(
+            str(user.id), auth_source="oauth", issued_at=time.time() - 30.0
+        )
         mcp_sse_channels.register(child_token)
 
         res = await self.http_client.post(
@@ -306,7 +342,6 @@ class TestOAuthRevocation(_BaseMCPChildSessionCase):
         self.assertEqual(res.status_code, 202)
 
         # Admin signs out user
-        time.sleep(0.005)
         with patch.object(settings, "admin_emails", admin.email):
             async with async_session_maker() as session:
                 db_admin = await session.get(User, admin.id)
@@ -328,8 +363,12 @@ class TestOAuthRevocation(_BaseMCPChildSessionCase):
         user = await self._create_user()
         admin = await self._create_admin()
         server = await self._create_named_server(user)
+        # Deterministic setup: token minted with issued_at in past
         child_token = mcp_session_store.create(
-            str(user.id), server_id=str(server.id), auth_source="oauth"
+            str(user.id),
+            server_id=str(server.id),
+            auth_source="oauth",
+            issued_at=time.time() - 30.0,
         )
         mcp_sse_channels.register(child_token)
 
@@ -340,7 +379,6 @@ class TestOAuthRevocation(_BaseMCPChildSessionCase):
         self.assertEqual(res.status_code, 202)
 
         # Admin signs out user
-        time.sleep(0.005)
         with patch.object(settings, "admin_emails", admin.email):
             async with async_session_maker() as session:
                 db_admin = await session.get(User, admin.id)
@@ -367,13 +405,13 @@ class TestMCPApiKeyRotation(_BaseMCPChildSessionCase):
         initial_version = secrets.token_hex(16)
         user = await self._create_user(mcp_key=raw_key, key_version=initial_version)
 
-        # Open child session using key
-        child_token = mcp_session_store.create(
-            str(user.id), auth_source="api_key", key_version=initial_version
+        # 1. Take child token from endpoint event of a real /sse handshake
+        child_token = await self._handshake_sse(
+            "/api/mcp/sse",
+            headers={"X-MCP-Key": raw_key},
         )
-        mcp_sse_channels.register(child_token)
 
-        # 1. Child session works
+        # Verify child session initially works
         res = await self.http_client.post(
             f"/api/mcp/message?session={child_token}",
             json=PING_PAYLOAD,
@@ -405,17 +443,11 @@ class TestMCPApiKeyRotation(_BaseMCPChildSessionCase):
         )
         self.assertEqual(res_old_key.status_code, 401)
 
-        # 5. New API key works to establish a new session
-        async with self._stream_sse(
+        # 5. New API key works to establish a new session through real handshake
+        new_child_token = await self._handshake_sse(
             "/api/mcp/sse",
             headers={"X-MCP-Key": new_raw_key},
-        ) as res_new_key:
-            self.assertEqual(res_new_key.status_code, 200)
-
-        new_child_token = mcp_session_store.create(
-            str(user.id), auth_source="api_key", key_version=new_version
         )
-        mcp_sse_channels.register(new_child_token)
         res_new_session = await self.http_client.post(
             f"/api/mcp/message?session={new_child_token}",
             json=PING_PAYLOAD,
@@ -429,16 +461,13 @@ class TestMCPApiKeyRotation(_BaseMCPChildSessionCase):
         initial_version = server.api_key_version
         assert initial_version is not None
 
-        # Open child session for named server
-        child_token = mcp_session_store.create(
-            str(user.id),
-            server_id=str(server.id),
-            auth_source="api_key",
-            key_version=initial_version,
+        # 1. Take child token from endpoint event of a real named server handshake
+        child_token = await self._handshake_sse(
+            f"/api/mcp/servers/{server.id}/sse",
+            headers={"X-MCP-Key": raw_server_key},
         )
-        mcp_sse_channels.register(child_token)
 
-        # 1. Child session works
+        # Child session works
         res = await self.http_client.post(
             f"/api/mcp/servers/{server.id}/message?session={child_token}",
             json=PING_PAYLOAD,
@@ -474,25 +503,58 @@ class TestMCPApiKeyRotation(_BaseMCPChildSessionCase):
         )
         self.assertEqual(res_old_key.status_code, 401)
 
-        # 5. New server key and new child session work
-        async with self._stream_sse(
+        # 5. New server key and new child session work via real handshake
+        new_child_token = await self._handshake_sse(
             f"/api/mcp/servers/{server.id}/sse",
             headers={"X-MCP-Key": new_raw_server_key},
-        ) as res_new_key:
-            self.assertEqual(res_new_key.status_code, 200)
-
-        new_child_token = mcp_session_store.create(
-            str(user.id),
-            server_id=str(server.id),
-            auth_source="api_key",
-            key_version=new_version,
         )
-        mcp_sse_channels.register(new_child_token)
         res_new_session = await self.http_client.post(
             f"/api/mcp/servers/{server.id}/message?session={new_child_token}",
             json=PING_PAYLOAD,
         )
         self.assertEqual(res_new_session.status_code, 202)
+
+    async def test_concurrent_handshakes_with_empty_version_agree(self) -> None:
+        """With api_key_version NULL, concurrent handshakes agree on the same version via COALESCE."""
+        import asyncio
+
+        raw_key = f"mcp-{uuid.uuid4().hex}"
+        user_id = uuid.uuid4()
+        self.user_ids.append(user_id)
+        async with async_session_maker() as session:
+            user = User(
+                id=user_id,
+                email=f"mcp_user_{user_id.hex[:8]}@example.com",
+                name="MCP User",
+                hashed_password=hash_password(TEST_PASSWORD),
+                mcp_api_key=hash_secret(raw_key),
+                mcp_api_key_version=None,  # Empty version
+                is_active=True,
+            )
+            session.add(user)
+            await session.commit()
+
+        # Run 4 concurrent handshakes
+        tokens = await asyncio.gather(
+            self._handshake_sse("/api/mcp/sse", headers={"X-MCP-Key": raw_key}),
+            self._handshake_sse("/api/mcp/sse", headers={"X-MCP-Key": raw_key}),
+            self._handshake_sse("/api/mcp/sse", headers={"X-MCP-Key": raw_key}),
+            self._handshake_sse("/api/mcp/sse", headers={"X-MCP-Key": raw_key}),
+        )
+
+        decoded = [jwt.decode(t, options={"verify_signature": False}) for t in tokens]
+        versions = [d.get("key_version") for d in decoded]
+        self.assertTrue(all(v is not None for v in versions))
+        # All 4 handshakes agreed on the exact same version
+        self.assertEqual(len(set(versions)), 1)
+
+        # All 4 sessions can successfully deliver messages without 401
+        for token in tokens:
+            res = await self.http_client.post(
+                f"/api/mcp/message?session={token}",
+                json=PING_PAYLOAD,
+            )
+            self.assertEqual(res.status_code, 202)
 
 
 class TestTransportRestrictionsAndRenewal(_BaseMCPChildSessionCase):
@@ -534,6 +596,36 @@ class TestTransportRestrictionsAndRenewal(_BaseMCPChildSessionCase):
             headers={"Authorization": f"Bearer {default_child}"},
         )
         self.assertEqual(res_bearer_mint.status_code, 401)
+
+    async def test_handshake_refuses_when_auth_source_missing(self) -> None:
+        from fastapi import HTTPException
+
+        from app.api.mcp import mcp_sse_endpoint
+        from app.api.mcp_servers import named_server_sse
+
+        user = await self._create_user()
+        server = await self._create_named_server(user)
+
+        # 1. Plain GET without authentication fails
+        res = await self.http_client.get("/api/mcp/sse")
+        self.assertEqual(res.status_code, 401)
+
+        res_named = await self.http_client.get(f"/api/mcp/servers/{server.id}/sse")
+        self.assertEqual(res_named.status_code, 401)
+
+        # 2. Handshake refuses to mint when auth_source is missing instead of defaulting to oauth
+        req = MagicMock()
+        req.state.mcp_auth_source = None
+        req.headers.get = MagicMock(return_value=None)
+        with self.assertRaises(HTTPException) as ctx:
+            await mcp_sse_endpoint(request=req, mcp_user=user)
+        self.assertEqual(ctx.exception.status_code, 401)
+        self.assertEqual(ctx.exception.detail, "Missing authentication source")
+
+        with self.assertRaises(HTTPException) as ctx_named:
+            await named_server_sse(server_id=server.id, request=req, server=(user, server))
+        self.assertEqual(ctx_named.exception.status_code, 401)
+        self.assertEqual(ctx_named.exception.detail, "Missing authentication source")
 
     async def test_original_credentials_can_establish_sessions(self) -> None:
         user = await self._create_user()
@@ -832,3 +924,47 @@ class TestTokenClaimValidation(_BaseMCPChildSessionCase):
         self.assertNotIn(user.hashed_password, token_str)
         self.assertEqual(decoded.get("key_version"), version)
         self.assertEqual(decoded.get("source"), "api_key")
+
+    async def test_alias_claims_rejected(self) -> None:
+        """Alias claims (src, auth_source, key_generation, kgid, ckv) are rejected; only source and key_version are accepted."""
+        user = await self._create_user()
+
+        # Token with 'src' instead of 'source'
+        token_src = self._encode_token(
+            {
+                "sub": str(user.id),
+                "type": "mcp_child_session",
+                "jti": secrets.token_urlsafe(16),
+                "exp": int(time.time()) + 3600,
+                "iat": time.time(),
+                "src": "oauth",
+            }
+        )
+        self.assertIsNone(mcp_session_store.resolve(token_src))
+
+        # Token with 'auth_source' instead of 'source'
+        token_auth_source = self._encode_token(
+            {
+                "sub": str(user.id),
+                "type": "mcp_child_session",
+                "jti": secrets.token_urlsafe(16),
+                "exp": int(time.time()) + 3600,
+                "iat": time.time(),
+                "auth_source": "oauth",
+            }
+        )
+        self.assertIsNone(mcp_session_store.resolve(token_auth_source))
+
+        # Token with 'key_generation' instead of 'key_version'
+        token_key_gen = self._encode_token(
+            {
+                "sub": str(user.id),
+                "type": "mcp_child_session",
+                "jti": secrets.token_urlsafe(16),
+                "exp": int(time.time()) + 3600,
+                "iat": time.time(),
+                "source": "api_key",
+                "key_generation": "gen-123",
+            }
+        )
+        self.assertIsNone(mcp_session_store.resolve(token_key_gen))

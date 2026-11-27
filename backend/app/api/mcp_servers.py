@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from fastapi.responses import Response, StreamingResponse
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.analytics import upsert_workflow_analytics_snapshot
@@ -253,13 +253,24 @@ async def _get_named_server_context(
     if user is None or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
 
-    if not getattr(server, "api_key_version", None):
-        server.api_key_version = secrets.token_hex(16)
+    key_version = getattr(server, "api_key_version", None)
+    if not key_version and hasattr(server, "id"):
+        new_version = secrets.token_hex(16)
+        stmt = (
+            update(MCPServer)
+            .where(MCPServer.id == server.id)
+            .values(api_key_version=func.coalesce(MCPServer.api_key_version, new_version))
+            .returning(MCPServer.api_key_version)
+        )
+        res = await db.execute(stmt)
+        returned = res.scalar_one_or_none()
+        key_version = returned if isinstance(returned, str) else new_version
+        server.api_key_version = key_version
         await db.flush()
 
     if hasattr(request, "state"):
         request.state.mcp_auth_source = "api_key"
-        request.state.mcp_key_version = getattr(server, "api_key_version", None)
+        request.state.mcp_key_version = key_version
     return user, server
 
 
@@ -457,7 +468,13 @@ async def named_server_sse(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many active MCP SSE sessions. Try again shortly.",
         )
-    auth_source = getattr(request.state, "mcp_auth_source", "oauth")
+    auth_source = getattr(request.state, "mcp_auth_source", None)
+    if not auth_source or auth_source not in ("oauth", "api_key"):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing authentication source",
+            headers={"WWW-Authenticate": 'Bearer realm="heym-mcp"'},
+        )
     key_version = getattr(request.state, "mcp_key_version", None)
     session_token = mcp_session_store.create(
         str(user.id),
