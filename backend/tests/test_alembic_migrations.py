@@ -15,7 +15,13 @@ class AlembicMigrationGraphTest(unittest.TestCase):
         self.script = ScriptDirectory.from_config(config)
 
     def test_revision_graph_has_one_head(self) -> None:
-        self.assertEqual(self.script.get_heads(), ["162_run_history_started_by"])
+        self.assertEqual(self.script.get_heads(), ["163_mcp_api_key_version"])
+
+    def test_mcp_api_key_version_follows_run_history_started_by(self) -> None:
+        revision = self.script.get_revision("163_mcp_api_key_version")
+
+        self.assertIsNotNone(revision)
+        self.assertEqual(revision.down_revision, "162_run_history_started_by")
 
     def test_run_history_started_by_follows_run_history_encryption(self) -> None:
         revision = self.script.get_revision("162_run_history_started_by")
