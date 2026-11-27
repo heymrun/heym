@@ -65,6 +65,41 @@ def _clean_schema(value: Any) -> Any:
     return value
 
 
+def _resolve_ref(root: dict[str, Any], ref: str) -> dict[str, Any] | None:
+    if not ref.startswith("#/"):
+        return None
+    node: Any = root
+    for part in ref[2:].split("/"):
+        part = part.replace("~1", "/").replace("~0", "~")
+        if not isinstance(node, dict) or part not in node:
+            return None
+        node = node[part]
+    return node if isinstance(node, dict) else None
+
+
+def _inline_refs(value: Any, root: dict[str, Any], expanding: frozenset[str] = frozenset()) -> Any:
+    """Put the schema each local `$ref` names in its place; declarations cannot point.
+
+    A reference that names nothing, or one back into a schema it is inside, is dropped.
+    """
+    if isinstance(value, list):
+        return [_inline_refs(item, root, expanding) for item in value]
+    if not isinstance(value, dict):
+        return value
+    ref = value.get("$ref")
+    if not isinstance(ref, str):
+        return {key: _inline_refs(item, root, expanding) for key, item in value.items()}
+    siblings = {key: item for key, item in value.items() if key != "$ref"}
+    target = None if ref in expanding else _resolve_ref(root, ref)
+    if target is None:
+        return _inline_refs(siblings, root, expanding)
+    return _inline_refs({**target, **siblings}, root, expanding | {ref})
+
+
+def _declaration_schema(parameters: dict[str, Any]) -> Any:
+    return _clean_schema(_inline_refs(parameters, parameters))
+
+
 def _image_part(image: str) -> dict[str, Any]:
     match = _DATA_URI.match(image)
     if match:
@@ -151,7 +186,7 @@ class GeminiTransport:
         return {
             "name": fn.get("name", ""),
             "description": fn.get("description", ""),
-            "parameters": _clean_schema(
+            "parameters": _declaration_schema(
                 fn.get("parameters") or {"type": "object", "properties": {}}
             ),
         }

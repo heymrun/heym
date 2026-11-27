@@ -7,6 +7,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import httpx
+from pydantic import BaseModel, Field
 
 from app.models.schemas import CredentialType
 from app.services.llm_service import LLMService
@@ -158,6 +159,83 @@ class TestBuildKwargs(unittest.TestCase):
             {"type": "object", "properties": {"title": {"type": "string"}}},
         )
         self.assertEqual(parameters["required"], names)
+
+    def _parameters(self, schema: dict[str, Any]) -> dict[str, Any]:
+        tool = {"type": "function", "function": {"name": "t", "parameters": schema}}
+        return self._build(tools=[tool])["tools"][0]["functionDeclarations"][0]["parameters"]
+
+    def test_references_are_replaced_by_the_schema_they_name(self) -> None:
+        class Column(BaseModel):
+            name: str
+            title: str | None = None
+
+        class Args(BaseModel):
+            columns: list[Column]
+            key: Column | None = Field(None, description="The key column.")
+
+        schema = Args.model_json_schema()
+        self.assertIn("$defs", schema)
+
+        parameters = self._parameters(schema)
+
+        column = {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "title": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+            },
+            "required": ["name"],
+        }
+        self.assertNotIn("$ref", json.dumps(parameters))
+        self.assertNotIn("$defs", parameters)
+        self.assertEqual(parameters["properties"]["columns"]["items"], column)
+        self.assertEqual(
+            parameters["properties"]["key"],
+            {"anyOf": [column, {"type": "null"}], "description": "The key column."},
+        )
+        self.assertEqual(parameters["required"], ["columns"])
+
+    def test_a_description_beside_a_reference_wins_over_the_target(self) -> None:
+        schema = {
+            "type": "object",
+            "properties": {"when": {"$ref": "#/definitions/Day", "description": "Due day."}},
+            "definitions": {"Day": {"type": "string", "description": "A day."}},
+        }
+
+        parameters = self._parameters(schema)
+
+        self.assertEqual(
+            parameters["properties"]["when"], {"type": "string", "description": "Due day."}
+        )
+        self.assertNotIn("definitions", parameters)
+
+    def test_recursive_and_unresolvable_references_are_dropped(self) -> None:
+        schema = {
+            "type": "object",
+            "properties": {
+                "tree": {"$ref": "#/$defs/Node"},
+                "remote": {"$ref": "https://example.com/s.json", "description": "Remote."},
+                "missing": {"$ref": "#/$defs/Nope", "type": "string"},
+            },
+            "$defs": {
+                "Node": {
+                    "type": "object",
+                    "properties": {
+                        "children": {"type": "array", "items": {"$ref": "#/$defs/Node"}}
+                    },
+                }
+            },
+        }
+
+        parameters = self._parameters(schema)
+
+        self.assertNotIn("$ref", json.dumps(parameters))
+        self.assertEqual(
+            parameters["properties"]["tree"],
+            {"type": "object", "properties": {"children": {"type": "array", "items": {}}}},
+        )
+        self.assertEqual(parameters["properties"]["remote"], {"description": "Remote."})
+        self.assertEqual(parameters["properties"]["missing"], {"type": "string"})
 
     def test_tool_choice_vocabulary_is_translated(self) -> None:
         def mode(choice: str | None) -> str:
