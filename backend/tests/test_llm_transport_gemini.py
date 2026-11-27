@@ -136,6 +136,29 @@ class TestBuildKwargs(unittest.TestCase):
         self.assertEqual(parameters["required"], ["workflow_id"])
         self.assertIn("additionalProperties", TOOL["function"]["parameters"])
 
+    def test_parameters_named_like_schema_keywords_are_kept(self) -> None:
+        names = ["title", "default", "examples", "definitions", "additionalProperties"]
+        item = {"type": "object", "title": "Item", "properties": {"title": {"type": "string"}}}
+        properties: dict[str, Any] = {name: {"type": "string", "title": name} for name in names}
+        properties["properties"] = {"type": "array", "items": item}
+        tool = {
+            "type": "function",
+            "function": {
+                "name": "create_page",
+                "parameters": {"type": "object", "properties": properties, "required": names},
+            },
+        }
+
+        parameters = self._build(tools=[tool])["tools"][0]["functionDeclarations"][0]["parameters"]
+
+        for name in names:
+            self.assertEqual(parameters["properties"][name], {"type": "string"})
+        self.assertEqual(
+            parameters["properties"]["properties"]["items"],
+            {"type": "object", "properties": {"title": {"type": "string"}}},
+        )
+        self.assertEqual(parameters["required"], names)
+
     def test_tool_choice_vocabulary_is_translated(self) -> None:
         def mode(choice: str | None) -> str:
             return self._build([TOOL], tool_choice=choice)["toolConfig"]["functionCallingConfig"][
