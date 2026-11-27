@@ -57,6 +57,8 @@ def _make_request(
     _headers = headers or {}
     req.headers.get = MagicMock(side_effect=lambda key, default=None: _headers.get(key, default))
     req.is_disconnected = AsyncMock(return_value=True)  # disconnect after first chunk
+    req.state.mcp_auth_source = "oauth"
+    req.state.mcp_key_version = None
     return req
 
 

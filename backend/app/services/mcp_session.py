@@ -11,7 +11,9 @@ import asyncio
 import secrets
 import threading
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass, field
+from typing import Any
 
 import jwt
 from jwt import InvalidTokenError
@@ -21,6 +23,20 @@ from app.config import settings
 _SESSION_TTL_SECONDS = 3600  # 1 hour
 _CLEANUP_INTERVAL_SECONDS = 600
 _TOKEN_TYPE = "mcp_sse_session"
+
+
+@dataclass(frozen=True)
+class MCPSessionClaims:
+    """Validated claims carried by an MCP child session token."""
+
+    user_id: str
+    server_id: str | None
+    auth_source: str
+    issued_at: float
+    key_version: str | None = None
+
+    def __iter__(self) -> Iterator[str | None]:
+        return iter((self.user_id, self.server_id))
 
 
 @dataclass
@@ -50,16 +66,29 @@ class MCPSessionStore:
             del self._revoked_jtis[k]
         self._last_cleanup = now
 
-    def create(self, user_id: str, server_id: str | None = None) -> str:
+    def create(
+        self,
+        user_id: str,
+        server_id: str | None = None,
+        *,
+        auth_source: str = "oauth",
+        key_version: str | None = None,
+        issued_at: float | None = None,
+    ) -> str:
         """Create a signed session token mapped to user_id (and optionally server_id)."""
         now = time.time()
+        iat_val = issued_at if issued_at is not None else now
         expires_at = now + _SESSION_TTL_SECONDS
-        payload = {
+        payload: dict[str, Any] = {
             "sub": user_id,
             "type": _TOKEN_TYPE,
             "jti": secrets.token_urlsafe(16),
             "exp": int(expires_at),
+            "iat": iat_val,
+            "source": auth_source,
         }
+        if key_version is not None:
+            payload["key_version"] = key_version
         if server_id is not None:
             payload["sid"] = server_id
         token = jwt.encode(payload, settings.secret_key, algorithm=settings.jwt_algorithm)
@@ -67,8 +96,8 @@ class MCPSessionStore:
             self._cleanup(now)
         return token
 
-    def resolve(self, token: str) -> tuple[str, str | None] | None:
-        """Return (user_id, server_id) for a valid non-expired token, or None."""
+    def resolve(self, token: str) -> MCPSessionClaims | None:
+        """Return MCPSessionClaims for a valid non-expired token with required claims, or None."""
         now = time.time()
         with self._lock:
             self._cleanup(now)
@@ -77,29 +106,49 @@ class MCPSessionStore:
                     token, settings.secret_key, algorithms=[settings.jwt_algorithm]
                 )
             except InvalidTokenError:
-                payload = None
-
-            if payload is not None:
-                jti = payload.get("jti")
-                if payload.get("type") != _TOKEN_TYPE or not isinstance(jti, str):
-                    return None
-                if jti in self._revoked_jtis:
-                    return None
-                user_id = payload.get("sub")
-                server_id = payload.get("sid")
-                if not isinstance(user_id, str):
-                    return None
-                if server_id is not None and not isinstance(server_id, str):
-                    return None
-                return user_id, server_id
-
-            session = self._sessions.get(token)
-            if session is None:
                 return None
-            if now - session.created_at > _SESSION_TTL_SECONDS:
-                del self._sessions[token]
+
+            if not isinstance(payload, dict):
                 return None
-            return session.user_id, session.server_id
+
+            if payload.get("type") != _TOKEN_TYPE:
+                return None
+
+            jti = payload.get("jti")
+            if not isinstance(jti, str) or jti in self._revoked_jtis:
+                return None
+
+            user_id = payload.get("sub")
+            if not isinstance(user_id, str):
+                return None
+
+            server_id = payload.get("sid")
+            if server_id is not None and not isinstance(server_id, str):
+                return None
+
+            iat = payload.get("iat")
+            if iat is None or not isinstance(iat, (int, float)):
+                return None
+
+            source = payload.get("source")
+            if source not in ("oauth", "api_key"):
+                return None
+
+            key_version = payload.get("key_version")
+
+            if source == "api_key":
+                if not key_version or not isinstance(key_version, str):
+                    return None
+            elif key_version is not None and not isinstance(key_version, str):
+                return None
+
+            return MCPSessionClaims(
+                user_id=user_id,
+                server_id=server_id,
+                auth_source=str(source),
+                issued_at=float(iat),
+                key_version=str(key_version) if key_version is not None else None,
+            )
 
     def revoke(self, token: str) -> None:
         with self._lock:

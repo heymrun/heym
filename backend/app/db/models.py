@@ -123,6 +123,7 @@ class User(Base):
     mcp_api_key: Mapped[str | None] = mapped_column(
         String(64), nullable=True, unique=True, index=True
     )
+    mcp_api_key_version: Mapped[str | None] = mapped_column(String(36), nullable=True)
     tts_credential_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("credentials.id", ondelete="SET NULL"),
@@ -228,6 +229,7 @@ class MCPServer(Base):
     )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     api_key: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    api_key_version: Mapped[str | None] = mapped_column(String(36), nullable=True)
     # Exposes the dashboard chat engine as the `heym_chat` tool on this named server.
     chat_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     chat_credential_id: Mapped[uuid.UUID | None] = mapped_column(

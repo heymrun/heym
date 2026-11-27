@@ -10,7 +10,7 @@ from typing import Any, Awaitable, Callable, TypeVar
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from fastapi.responses import JSONResponse, Response, StreamingResponse
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.analytics import upsert_workflow_analytics_snapshot
@@ -32,6 +32,7 @@ from app.db.models import (
     Credential,
     ExecutionHistory,
     LLMTrace,
+    MCPServer,
     OAuthAccessToken,
     User,
     Workflow,
@@ -392,7 +393,14 @@ def _stream_mcp_jsonrpc_response(
     )
 
 
-async def session_user_active(user_id_str: str) -> bool:
+async def session_user_active(
+    user_id_str: str,
+    *,
+    issued_at: float | None = None,
+    auth_source: str | None = None,
+    key_version: str | None = None,
+    server_id_str: str | None = None,
+) -> bool:
     """Whether the account behind a short-lived MCP session token may still act.
 
     The session store lives in one process's memory, so deactivation on another instance
@@ -401,11 +409,56 @@ async def session_user_active(user_id_str: str) -> bool:
     """
     try:
         user_id = uuid.UUID(user_id_str)
-    except ValueError:
+    except (ValueError, TypeError):
         return False
+
+    server_id = None
+    if server_id_str:
+        try:
+            server_id = uuid.UUID(server_id_str)
+        except (ValueError, TypeError):
+            return False
+
     async with async_session_maker() as db:
-        result = await db.execute(select(User.is_active).where(User.id == user_id))
-        return result.scalar_one_or_none() is True
+        query = select(User.id).where(User.id == user_id, User.is_active.is_(True))
+
+        if auth_source == "oauth":
+            if issued_at is None:
+                return False
+            token_time = datetime.fromtimestamp(float(issued_at), tz=timezone.utc)
+            query = query.where(
+                or_(
+                    User.sessions_revoked_at.is_(None),
+                    User.sessions_revoked_at < token_time,
+                )
+            )
+            if server_id is not None:
+                query = query.join(
+                    MCPServer,
+                    and_(MCPServer.id == server_id, MCPServer.user_id == user_id),
+                )
+        elif auth_source == "api_key":
+            if not key_version:
+                return False
+            if server_id is not None:
+                query = query.join(
+                    MCPServer,
+                    and_(
+                        MCPServer.id == server_id,
+                        MCPServer.user_id == user_id,
+                        MCPServer.api_key_version == key_version,
+                    ),
+                )
+            else:
+                query = query.where(
+                    User.mcp_api_key.is_not(None),
+                    User.mcp_api_key_version == key_version,
+                )
+        else:
+            return False
+
+        result = await db.execute(query)
+        return result.scalar_one_or_none() is not None
 
 
 def _session_user_from_id(user_id_str: str) -> User:
@@ -523,14 +576,19 @@ async def _accept_client_response(body: object, user_id: uuid.UUID) -> Response 
     return Response(status_code=status.HTTP_202_ACCEPTED)
 
 
+def _is_message_route(request: Request) -> bool:
+    return request.url.path.rstrip("/").endswith("/message")
+
+
 async def get_mcp_user(
     request: Request,
     x_mcp_key: str | None = Header(None, alias="X-MCP-Key"),
     db: AsyncSession = Depends(get_db),
 ) -> User:
     # 0. Check for short-lived SSE session token (?session=)
+    # Child session tokens are accepted only on the /message routes.
     session_param = request.query_params.get("session")
-    if session_param:
+    if session_param and _is_message_route(request):
         resolve_result = mcp_session_store.resolve(session_param)
         if resolve_result is None:
             raise HTTPException(
@@ -538,14 +596,19 @@ async def get_mcp_user(
                 detail="Invalid or expired session token",
                 headers={"WWW-Authenticate": 'Bearer realm="heym-mcp"'},
             )
-        user_id_str, _ = resolve_result  # ignore server_id for default server
-        if not await session_user_active(user_id_str):
+        if not await session_user_active(
+            resolve_result.user_id,
+            issued_at=resolve_result.issued_at,
+            auth_source=resolve_result.auth_source,
+            key_version=resolve_result.key_version,
+            server_id_str=resolve_result.server_id,
+        ):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid or expired session token",
                 headers={"WWW-Authenticate": 'Bearer realm="heym-mcp"'},
             )
-        return _session_user_from_id(user_id_str)
+        return _session_user_from_id(resolve_result.user_id)
 
     # 1. Check for Bearer token (OAuth). Header only: a long-lived token in the
     # query string lands in access logs, proxies, browser history and Referer.
@@ -580,6 +643,9 @@ async def get_mcp_user(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="User not found",
             )
+        if hasattr(request, "state"):
+            request.state.mcp_auth_source = "oauth"
+            request.state.mcp_key_version = None
         return user
 
     # 2. Fall back to X-MCP-Key. Header only, for the same reason as above.
@@ -601,6 +667,24 @@ async def get_mcp_user(
             detail="Invalid MCP API key",
         )
 
+    key_version = getattr(user, "mcp_api_key_version", None)
+    if not key_version and hasattr(user, "id"):
+        new_version = secrets.token_hex(16)
+        stmt = (
+            update(User)
+            .where(User.id == user.id)
+            .values(mcp_api_key_version=func.coalesce(User.mcp_api_key_version, new_version))
+            .returning(User.mcp_api_key_version)
+        )
+        res = await db.execute(stmt)
+        returned = res.scalar_one_or_none()
+        key_version = returned if isinstance(returned, str) else new_version
+        user.mcp_api_key_version = key_version
+        await db.flush()
+
+    if hasattr(request, "state"):
+        request.state.mcp_auth_source = "api_key"
+        request.state.mcp_key_version = key_version
     return user
 
 
@@ -616,7 +700,9 @@ async def get_mcp_user_for_sse(
     connections until the client disconnects.
     """
     async with async_session_maker() as db:
-        return await get_mcp_user(request=request, x_mcp_key=x_mcp_key, db=db)
+        user = await get_mcp_user(request=request, x_mcp_key=x_mcp_key, db=db)
+        await db.commit()
+        return user
 
 
 async def get_user_mcp_workflows(db: AsyncSession, user_id: uuid.UUID) -> list[Workflow]:
@@ -1064,6 +1150,7 @@ async def regenerate_mcp_key(
 ) -> MCPRegenerateKeyResponse:
     new_key = secrets.token_hex(32)
     current_user.mcp_api_key = hash_secret(new_key)
+    current_user.mcp_api_key_version = secrets.token_hex(16)
     await db.flush()
     await db.refresh(current_user)
 
@@ -1849,7 +1936,19 @@ async def mcp_sse_endpoint(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many active MCP SSE sessions. Try again shortly.",
         )
-    session_token = mcp_session_store.create(str(mcp_user.id))
+    auth_source = getattr(request.state, "mcp_auth_source", None)
+    if not auth_source or auth_source not in ("oauth", "api_key"):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing authentication source",
+            headers={"WWW-Authenticate": 'Bearer realm="heym-mcp"'},
+        )
+    key_version = getattr(request.state, "mcp_key_version", None)
+    session_token = mcp_session_store.create(
+        str(mcp_user.id),
+        auth_source=auth_source,
+        key_version=key_version,
+    )
     message_endpoint = f"/api/mcp/message?session={session_token}"
 
     async def event_generator():

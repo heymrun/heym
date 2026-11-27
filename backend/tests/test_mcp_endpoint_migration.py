@@ -14,7 +14,7 @@ import unittest
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from fastapi import FastAPI, status
+from fastapi import FastAPI, Request, status
 from starlette.testclient import TestClient
 
 from app.api import mcp, mcp_servers
@@ -144,7 +144,13 @@ class TestDefaultMCPEndpoints(unittest.TestCase):
 
     def test_get_legacy_sse_endpoint_route_returns_streaming(self) -> None:
         """GET /api/mcp/sse continues serving the legacy SSE handshake stream."""
-        self.app.dependency_overrides[mcp.get_mcp_user_for_sse] = lambda: self.user
+
+        def _get_user_for_sse(request: Request) -> User:
+            request.state.mcp_auth_source = "oauth"
+            request.state.mcp_key_version = None
+            return self.user
+
+        self.app.dependency_overrides[mcp.get_mcp_user_for_sse] = _get_user_for_sse
         with patch("starlette.requests.Request.is_disconnected", AsyncMock(return_value=True)):
             with self.client.stream("GET", "/api/mcp/sse") as response:
                 self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -294,9 +300,14 @@ class TestNamedMCPEndpoints(unittest.TestCase):
 
     def test_get_named_legacy_sse_endpoint_route_returns_streaming(self) -> None:
         """GET /api/mcp/servers/{id}/sse returns 200 SSE streaming handshake."""
-        self.app.dependency_overrides[mcp_servers._get_named_server_context_for_sse] = lambda: (
-            self.user,
-            self.legacy_server,
+
+        def _get_named_context_for_sse(request: Request) -> tuple[User, MCPServer]:
+            request.state.mcp_auth_source = "oauth"
+            request.state.mcp_key_version = None
+            return (self.user, self.legacy_server)
+
+        self.app.dependency_overrides[mcp_servers._get_named_server_context_for_sse] = (
+            _get_named_context_for_sse
         )
         with patch("starlette.requests.Request.is_disconnected", AsyncMock(return_value=True)):
             with self.client.stream(
