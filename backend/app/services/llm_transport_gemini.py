@@ -50,7 +50,16 @@ class GeminiHistory:
 
 def _clean_schema(value: Any) -> Any:
     if isinstance(value, dict):
-        return {k: _clean_schema(v) for k, v in value.items() if k not in _UNSUPPORTED_SCHEMA_KEYS}
+        cleaned: dict[str, Any] = {}
+        for key, item in value.items():
+            if key in _UNSUPPORTED_SCHEMA_KEYS:
+                continue
+            if key == "properties" and isinstance(item, dict):
+                # These keys are parameter names, which may spell a schema keyword.
+                cleaned[key] = {name: _clean_schema(schema) for name, schema in item.items()}
+            else:
+                cleaned[key] = _clean_schema(item)
+        return cleaned
     if isinstance(value, list):
         return [_clean_schema(item) for item in value]
     return value
