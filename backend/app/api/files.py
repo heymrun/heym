@@ -664,7 +664,8 @@ async def download_via_token(
             status_code=status.HTTP_404_NOT_FOUND, detail="File missing from storage"
         )
 
-    await increment_download_count(db, token_row)
+    if not await increment_download_count(db, token_row):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid or expired link")
     await db.commit()
 
     return FileResponse(
@@ -718,7 +719,12 @@ async def download_via_basic_auth(
             status_code=status.HTTP_404_NOT_FOUND, detail="File missing from storage"
         )
 
-    await increment_download_count(db, token_row)
+    if not await increment_download_count(db, token_row):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials",
+            headers={"WWW-Authenticate": 'Basic realm="file"'},
+        )
     await db.commit()
 
     return FileResponse(

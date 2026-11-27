@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import bcrypt
-from sqlalchemy import select
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -306,9 +306,31 @@ async def validate_basic_auth(
     return None
 
 
-async def increment_download_count(db: AsyncSession, access_token: FileAccessToken) -> None:
-    access_token.download_count += 1
-    await db.flush()
+async def increment_download_count(db: AsyncSession, access_token: FileAccessToken) -> bool:
+    """Atomically claim a download quota slot using a conditional database update.
+
+    Returns True if the download count was successfully incremented, or False
+    if the token has expired or has already reached its max_downloads limit.
+    """
+    now = datetime.now(timezone.utc)
+    stmt = (
+        update(FileAccessToken)
+        .where(
+            FileAccessToken.id == access_token.id,
+            or_(
+                FileAccessToken.max_downloads.is_(None),
+                FileAccessToken.download_count < FileAccessToken.max_downloads,
+            ),
+            or_(
+                FileAccessToken.expires_at.is_(None),
+                FileAccessToken.expires_at >= now,
+            ),
+        )
+        .values(download_count=FileAccessToken.download_count + 1)
+        .returning(FileAccessToken.id)
+    )
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none() is not None
 
 
 def build_download_url(base_url: str, token: str) -> str:
