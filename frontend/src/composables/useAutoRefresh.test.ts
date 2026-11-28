@@ -1,6 +1,27 @@
 import { describe, expect, it } from "vitest";
 
-import { formatCountdown, validateAutoRefreshSeconds } from "./useAutoRefresh";
+import {
+  formatCountdown,
+  parseAutoRefreshSecondsInput,
+  validateAutoRefreshSeconds,
+} from "./useAutoRefresh";
+
+describe("parseAutoRefreshSecondsInput", () => {
+  it("preserves decimal input so validation can reject it", () => {
+    const parsed = parseAutoRefreshSecondsInput("10.5");
+
+    expect(parsed).toBe(10.5);
+    expect(validateAutoRefreshSeconds(parsed)).toBe("Enter a whole number of seconds");
+  });
+
+  it("parses whole-number input", () => {
+    expect(parseAutoRefreshSecondsInput("120")).toBe(120);
+  });
+
+  it("rejects empty input as a non-finite value", () => {
+    expect(parseAutoRefreshSecondsInput("")).toBeNaN();
+  });
+});
 
 describe("validateAutoRefreshSeconds", () => {
   it("accepts a whole number within the default bounds", () => {

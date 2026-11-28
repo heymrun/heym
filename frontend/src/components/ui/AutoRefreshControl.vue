@@ -9,6 +9,7 @@ import {
   AUTO_REFRESH_MAX_SECONDS,
   AUTO_REFRESH_MIN_SECONDS,
   formatCountdown,
+  parseAutoRefreshSecondsInput,
   useAutoRefresh,
   validateAutoRefreshSeconds,
   type AutoRefreshBounds,
@@ -97,7 +98,7 @@ function applyPreset(value: PresetValue): void {
 }
 
 function applyCustomInterval(): void {
-  const parsed = Number.parseInt(customSecondsInput.value, 10);
+  const parsed = parseAutoRefreshSecondsInput(customSecondsInput.value);
   const error = validateAutoRefreshSeconds(parsed, props.bounds);
   if (error !== null) {
     customError.value = error;

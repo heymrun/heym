@@ -258,6 +258,23 @@ test("auto-refresh keeps serving the cache, before and after a toolbar Refresh",
     await page.goto(`/?tab=dashboard&dashboard=${dashboardId}`);
     await expect(page.getByText("first value")).toBeVisible({ timeout: 20_000 });
 
+    // Custom intervals must reject fractional input without starting a timer.
+    const autoRefresh = page.locator("div.w-28").locator("xpath=../..");
+    await autoRefresh.getByRole("combobox").click();
+    await page.getByRole("option", { name: "Custom", exact: true }).click();
+    const customSeconds = autoRefresh.getByPlaceholder("Seconds");
+    await customSeconds.fill("10.5");
+    await autoRefresh.getByRole("button", { name: "Apply", exact: true }).click();
+    await expect(autoRefresh.getByText("Enter a whole number of seconds")).toBeVisible();
+    const countdown = autoRefresh.locator('[title^="Next refresh in "]');
+    await expect(countdown).toHaveCount(0);
+
+    // A valid whole-number interval clears the error and starts the countdown.
+    await customSeconds.fill("30");
+    await autoRefresh.getByRole("button", { name: "Apply", exact: true }).click();
+    await expect(autoRefresh.getByText("Enter a whole number of seconds")).toHaveCount(0);
+    await expect(countdown).toBeVisible();
+
     // Auto-refresh every 60 s.
     await page.locator("div.w-28").getByRole("combobox").click();
     await page.getByRole("option", { name: "60s", exact: true }).click();

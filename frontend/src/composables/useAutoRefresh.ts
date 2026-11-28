@@ -9,6 +9,11 @@ export interface AutoRefreshBounds {
   maxSeconds?: number;
 }
 
+export function parseAutoRefreshSecondsInput(value: string): number {
+  const trimmed = value.trim();
+  return trimmed === "" ? Number.NaN : Number(trimmed);
+}
+
 export function validateAutoRefreshSeconds(
   seconds: number,
   bounds: AutoRefreshBounds = {},
